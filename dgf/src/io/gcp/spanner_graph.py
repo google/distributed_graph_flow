@@ -229,7 +229,7 @@ def read_spanner_graph(
     max_workers: int = 10,
     verbose: int = 1,
 ) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
-  """Reads a Spanner Graph in process and returns a GraphFlow in-memory graph.
+  """Reads a Spanner Graph in-process and returns a GraphFlow in-memory graph.
 
   The function reads the graph metadata and data from Spanner,
   and constructs an `InMemoryGraph` object. Node and edge data are

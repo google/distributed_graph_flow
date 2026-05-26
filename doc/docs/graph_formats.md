@@ -51,7 +51,7 @@ processing graphs that exceed the memory capacity of a single machine.
 ## Sparse Deferred Struct
 
 The graph format used by the Sparse Deferred library. Unlike GF, which utilizes
-distinct objects for different backends (`dgf.data.InMemoryGraph` (Numpy),
+distinct objects for different backends (`dgf.data.InMemoryGraph` (NumPy),
 `dgf.data.JaxInMemoryGraph`, `dgf.data.TFInMemoryGraph`), a Sparse Deferred
 Struct can encapsulate NumPy, TensorFlow, or JAX arrays.
 

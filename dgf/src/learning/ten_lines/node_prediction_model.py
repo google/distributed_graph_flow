@@ -184,7 +184,7 @@ class ModelLiveResource:
 # TODO(gbm): Don't use the AutoNormalizeConfig. Store a serializable normalizer
 # instead.
 class NodePredictionModel(common.Model):
-  """The user visible returned model object."""
+  """The user-visible returned model object."""
 
   def __init__(self, data: ModelData) -> None:
     super().__init__(data)

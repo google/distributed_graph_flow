@@ -22,7 +22,7 @@ from dgf.src.util import json as json_lib
 
 
 def read_feature_statistics(path: str) -> statistics_lib.GraphFeatureStatistics:
-  """Loads feature statistics to disk in a json format.
+  """Reads feature statistics from disk in a JSON format.
 
   Usage example:
 

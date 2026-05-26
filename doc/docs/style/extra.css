@@ -44,6 +44,11 @@ h1#_1 {
   display: none !important;
 }
 
+.jp-OutputArea-output {
+  background-color: #FAFAFA;
+  line-height: 1.0;
+}
+
 .md-typeset {
   line-height: 1.5;
 }
@@ -51,7 +56,7 @@ h1#_1 {
 .md-typeset pre {
   line-height: 1.4;
   font-size: 14px;
-   white-space: pre-wrap !important;
+  white-space: pre-wrap !important;
 }
 
 .md-typeset code {

@@ -247,7 +247,7 @@ def read_bigquery_graph(
     max_workers: int = 10,
     verbose: Union[int, bool] = True,
 ) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
-  """Reads a BigQuery Graph in process and returns a GraphFlow in-memory graph.
+  """Reads a BigQuery Graph in-process and returns a GraphFlow in-memory graph.
 
   Usage:
     ```
@@ -315,7 +315,7 @@ def export_bigquery_to_disk(
     max_workers: int = 10,
     verbose: Union[int, bool] = True,
 ):
-  """Reads a BigQuery Graph in process and returns a GraphFlow in-memory graph.
+  """Reads a BigQuery Graph in-process and returns a GraphFlow in-memory graph.
 
   Usage:
     ```

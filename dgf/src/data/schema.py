@@ -140,23 +140,23 @@ class GraphSchema:
 
 @dataclasses.dataclass
 class GraphSchemaFilter:
-  """Filters a GraphSchema to sub-select  node sets, edge sets, and features.
+  """Filters a GraphSchema to sub-select node sets, edge sets, and features.
 
   A `GraphSchemaFilter` can be used with IO methods (when reading a graph from
   disk; with the `schema_filter` argument when available), or to operate
-  directly on schema (with `dgf.transform.filter_schema`).
+  directly on a schema (with `dgf.transform.filter_schema`).
 
   Attributes:
-    nodeset_fn: A callable `(name, schema) -> bool` to filter node sets. If
-      return true, keep the nodeset. Otherwise, remove it.
-    edgeset_fn: A callable `(name, schema) -> bool` to filter edge sets. If
-      return true, keep the edgeset. Otherwise, remove it.
+    nodeset_fn: A callable `(name, schema) -> bool` to filter node sets. If it
+      returns True, keep the nodeset. Otherwise, remove it.
+    edgeset_fn: A callable `(name, schema) -> bool` to filter edge sets. If it
+      returns True, keep the edgeset. Otherwise, remove it.
     feature_fn: A callable `(name, schema) -> bool` to filter node OR edge
-      features. If return true, keep the feature. Otherwise, remove it.
+      features. If it returns True, keep the feature. Otherwise, remove it.
     node_feature_fn: A callable `(name, schema) -> bool` to filter node
-      features. If return true, keep the feature. Otherwise, remove it.
+      features. If it returns True, keep the feature. Otherwise, remove it.
     edge_feature_fn: A callable `(name, schema) -> bool` to filter edge
-      features. If return true, keep the feature. Otherwise, remove it.
+      features. If it returns True, keep the feature. Otherwise, remove it.
   """
 
   nodeset_fn: Callable[[str, NodeSchema], bool] = lambda key, sch: True

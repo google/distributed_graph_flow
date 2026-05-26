@@ -27,7 +27,7 @@ def padding_from_graph_generator(
     relative_margin: float = 0.1,
     absolute_margin: int = 1,
 ) -> padding_lib.Padding:
-  """Creates a padding configuration from a set of in memory graphs.
+  """Creates a padding configuration from a set of in-memory graphs.
 
   Usage example:
 

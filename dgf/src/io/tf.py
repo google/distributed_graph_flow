@@ -134,7 +134,7 @@ def graph_to_tf_graph(
     src: in_memory_graph_lib.InMemoryGraph,
     schema: Optional[schema_lib.GraphSchema] = None,
 ) -> tf_in_memory_graph_lib.TFInMemoryGraph:
-  """Converts a graph to a TF in memory graph.
+  """Converts a graph to a TF in-memory graph.
 
   Args:
     src: The source graph to convert.

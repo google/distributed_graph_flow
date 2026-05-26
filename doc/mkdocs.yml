@@ -54,6 +54,9 @@ nav:
   - 🧭 Getting started: tutorial/getting_started_simple_api.ipynb
   - 🔥 Advanced API: tutorial/getting_started_advanced_api.ipynb
   - 🐜 API: api.md
+  - ❔ Q&A: qna.md
+  - 📖 Examples: https://github.com/google/distributed_graph_flow/tree/main/examples
+  - 🤸 For Googlers: http://go/graph-flow
   - Simple API:
     - Tasks:
       - Node model: tutorial/node_prediction.ipynb

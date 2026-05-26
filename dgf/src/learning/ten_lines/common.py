@@ -422,7 +422,7 @@ def save_model(model: Model, path: str) -> None:
 
 
 def load_model(path: str) -> Model:
-  """Loads a model previously saved with model.save.
+  """Loads a model previously saved with `model.save()`.
 
   Usage example:
 

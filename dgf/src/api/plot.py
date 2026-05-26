@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Plot graph, schema, and other graph related data."""
+"""Plot graph, schema, and other graph-related data."""
 
 # pylint: disable=unused-import,g-importing-member,g-import-not-at-top,g-bad-import-order,reimported,disable=attribute-error
 

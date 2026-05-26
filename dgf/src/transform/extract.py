@@ -56,7 +56,7 @@ def filter_graph(
     graph: in_memory_graph_lib.InMemoryGraph,
     schema: schema_lib.GraphSchema,
 ) -> in_memory_graph_lib.InMemoryGraph:
-  """Creates a in memory graph with a subset of nodesets/edgesets/features.
+  """Creates an in-memory graph with a subset of nodesets/edgesets/features.
 
   Args:
     graph: The input InMemoryGraph.

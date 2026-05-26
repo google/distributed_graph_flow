@@ -29,7 +29,7 @@ def graph_to_jax_graph(
     ],
     cast_arrays: bool = True,
 ) -> jax_in_memory_graph_lib.JaxInMemoryGraph:
-  """Converts a (Numpy) in memory graph into a jax in memory graph.
+  """Converts a (NumPy) in-memory graph into a JAX in-memory graph.
 
   Args:
     src: The source graph to convert.

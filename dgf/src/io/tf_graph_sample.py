@@ -442,7 +442,7 @@ def write_tfgnn_graphs(
     compression: str = "GZIP",
     num_shards: int = 10,
 ):
-  """Writes a set of in memory graphs to disk as TF Examples.
+  """Writes a set of in-memory graphs to disk as TF Examples.
 
   The writing is done in process, which is different from
   "write_tfgnn_graphs" which runs with Beam.
@@ -586,7 +586,7 @@ def read_tfgnn_graphs(
     ) = TFGraphSampleContainerType.TF_RECORD,
     compression: str = "GZIP",
 ) -> Generator[in_memory_graph.InMemoryGraph, None, None]:
-  """Reads a set of in memory graphs from disk stored as TF Examples.
+  """Reads a set of in-memory graphs from disk stored as TF Examples.
 
   The reading is done in process, which is different from
   "ReadFromTFGraphSample" which runs with Beam.

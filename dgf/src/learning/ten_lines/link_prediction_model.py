@@ -214,7 +214,7 @@ def _separate_positives_and_negatives(
 
 
 class LinkPredictionModel(common.Model):
-  """The user visible returned model object for edge prediction."""
+  """The user-visible returned model object for edge prediction."""
 
   def __init__(self, data: ModelData) -> None:
     super().__init__(data)

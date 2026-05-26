@@ -35,7 +35,7 @@ def _features_to_jax(src: Dict[str, np.ndarray]) -> Dict[str, jnp.ndarray]:
 def sparse_deferred_struct_to_graph(
     sd_graph_struct: sd_struct_lib.GraphStruct,
 ) -> in_memory_graph_lib.InMemoryGraph:
-  """Converts a Sparse Deferred struct into a in memory graph.
+  """Converts a Sparse Deferred struct into an in-memory graph.
 
   Args:
     sd_graph_struct: The input graph in `sd_struct_lib.GraphStruct` format.
@@ -72,7 +72,7 @@ def sparse_deferred_struct_to_graph(
 def sparse_deferred_struct_to_jax_graph(
     sd_graph_struct: sd_struct_lib.GraphStruct,
 ) -> jax_in_memory_graph_lib.JaxInMemoryGraph:
-  """Converts a Sparse Deferred struct into a Jax in memory graph.
+  """Converts a Sparse Deferred struct into a JAX in-memory graph.
 
   Args:
     sd_graph_struct: The input graph in `sd_struct_lib.GraphStruct` format.
@@ -110,7 +110,7 @@ def graph_to_sparse_deferred_struct(
     in_memory_graph: in_memory_graph_lib.InMemoryGraph,
     schema: Optional[schema_lib.GraphSchema] = None,
 ) -> sd_struct_lib.GraphStruct:
-  """Converts an in memory graph into a Sparse Deferred struct.
+  """Converts an in-memory graph into a Sparse Deferred struct.
 
   Args:
     in_memory_graph: The input graph in `InMemoryGraph` format.
