@@ -1,6 +1,9 @@
 site_name: Distributed Graph Flow
+site_url: https://dgf.readthedocs.io/
 theme: readthedocs
 use_directory_urls: false
+repo_url: https://github.com/google/distributed_graph_flow
+repo_name: google/distributed_graph_flow
 
 theme:
   name: material
@@ -63,6 +66,11 @@ nav:
     -   Graph file format: file_formats.md
     -   Graph in-memory objects: graph_formats.md
   - Changelog: changelog.md
+
+extra:
+  analytics:
+    provider: google
+    property: G-B6NFSCCG1B
 
 watch:
   - ../CHANGELOG.md
