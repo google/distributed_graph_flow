@@ -1,0 +1,27 @@
+EmbedGraph(cat-embedding=64)
+Dense(8)
+Activation(silu)
+Norm(layer_norm)
+Graph Convolution Block x2:
+    X = ...
+    MPNN:
+      Message:
+        Dense(8)
+        Activation(silu)
+        Dense(8)
+      Update:
+        Dense(8)
+        Activation(silu)
+        Dropout(0.1)
+        Dense(8)
+    Residual(X)
+    # Post MPNN
+    X = ...
+    Norm(rms_norm)
+    Dense(32)
+    Activation(silu)
+    Dense(8)
+    Dropout(0.1)
+    Residual(X)
+Identity
+Dense(3) # Classification head

@@ -1,0 +1,1 @@
+This is a dummy golden file for testing assert_golden_string.

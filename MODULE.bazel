@@ -1,0 +1,23 @@
+module(name = "dgf")
+
+bazel_dep(name = "abseil-cpp", version = "20250814.1")
+bazel_dep(name = "googletest", version = "1.17.0.bcr.2")
+bazel_dep(name = "bazel_skylib", version = "1.9.0")
+bazel_dep(name = "grpc", version = "1.76.0.bcr.1")
+bazel_dep(name = "nlohmann_json", version = "3.12.0.bcr.1")
+bazel_dep(name = "platforms", version = "1.0.0")
+bazel_dep(name = "protobuf", version = "33.2")
+bazel_dep(name = "rules_cc", version = "0.2.15")
+bazel_dep(name = "rules_proto", version = "7.1.0")
+bazel_dep(name = "rules_python", version = "1.7.0")
+bazel_dep(name = "nanobind_bazel", version = "2.12.0")
+
+# python = use_extension("@rules_python//python/extensions:python.bzl", "python")
+# python.defaults(
+#     python_version_env = "BAZEL_PYTHON_VERSION",
+# )
+# python.toolchain(python_version = "3.11")
+# python.toolchain(python_version = "3.12")
+# python.toolchain(python_version = "3.13")
+
+register_toolchains("//:system_python_toolchain")

@@ -1,0 +1,113 @@
+# proto-file: third_party/py/dgf/examples/test_data/proto/graph_schema.proto
+# proto-message: GraphSchema
+
+context {
+  # No context features in this example
+}
+
+node_sets {
+  key: "paper"
+  value {
+    features {
+      key: "feat"
+      value {
+        description: "Paper features"
+        dtype: DT_FLOAT
+        shape {
+           dim {
+             size: 3
+           }
+         }
+      }
+    }
+    features {
+      key: "labels"
+      value {
+        description: "Paper label"
+        dtype: DT_INT64
+      }
+    }
+  }
+}
+
+node_sets {
+  key: "author"
+  value {
+  }
+}
+
+node_sets {
+  key: "institution"
+  value {
+  }
+}
+
+node_sets {
+  key: "field_of_study"
+  value {
+  }
+}
+
+edge_sets {
+  key: "affiliated_with"
+  value {
+    source: "author"
+    target: "institution"
+  }
+}
+
+edge_sets {
+  key: "cites"
+  value {
+    source: "paper"
+    target: "paper"
+  }
+}
+
+edge_sets {
+  key: "has_topic"
+  value {
+    source: "paper"
+    target: "field_of_study"
+  }
+}
+
+edge_sets {
+  key: "rev_affiliated_with"
+  value {
+    source: "institution"
+    target: "author"
+  }
+}
+
+edge_sets {
+  key: "rev_cites"
+  value {
+    source: "paper"
+    target: "paper"
+  }
+}
+
+edge_sets {
+  key: "rev_has_topic"
+  value {
+    source: "field_of_study"
+    target: "paper"
+  }
+}
+
+edge_sets {
+  key: "rev_writes"
+  value {
+    source: "paper"
+    target: "author"
+  }
+}
+
+edge_sets {
+  key: "writes"
+  value {
+    source: "author"
+    target: "paper"
+  }
+}

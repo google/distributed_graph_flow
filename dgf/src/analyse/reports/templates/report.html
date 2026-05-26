@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ payload.dataset_name }} - GraphFlow EDA Report</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --primary-color: #1a73e8;
+            --secondary-color: #5f6368;
+            --success-color: #1e8e3e;
+            --warning-color: #f9ab00;
+            --danger-color: #d93025;
+            --light-bg: #f8f9fa;
+            --card-border-radius: 12px;
+            --header-height: 220px;
+        }
+
+        body {
+            font-family: 'Roboto', sans-serif;
+            background-color: #f0f2f5;
+            color: #202124;
+        }
+
+        /* HEADER STYLES */
+        .report-header {
+            background: linear-gradient(135deg, var(--primary-color), #174ea6);
+            color: white;
+            padding: 3rem 0;
+            margin-bottom: -3rem; /* Overlap effect */
+            height: var(--header-height);
+            position: relative;
+        }
+
+        .report-header h1 {
+            font-weight: 700;
+            letter-spacing: -0.5px;
+        }
+
+        .report-meta {
+            font-size: 0.95rem;
+            opacity: 0.9;
+        }
+
+        /* CARD STYLES */
+        .card {
+            border: none;
+            border-radius: var(--card-border-radius);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05); /* Softer shadow */
+            margin-bottom: 1.5rem;
+            transition: transform 0.2s ease-in-out;
+        }
+
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 12px rgba(0,0,0,0.1);
+        }
+
+        .card-header {
+            background-color: white;
+            border-bottom: 1px solid rgba(0,0,0,0.05);
+            font-weight: 600;
+            color: var(--secondary-color);
+            border-radius: var(--card-border-radius) var(--card-border-radius) 0 0 !important;
+            padding: 1rem 1.5rem;
+            text-transform: uppercase;
+            font-size: 0.85rem;
+            letter-spacing: 0.5px;
+        }
+
+        .card-body {
+            padding: 1.5rem;
+        }
+
+        /* SCORECARD SPECIFIC */
+        .metric-card {
+            text-align: center;
+            padding: 1rem;
+        }
+
+        .metric-value {
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: var(--primary-color);
+            line-height: 1.2;
+            margin-bottom: 0.2rem;
+        }
+
+        .metric-label {
+            font-size: 0.85rem;
+            color: var(--secondary-color);
+            text-transform: uppercase;
+            font-weight: 500;
+        }
+
+        .metric-icon {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+            opacity: 0.2;
+            color: var(--secondary-color);
+        }
+
+        /* SECTION TITLES */
+        .section-title {
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            font-weight: 300;
+            color: var(--secondary-color);
+            border-left: 4px solid var(--primary-color);
+            padding-left: 1rem;
+        }
+
+        /* CUSTOM SCROLLBAR */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #ccc; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #aaa; 
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 1. HERO HEADER -->
+    <header class="report-header">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h6 class="text-uppercase mb-2" style="opacity: 0.8; letter-spacing: 1px;">Graph Flow Report</h6>
+                    <h1 class="display-4">{{ payload.dataset_name }}</h1>
+                    <div class="report-meta mt-3">
+                        <span class="me-3"><i class="fas fa-tasks me-2"></i>{{ payload.task_type }}</span>
+                        <span class="me-3"><i class="fas fa-calendar-alt me-2"></i>{{ payload.generated_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                    </div>
+                </div>
+                <div class="col-md-4 text-md-end d-none d-md-block">
+                    {% if logo_base64 %}
+                    <img src="data:image/png;base64,{{ logo_base64 }}" alt="GraphFlow Logo" style="height: 150px; opacity: 0.9;">
+                    {% else %}
+                    <i class="fas fa-project-diagram fa-8x" style="opacity: 0.15;"></i>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN CONTENT -->
+    <div class="container" style="margin-top: 3rem;">
+        
+        <!-- 2. EXECUTIVE SUMMARY (SCORECARD) -->
+        <h3 class="section-title">1. Executive Summary</h3>
+        <div class="row">
+            <!-- Global Stats -->
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100">
+                    <div class="card-body metric-card">
+                        <i class="fas fa-share-alt metric-icon"></i>
+                        <div class="metric-value">{{ payload.global_graph_topology.total_nodes | number_format }}</div>
+                        <div class="metric-label">Total Nodes</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100">
+                    <div class="card-body metric-card">
+                        <i class="fas fa-link metric-icon"></i>
+                        <div class="metric-value">{{ payload.global_graph_topology.total_edges | number_format }}</div>
+                        <div class="metric-label">Total Edges</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100">
+                    <div class="card-body metric-card">
+                        <i class="fas fa-vector-square metric-icon"></i>
+                        <div class="metric-value">{{ payload.feature_dimensionality }}</div>
+                        <div class="metric-label">Vector Dim</div>
+                    </div>
+                </div>
+            </div>
+            {% if payload.num_classes is not none %}
+            <div class="col-md-3 col-sm-6">
+                <div class="card h-100">
+                    <div class="card-body metric-card">
+                        <i class="fas fa-layer-group metric-icon"></i>
+                        <div class="metric-value">{{ payload.num_classes }}</div>
+                        <div class="metric-label">Num Classes</div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        </div>
+
+        <div class="row">
+            <div class="col-12 text-center text-muted mt-5">
+                <!-- <p>Additional sections (Topology, Feature Analysis, Visual Inspection) will be populated as more stats become available.</p> -->
+            </div>
+        </div>
+
+        <!-- 3. GLOBAL GRAPH TOPOLOGY -->
+        <h3 class="section-title">2. Global Graph Topology</h3>
+        <!-- Row 1: Linear Scale Charts -->
+        <div class="row mb-4">
+            <!-- Degree Distribution Bar Chart (Linear) -->
+            <div class="col-md-6 mb-4 mb-md-0">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Degree Distribution (Bar)</span>
+                        <small class="text-muted">Linear Scale</small>
+                    </div>
+                    <div class="card-body">
+                        {% if payload.global_graph_topology.degree_distribution %}
+                        <canvas id="degreeBarChart" style="max-height: 300px;"></canvas>
+                        {% else %}
+                        <div class="text-center text-muted py-5">
+                            <i class="fas fa-chart-bar fa-3x mb-3"></i>
+                            <p>Data not available.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Degree Distribution Scatter Plot (Linear) -->
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Degree Distribution (Scatter)</span>
+                        <small class="text-muted">Linear Scale</small>
+                    </div>
+                    <div class="card-body">
+                        {% if payload.global_graph_topology.degree_distribution %}
+                        <canvas id="degreeScatterChart" style="max-height: 300px;"></canvas>
+                        {% else %}
+                        <div class="text-center text-muted py-5">
+                            <i class="fas fa-chart-bar fa-3x mb-3"></i>
+                            <p>Data not available.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Row 2: Log Scale Charts -->
+        <div class="row mb-4">
+            <!-- Degree Distribution Bar Chart (Log Y) -->
+            <div class="col-md-6 mb-4 mb-md-0">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Degree Distribution (Bar)</span>
+                        <small class="text-muted">Log Y Scale</small>
+                    </div>
+                    <div class="card-body">
+                        {% if payload.global_graph_topology.degree_distribution %}
+                        <canvas id="degreeBarLogChart" style="max-height: 300px;"></canvas>
+                        {% else %}
+                        <div class="text-center text-muted py-5">
+                            <i class="fas fa-chart-bar fa-3x mb-3"></i>
+                            <p>Data not available.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+
+            <!-- Degree Distribution Scatter Plot (Log-Log) -->
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>Degree Distribution (Scatter)</span>
+                        <small class="text-muted">Log-Log Scale</small>
+                    </div>
+                    <div class="card-body">
+                        {% if payload.global_graph_topology.degree_distribution %}
+                        <canvas id="degreeScatterLogChart" style="max-height: 300px;"></canvas>
+                        {% else %}
+                        <div class="text-center text-muted py-5">
+                            <i class="fas fa-chart-bar fa-3x mb-3"></i>
+                            <p>Data not available.</p>
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- Connectivity Metrics Table -->
+            <div class="col-12">
+                <div class="card h-100">
+                    <div class="card-header">Connectivity Metrics</div>
+                    <div class="card-body p-0">
+                        <table class="table table-striped mb-0">
+                            <tbody>
+                                <tr>
+                                    <td>Avg Degree</td>
+                                    <td class="text-end fw-bold">{{ payload.global_graph_topology.avg_degree | round(2) if payload.global_graph_topology.avg_degree is not none else "N/A" }}</td>
+                                    <td>Density</td>
+                                    <td class="text-end fw-bold">{{ "%.4f"|format(payload.global_graph_topology.graph_density) if payload.global_graph_topology.graph_density is not none else "N/A" }}</td>
+                                </tr>
+                                <tr>
+                                    <td>Connected Components</td>
+                                    <td class="text-end fw-bold">{{ payload.global_graph_topology.num_connected_components | number_format if payload.global_graph_topology.num_connected_components is not none else "N/A" }}</td>
+                                    <td>Largest Component</td>
+                                    <td class="text-end fw-bold">{{ payload.global_graph_topology.largest_component_size | number_format if payload.global_graph_topology.largest_component_size is not none else "N/A" }}</td>
+                                </tr>
+                                <tr>
+                                    <td>Isolated Nodes</td>
+                                    <td class="text-end fw-bold">{{ payload.global_graph_topology.isolated_nodes | number_format if payload.global_graph_topology.isolated_nodes is not none else "N/A" }}</td>
+                                    <td>Diameter</td>
+                                    <td class="text-end fw-bold">{{ payload.global_graph_topology.graph_diameter if payload.global_graph_topology.graph_diameter is not none else "N/A" }}</td>
+                                </tr>
+                                <tr>
+                                    <td>Homophily</td>
+                                    <td class="text-end fw-bold">{{ "%.2f"|format(payload.global_graph_topology.homophily_ratio) if payload.global_graph_topology.homophily_ratio is not none else "N/A" }}</td>
+                                    <td></td>
+                                    <td></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. VISUAL INSPECTION GALLERY -->
+        {% if payload.visual_gallery_data %}
+        <h3 class="section-title">3. Visual Inspection Gallery</h3>
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="fas fa-eye me-2"></i>Interactive Subgraph Inspection
+                    </div>
+                    <div class="card-body">
+                        <div class="row" id="visual-gallery-container">
+                            {% for item in payload.visual_gallery_data %}
+                            <div class="col-md-6 mb-4">
+                                <div class="card h-100 shadow-sm" style="position: relative;">
+                                    <div class="card-header d-flex justify-content-between align-items-center bg-light py-2">
+                                        <small class="fw-bold text-muted">Subgraph #{{ loop.index }}</small>
+                                        <div>
+                                            <span class="badge bg-secondary me-2">{{ item.nodes|length }} Nodes | {{ item.edges|length }} Edges</span>
+                                            <button class="btn btn-sm btn-outline-secondary py-0" onclick="resetZoom('mynetwork_{{ loop.index }}')" title="Reset Zoom">
+                                                <i class="fas fa-expand"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="card-body p-0" style="position: relative;">
+                                        <div id="mynetwork_{{ loop.index }}" style="height: 400px; width: 100%;"></div>
+                                        
+                                        <!-- Selected Element Details Panel (Overlay) -->
+                                        <div id="details-panel-{{ loop.index }}" class="card shadow-sm border" style="position: absolute; top: 10px; right: 10px; width: 260px; display: none; z-index: 1000; font-size: 0.85rem; opacity: 0.95;">
+                                            <div class="card-header bg-light py-1 d-flex justify-content-between align-items-center px-2">
+                                                <strong id="details-title-{{ loop.index }}" class="text-truncate">Details</strong>
+                                                <button type="button" class="btn-close btn-sm" onclick="hideDetails({{ loop.index }})" aria-label="Close" style="font-size: 0.7rem;"></button>
+                                            </div>
+                                            <div class="card-body p-0" style="max-height: 250px; overflow-y: auto;">
+                                                <table class="table table-sm table-striped table-hover mb-0" style="--bs-table-striped-bg: rgba(66, 133, 244, 0.08);">
+                                                    <tbody id="details-table-body-{{ loop.index }}"></tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% if item.legend %}
+                                    <div class="card-footer bg-white border-top-0">
+                                        <small class="text-muted me-2 fw-bold" style="font-size: 0.8rem;">
+                                            Legend{% if payload.color_by_attribute %} ({{ payload.color_by_attribute }}){% endif %}:
+                                        </small>
+                                        {% for label, color in item.legend.items() %}
+                                        <span class="badge rounded-pill text-dark border me-1 mb-1" style="background-color: {{ color }}">{{ label }}</span>
+                                        {% endfor %}
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        {% if payload.global_graph_topology.degree_distribution %}
+        const degreeBarCtx = document.getElementById('degreeBarChart').getContext('2d');
+        const degreeScatterCtx = document.getElementById('degreeScatterChart').getContext('2d');
+        const degreeBarLogCtx = document.getElementById('degreeBarLogChart').getContext('2d');
+        const degreeScatterLogCtx = document.getElementById('degreeScatterLogChart').getContext('2d');
+        
+        const rawDegreeData = {{ payload.global_graph_topology.degree_distribution | tojson | safe }};
+        
+        // Prepare data sorted by degree for Bar Chart
+        const sortedDegrees = Object.keys(rawDegreeData).map(Number).sort((a, b) => a - b);
+        const barLabels = sortedDegrees.map(String);
+        const barValues = sortedDegrees.map(d => rawDegreeData[String(d)]);
+
+        // Prepare data for Scatter Plot
+        const degreeScatterData = Object.entries(rawDegreeData).map(([degree, count]) => ({
+            x: Number(degree),
+            y: count
+        }));
+
+        const commonBarOptions = (isLogY) => ({
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    title: { display: true, text: 'Degree' },
+                    grid: { display: false }
+                },
+                y: {
+                    type: isLogY ? 'logarithmic' : 'linear',
+                    title: { display: true, text: 'Node Count' },
+                    beginAtZero: true
+                }
+            }
+        });
+
+        const commonScatterOptions = (isLogX, isLogY) => ({
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    type: isLogX ? 'logarithmic' : 'linear',
+                    title: { display: true, text: isLogX ? 'Degree (Log)' : 'Degree' },
+                    position: 'bottom'
+                },
+                y: {
+                    type: isLogY ? 'logarithmic' : 'linear',
+                    title: { display: true, text: isLogY ? 'Node Count (Log)' : 'Node Count' },
+                    beginAtZero: true
+                }
+            },
+            plugins: {
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return `Degree: ${context.parsed.x}, Count: ${context.parsed.y}`;
+                        }
+                    }
+                }
+            }
+        });
+
+        // --- 1. Bar Chart (Linear) ---
+        new Chart(degreeBarCtx, {
+            type: 'bar',
+            data: {
+                labels: barLabels,
+                datasets: [{
+                    label: 'Node Count',
+                    data: barValues,
+                    backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: commonBarOptions(false)
+        });
+
+        // --- 2. Scatter Chart (Linear) ---
+        new Chart(degreeScatterCtx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'Node Count',
+                    data: degreeScatterData,
+                    backgroundColor: 'rgba(255, 99, 132, 0.6)',
+                    borderColor: 'rgba(255, 99, 132, 1)',
+                    borderWidth: 1,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                }]
+            },
+            options: commonScatterOptions(false, false)
+        });
+
+        // --- 3. Bar Chart (Log Y) ---
+        new Chart(degreeBarLogCtx, {
+            type: 'bar',
+            data: {
+                labels: barLabels,
+                datasets: [{
+                    label: 'Node Count',
+                    data: barValues,
+                    backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: commonBarOptions(true)
+        });
+
+        // --- 4. Scatter Chart (Log-Log) ---
+        new Chart(degreeScatterLogCtx, {
+            type: 'scatter',
+            data: {
+                datasets: [{
+                    label: 'Node Count',
+                    data: degreeScatterData,
+                    backgroundColor: 'rgba(153, 102, 255, 0.6)',
+                    borderColor: 'rgba(153, 102, 255, 1)',
+                    borderWidth: 1,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                }]
+            },
+            options: commonScatterOptions(true, true)
+        });
+        {% endif %}
+    </script>
+
+    <!-- Vis.js Library (CDN) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js"></script>
+
+    <!-- Initialize PyVis Networks -->
+    <script>
+        // Global store for network instances
+        window.networks = {};
+
+        function resetZoom(containerId) {
+          if (window.networks[containerId]) {
+            window.networks[containerId].fit({ animation: true });
+          }
+        }
+
+        function hexToRgba(hex, alpha) {
+            if (!hex || typeof hex !== 'string' || !hex.startsWith('#')) return `rgba(100,100,100,${alpha})`;
+            let r=0, g=0, b=0;
+            if (hex.length === 4) {
+                r = parseInt("0x" + hex[1] + hex[1]);
+                g = parseInt("0x" + hex[2] + hex[2]);
+                b = parseInt("0x" + hex[3] + hex[3]);
+            } else if (hex.length === 7) {
+                r = parseInt("0x" + hex[1] + hex[2]);
+                g = parseInt("0x" + hex[3] + hex[4]);
+                b = parseInt("0x" + hex[5] + hex[6]);
+            }
+            return `rgba(${r},${g},${b},${alpha})`;
+        }
+
+        function showDetails(data, type, index, resolvedColor) {
+            const container = document.getElementById('details-panel-' + index);
+            const title = document.getElementById('details-title-' + index);
+            const tbody = document.getElementById('details-table-body-' + index);
+            const table = container.querySelector('table');
+
+            if (!container || !title || !tbody) {
+                console.error('Details panel elements not found for index ' + index);
+                return;
+            }
+
+            // Extract Color for Theming
+            let color = resolvedColor || data.color;
+            if (typeof color === 'object' && color !== null) {
+                color = color.background || color.color || '#1a73e8';
+            }
+            if (!color) color = (type === 'Edge') ? '#6c757d' : '#1a73e8';
+
+            // Apply colors
+            const stripeColor = hexToRgba(color, 0.15);
+            if (table) table.style.setProperty('--bs-table-striped-bg', stripeColor);
+            container.style.borderLeft = `5px solid ${color}`;
+
+            title.textContent = `${type} Details`;
+            tbody.innerHTML = '';
+
+            // Helper to add row
+            const addRow = (k, v) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `<td class="fw-bold text-muted ps-3" style="width: 40%;">${k}</td><td class="pe-3">${v}</td>`;
+                tbody.appendChild(row);
+            };
+
+            // Add standard properties
+            if (data.id !== undefined) addRow('ID', data.id);
+            if (data.label) addRow('Label', data.label);
+
+            // Add extra_data (user attributes)
+            if (data.extra_data) {
+                // divider
+                const divider = document.createElement('tr');
+                divider.innerHTML = '<td colspan="2" class="bg-light fw-bold text-center text-uppercase text-muted" style="font-size: 0.75rem;">Attributes</td>';
+                // Optional: Tint the divider too?
+                // divider.style.backgroundColor = hexToRgba(color, 0.1); 
+                tbody.appendChild(divider);
+
+                Object.entries(data.extra_data).forEach(([key, value]) => {
+                    addRow(key, value);
+                });
+            }
+
+            container.style.display = 'block';
+        }
+
+        function hideDetails(index) {
+            const container = document.getElementById('details-panel-' + index);
+            if (container) {
+                container.style.display = 'none';
+            }
+        }
+
+        {% if payload.visual_gallery_data %}
+        document.addEventListener('DOMContentLoaded', function() {
+            // Check if the Vis.js library is loaded.
+            if (typeof vis === 'undefined') {
+                console.error("Vis.js library is not loaded. Make sure to include it in your HTML head.");
+                return;
+            }
+
+            // Parse data safely
+            const galleryData = JSON.parse('{{ payload.visual_gallery_data | tojson | safe }}');
+
+            galleryData.forEach((item, index) => {
+                const containerId = 'mynetwork_' + (index + 1);
+                const container = document.getElementById(containerId);
+                const graphIndex = index + 1;
+
+                if (container) {
+                    try {
+                        const data = {
+                            nodes: new vis.DataSet(item.nodes),
+                            edges: new vis.DataSet(item.edges)
+                        };
+
+                        // Force layout options to ensure good initial view
+                        const options = item.options || {};
+
+                        // options.interaction = { hover: true, selectConnectedEdges: false };
+                        const network = new vis.Network(container, data, options);
+
+                        window.networks[containerId] = network;
+
+                        // Click handlers for interactivity
+                        network.on("selectNode", function(params) {
+                            if (params.nodes.length > 0) {
+                                const nodeId = params.nodes[0];
+                                const node = item.nodes.find(n => n.id === nodeId);
+                                const nodeColor = node ? node.color : data.nodes.get(nodeId).color;
+                                if (node) showDetails(node, 'Node', graphIndex, nodeColor);
+                            }
+                        });
+
+                        network.on("selectEdge", function(params) {
+                            // Only show edge details if no node is selected (to avoid clutter)
+                            if (params.nodes.length === 0 && params.edges.length > 0) {
+                                const edgeId = params.edges[0];
+                                // Use DataSet lookup
+                                const edge = data.edges.get(edgeId);
+                                if (edge) {
+                                    showDetails(edge, 'Edge', graphIndex, edge.color);
+                                }
+                            }
+                        });
+
+                        network.on("deselectNode", function(params) {
+                             if (params.nodes.length === 0 && params.edges.length === 0) {
+                                 hideDetails(graphIndex);
+                             }
+                        });
+                        network.on("deselectEdge", function(params) {
+                             if (params.nodes.length === 0 && params.edges.length === 0) {
+                                 hideDetails(graphIndex);
+                             }
+                        });
+
+                        console.log("Initialized network #" + graphIndex);
+                    } catch (err) {
+                        console.error("Failed to initialize network #" + graphIndex, err);
+                    }
+                } else {
+                    console.warn("Container not found:", containerId);
+                }
+            });
+        });
+        {% endif %}
+    </script>
+</body>
+</html>

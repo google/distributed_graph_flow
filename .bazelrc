@@ -1,0 +1,25 @@
+# .bazelrc
+
+# Force Bazel to use the environment variables (like PATH) we set in Docker
+build --action_env=PATH
+build --action_env=LD_LIBRARY_PATH
+
+# Prevent Bazel from picking up local system headers accidentally
+build --incompatible_strict_action_env
+
+# Optimization for manylinux
+build -c opt
+build --copt=-fPIC
+
+# Nice print
+build --copt=-fdiagnostics-color=always
+build --color=yes
+
+build --cxxopt=-std=c++20
+build --host_cxxopt=-std=c++20
+build --features=-fully_static_link
+build --copt=-mavx2
+
+build --action_env=PATH
+test --test_env=PYTHONPATH
+test --test_env=PATH

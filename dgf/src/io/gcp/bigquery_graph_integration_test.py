@@ -1,0 +1,90 @@
+# Copyright 2022 Google LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+r"""Manual tests for bigquery_graph.
+"""
+
+from absl.testing import absltest
+from dgf.src.data import schema as schema_lib
+from dgf.src.io import graph_in_memory as gf_graph_in_memory_lib
+from dgf.src.io.gcp import bigquery_graph
+from dgf.src.util import test_util
+from dgf.src.validate import in_memory_graph as in_memory_graph_validate_lib
+
+
+def expected_schema() -> schema_lib.GraphSchema:
+  return schema_lib.GraphSchema(
+      node_sets={
+          "nodes": schema_lib.NodeSchema(
+              features={
+                  "feat": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.FLOAT_64,
+                      shape=(None,),
+                  ),
+                  "id": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.BYTES,
+                      semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+                  ),
+                  "labels": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.INTEGER_64,
+                  ),
+                  "year": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.INTEGER_64,
+                  ),
+              }
+          )
+      },
+      edge_sets={
+          "edges": schema_lib.EdgeSchema(
+              source="nodes",
+              target="nodes",
+          )
+      },
+  )
+
+
+class BigqueryGraphManualTest(absltest.TestCase):
+
+  def test_read_bigquery_graph(self):
+    graph, schema = bigquery_graph.read_bigquery_graph(
+        project="biggraphs-poc",
+        dataset="arxiv",
+        graph="arvix_graph",
+        work_dir="gs://gbm-test/tmp",
+        verbose=2,
+    )
+    in_memory_graph_validate_lib.validate_graph(
+        graph, schema, raise_on_warning=False
+    )
+    test_util.assert_are_equal(self, schema, expected_schema())
+
+  def test_export_bigquery_to_disk(self):
+    bigquery_graph.export_bigquery_to_disk(
+        path="gs://gbm-test/graph_export",
+        project="biggraphs-poc",
+        dataset="arxiv",
+        graph="arvix_graph",
+        verbose=2,
+    )
+    graph, schema = gf_graph_in_memory_lib.read_graph(
+        "gs://gbm-test/graph_export"
+    )
+    in_memory_graph_validate_lib.validate_graph(
+        graph, schema, raise_on_warning=False
+    )
+    test_util.assert_are_equal(self, schema, expected_schema())
+
+
+if __name__ == "__main__":
+  absltest.main()

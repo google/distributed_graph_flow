@@ -1,0 +1,68 @@
+site_name: Distributed Graph Flow
+theme: readthedocs
+use_directory_urls: false
+
+theme:
+  name: material
+  palette:
+    primary: indigo
+    accent: light blue
+  logo: image/logo.png
+  font:
+    text: Roboto
+  features:
+    - search.suggest
+    - navigation.expand
+
+  palette:
+    - primary: white
+    - accent: blue
+    - scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+extra_css:
+  - style/extra.css
+
+markdown_extensions:
+  - tables
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+
+plugins:
+  - search
+  - mkdocs-jupyter:
+      include_source: true   # Shows the "Download Notebook" button
+      execute: false         # Set to 'true' if you want MkDocs to run the cells during build
+  - gen-files:
+      scripts:
+        - copy_external.py
+
+strict: true
+
+nav:
+  - 🏡 Home: index.md
+  - 🧭 Getting started: tutorial/getting_started_simple_api.ipynb
+  - 🔥 Advanced API: tutorial/getting_started_advanced_api.ipynb
+  - 🐜 API: api.md
+  - Simple API:
+    - Tasks:
+      - Node model: tutorial/node_prediction.ipynb
+      - Link model: tutorial/link_prediction.ipynb
+  - Advanced API:
+    - In-memory graph: tutorial/in_memory_graph.ipynb
+    - Sampler: tutorial/sampler.ipynb
+    - Normaliers: tutorial/normalizer.ipynb
+  - Guides:
+    -   Graph file format: file_formats.md
+    -   Graph in-memory objects: graph_formats.md
+  - Changelog: changelog.md
+
+watch:
+  - ../CHANGELOG.md

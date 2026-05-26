@@ -1,0 +1,54 @@
+Layers
+======
+
+This directory contains a set of composable Flax Modules. Each module (or layer)
+follows one of the following two patterns:
+
+1. Direct pattern (for small modules)
+-------------------------------------
+
+The module takes a set of constructor arguments and implements a call method
+with a training: bool variable without a default value.
+
+Usage example:
+
+  m = MyModule(a=1, b=2)
+  y = m(x, training=True)
+
+2. Configuration-based pattern
+------------------------------
+
+For each module <Name>, a dataclass <Name>Config implements a make method
+returning the <Name> module.
+
+Usage example:
+
+  config = MyModuleConfig(a=1, b=2)
+  m = config.make()
+  y = m(x, training=True)
+
+Note that nothing prevent the user to do:
+
+  m = MyModuleConfig(a=1, b=2).make()
+  y = m(x, training=True)
+
+This make approach create a nice solution to the solution of versionning.
+While the following is possibly, it is not ideal (would break the versioning).
+
+  MyModuleConfig can create MyModuleV1 or MyModuleV2
+
+Note: Configuring modules with dataclasses greatly simplifies model
+serialization. When using the direct pattern for layers with many configuration
+options, the caller must manage serialization manually, a task made much easier
+by dataclasses.
+
+Note: The module class should not repeat all the fields from the config, as it
+creates code that is harder to maintain.
+
+Schemas (e.g., graph, feature), graph stats, and other large configuration data
+should be provided as constructor arguments of the make function instead of
+being stored in the config.
+
+  config = MyModuleConfig(a=1, b=2)
+  m = config.make(schema=my_graph_schema)
+  y = m(x, training=True)

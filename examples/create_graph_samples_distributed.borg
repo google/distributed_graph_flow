@@ -1,0 +1,148 @@
+// Borg config for the distributed sampler.
+//
+// A usage example:
+// See third_party/py/dgf/examples/create_graph_samples_distributed.py
+//
+vars {
+  // Name of the service in Sigma.
+  name = 'dgf_distributed_sampler'
+
+  // Path to the input graph. Should be a GF Graph.
+  // For other formats, use the converted first.
+  input_graph = external
+
+  // Path to the output samples. Will be compressed TF Record.
+  output_samples = external
+
+  // Working directory for temporary files. Ideally, this should be on the same
+  // Borg cell as the workers to minimize network latency. Used to resume work
+  // when workers/manager are interrupted. Do not reuse for different datasets
+  // or parameters.
+  working_dir = external
+
+  // Name of the seed nodeset.
+  seed_nodeset = external
+
+  // Number of sampling hops.
+  num_hops = external
+
+  // Sampling width.
+  hop_width = external
+
+  // The total number of graph samples to generate. If not specified, a sample
+  // will be generated for every node in the seed nodeset.
+  num_samples = null
+
+  // Number of workers. Increase for larger datasets.
+  // Using too many workers can make the sampling slower.
+  num_workers = external
+
+  // Number of parallel requests sent in parallel in manager/worker and
+  // inter-worker communication.
+  // TODO(gbm): Automatically tune.
+  parallel_jobs_per_workers = 100
+
+  cell = external
+  charged_user = external
+  gfs_user = charged_user
+  priority_manager = 119
+  use_batch_quota = false
+  priority_workers = cond(use_batch_quota, 115, 119)
+
+  // CPU and RAM resource of the manager and worker.
+  cpu = 5
+  ram_manager = null
+  ram_worker = null
+  // For synchronous algorithms, ensuring all workers have similar speeds (e.g.,
+  // by using the same machine type) is beneficial.
+  constraints = null  // 'platform_genus?skylake'
+
+  // Speed of each platform:
+  // https://source.corp.google.com/piper///depot/google3/borg/util/reports/gcu/gcus_per_cpu_ga.csv
+  cpu_platform = null
+
+  // If your algorithm is RAM bandwidth intensive using
+  // `appclass=LATENCY_TOLERANT_PRIMARY` will increase the RAM bandwidth and
+  // ultimately pipeline speed."
+  appclass = null
+
+  // Non configurable fields.
+  binary = '//third_party/py/dgf/examples:create_graph_samples_distributed.par'
+  num_managers = 1  // The distributed sampler only use one worker.
+}
+
+service benchmark {
+
+  packages {
+    package manager { blaze_label = vars.binary }
+    package worker { blaze_label = vars.binary }
+  }
+  name = vars.name
+  runtime {
+    cell = vars.cell
+  }
+  accounting = {
+    charged_user = vars.charged_user
+  }
+  scheduling {
+    max_task_failures = 3
+    max_per_task_failures = 3
+  }
+  appclass {
+    type = vars.appclass
+  }
+  requirements = {
+    autopilot = true
+    cpu = vars.cpu
+    cpu_platform = vars.cpu_platform
+    constraints = vars.constraints
+  }
+  permissions = {
+    logs_read_access_roles = ['simple-ml-team']  // For support
+  }
+
+  job manager = {
+    scheduling = {
+      priority = vars.priority_manager
+    }
+    requirements = {
+      ram = vars.ram_manager
+    }
+    args = {
+      gfs_user = vars.gfs_user
+      node_spec = "{\"port\":%port%,\"manager_idx\":%task%,\"num_managers\":%vars.num_managers%,\"num_workers\":%vars.num_workers%,\"worker_addresses\":[\"%up.worker.get_job_bns_prefix()%\"],\"parallel_jobs_per_workers\":%vars.parallel_jobs_per_workers%}"
+      input_graph = vars.input_graph
+      output_samples = vars.output_samples
+      seed_nodeset = vars.seed_nodeset
+      num_hops = vars.num_hops
+      hop_width = vars.hop_width
+      working_dir = vars.working_dir
+    }
+    extra_argv = vars.manager_args
+    package_binary = 'manager/create_graph_samples_distributed.par'
+  }
+
+  job worker = {
+    scheduling = {
+      priority = vars.priority_workers
+      batch_quota = cond(vars.use_batch_quota, { strategy = 'RUN_SOON' }, null)
+    }
+    requirements = {
+      ram = vars.ram_worker
+    }
+    replicas = vars.num_workers
+    args = {
+      gfs_user = vars.gfs_user
+      node_spec = "{\"port\":%port%,\"worker_idx\":%task%,\"num_managers\":%vars.num_managers%,\"num_workers\":%vars.num_workers%,\"worker_addresses\":[\"%up.worker.get_job_bns_prefix()%\"],\"parallel_jobs_per_workers\":%vars.parallel_jobs_per_workers%}"
+      working_dir = vars.working_dir
+      // colossus_keystore_backend = 'LITE'
+      // Default is 1M which is too small for ML training.
+      malloc_release_bytes_per_sec = 1000M
+      tcmalloc_release_rate = null
+    }
+    package_binary = 'worker/create_graph_samples_distributed.par'
+    dependencies {
+      parent = up.manager
+    }
+  }
+}

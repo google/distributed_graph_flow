@@ -1,0 +1,55 @@
+# proto-file: third_party/py/dgf/examples/test_data/proto/graph_sample.proto
+# proto-message: GraphSample
+
+# Sample 1: A graph with one paper, one author.
+
+features{
+  feature{
+    key: "nodes/paper.feat"
+    value { float_list { value: [0.1, 0.2, 0.3] } }
+  }
+  feature{
+    key: "nodes/paper.labels"
+    value { int64_list { value: [1] } }
+  }
+  feature{
+    key: "nodes/paper.#size"
+    value { int64_list { value: [1] } }
+  }
+  feature{
+    key: "nodes/author.#size"
+    value { int64_list { value: [1] } }
+  }
+  feature{
+    key: "nodes/institution.#size"
+    value { int64_list { value: [0] } }
+  }
+  feature{
+    key: "nodes/field_of_study.#size"
+    value { int64_list { value: [0] } }
+  }
+  feature{
+    key: "edges/writes.#size"
+    value { int64_list { value: [1] } }
+  }
+  feature{
+    key: "edges/writes.#source"
+    value { int64_list { value: [0] } } # Author 0
+  }
+  feature{
+    key: "edges/writes.#target"
+    value { int64_list { value: [0] } } # Paper 0
+  }
+  feature{
+    key: "edges/cites.#size"
+    value { int64_list { value: [0] } }
+  }
+  feature{
+    key: "edges/affiliated_with.#size"
+    value { int64_list { value: [0] } }
+  }
+  feature{
+    key: "edges/has_topic.#size"
+    value { int64_list { value: [0] } }
+  }
+}
