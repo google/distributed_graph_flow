@@ -92,7 +92,7 @@ def create_edgeset_sql(
   for label_and_properties in edge_table.label_and_properties:
     if label_and_properties.properties:
       for property_ in label_and_properties.properties:
-        projections.add(f"{property_.expression}` AS `{property_.name}`")
+        projections.add(f"`{property_.expression}` AS `{property_.name}`")
 
   select_clause = ", ".join(projections)
   edgeset_sql = f"""
