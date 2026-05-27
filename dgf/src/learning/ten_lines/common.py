@@ -530,3 +530,38 @@ def num_model_weights(model_params: Optional[Any]) -> Dict[str, int]:
       dtype_name = str(leaf.dtype)
       weights[dtype_name] = weights.get(dtype_name, 0) + leaf.size
   return weights
+
+
+def check_number_of_seeds(
+    batch_size: int,
+    num_training: Optional[int],
+    num_validation: Optional[int],
+    key: Literal["node", "edge"],
+):
+  """Checks if the number of seed nodes is sufficient for the given batch size.
+
+  Args:
+    batch_size: The batch size used for training.
+    num_training: The number of seed nodes in the training set, or None if not
+      applicable.
+    num_validation: The number of seed nodes in the validation set, or None if
+      not applicable.
+    key: The type of seed being checked, either "node" or "edge".
+
+  Raises:
+    ValueError: If the number of seed nodes is smaller than the batch size
+      for either the training or validation set.
+  """
+  if num_training is not None and num_training < batch_size:
+    raise ValueError(
+        f"The number of training seed nodes ({num_training}) is smaller than"
+        f" the batch size ({batch_size}). Increase the number of training seed"
+        f" {key}s or decrease the batch size."
+    )
+
+  if num_validation is not None and num_validation < batch_size:
+    raise ValueError(
+        f"The number of validation seed nodes ({num_validation}) is smaller"
+        f" than the batch size ({batch_size}). Increase the number of"
+        f" validation seed {key}s or decrease the batch size."
+    )

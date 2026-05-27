@@ -285,6 +285,40 @@ class TenLines(parameterized.TestCase):
     with self.assertRaisesRegex(TypeError, "Expected Architecture or str"):
       common.parse_architecture(123)  # pytype: disable=wrong-arg-types
 
+  def test_check_number_of_seeds_success(self):
+    common.check_number_of_seeds(
+        batch_size=10, num_training=20, num_validation=15, key="node"
+    )
+    common.check_number_of_seeds(
+        batch_size=10, num_training=20, num_validation=None, key="node"
+    )
+    common.check_number_of_seeds(
+        batch_size=10, num_training=None, num_validation=15, key="node"
+    )
+
+  def test_check_number_of_seeds_insufficient_training_fails(self):
+    with self.assertRaisesRegex(
+        ValueError,
+        r"The number of training seed nodes \(5\) is smaller than the batch"
+        r" size \(10\)\. Increase the number of training seed nodes or decrease"
+        r" the batch size\.",
+    ):
+      common.check_number_of_seeds(
+          batch_size=10, num_training=5, num_validation=15, key="node"
+      )
+
+  def test_check_number_of_seeds_insufficient_validation_fails(self):
+    with self.assertRaisesRegex(
+        ValueError,
+        r"The number of validation seed nodes \(5\) is smaller than the batch"
+        r" size \(10\)\. Increase the number of validation seed edges or"
+        r" decrease"
+        r" the batch size\.",
+    ):
+      common.check_number_of_seeds(
+          batch_size=10, num_training=15, num_validation=5, key="edge"
+      )
+
 
 if __name__ == "__main__":
   absltest.main()

@@ -151,6 +151,14 @@ def prepare_datasets(
       **common_kwargs,
   )
   valid_dataset.prepare_from_existing_one(train_dataset)
+
+  common.check_number_of_seeds(
+      batch_size=hparams.batch_size,
+      num_training=train_dataset.num_nodes_in_seed_nodeset(),
+      num_validation=valid_dataset.num_nodes_in_seed_nodeset(),
+      key="node",
+  )
+
   return train_dataset, valid_dataset
 
 
