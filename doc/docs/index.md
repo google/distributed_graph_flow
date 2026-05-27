@@ -1,6 +1,6 @@
 #
 <div align="center">
-  <img src="image/logo2-color-detoured-small.png" width="300" />
+  <img src="image/logo.png" width="300" />
 </div>
 
 **Graph Flow** (Distributed GF, or simply GF) is a Python toolkit to develop and deploy Graph Neural

@@ -1,7 +1,7 @@
 # Distributed Graph Flow
 
 <p align="center">
-<img src="doc/docs/image/logo2-color-detoured-small.png" width="300" />
+<img src="doc/docs/image/logo.png" width="300" />
 </p>
 
 **(Distributed) Graph Flow** (GF) is a Python toolkit to develop and deploy

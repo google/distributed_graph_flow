@@ -7,27 +7,27 @@ repo_name: google/distributed_graph_flow
 
 theme:
   name: material
-  palette:
-    primary: indigo
-    accent: light blue
-  logo: image/logo.png
+  favicon: image/icon_128.png
+  logo: image/icon_128.png
   font:
     text: Roboto
   features:
     - search.suggest
     - navigation.expand
-
   palette:
-    - primary: white
-    - accent: blue
     - scheme: default
+      primary: white
+      accent: blue
       toggle:
-        icon: material/weather-night
+        icon: material/toggle-switch-off-outline
         name: Switch to dark mode
     - scheme: slate
+      primary: black
+      accent: blue
       toggle:
-        icon: material/weather-sunny
+        icon: material/toggle-switch
         name: Switch to light mode
+
 
 extra_css:
   - style/extra.css
