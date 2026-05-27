@@ -73,6 +73,7 @@ class DictionaryIndexNormalizerTest(absltest.TestCase):
         "test_feature_INDEX": schema_lib.FeatureSchema(
             format=schema_lib.FeatureFormat.INTEGER_64,
             semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+            shape=(),
             num_categorical_values=3,  # red, green, OOV
         )
     }
@@ -172,6 +173,7 @@ class SoftQuantileNormalizerTest(absltest.TestCase):
         "test_feature_SOFT_QUANTILE": schema_lib.FeatureSchema(
             format=schema_lib.FeatureFormat.FLOAT_32,
             semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=(),
         )
     }
     self.assertEqual(output_schema, expected_output_schema)
@@ -267,6 +269,7 @@ class HashStringNormalizerTest(absltest.TestCase):
         "test_feature_HASH": schema_lib.FeatureSchema(
             format=schema_lib.FeatureFormat.INTEGER_64,
             semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+            shape=(),
             num_categorical_values=num_buckets,
         )
     }
@@ -349,6 +352,7 @@ class AutoNormalierTest(absltest.TestCase):
                     "f3_SOFT_QUANTILE": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
                         semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                        shape=(),
                     )
                 }
             ),
@@ -495,6 +499,7 @@ class AutoNormalierTest(absltest.TestCase):
                     "f3_SOFT_QUANTILE": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
                         semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                        shape=(),
                     )
                 }
             ),

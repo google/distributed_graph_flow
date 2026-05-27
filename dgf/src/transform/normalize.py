@@ -137,7 +137,7 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
 
   dictionary_map: Dict[str, int]
   out_of_vocab_value: int
-  output_shape: Tuple[int, ...]
+  output_shape: Tuple[Optional[int], ...]
   output_feature_name: str
   type: str = dataclasses.field(default="DictionaryIndexNormalizer", init=False)
   tf_table: Any = dataclasses.field(
@@ -169,7 +169,7 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
             key: item.index for key, item in input_stats.dictionary.items()
         },
         out_of_vocab_value=len(input_stats.dictionary),
-        output_shape=input_schema.shape,
+        output_shape=input_schema.shape or (),
         output_feature_name=f"{feature_name}_INDEX",
     )
 
@@ -233,7 +233,7 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
   """
 
   output_feature_name: str
-  output_shape: Tuple[int, ...]
+  output_shape: Tuple[Optional[int], ...]
   quantiles: np.ndarray = dataclasses.field(
       metadata=dataclasses_json.config(
           encoder=lambda x: x.tolist(),
@@ -274,7 +274,7 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
     return SoftQuantileNormalizer(
         input_feature=feature_name,
         quantiles=quantiles,
-        output_shape=input_schema.shape,
+        output_shape=input_schema.shape or (),
         output_feature_name=f"{feature_name}_SOFT_QUANTILE",
     )
 
@@ -350,7 +350,7 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
 class HashStringNormalizer(AbstractFeatureNormalizer):
 
   num_buckets: int
-  output_shape: Tuple[int, ...]
+  output_shape: Tuple[Optional[int], ...]
   output_feature_name: str
   type: str = dataclasses.field(default="HashStringNormalizer", init=False)
 
@@ -369,7 +369,7 @@ class HashStringNormalizer(AbstractFeatureNormalizer):
     return HashStringNormalizer(
         input_feature=feature_name,
         num_buckets=num_buckets,
-        output_shape=input_schema.shape,
+        output_shape=input_schema.shape or (),
         output_feature_name=f"{feature_name}_HASH",
     )
 
