@@ -17,22 +17,26 @@
 import dataclasses
 import os
 import tempfile
-from typing import Tuple
+from typing import Literal, Tuple
 import unittest.mock
 from absl import logging
 from absl.testing import absltest
+from absl.testing import parameterized
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
+from dgf.src.io import tf as tf_io
 from dgf.src.learning.jax.layers import standard
 from dgf.src.learning.ten_lines import common as common_lib
 from dgf.src.learning.ten_lines import link_prediction_model
 from dgf.src.learning.ten_lines import link_prediction_train
+from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.util import filesystem as fs
 from dgf.src.util import test_util
 import jax
 import jax.numpy as jnp
 import jax.scipy.special as jsp
 import numpy as np
+import tensorflow as tf
 
 # Arguments to speed up the train method. Model quality will be poor,
 # but training and model inference will run completely.
@@ -277,7 +281,7 @@ def gen_predictible_model_graph():
   return graph, schema
 
 
-class LinkPredictionToyTest(absltest.TestCase):
+class LinkPredictionToyTest(parameterized.TestCase):
 
   @classmethod
   def setUpClass(cls):
@@ -537,6 +541,212 @@ class LinkPredictionToyTest(absltest.TestCase):
         self.model.data().core_model_config.architecture(),
         "link_prediction_architecture.txt",
     )
+
+  @parameterized.parameters(
+      {"encoder": "source", "consume_tf_graph_dict": False},
+      {"encoder": "source", "consume_tf_graph_dict": True},
+      {"encoder": "target", "consume_tf_graph_dict": False},
+      {"encoder": "target", "consume_tf_graph_dict": True},
+      {"encoder": "both", "consume_tf_graph_dict": False},
+      {"encoder": "both", "consume_tf_graph_dict": True},
+  )
+  def test_to_tensorflow_function(
+      self,
+      encoder: Literal["source", "target", "both"],
+      consume_tf_graph_dict: bool,
+  ):
+    model = self.model
+    graph = self.graph
+    schema = model.data().schema
+
+    # Ensure 0 and 1 are not connected to avoid masking issues in test
+    edge_set = graph.edge_sets["A_to_B"]
+    is_connected = np.any(
+        (edge_set.adjacency[0] == 0) & (edge_set.adjacency[1] == 1)
+    )
+    self.assertFalse(
+        is_connected, "Nodes 0 and 1 are connected, choose other nodes for test"
+    )
+
+    source_sampler = in_memory_sampler_lib.create_sampler(
+        plan=model.data().source_sampling_plan,
+        graph=graph,
+        schema=schema,
+        batch_size=5,
+    )
+    target_sampler = in_memory_sampler_lib.create_sampler(
+        plan=model.data().target_sampling_plan,
+        graph=graph,
+        schema=schema,
+        batch_size=5,
+    )
+
+    source_sample = source_sampler.sample(0)
+    target_sample = target_sampler.sample(1)
+
+    tf_source_sample = tf_io.graph_to_tf_graph(source_sample, schema=schema)
+    tf_target_sample = tf_io.graph_to_tf_graph(target_sample, schema=schema)
+
+    tf_predict_fn = model.to_tensorflow_function(
+        encoder=encoder, consume_tf_graph_dict=consume_tf_graph_dict
+    )
+
+    if encoder == "source":
+      if consume_tf_graph_dict:
+        kwargs = {
+            **tf_io.tf_graph_to_tf_graph_dict(tf_source_sample),
+            "seed_node_idxs": tf.constant([0]),
+        }
+      else:
+        kwargs = {"graph": tf_source_sample, "seed_node_idxs": tf.constant([0])}
+
+      prediction = tf_predict_fn(**kwargs)
+      expected_prediction = model.predict_embedding(
+          source_sample, [0], encoder="source"
+      )
+      np.testing.assert_allclose(
+          prediction.numpy(), expected_prediction, atol=1e-5
+      )
+
+    elif encoder == "target":
+      if consume_tf_graph_dict:
+        kwargs = {
+            **tf_io.tf_graph_to_tf_graph_dict(tf_target_sample),
+            "seed_node_idxs": tf.constant([0]),
+        }
+      else:
+        kwargs = {"graph": tf_target_sample, "seed_node_idxs": tf.constant([0])}
+
+      prediction = tf_predict_fn(**kwargs)
+      expected_prediction = model.predict_embedding(
+          target_sample, [0], encoder="target"
+      )
+      np.testing.assert_allclose(
+          prediction.numpy(), expected_prediction, atol=1e-5
+      )
+
+    elif encoder == "both":
+      if consume_tf_graph_dict:
+        kwargs = {}
+        for k, v in tf_io.tf_graph_to_tf_graph_dict(tf_source_sample).items():
+          kwargs[f"source_{k}"] = v
+        for k, v in tf_io.tf_graph_to_tf_graph_dict(tf_target_sample).items():
+          kwargs[f"target_{k}"] = v
+        kwargs["source_seed_node_idxs"] = tf.constant([0])
+        kwargs["target_seed_node_idxs"] = tf.constant([0])
+      else:
+        kwargs = {
+            "source_graph": tf_source_sample,
+            "target_graph": tf_target_sample,
+            "source_seed_node_idxs": tf.constant([0]),
+            "target_seed_node_idxs": tf.constant([0]),
+        }
+
+      prediction = tf_predict_fn(**kwargs)
+      expected_prediction = model.predict(
+          graph, [0], [1], all_combinations=False, verbose=0
+      )
+      np.testing.assert_allclose(
+          prediction.numpy(), expected_prediction, atol=1e-5
+      )
+
+    # Test save and load
+    with tempfile.TemporaryDirectory() as tmpdir:
+      tf.saved_model.save(tf_predict_fn, tmpdir)
+      loaded = tf.saved_model.load(tmpdir)
+      loaded_prediction = loaded(**kwargs)
+      np.testing.assert_allclose(
+          loaded_prediction.numpy(), prediction.numpy(), atol=1e-5
+      )
+
+      self.assertIn("serving_default", loaded.signatures)
+      signature = loaded.signatures["serving_default"]
+      input_names = [t.name for t in signature.inputs]
+
+      if consume_tf_graph_dict:
+        h = f"{tf_io.BEGIN_CODE}23{tf_io.END_CODE}"
+        u = f"{tf_io.BEGIN_CODE}5f{tf_io.END_CODE}"
+
+        if encoder in ("source", "target"):
+          expected_keys_and_shapes = [
+              ("nodes_A_reserved_size", ()),
+              (f"nodes_A_{h}id", [None]),
+              ("nodes_A_f1", [None]),
+              ("nodes_A_f2", [None]),
+              ("nodes_B_reserved_size", ()),
+              (f"nodes_B_{h}id", [None]),
+              ("nodes_B_f1", [None]),
+              ("nodes_B_f2", [None]),
+              (f"edges_A{u}to{u}B_reserved_adjacency", [2, None]),
+          ]
+          seed_node_idxs_key = "seed_node_idxs"
+        elif encoder == "both":
+          single_graph_expected = [
+              ("nodes_A_reserved_size", ()),
+              (f"nodes_A_{h}id", [None]),
+              ("nodes_A_f1", [None]),
+              ("nodes_A_f2", [None]),
+              ("nodes_B_reserved_size", ()),
+              (f"nodes_B_{h}id", [None]),
+              ("nodes_B_f1", [None]),
+              ("nodes_B_f2", [None]),
+              (f"edges_A{u}to{u}B_reserved_adjacency", [2, None]),
+          ]
+          expected_keys_and_shapes = []
+          for key, shape in single_graph_expected:
+            expected_keys_and_shapes.append((f"source_{key}", shape))
+            expected_keys_and_shapes.append((f"target_{key}", shape))
+
+          # Check source and target seed node idxs
+          self.assertTrue(
+              any("source_seed_node_idxs" in name for name in input_names),
+              "source_seed_node_idxs not found in signature inputs:"
+              f" {input_names}",
+          )
+          self.assertTrue(
+              any("target_seed_node_idxs" in name for name in input_names),
+              "target_seed_node_idxs not found in signature inputs:"
+              f" {input_names}",
+          )
+
+          # We also need to check their shapes.
+          source_seed_tensor = next(
+              t for t in signature.inputs if "source_seed_node_idxs" in t.name
+          )
+          target_seed_tensor = next(
+              t for t in signature.inputs if "target_seed_node_idxs" in t.name
+          )
+          self.assertEqual(source_seed_tensor.shape.as_list(), [None])
+          self.assertEqual(target_seed_tensor.shape.as_list(), [None])
+
+          seed_node_idxs_key = None
+
+        if seed_node_idxs_key:
+          self.assertTrue(
+              any(seed_node_idxs_key in name for name in input_names),
+              f"{seed_node_idxs_key} not found in signature inputs:"
+              f" {input_names}",
+          )
+          seed_tensor = next(
+              t for t in signature.inputs if seed_node_idxs_key in t.name
+          )
+          self.assertEqual(seed_tensor.shape.as_list(), [None])
+
+        for key, expected_shape in expected_keys_and_shapes:
+          key_lower = key.lower()
+          self.assertTrue(
+              any(key_lower in name for name in input_names),
+              f"Key {key_lower} not found in signature inputs: {input_names}",
+          )
+
+          tensor = next(
+              (t for t in signature.inputs if key_lower in t.name), None
+          )
+          self.assertIsNotNone(tensor, f"Tensor for key {key_lower} not found")
+          if expected_shape == ():
+            self.assertEqual(tensor.shape, ())
+          else:
+            self.assertEqual(tensor.shape.as_list(), expected_shape)
 
 
 class LinkPredictionToyStandaloneTest(absltest.TestCase):

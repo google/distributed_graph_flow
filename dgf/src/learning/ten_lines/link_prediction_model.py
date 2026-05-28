@@ -22,8 +22,10 @@ from dgf.src.data import in_memory_graph
 from dgf.src.data import padding as padding_data_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.data import statistics as statistics_lib
+from dgf.src.data import tf_in_memory_graph as tf_in_memory_graph_lib
 from dgf.src.generate import edge_neighbor_generator as edge_neighbor_generator_lib
 from dgf.src.io import jax as jax_lib
+from dgf.src.io import tf as io_tf_lib
 from dgf.src.learning.ten_lines import common
 from dgf.src.learning.ten_lines import evaluation
 from dgf.src.learning.ten_lines import link_prediction_core_model
@@ -35,10 +37,12 @@ from dgf.src.transform import normalize as normalize_lib
 from dgf.src.util import util
 from dgf.src.util import util_ext
 import jax
+from jax.experimental import jax2tf
 import jax.numpy as jnp
 import jaxtyping
 import numpy as np
 import orbax.checkpoint as ocp
+import tensorflow as tf
 import tqdm
 
 Batch = link_prediction_core_model.Batch
@@ -748,6 +752,382 @@ class LinkPredictionModel(common.Model):
         embeddings_list.append(emb)
 
     return np.concatenate(embeddings_list, axis=0)
+
+  def to_tensorflow_function(
+      self,
+      encoder: Literal["source", "target", "both"],
+      *,
+      consume_tf_graph_dict: bool = False,
+  ) -> tf.Module:
+    """Exports the model as a TensorFlow function without the sampling step.
+
+    This method creates a TensorFlow function that encapsulates the model's
+    normalization and core prediction logic. It is designed to be used with
+    pre-sampled subgraphs.
+
+    Usage example:
+
+    ```python
+    # Export the full model (both source and target encoders)
+    tf_predict_fn = model.to_tensorflow_function(encoder="both")
+
+    # Pre-sampled and converted TF graphs
+    tf_source_graph = dgf.io.graph_to_tf_graph(source_sample, schema)
+    tf_target_graph = dgf.io.graph_to_tf_graph(target_sample, schema)
+
+    # Predict probability for edge between source node 0 (in source_graph)
+    # and target node 0 (in target_graph)
+    probs = tf_predict_fn(
+        source_graph=tf_source_graph,
+        target_graph=tf_target_graph,
+        source_seed_node_idxs=tf.constant([0]),
+        target_seed_node_idxs=tf.constant([0]),
+    )
+
+    # Export only the source encoder
+    tf_src_encoder = model.to_tensorflow_function(encoder="source")
+    src_embeddings = tf_src_encoder(
+        graph=tf_source_graph,
+        seed_node_idxs=tf.constant([0]),
+    )
+    ```
+
+    Args:
+      encoder: Which part of the model to export. - "source": Export the source
+        encoder. Returns source embeddings. - "target": Export the target
+        encoder. Returns target embeddings. - "both": Export the full model.
+        Returns edge probabilities.
+      consume_tf_graph_dict: If `True`, the returned TensorFlow function will
+        expect flat dictionaries representing the graphs instead of
+        `TFInMemoryGraph` objects. For `encoder="both"`, the keys in the
+        dictionary must be prefixed with `source_` and `target_` respectively.
+
+    Returns:
+      A `tf.Module` with a `__call__` method.
+    """
+    live = self._get_live()
+    schema = self.data().schema
+
+    graph_spec = io_tf_lib.schema_to_spec(schema)
+    graph_dict_spec = io_tf_lib.schema_to_dict_spec(schema)
+    seed_node_idxs_spec = tf.TensorSpec(
+        shape=[None], dtype=tf.int32, name="seed_node_idxs"
+    )
+
+    def make_single_encoder_wrapper(
+        tf_apply_fn,
+        normalizer: normalize_lib.GraphNormalizer,
+        padding: padding_data_lib.Padding,
+    ) -> tf.Module:
+      tf_apply = jax2tf.convert(
+          tf_apply_fn,
+          polymorphic_shapes=[None, "(b,)"],
+          native_serialization_platforms=["cpu", "cuda"],
+      )
+
+      class TfPredictWrapperBase(tf.Module):
+
+        def __init__(
+            self,
+            name: str,
+            tf_apply,
+            normalizer: normalize_lib.GraphNormalizer,
+            schema: schema_lib.GraphSchema,
+            padding: padding_data_lib.Padding,
+        ):
+          super().__init__(name=name)
+          self._tf_apply = tf_apply
+          self._normalizer = normalizer
+          self._schema = schema
+          self._padding = padding
+          self._normalizer_tf_resources = normalizer.tensorflow_resources()
+
+        def _predict(
+            self,
+            graph: tf_in_memory_graph_lib.TFInMemoryGraph,
+            seed_node_idxs: tf.Tensor,
+        ) -> tf.Tensor:
+          padded_graph = merge_lib.pad_graph_tensorflow(
+              graph, self._schema, self._padding
+          )
+          normalized_graph = self._normalizer.normalize_tensorflow(padded_graph)
+          jax_graph = jax_lib.graph_to_jax_graph(
+              normalized_graph, cast_arrays=False
+          )
+          return self._tf_apply(jax_graph, seed_node_idxs)
+
+      class TfPredictWrapperTFGraph(TfPredictWrapperBase):
+
+        def __init__(self, tf_apply, normalizer, schema, padding):
+          super().__init__(
+              "TfPredictWrapperTFGraph", tf_apply, normalizer, schema, padding
+          )
+
+        @tf.function(
+            autograph=False,
+            input_signature=[graph_spec, seed_node_idxs_spec],
+        )
+        def __call__(
+            self,
+            graph: tf_in_memory_graph_lib.TFInMemoryGraph,
+            seed_node_idxs: tf.Tensor,
+        ) -> tf.Tensor:
+          return self._predict(graph, seed_node_idxs)
+
+      class TfPredictWrapperTFGraphDict(TfPredictWrapperBase):
+
+        def __init__(self, tf_apply, normalizer, schema, padding):
+          super().__init__(
+              "TfPredictWrapperTFGraphDict",
+              tf_apply,
+              normalizer,
+              schema,
+              padding,
+          )
+
+        @tf.function(autograph=False)
+        def __call__(
+            self,
+            **kwargs,
+        ) -> tf.Tensor:
+          seed_node_idxs = kwargs.pop("seed_node_idxs")
+          graph = io_tf_lib.tf_graph_dict_to_tf_graph(kwargs)
+          return self._predict(graph, seed_node_idxs)
+
+      wrapper_class = (
+          TfPredictWrapperTFGraphDict
+          if consume_tf_graph_dict
+          else TfPredictWrapperTFGraph
+      )
+      wrapper = wrapper_class(tf_apply, normalizer, schema, padding)
+
+      if consume_tf_graph_dict:
+        spec_kwargs = {spec.name: spec for spec in graph_dict_spec}
+        spec_kwargs["seed_node_idxs"] = seed_node_idxs_spec
+        wrapper.__call__ = wrapper.__call__.get_concrete_function(**spec_kwargs)
+
+      return wrapper
+
+    if encoder == "source":
+      return make_single_encoder_wrapper(
+          live.apply_encoder_source,
+          live.source_normalizer,
+          self._data.positive_source_padding,
+      )
+    elif encoder == "target":
+      return make_single_encoder_wrapper(
+          live.apply_encoder_target,
+          live.target_normalizer,
+          self._data.positive_target_padding,
+      )
+    elif encoder == "both":
+      source_padding = self._data.positive_source_padding
+      target_padding = self._data.positive_target_padding
+
+      tf_apply = jax2tf.convert(
+          live.apply_core_model,
+          polymorphic_shapes=[
+              InferenceBatch(  # pytype: disable=wrong-arg-types
+                  source_graph=None,
+                  target_graph=None,
+                  source_offset="(b,)",
+                  target_offset="(b,)",
+              )
+          ],
+          native_serialization_platforms=["cpu", "cuda"],
+      )
+
+      class TfPredictWrapperBase(tf.Module):
+
+        def __init__(
+            self,
+            name: str,
+            tf_apply,
+            source_normalizer: normalize_lib.GraphNormalizer,
+            target_normalizer: normalize_lib.GraphNormalizer,
+            schema: schema_lib.GraphSchema,
+            source_padding: padding_data_lib.Padding,
+            target_padding: padding_data_lib.Padding,
+        ):
+          super().__init__(name=name)
+          self._tf_apply = tf_apply
+          self._source_normalizer = source_normalizer
+          self._target_normalizer = target_normalizer
+          self._schema = schema
+          self._source_padding = source_padding
+          self._target_padding = target_padding
+          self._source_normalizer_tf_resources = (
+              source_normalizer.tensorflow_resources()
+          )
+          self._target_normalizer_tf_resources = (
+              target_normalizer.tensorflow_resources()
+          )
+
+        def _predict(
+            self,
+            source_graph: tf_in_memory_graph_lib.TFInMemoryGraph,
+            target_graph: tf_in_memory_graph_lib.TFInMemoryGraph,
+            source_seed_idxs: tf.Tensor,
+            target_seed_idxs: tf.Tensor,
+        ) -> tf.Tensor:
+          padded_source = merge_lib.pad_graph_tensorflow(
+              source_graph, self._schema, self._source_padding
+          )
+          normalized_source = self._source_normalizer.normalize_tensorflow(
+              padded_source
+          )
+          jax_source = jax_lib.graph_to_jax_graph(
+              normalized_source, cast_arrays=False
+          )
+
+          padded_target = merge_lib.pad_graph_tensorflow(
+              target_graph, self._schema, self._target_padding
+          )
+          normalized_target = self._target_normalizer.normalize_tensorflow(
+              padded_target
+          )
+          jax_target = jax_lib.graph_to_jax_graph(
+              normalized_target, cast_arrays=False
+          )
+
+          batch = InferenceBatch(  # pytype: disable=wrong-arg-types
+              source_graph=jax_source,
+              target_graph=jax_target,
+              source_offset=source_seed_idxs,
+              target_offset=target_seed_idxs,
+          )
+          logits = self._tf_apply(batch)
+          return tf.math.sigmoid(logits)
+
+      source_seed_node_idxs_spec = tf.TensorSpec(
+          shape=[None], dtype=tf.int32, name="source_seed_node_idxs"
+      )
+      target_seed_node_idxs_spec = tf.TensorSpec(
+          shape=[None], dtype=tf.int32, name="target_seed_node_idxs"
+      )
+
+      class TfPredictWrapperTFGraph(TfPredictWrapperBase):
+
+        def __init__(
+            self,
+            tf_apply,
+            source_normalizer,
+            target_normalizer,
+            schema,
+            source_padding,
+            target_padding,
+        ):
+          super().__init__(
+              "TfPredictWrapperTFGraph",
+              tf_apply,
+              source_normalizer,
+              target_normalizer,
+              schema,
+              source_padding,
+              target_padding,
+          )
+
+        @tf.function(
+            autograph=False,
+            input_signature=[
+                graph_spec,
+                graph_spec,
+                source_seed_node_idxs_spec,
+                target_seed_node_idxs_spec,
+            ],
+        )
+        def __call__(
+            self,
+            source_graph: tf_in_memory_graph_lib.TFInMemoryGraph,
+            target_graph: tf_in_memory_graph_lib.TFInMemoryGraph,
+            source_seed_node_idxs: tf.Tensor,
+            target_seed_node_idxs: tf.Tensor,
+        ) -> tf.Tensor:
+          return self._predict(
+              source_graph,
+              target_graph,
+              source_seed_node_idxs,
+              target_seed_node_idxs,
+          )
+
+      class TfPredictWrapperTFGraphDict(TfPredictWrapperBase):
+
+        def __init__(
+            self,
+            tf_apply,
+            source_normalizer,
+            target_normalizer,
+            schema,
+            source_padding,
+            target_padding,
+        ):
+          super().__init__(
+              "TfPredictWrapperTFGraphDict",
+              tf_apply,
+              source_normalizer,
+              target_normalizer,
+              schema,
+              source_padding,
+              target_padding,
+          )
+
+        @tf.function(autograph=False)
+        def __call__(
+            self,
+            **kwargs,
+        ) -> tf.Tensor:
+          source_seed_node_idxs = kwargs.pop("source_seed_node_idxs")
+          target_seed_node_idxs = kwargs.pop("target_seed_node_idxs")
+
+          source_kwargs = {}
+          target_kwargs = {}
+          for k, v in kwargs.items():
+            if k.startswith("source_"):
+              source_kwargs[k[len("source_") :]] = v
+            elif k.startswith("target_"):
+              target_kwargs[k[len("target_") :]] = v
+            else:
+              raise ValueError(f"Unexpected key: {k}")
+
+          source_graph = io_tf_lib.tf_graph_dict_to_tf_graph(source_kwargs)
+          target_graph = io_tf_lib.tf_graph_dict_to_tf_graph(target_kwargs)
+          return self._predict(
+              source_graph,
+              target_graph,
+              source_seed_node_idxs,
+              target_seed_node_idxs,
+          )
+
+      wrapper_class = (
+          TfPredictWrapperTFGraphDict
+          if consume_tf_graph_dict
+          else TfPredictWrapperTFGraph
+      )
+      wrapper = wrapper_class(
+          tf_apply,
+          live.source_normalizer,
+          live.target_normalizer,
+          schema,
+          source_padding,
+          target_padding,
+      )
+
+      if consume_tf_graph_dict:
+        spec_kwargs = {}
+        for spec in graph_dict_spec:
+          spec_kwargs[f"source_{spec.name}"] = tf.TensorSpec(
+              shape=spec.shape, dtype=spec.dtype, name=f"source_{spec.name}"
+          )
+          spec_kwargs[f"target_{spec.name}"] = tf.TensorSpec(
+              shape=spec.shape, dtype=spec.dtype, name=f"target_{spec.name}"
+          )
+        spec_kwargs["source_seed_node_idxs"] = source_seed_node_idxs_spec
+        spec_kwargs["target_seed_node_idxs"] = target_seed_node_idxs_spec
+        wrapper.__call__ = wrapper.__call__.get_concrete_function(**spec_kwargs)
+
+      return wrapper
+    else:
+      raise ValueError(f"Invalid encoder: {encoder}")
 
   def evaluate(
       self,
