@@ -1,7 +1,4 @@
 package(
     
-    default_visibility = [
-        "//dgf:__subpackages__",
-        "//:internal_users",
-    ],
+    default_visibility = ["//:internal_users"],
 )
