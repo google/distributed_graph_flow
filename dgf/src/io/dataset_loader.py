@@ -30,6 +30,7 @@ from dgf.src.io import cache as cache_lib
 from dgf.src.io import feature_format as feature_format_lib
 from dgf.src.io import graph_in_memory as gf_graph_in_memory
 from dgf.src.util import log
+from dgf.src.util import weak_dep
 import dgf.src.util.filesystem as fs
 import numpy as np
 import pandas as pd
@@ -53,16 +54,6 @@ GRAPHLAND_DATASET_NAMES = [
 ]
 
 
-def import_ogb_nodeproppred() -> Optional[Any]:
-  try:
-    from ogb import nodeproppred  # pylint: disable=g-import-not-at-top # pytype: disable=import-error
-
-    return nodeproppred
-  except ImportError:
-    pass
-  return None
-
-
 class Repo(str, enum.Enum):
   """Where does the data comes from."""
 
@@ -83,12 +74,7 @@ def download_ogb_graph(name: str) -> Tuple[Any, Any, Any]:
     A tuple containing the graph data, labels, and index splits.
   """
 
-  nodeproppred = import_ogb_nodeproppred()
-  if nodeproppred is None:
-    raise RuntimeError(
-        "OGB nodeproppred is not available. Please install it using `pip"
-        " install ogb` to use this function."
-    )
+  nodeproppred = weak_dep.import_ogb_nodeproppred()
 
   # Download dataset using OGB's Library-Agnostic Loader.
   # TODO: b/449224186 - Temporarily, always clean up the cache directory

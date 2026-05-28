@@ -25,6 +25,7 @@ py_library(
         ":filesystem",
         ":proto",
         ":shard",
+        ":weak_dep",
         # bagz dep,
         "//dgf/src/data:distributed_graph",
         "//dgf/src/data:gf_metadata",
@@ -171,6 +172,13 @@ cc_library(
     testonly = True,
     hdrs = ["test_util.h"],
     deps = ["@googletest//:gtest"],
+)
+
+py_library(
+    name = "weak_dep",
+    srcs = ["weak_dep.py"],
+    deps = [
+    ],
 )
 
 # Nanobind
@@ -361,5 +369,14 @@ py_test(
         # absl/logging dep,
         # absl/testing:absltest dep,
         # absl/testing:flagsaver dep,
+    ],
+)
+
+py_test(
+    name = "weak_dep_test",
+    srcs = ["weak_dep_test.py"],
+    deps = [
+        ":weak_dep",
+        # absl/testing:absltest dep,
     ],
 )

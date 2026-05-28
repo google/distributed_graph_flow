@@ -16,8 +16,13 @@
 
 import json
 import os
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, TYPE_CHECKING, Tuple
 from unittest import mock
+
+from dgf.src.util import weak_dep
+
+if TYPE_CHECKING:
+  from tensorflow_gnn import proto as tf_gnn_proto
 
 import bagz
 from dgf.src.data import distributed_graph as distributed_graph_lib
@@ -37,7 +42,7 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 import tensorflow as tf
-from tensorflow_gnn import proto as tf_gnn_proto
+
 
 parse_schema = fastavro.parse_schema
 
@@ -178,7 +183,7 @@ def generate_tf_gnn_graph_schema(
     node_id: bool = False,
     edge_id: bool = False,
     variable_length: bool = True,
-) -> tf_gnn_proto.GraphSchema:
+) -> "tf_gnn_proto.GraphSchema":
   """Generates a tf_gnn_proto.GraphSchema.
 
   Args:
@@ -312,6 +317,7 @@ def generate_tf_gnn_graph_schema(
   """
   )
 
+  tf_gnn_proto = weak_dep.import_tf_gnn_proto()
   graph_schema = proto_lib.parse_text_proto(
       graph_schema_pbtxt, tf_gnn_proto.GraphSchema
   )

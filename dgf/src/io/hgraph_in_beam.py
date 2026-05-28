@@ -23,9 +23,9 @@ from dgf.src.io import hgraph_in_memory
 from dgf.src.util import filesystem
 from dgf.src.util import proto as proto_lib
 from dgf.src.util import shard as shard_lib
+from dgf.src.util import weak_dep
 import numpy as np
 import tensorflow as tf
-from tensorflow_gnn import proto as tf_gnn_proto
 
 
 def read_graphai_hgraph(
@@ -111,6 +111,7 @@ class ReadFromHGraph(beam.PTransform):
 
     # Import TF-GNN schema proto
     if self.schema is None:
+      tf_gnn_proto = weak_dep.import_tf_gnn_proto()
       tfgnn_schema = proto_lib.read_text_proto(
           os.path.join(self.path, hgraph_in_memory.PATH_GRAPH_SCHEMA),
           tf_gnn_proto.GraphSchema,

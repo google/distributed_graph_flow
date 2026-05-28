@@ -18,7 +18,7 @@ import enum
 import logging
 import os
 import time
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, TYPE_CHECKING, Tuple
 from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
@@ -28,9 +28,12 @@ from dgf.src.io import tfrecord as tfrecord_lib
 from dgf.src.util import filesystem
 from dgf.src.util import proto as proto_lib
 from dgf.src.util import shard as shard_lib
+from dgf.src.util import weak_dep
 import numpy as np
 import tensorflow as tf
-from tensorflow_gnn import proto as tf_gnn_proto
+
+if TYPE_CHECKING:
+  from tensorflow_gnn import proto as tf_gnn_proto
 
 PATH_GRAPH_SCHEMA = "graph_schema.pbtxt"
 PATH_NODE_FEATURE = "node_features"
@@ -59,7 +62,7 @@ def get_extension(container_type: HGraphContainerType) -> str:
 
 
 def tfgnn_schema_to_schema(
-    tfgnn_schema: tf_gnn_proto.GraphSchema,
+    tfgnn_schema: "tf_gnn_proto.GraphSchema",
 ) -> schema_lib.GraphSchema:
   """Converts a TF-GNN schema proto into a GraphSchema object.
 
@@ -106,7 +109,7 @@ def tfgnn_schema_to_schema(
 def schema_to_tfgnn_schema(
     schema: schema_lib.GraphSchema,
     add_reverse_edges: bool = False,
-) -> tf_gnn_proto.GraphSchema:
+) -> "tf_gnn_proto.GraphSchema":
   """Converts a GraphSchema object into a TF-GNN schema proto.
 
   Args:
@@ -119,6 +122,8 @@ def schema_to_tfgnn_schema(
   Returns:
     A TF-GNN schema proto.
   """
+
+  tf_gnn_proto = weak_dep.import_tf_gnn_proto()
 
   def convert_feature_schema(feature: schema_lib.FeatureSchema):
     feature_type = feature_format_lib.FEATURE_FORMAT_TO_TF_DTYPE[
@@ -228,6 +233,7 @@ def read_graphai_hgraph(
   if override_schema is None:
     if verbose:
       print("Loading schema")
+    tf_gnn_proto = weak_dep.import_tf_gnn_proto()
     tfgnn_schema = proto_lib.read_text_proto(
         os.path.join(path, PATH_GRAPH_SCHEMA),
         tf_gnn_proto.GraphSchema,

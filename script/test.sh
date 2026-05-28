@@ -25,7 +25,7 @@ source /tmp/venv/bin/activate
 
 
 # Install requirements
-${PYBIN} -m pip install -r requirements.txt
+${PYBIN} -m pip install -r requirements.txt -r requirements-dev.txt
 
 # Check that absl is installed
 ${PYBIN} -c "import absl" || { echo "Error: absl is not installed in the virtual environment."; exit 1; }

@@ -37,5 +37,5 @@ ${PYBIN} -m auditwheel repair --plat manylinux_2_28_x86_64 -w dist dist/dgf-*-cp
 chmod -R a+rw dist
 ${PYBIN} -m pip uninstall dgf -y
 ${PYBIN} -m pip install dist/dgf-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
-export TF_USE_LEGACY_KERAS=1
+# export TF_USE_LEGACY_KERAS=1 # TF_USE_LEGACY_KERAS=1 is not needed for this toy example.
 ${PYBIN} script/toy.py
