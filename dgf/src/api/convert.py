@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Convert object formats e.g. convert a graph to a Sparse Deferred struct."""
+"""Converts object formats, e.g., a graph to a Sparse Deferred struct."""
 
 # pylint: disable=unused-import,g-importing-member,g-import-not-at-top,g-bad-import-order,reimported,disable=attribute-error
 

@@ -37,14 +37,11 @@ def feature_statistics(
   semantic=NUMERICAL or TIMESERIES, computes min/max and histogram.
   - For format=bytes with semantic=CATEGORICAL, computes a dictionary.
 
-  Warning: If the feature's semantic is not set, not statsitics will be
+  Warning: If the feature's semantic is not set, no statistics will be
   computed.
 
-  This method computes the feature statistics on an iterator of in-memory
-  graphs.
-
-  For large sets of graphs, use the Beam distributed version instead:
-  dgf.analyse.feature_in_memory_statistics.
+  For large graphs, use the Beam distributed version instead:
+  dgf.beam.analyse.feature_statistics.
 
   Usage example:
 
@@ -100,14 +97,14 @@ def feature_statistics_from_graphs(
   semantic=NUMERICAL or TIMESERIES, computes min/max and histogram.
   - For format=bytes with semantic=CATEGORICAL, computes a dictionary.
 
-  Warning: If the feature's semantic is not set, not statsitics will be
+  Warning: If the feature's semantic is not set, no statistics will be
   computed.
 
   This method computes the feature statistics on an iterator of in-memory
   graphs.
 
   For large sets of graphs, use the Beam distributed version instead:
-  dgf.analyse.feature_in_memory_statistics.
+  dgf.beam.analyse.feature_statistics_from_graphs.
 
   Usage example:
 

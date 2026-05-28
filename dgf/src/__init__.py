@@ -12,9 +12,3 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Functions to analyze graphs using Beam, e.g., feature and graph statistics."""
-
-# pylint: disable=unused-import,g-importing-member,g-import-not-at-top,g-bad-import-order,reimported,disable=attribute-error
-
-from dgf.src.analyse.feature_statistics import feature_statistics
-from dgf.src.analyse.in_memory_feature_statistics import feature_statistics_from_graphs

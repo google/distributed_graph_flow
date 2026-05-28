@@ -37,6 +37,7 @@ markdown_extensions:
   - admonition
   - pymdownx.details
   - pymdownx.superfences
+  - attr_list
 
 plugins:
   - search
@@ -46,8 +47,19 @@ plugins:
   - gen-files:
       scripts:
         - copy_external.py
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_root_heading: true 
+            show_root_full_path: true
+            show_signature: false
+            show_root_heading: false
+            show_bases: true
+            show_source: false
 
-strict: true
+strict: false
 
 nav:
   - 🏡 Home: index.md

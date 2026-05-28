@@ -38,11 +38,11 @@ def feature_statistics_from_graphs(
     dictionary_buffer_size: int | None = None,
     reservoir_sampling_buffer_size: int = 10_000,
 ) -> beam.PCollection[statistics_lib.GraphFeatureStatistics]:
-  """Computes the feature statistics for a set of InMemoryGraph.
+  """Computes the feature statistics for a set of InMemoryGraphs.
 
   To write stats to disk, see "write_feature_statistics".
 
-  For small set of graphs, use the in-process version instead:
+  For a small set of graphs, use the in-process version instead:
   dgf.analyse.feature_statistics_from_graphs.
 
   Usage example:
@@ -52,11 +52,12 @@ def feature_statistics_from_graphs(
   graphs = dgf.beam.io.read_tfgnn_graphs(pipe, "/my/data@10")
 
   # Compute the statistics
-  feature_statistics =
-  dgf.analyse.feature_statistics_from_graphs(graphs,schema)
+  feature_statistics = (
+      dgf.beam.analyse.feature_statistics_from_graphs(graphs, schema)
+  )
 
   # Save the statistics
-  dgf.beam.io.write_feature_statistics(feature_statistics,"/my/stats.json")
+  dgf.beam.io.write_feature_statistics(feature_statistics, "/my/stats.json")
   ```
 
   Args:

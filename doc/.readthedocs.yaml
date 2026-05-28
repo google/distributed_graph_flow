@@ -14,3 +14,6 @@ mkdocs:
 python:
   install:
     - requirements: doc/requirements.txt
+    - method: pip
+      path: third_party/py/dgf
+      extra_requirements: []

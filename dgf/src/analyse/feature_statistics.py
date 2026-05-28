@@ -93,9 +93,9 @@ def feature_statistics(
     dictionary_buffer_size: int | None = None,
     reservoir_sampling_buffer_size: int = 10_000,
 ) -> beam.PCollection[statistics_lib.GraphFeatureStatistics]:
-  """Computes the feature statistics for a Graph.
+  """Computes the feature statistics for a distributed Graph.
 
-  To write stats to disk, see "feature_statistics".
+  To write stats to disk, see "dgf.beam.io.write_feature_statistics".
 
   Args:
     graph: Input graph.

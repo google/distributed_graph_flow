@@ -24,6 +24,7 @@ from google.cloud import storage
 
 
 def is_gcs_path(path: str) -> bool:
+  """Returns True if the path is a Google Cloud Storage (GCS) path."""
   return path.startswith("gs://")
 
 
@@ -75,6 +76,7 @@ def open_write(path: str, binary: bool = False):
 
 
 def exists(path: str) -> bool:
+  """Returns True if the path exists."""
   return epath.Path(path).exists()
 
 

@@ -24,6 +24,7 @@ import numpy as np
 
 
 class Sampler:
+  """Sampler for generating subgraphs from an in-memory graph."""
 
   def __init__(
       self,

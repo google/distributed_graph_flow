@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Analyze graph e.g. feature statistics, graph statistics."""
+"""Utilities to analyze graphs, e.g., feature and graph statistics."""
 
 # pylint: disable=unused-import,g-importing-member,g-import-not-at-top,g-bad-import-order,reimported,disable=attribute-error
 

@@ -49,18 +49,32 @@ def norm(
 def modern_residual_mlp(
     dims: int, dropout_rate: Optional[float] = 0.1, expansion_ratio: int = 4
 ) -> "GenericBlockConfig":
+  """Returns a GenericBlockConfig for a modern residual MLP.
+
+  It uses the config string "NL{expansion_ratio}ALDR" which stands for:
+  Norm, Linear (expanded), Activation, Linear (contracted), Dropout, Residual.
+  """
   return GenericBlockConfig(
       f"NL{expansion_ratio}ALDR", dims=dims, dropout_rate=dropout_rate
   )
 
 
 def ingest_feature(dims: int, norm: str = "layer_norm") -> "GenericBlockConfig":
+  """Returns a GenericBlockConfig for feature ingestion.
+
+  It uses the config string "LAN" which stands for: Linear, Activation, Norm.
+  """
   return GenericBlockConfig("LAN", dims=dims, norm=norm)
 
 
 def sequential_mlp(
     dims: int, num_layers: int = 2, dropout_rate: Optional[float] = None
 ) -> "GenericBlockConfig":
+  """Returns a GenericBlockConfig for a sequential MLP.
+
+  It builds a config string with `num_layers` of Linear + Activation (+ optional
+  Dropout) followed by a final Linear layer.
+  """
   config_parts = ["N"]
   for _ in range(num_layers):
     config_parts.append("LA")
@@ -73,6 +87,7 @@ def sequential_mlp(
 
 
 def identity() -> "GenericBlockConfig":
+  """Returns a GenericBlockConfig that acts as an identity block."""
   return GenericBlockConfig("", dims=1)
 
 
