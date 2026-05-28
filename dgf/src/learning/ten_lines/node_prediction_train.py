@@ -26,6 +26,7 @@ from dgf.src.analyse import print_schema as print_schema_lib
 from dgf.src.data import in_memory_graph
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
+from dgf.src.io import jax as jax_lib
 from dgf.src.learning.jax import flax_train
 from dgf.src.learning.jax.layers import classification as classification_lib
 from dgf.src.learning.jax.layers import preprocess
@@ -36,8 +37,11 @@ from dgf.src.learning.ten_lines import dataset
 from dgf.src.learning.ten_lines import node_prediction_core_model
 from dgf.src.learning.ten_lines import node_prediction_dataset
 from dgf.src.learning.ten_lines import node_prediction_model
+from dgf.src.plot import network as network_lib
 from dgf.src.sampling import config as sampling_config_lib
+from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
+from dgf.src.util import filesystem as fs
 from dgf.src.util import log
 from dgf.src.util import util
 import jax
@@ -76,6 +80,7 @@ def prepare_datasets(
     batch_size: int,
     cache_normalized_features: bool,
     cache_normalized_features_device: Literal["host", "device"],
+    sampling_plan: Optional[sampling_config_lib.SamplingPlan],
 ) -> Tuple[
     node_prediction_dataset.GNNDatasetPreparator,
     Optional[node_prediction_dataset.GNNDatasetPreparator],
@@ -101,22 +106,26 @@ def prepare_datasets(
       )
   )
 
-  sampling_config = sampling_config_lib.SimpleSamplingConfig(
-      seed_nodeset=task.target_nodeset,
-      num_hops=hparams.num_sampling_hops,
-      hop_width=hparams.sampling_width,
-      reverse=True,
-      edgeset_timestamp_features=edgeset_timestamp_features
-      if temporal_sampling
-      else {},
-  )
+  if sampling_plan is None:
+    sampling_config = sampling_config_lib.SimpleSamplingConfig(
+        seed_nodeset=task.target_nodeset,
+        num_hops=hparams.num_sampling_hops,
+        hop_width=hparams.sampling_width,
+        reverse=True,
+        edgeset_timestamp_features=edgeset_timestamp_features
+        if temporal_sampling
+        else {},
+    )
+    sampling_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
+        sampling_config, schema
+    )
 
   # TODO(gbm): Should we allow for the training and validation graphs to be in
   # different format?
   common_kwargs = {
       "format": graph_format,
       "schema": schema,
-      "sampling_config": sampling_config,
+      "sampling_plan": sampling_plan,
       "batch_size": hparams.batch_size,
       "drop_remainder": True,
       "verbose_preparation": verbose >= 2,
@@ -362,6 +371,8 @@ def train_node_model(
     cache_normalized_features_device: Literal["host", "device"] = "device",
     export_metrics_to_xm: bool = False,
     architecture: Union[common.Architecture, str] = common.DEFAULT_ARCHITECTURE,
+    sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None,
+    diagnostic_dir: Optional[str] = None,
 ) -> NodePredictionModel:
   """Trains a supervised Graph Neural Network model for node-level prediction.
 
@@ -417,8 +428,9 @@ def train_node_model(
       timestamp feature. Nodesets/edgesets without specified timestamp features
       are treated as atemporal.
     message_pooling: The pooling method to use for aggregating messages.
-    experimental_preprocess_core_model_config: An optional callable to modify
-      the `CoreModelConfig` before it is used to build the core model.
+    experimental_preprocess_core_model_config: Advanced option. An optional
+      callable to modify the `CoreModelConfig` before it is used to build the
+      core model.
     cache_normalized_features: If True, pre-compute the normalized features
       during the preparation stage instead of computing them on the fly in the
       generator. This option can speed up data generation/training but increases
@@ -431,6 +443,11 @@ def train_node_model(
     export_metrics_to_xm: If True, metrics from the training and validation
       steps will be exported to XManager.
     architecture: The architecture of the GNN model.
+    sampling_plan: An advanced option to provide a custom plan for the sampler.
+      When you use this option, the sampler ignores standard graph sampling
+      arguments and validation checks e.g., num_sampling_hops, sampling_width.
+    diagnostic_dir: If provided, creates this directory and export to it
+      artefacts that can be useful to understand and debug the model training.
 
   Returns:
     A trained `NodePredictionModel` instance.
@@ -445,6 +462,9 @@ def train_node_model(
 
   architecture = common.parse_architecture(architecture)
   begin_train_time = time.time()
+
+  if diagnostic_dir is not None:
+    fs.makedirs(diagnostic_dir)
 
   if verbose >= 2:
     log.info("Using %s JAX backend", jax.default_backend())
@@ -519,6 +539,7 @@ def train_node_model(
           cache_valid_dataset=cache_valid_dataset,
           cache_normalized_features=cache_normalized_features,
           cache_normalized_features_device=cache_normalized_features_device,
+          sampling_plan=sampling_plan,
       )
   normalized_schema = train_dataset.generated_schema()
 
@@ -714,9 +735,21 @@ def train_node_model(
   jitted_train_step = jax.jit(train_step)
 
   def infinite_train_dataset_iterator():
+    num_diagnostic_plots = 0
     while True:
       for sample, merge_offset in train_dataset.generate_jax():
         with jax.profiler.TraceAnnotation("process_batch"):
+
+          if diagnostic_dir is not None and num_diagnostic_plots < 5:
+            _diagnose_train_batch(
+                sample,
+                merge_offset,
+                diagnostic_dir,
+                normalized_schema,
+                num_diagnostic_plots,
+            )
+            num_diagnostic_plots += 1
+
           yield process_batch(sample, merge_offset)
 
   train_kwargs = {}
@@ -837,6 +870,24 @@ def train_node_model(
   )
 
   return model
+
+
+def _diagnose_train_batch(
+    graph: jax_in_memory_graph.JaxInMemoryGraph,
+    offsets: Dict[str, jnp.ndarray],
+    diagnostic_dir: str,
+    schema: schema_lib.GraphSchema,
+    batch_idx: int,
+):
+  """Exports diagnostic information about a training batch."""
+  graph_np = jax_lib.jax_graph_to_graph(graph)
+  offsets_np = {k: np.asarray(v) for k, v in offsets.items()}
+  graph = merge_lib.remove_padding_sentinels(graph_np, schema, offsets_np)
+  network_lib.plot_graph(graph, schema).render(
+      os.path.join(diagnostic_dir, f"graph_{batch_idx}"),
+      format="png",
+      cleanup=True,
+  )
 
 
 common.register_model(NodePredictionModel, ModelData)

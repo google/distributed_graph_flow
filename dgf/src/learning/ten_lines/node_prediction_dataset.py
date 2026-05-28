@@ -102,7 +102,7 @@ class GNNDatasetPreparator:
       configured.
     batch_size: The desired size of each batch of seed nodes. Set batch_size=1
       to avoid batching / merging.
-    sampling_config: Configuration for sampling subgraphs around the seed nodes.
+    sampling_plan: Configuration for sampling subgraphs around the seed nodes.
     drop_remainder: If `True`, the last batch of seed nodes will be dropped if
       it contains fewer than `batch_size` elements.
     shuffle: If `True`, the seed nodes are shuffled before batching.
@@ -146,7 +146,7 @@ class GNNDatasetPreparator:
   graph: dataset.Graph
   schema: schema_lib.GraphSchema
   batch_size: int
-  sampling_config: sampling_config_lib.SimpleSamplingConfig
+  sampling_plan: sampling_config_lib.SamplingPlan
   drop_remainder: bool
   shuffle: bool
   format: Union[dataset.GraphFormat, str] = dataset.GraphFormat.AUTO
@@ -298,9 +298,7 @@ class GNNDatasetPreparator:
         schema=self.schema,
         batch_size=self.batch_size,
         seed_node_idxs=self.seed_node_idxs,
-        sampling_config=sampling_config_lib.simple_sampling_config_to_sampling_plan(
-            self.sampling_config, self.schema
-        ),
+        sampling_config=self.sampling_plan,
         drop_remainder=self.drop_remainder,
         shuffle=self.shuffle,
         format=self.format,

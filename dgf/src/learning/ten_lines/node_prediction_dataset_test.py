@@ -38,15 +38,19 @@ class GNNDatasetPreparatorTest(parameterized.TestCase):
     graph = gen_test_graph.generate_in_memory_graph(True, False)
     schema = gen_test_graph.generate_schema(True, False, True, False)
     print("schema:\n", schema)
+    sampling_config = sampling_config_lib.SimpleSamplingConfig(
+        seed_nodeset="n1",
+        num_hops=2,
+        hop_width=3,
+        reverse=True,
+    )
+    sampling_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
+        sampling_config, schema
+    )
     preparator = node_prediction_dataset.GNNDatasetPreparator(
         graph=graph,
         schema=schema,
-        sampling_config=sampling_config_lib.SimpleSamplingConfig(
-            seed_nodeset="n1",
-            num_hops=2,
-            hop_width=3,
-            reverse=True,
-        ),
+        sampling_plan=sampling_plan,
         batch_size=2,
         drop_remainder=True,
         shuffle=True,
@@ -88,15 +92,19 @@ class GNNDatasetPreparatorTest(parameterized.TestCase):
 
   def test_in_memory_temporal_graph(self):
     graph, schema = gen_test_graph.generate_temporal_in_memory_graph(False)
+    sampling_config = sampling_config_lib.SimpleSamplingConfig(
+        seed_nodeset="n1",
+        num_hops=2,
+        hop_width=3,
+        reverse=True,
+    )
+    sampling_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
+        sampling_config, schema
+    )
     preparator = node_prediction_dataset.GNNDatasetPreparator(
         graph=graph,
         schema=schema,
-        sampling_config=sampling_config_lib.SimpleSamplingConfig(
-            seed_nodeset="n1",
-            num_hops=2,
-            hop_width=3,
-            reverse=True,
-        ),
+        sampling_plan=sampling_plan,
         batch_size=2,
         drop_remainder=True,
         shuffle=True,
@@ -140,15 +148,19 @@ class GNNDatasetPreparatorTest(parameterized.TestCase):
         container_type="TF_RECORD",
     )
 
+    sampling_config = sampling_config_lib.SimpleSamplingConfig(
+        seed_nodeset="n1",
+        num_hops=2,
+        hop_width=3,
+        reverse=True,
+    )
+    sampling_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
+        sampling_config, schema
+    )
     preparator = node_prediction_dataset.GNNDatasetPreparator(
         graph=path,
         schema=schema,
-        sampling_config=sampling_config_lib.SimpleSamplingConfig(
-            seed_nodeset="n1",
-            num_hops=2,
-            hop_width=3,
-            reverse=True,
-        ),
+        sampling_plan=sampling_plan,
         batch_size=2,
         drop_remainder=True,
         shuffle=True,

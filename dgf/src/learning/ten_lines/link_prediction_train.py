@@ -165,6 +165,8 @@ def prepare_datasets(
     batch_size: int,
     cache_normalized_features: bool,
     cache_normalized_features_device: Literal["host", "device"],
+    source_sampling_plan: Optional[sampling_config_lib.SamplingPlan],
+    target_sampling_plan: Optional[sampling_config_lib.SamplingPlan],
 ) -> Tuple[
     link_prediction_dataset.GNNLinkDatasetPreparator,
     Optional[link_prediction_dataset.GNNLinkDatasetPreparator],
@@ -215,6 +217,8 @@ def prepare_datasets(
   common_kwargs = {
       "schema": schema,
       "sampling_config": sampling_config,
+      "source_sampling_plan": source_sampling_plan,
+      "target_sampling_plan": target_sampling_plan,
       "batch_size": hparams.batch_size,
       "drop_remainder": True,
       "target_edgeset": task.target_edgeset,
@@ -317,6 +321,8 @@ def train_link_model(
     cache_normalized_features_device: Literal["host", "device"] = "device",
     export_metrics_to_xm: bool = False,
     architecture: Union[common.Architecture, str] = common.DEFAULT_ARCHITECTURE,
+    source_sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None,
+    target_sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None,
 ) -> LinkPredictionModel:
   """Trains a supervised Graph Neural Network model for edge prediction.
 
@@ -389,6 +395,14 @@ def train_link_model(
     export_metrics_to_xm: If True, export training and validation metrics to
       XManager.
     architecture: The architecture of the GNN model to use.
+    source_sampling_plan: An advanced option to provide a custom plan for the
+      sampler of the source node. When you use this option, the sampler ignores
+      standard graph sampling arguments and validation checks e.g.,
+      num_sampling_hops, sampling_width.
+    target_sampling_plan: An advanced option to provide a custom plan for the
+      sampler of the target node. When you use this option, the sampler ignores
+      standard graph sampling arguments and validation checks e.g.,
+      num_sampling_hops, sampling_width.
 
   Returns:
     A LinkPredictionModel instance.
@@ -458,6 +472,8 @@ def train_link_model(
         cache_valid_dataset=cache_valid_dataset,
         cache_normalized_features=cache_normalized_features,
         cache_normalized_features_device=cache_normalized_features_device,
+        source_sampling_plan=source_sampling_plan,
+        target_sampling_plan=target_sampling_plan,
     )
   source_normalized_schema = (
       train_dataset.get_live().source_normalizer.output_schema()

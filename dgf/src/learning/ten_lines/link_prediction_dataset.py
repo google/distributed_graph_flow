@@ -137,6 +137,10 @@ class GNNLinkDatasetPreparator:
     batch_size: The desired size of each batch of seed edges. Set batch_size=1
       to avoid batching / merging.
     sampling_config: Configuration for sampling subgraphs around the seed nodes.
+    source_sampling_plan: Configuration for sampling subgraphs around the seed
+      nodes. If specified, replaces sampling_config for the source node.
+    target_sampling_plan: Configuration for sampling subgraphs around the seed
+      nodes. If specified, replaces sampling_config for the target node.
     drop_remainder: If `True`, the last batch of seed edges will be dropped if
       it contains fewer than `batch_size` elements.
     shuffle: If `True`, the seed edges are shuffled before batching.
@@ -171,6 +175,8 @@ class GNNLinkDatasetPreparator:
   schema: schema_lib.GraphSchema
   batch_size: int
   sampling_config: sampling_config_lib.SimpleSamplingConfig
+  source_sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None
+  target_sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None
   drop_remainder: bool
   shuffle: bool
   target_edgeset: str
@@ -429,7 +435,9 @@ class GNNLinkDatasetPreparator:
 
     source_sampler = in_memory_sampler_lib.create_sampler(
         graph=self.graph,
-        plan=self.sampling_config,
+        plan=self.source_sampling_plan
+        if self.source_sampling_plan is not None
+        else self.sampling_config,
         schema=sampling_schema,
         batch_size=self.batch_size,
         edgeset_to_mask=edgeset_to_mask,
@@ -440,7 +448,9 @@ class GNNLinkDatasetPreparator:
     )
     target_sampler = in_memory_sampler_lib.create_sampler(
         graph=self.graph,
-        plan=target_plan,
+        plan=self.target_sampling_plan
+        if self.target_sampling_plan is not None
+        else target_plan,
         schema=sampling_schema,
         batch_size=self.batch_size * self.num_negative_nodes,
         edgeset_to_mask=edgeset_to_mask,

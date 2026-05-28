@@ -15,6 +15,7 @@
 """Tests for edge prediction."""
 
 import dataclasses
+import os
 import tempfile
 from typing import Tuple
 import unittest.mock
@@ -536,6 +537,27 @@ class LinkPredictionToyTest(absltest.TestCase):
         self.model.data().core_model_config.architecture(),
         "link_prediction_architecture.txt",
     )
+
+
+class LinkPredictionToyStandaloneTest(absltest.TestCase):
+
+  @unittest.skip("The test requires graphviz")
+  def test_diagnostic_dir(self):
+    graph, schema = gen_toy_graph()
+    diagnostic_dir = self.create_tempdir().full_path
+    _ = link_prediction_train.train_link_model(
+        graph=graph,
+        schema=schema,
+        target_edgeset="A_to_B",
+        diagnostic_dir=diagnostic_dir,
+        **RAPID_TRAINING_KWARGS,
+    )
+    for filename in [
+        "negative_target_graph_0.png",
+        "positive_source_graph_0.png",
+        "positive_target_graph_0.png",
+    ]:
+      self.assertTrue(fs.exists(os.path.join(diagnostic_dir, filename)))
 
 
 class LinkPredictionGraphAttentionNetworkToyTest(absltest.TestCase):

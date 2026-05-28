@@ -574,6 +574,25 @@ class NodePredictionRealLooking(parameterized.TestCase):
     )
 
 
+class NodePredictionRealLookingStandaloneTest(parameterized.TestCase):
+
+  @unittest.skip("The test requires graphviz")
+  def test_diagnostic_dir(self):
+    graph, schema = _gen_graph_real_looking()
+    diagnostic_dir = self.create_tempdir().full_path
+    _ = node_prediction_lib.train_node_model(
+        graph=graph,
+        valid_graph=graph,
+        schema=schema,
+        target_nodeset="client",
+        target_column="categorical_label",
+        diagnostic_dir=diagnostic_dir,
+        **RAPID_TRAINING_KWARGS,
+    )
+    for filename in ["graph_0.png", "graph_1.png"]:
+      self.assertTrue(fs.exists(os.path.join(diagnostic_dir, filename)))
+
+
 # This test trains a model on a toy patter. While this is a toy pattern, this
 # test take some time to run.
 class NodePredictionClassificationToy(absltest.TestCase):
