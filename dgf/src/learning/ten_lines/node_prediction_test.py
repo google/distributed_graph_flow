@@ -117,6 +117,10 @@ def _gen_graph_real_looking(
                       format=schema_lib.FeatureFormat.INTEGER_64,
                       semantic=schema_lib.FeatureSemantic.NUMERICAL,
                   ),
+                  "country": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.BYTES,
+                      semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                  ),
               }
           ),
       },
@@ -591,6 +595,20 @@ class NodePredictionRealLookingStandaloneTest(parameterized.TestCase):
     )
     for filename in ["graph_0.png", "graph_1.png"]:
       self.assertTrue(fs.exists(os.path.join(diagnostic_dir, filename)))
+
+  def test_partial_cover(self):
+    graph, schema = _gen_graph_real_looking()
+    my_args = {**RAPID_TRAINING_KWARGS}
+    del my_args["num_sampling_hops"]
+    _ = node_prediction_lib.train_node_model(
+        graph=graph,
+        valid_graph=graph,
+        schema=schema,
+        num_sampling_hops=0,  # The transactions table is not visited.
+        target_nodeset="client",
+        target_column="categorical_label",
+        **my_args,
+    )
 
 
 # This test trains a model on a toy patter. While this is a toy pattern, this

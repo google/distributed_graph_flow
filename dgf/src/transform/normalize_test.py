@@ -309,7 +309,7 @@ class AutoNormalierTest(absltest.TestCase):
                         quantiles=[],
                     ),
                     "f2": statistics_lib.FeatureStatistics(
-                        count=0,
+                        count=2,
                         minimum=0,
                         maximum=4,
                         dictionary={},
@@ -320,7 +320,7 @@ class AutoNormalierTest(absltest.TestCase):
             "n2": statistics_lib.FeatureSetStatistics(
                 features={
                     "f3": statistics_lib.FeatureStatistics(
-                        count=0,
+                        count=2,
                         minimum=0,
                         maximum=4,
                         dictionary={},

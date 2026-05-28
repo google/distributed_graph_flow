@@ -158,16 +158,25 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
           f"Feature '{feature_name}' has format '{input_schema.format}', but "
           "DictionaryIndexNormalizer only supports BYTES features."
       )
-    if not input_stats.dictionary:
-      raise ValueError(
-          f"Feature '{feature_name}' does not have a dictionary in its"
-          " statistics."
+
+    if input_stats.count == 0:
+      log.warning(
+          f"No value observed for feature {feature_name}. Creating a empty"
+          " DictionaryIndexNormalizer."
       )
+      dictionary_map = {"SENTINEL": 0}
+    else:
+      if not input_stats.dictionary:
+        raise ValueError(
+            f"Feature '{feature_name}' does not have a dictionary in its"
+            " statistics."
+        )
+      dictionary_map = {
+          key: item.index for key, item in input_stats.dictionary.items()
+      }
     return DictionaryIndexNormalizer(
         input_feature=feature_name,
-        dictionary_map={
-            key: item.index for key, item in input_stats.dictionary.items()
-        },
+        dictionary_map=dictionary_map,
         out_of_vocab_value=len(input_stats.dictionary),
         output_shape=input_schema.shape or (),
         output_feature_name=f"{feature_name}_INDEX",
@@ -191,7 +200,7 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
           self.out_of_vocab_value,
       )
 
-    vectorized_lookup = np.vectorize(_lookup)
+    vectorized_lookup = np.vectorize(_lookup, otypes=[np.int64])
     # TODO(gbm): Parametrize to int32.
     return {self.output_feature_name: vectorized_lookup(value)}
 
@@ -257,19 +266,29 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
           f"Feature '{feature_name}' has format '{input_schema.format}', but "
           "SoftQuantileNormalizer only supports INTEGER or FLOAT features."
       )
-    if not input_stats.quantiles:
-      raise ValueError(
-          f"Feature '{feature_name}' does not have quantiles in its statistics."
-      )
-    if len(input_stats.quantiles) < 2:
-      raise ValueError(
-          f"Feature '{feature_name}' has less than 2 quantiles in its"
-          " statistics, cannot perform soft quantile normalization."
-      )
 
-    quantiles = np.unique(np.array(input_stats.quantiles, dtype=np.float32))
-    if len(quantiles) == 1:
-      quantiles = np.append(quantiles, quantiles[0] + 1)
+    if input_stats.count == 0:
+      log.warning(
+          f"No value observed for feature {feature_name}. Creating a empty"
+          " SoftQuantileNormalizer."
+      )
+      quantiles = np.asarray([0, 1], dtype=np.float32)
+    else:
+
+      if not input_stats.quantiles:
+        raise ValueError(
+            f"Feature '{feature_name}' does not have quantiles in its"
+            " statistics."
+        )
+      if len(input_stats.quantiles) < 2:
+        raise ValueError(
+            f"Feature '{feature_name}' has less than 2 quantiles in its"
+            " statistics, cannot perform soft quantile normalization."
+        )
+
+      quantiles = np.unique(np.array(input_stats.quantiles, dtype=np.float32))
+      if len(quantiles) == 1:
+        quantiles = np.append(quantiles, quantiles[0] + 1)
 
     return SoftQuantileNormalizer(
         input_feature=feature_name,
@@ -883,7 +902,7 @@ class GraphNormalizer:
         input_feature_value = input_edgeset.features[normalizer.input_feature]
         output_features.update({
             k: asarray(v)
-            for k, v in normalizer.normalize_numpy(input_feature_value).items
+            for k, v in normalizer.normalize_numpy(input_feature_value).items()
         })
       dst_graph_edge_sets[edgeset_name] = (
           jax_in_memory_graph.JaxInMemoryEdgeSet(
