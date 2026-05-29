@@ -58,6 +58,7 @@ plugins:
             show_root_heading: false
             show_bases: true
             show_source: false
+            resolve_external: false
 
 strict: false
 
