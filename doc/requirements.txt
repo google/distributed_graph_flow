@@ -3,4 +3,3 @@ mkdocs-material
 mkdocs-jupyter
 mkdocs-gen-files
 mkdocstrings[python]
-dgf
