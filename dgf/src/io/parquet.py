@@ -222,6 +222,7 @@ def _write_single_shard(
     start_row: int,
     end_row: int,
     write_specs: Dict[str, WriteParquetSpec],
+    compression: str = "snappy",
 ):
 
   def to_pa_array(key, np_values, spec):
@@ -249,7 +250,7 @@ def _write_single_shard(
   }
   table = pa.Table.from_pydict(shard_data)
   with filesystem.open_write(shard_path, binary=True) as f:
-    pq.write_table(table, f)
+    pq.write_table(table, f, compression=compression)
 
 
 def write_numpy_dict_to_parquet(
@@ -259,6 +260,7 @@ def write_numpy_dict_to_parquet(
     schema: schema_lib.FeatureSetSchema,
     num_shards: int = 1,
     verbose: bool = False,
+    compression: str = "snappy",
 ):
   """Writes a dictionary of numpy arrays to sharded Parquet files.
 
@@ -269,6 +271,7 @@ def write_numpy_dict_to_parquet(
     schema: The schema defining the features to write.
     num_shards: The number of shards to write.
     verbose: If True, print progress information.
+    compression: The parquet compression codec to use.
   """
   if not data:
     raise ValueError("Input data dictionary is empty.")
@@ -307,7 +310,14 @@ def write_numpy_dict_to_parquet(
     if verbose:
       print(f"Writing shard {shard_index + 1}/{num_shards} to {shard_path}")
 
-    _write_single_shard(data, shard_path, start_row, end_row, write_specs)
+    _write_single_shard(
+        data,
+        shard_path,
+        start_row,
+        end_row,
+        write_specs,
+        compression=compression,
+    )
 
   with futures.ThreadPoolExecutor(
       max_workers=max(1, min(num_shards, 20))

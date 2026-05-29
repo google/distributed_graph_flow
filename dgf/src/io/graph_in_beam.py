@@ -252,6 +252,9 @@ def write_graph(
     graph: distributed_graph_lib.Graph,
     path: str,
     beam_namespace: str = "",
+    num_node_shards: int = 0,
+    num_edge_shards: int = 0,
+    compression: str = "snappy",
 ) -> beam.pvalue.PDone:
   """Writes a GF Graph from a distributed graph (beam).
 
@@ -305,6 +308,8 @@ def write_graph(
             file_path_prefix=file_path_prefix,
             file_name_suffix=PARQUET_EXTENSION,
             schema=_node_schema_to_parquet_schema(nodeset_schema),
+            codec=compression,
+            num_shards=num_node_shards,
         )
     )
     write_results.append(write_result)
@@ -324,6 +329,8 @@ def write_graph(
             file_path_prefix=file_path_prefix,
             file_name_suffix=PARQUET_EXTENSION,
             schema=_edge_schema_to_parquet_schema(edgeset_schema, graph.schema),
+            codec=compression,
+            num_shards=num_edge_shards,
         )
     )
     write_results.append(write_result)
@@ -398,10 +405,14 @@ def _node_to_raw(
     node: distributed_graph_lib.Node, schema: schema_lib.NodeSchema
 ) -> Dict[str, Any]:
   """Converts a Node to a raw dictionary for Parquet writing."""
+  primary_key = schema_analyse_lib.primary_feature_or_none("", schema)
   raw_dict = {}
   for feature_name in schema.features:
-    feature_values = node.features[feature_name]
-    raw_dict[feature_name] = feature_values.tolist()
+    if feature_name == primary_key:
+      raw_dict[feature_name] = node.id
+    else:
+      feature_values = node.features[feature_name]
+      raw_dict[feature_name] = feature_values.tolist()
   return raw_dict
 
 

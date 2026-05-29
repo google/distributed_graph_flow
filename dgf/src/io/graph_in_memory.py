@@ -336,6 +336,7 @@ def write_graph(
     path: str,
     verbose: bool = False,
     max_num_shards: Optional[int] = None,
+    compression: str = "snappy",
 ):
   """Writes an in-memory graph and schema to a GF Graph directory.
 
@@ -397,6 +398,7 @@ def write_graph(
         nodeset_schema.features,
         num_shards,
         verbose,
+        compression=compression,
     )
 
   # Write Edge Sets
@@ -447,6 +449,7 @@ def write_graph(
         features_schema,
         num_shards,
         verbose,
+        compression=compression,
     )
 
   end_time = time.monotonic()

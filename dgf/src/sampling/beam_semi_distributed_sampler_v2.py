@@ -16,6 +16,7 @@
 
 import logging
 import os
+import threading
 import time
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
 import apache_beam as beam
@@ -156,10 +157,12 @@ def sample_with_beam_semi_distributed_sampler_v2(
   return samples, schema
 
 
-class RawSamplerV2Cache:
+class SharedSampler:
+  """A wrapper to allow weak references to the shared sampler and mapper."""
 
-  def __init__(self):
-    self.by_path = {}
+  def __init__(self, sampler, mapper):
+    self.sampler = sampler
+    self.mapper = mapper
 
 
 class RawSamplerV2(beam.DoFn):
@@ -186,14 +189,11 @@ class RawSamplerV2(beam.DoFn):
 
   def setup(self):
     def initializer():
-      return RawSamplerV2Cache()
-
-    self.cache = RawSamplerV2.shared_in_memory_samplers.acquire(initializer)
-
-    if self.graph_path not in self.cache.by_path:
-      # TODO(gbm): Don't load and return the feature values.
       start_time = time.time()
-      logging.info("Load graph in memory")
+      logging.info(
+          "Thread %s: Start loading shared graph",
+          threading.current_thread().name,
+      )
 
       read_schema = self.schema
 
@@ -231,9 +231,13 @@ class RawSamplerV2(beam.DoFn):
       ].features[KEY_ID]
       mapper = {id.item(): idx for idx, id in enumerate(seed_node_ids)}
 
-      self.cache.by_path[self.graph_path] = (sampler, mapper)
+      return SharedSampler(sampler, mapper)
 
-    self.sampler, self.mapper = self.cache.by_path[self.graph_path]
+    shared_sampler = RawSamplerV2.shared_in_memory_samplers.acquire(
+        initializer, tag=self.graph_path
+    )
+    self.sampler = shared_sampler.sampler
+    self.mapper = shared_sampler.mapper
 
   def process(
       self, seeds: Sequence[distributed_graph.NodeId]

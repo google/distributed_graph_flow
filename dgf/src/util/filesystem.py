@@ -16,6 +16,7 @@
 """
 
 import concurrent.futures
+import time
 from typing import List, Optional, Sequence
 from absl import logging
 from etils import epath
@@ -58,6 +59,42 @@ def open_read(path: str, binary: bool = False):
   Returns:
     A file-like object for reading.
   """
+  if is_gcs_path(path):
+    # TODO(gbm): Check other possible fixes
+    # Direct GCS blob open for GCS reads (epath unreachable from GCP Dataflow runner).
+    # Note: blob.open() returns a streaming BlobReader which downloads in chunks,
+    # so it does NOT load the entire file into memory at once (safe for large files).
+    # We also add exponential-backoff retries to handle transient GCS network timeouts.
+    client = storage.Client()
+
+    # Parse "gs://bucket/path/to/blob" into bucket name and blob path.
+    gcs_path = path.replace("gs://", "")
+    bucket_name = gcs_path.split("/")[0]
+    blob_path = "/".join(gcs_path.split("/")[1:])
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(blob_path)
+
+    # Open the GCS blob as a streaming file-like object.
+    max_retries = 5
+    for attempt in range(max_retries):
+      try:
+        return blob.open("rb" if binary else "r")
+      except Exception as e:  # pylint: disable=broad-except
+        if attempt < max_retries - 1:
+          wait = 2**attempt  # Exponential backoff: 1s, 2s, 4s, 8s.
+          logging.warning(
+              "GCS open attempt %d/%d failed for %s: %s. Retrying in %ds.",
+              attempt + 1,
+              max_retries,
+              path,
+              e,
+              wait,
+          )
+          time.sleep(wait)
+        else:
+          raise  # All retries exhausted; propagate the exception.
+
+  # For non-GCS paths (local, CNS, etc.), delegate to etils.epath.
   return epath.Path(path).open("rb" if binary else "r")
 
 
