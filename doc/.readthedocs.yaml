@@ -10,8 +10,9 @@ build:
   jobs:
     pre_install:
       - pip install --no-deps dgf
-    post_build:
-      - python -m mkdocs build -v --clean --site-dir $READTHEDOCS_OUTPUT/html --config-file doc/mkdocs.yml
+    build:
+      html:
+        - python -m mkdocs build -v --clean --site-dir $READTHEDOCS_OUTPUT/html --config-file doc/mkdocs.yml
 
 mkdocs:
    configuration: doc/mkdocs.yml
