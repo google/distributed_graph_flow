@@ -37,7 +37,7 @@ class BinaryDistribution(Distribution):
 
 setup(
     name="dgf",
-    version="0.0.3",
+    version="0.0.4",
     author="Mathieu Guillame-Bert, Brandon Mayer",
     description="Distributed Graph Flow",
     long_description=open("README.md").read(),
