@@ -19,6 +19,8 @@ import enum
 from typing import Callable, Dict, Optional, Tuple
 import dataclasses_json
 
+Shape = Optional[Tuple[Optional[int], ...]]
+
 
 class FeatureFormat(enum.Enum):
   """How a value is represented / stored."""
@@ -85,15 +87,14 @@ class FeatureSchema:
     num_categorical_values: The number of possible categories for CATEGORICAL
       features. `None` for other semantic types or if the numeber of possible
       categories is unknown.
-    is_utf8_string: Whether the feature is a UTF-8 string. This is only
-      relevant when feature_format is BYTES, to distinguish between Spanner
-      STRING (True) and Spanner BYTES (False).
-    
+    is_utf8_string: Whether the feature is a UTF-8 string. This is only relevant
+      when feature_format is BYTES, to distinguish between Spanner STRING (True)
+      and Spanner BYTES (False).
   """
 
   format: FeatureFormat
   semantic: FeatureSemantic = FeatureSemantic.UNKNOWN
-  shape: Optional[Tuple[Optional[int], ...]] = None
+  shape: Shape = None
   num_categorical_values: Optional[int] = None
   is_utf8_string: Optional[bool] = False
 

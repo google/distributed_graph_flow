@@ -63,11 +63,13 @@ def get_extension(container_type: HGraphContainerType) -> str:
 
 def tfgnn_schema_to_schema(
     tfgnn_schema: "tf_gnn_proto.GraphSchema",
+    fix_shape: bool = True,
 ) -> schema_lib.GraphSchema:
   """Converts a TF-GNN schema proto into a GraphSchema object.
 
   Args:
     tfgnn_schema: A TF-GNN schema proto.
+    fix_shapes: If true, fixes the extra None dimension added to all the shapes.
 
   Returns:
     A GraphSchema object.
@@ -102,7 +104,9 @@ def tfgnn_schema_to_schema(
     )
 
   schema = schema_lib.GraphSchema(node_sets=node_sets, edge_sets=edge_sets)
-  analyse_schema_lib.fix_schema(schema, create_pound_id_as_fall_back=True)
+  analyse_schema_lib.fix_schema(
+      schema, create_pound_id_as_fall_back=True, fix_shape=fix_shape
+  )
   return schema
 
 

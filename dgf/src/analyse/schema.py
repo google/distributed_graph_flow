@@ -14,6 +14,7 @@
 
 """Analaysis / data extraction from a schema."""
 
+from typing import Tuple, Union
 from dgf.src.data import schema as schema_lib
 from dgf.src.util import log
 
@@ -142,6 +143,7 @@ def primary_feature_or_none(
 def fix_schema(
     schema: schema_lib.GraphSchema,
     create_pound_id_as_fall_back: bool = False,
+    fix_shape: bool = True,
 ):
   """Tries to fix broken/invalid schemas by inferring and setting primary keys.
 
@@ -151,9 +153,42 @@ def fix_schema(
       one called "#id". This should only be used to consume old GraphAI
       datasets. Note that create_pound_id_as_fall_back=True does not check that
       the feaure "#id" is actually present in the data.
+    fix_shapes: If true, fixes the extra None dimension added to all the shapes.
+      This is a common issue with TF-GNN schemas.
   """
 
+  def shape_is_suspicious(shape: schema_lib.Shape):
+    return (
+        shape is not None
+        and len(shape) == 2
+        and shape[0] is None
+        and shape[1] is not None
+    )
+
+  def fix_suspicious_shape(
+      feature_name,
+      shape: schema_lib.Shape,
+  ) -> schema_lib.Shape:
+    log.info("Fix suspicious shape of feature '%s'", feature_name)
+    assert shape_is_suspicious(shape)
+    if shape[1] == 1:
+      return tuple()
+    else:
+      return shape[1:]
+
   for nodeset_name, nodeset_def in schema.node_sets.items():
+    all_shapes_are_suspicious = True
+    for _, feature_schema in nodeset_def.features.items():
+      all_shapes_are_suspicious = (
+          all_shapes_are_suspicious
+          and shape_is_suspicious(feature_schema.shape)
+      )
+    if fix_shape and all_shapes_are_suspicious:
+      for feature_name, feature_schema in nodeset_def.features.items():
+        feature_schema.shape = fix_suspicious_shape(
+            feature_name, feature_schema.shape
+        )
+
     if primary_feature_or_none(nodeset_name, nodeset_def) is not None:
       continue
     # This nodeset has not primary key.
@@ -178,6 +213,18 @@ def fix_schema(
     )
 
   for edgeset_name, edgeset_def in schema.edge_sets.items():
+    all_shapes_are_suspicious = True
+    for _, feature_schema in edgeset_def.features.items():
+      all_shapes_are_suspicious = (
+          all_shapes_are_suspicious
+          and shape_is_suspicious(feature_schema.shape)
+      )
+    if fix_shape and all_shapes_are_suspicious:
+      for feature_name, feature_schema in edgeset_def.features.items():
+        feature_schema.shape = fix_suspicious_shape(
+            feature_name, feature_schema.shape
+        )
+
     if primary_feature_or_none(edgeset_name, edgeset_def) is not None:
       continue
     # This nodeset has not primary key.
@@ -197,3 +244,102 @@ def fix_schema(
         edgeset_name,
         primary_key,
     )
+
+
+def infer_schema_semantic(
+    schema: schema_lib.GraphSchema,
+    raise_on_error: bool = True,
+    verbose: bool = True,
+) -> schema_lib.GraphSchema:
+  """Automatically detects the semantic of features with UNKNOWN semantic.
+
+  Usage example:
+
+  ```python
+  schema = dgf.analyse.infer_schema_semantic(schema)
+  ```
+
+  The logic to infer the semantic is as follows:
+  - bytes and booleans are considered categorical.
+  - numerical values (float, integers) are considered numerical.
+  - integer values where the name starts with "is_" are considered categorical.
+  - features where the name starts with # are ignored.
+
+  Args:
+    schema: The GraphSchema to infer semantics for.
+    raise_on_error: If True, raises a ValueError if a feature's semantic cannot
+      be inferred. If False, logs a warning instead.
+    verbose: Print message about non-trivial decisions.
+
+  Returns:
+    The modified GraphSchema.
+  """
+  for nodeset_name, nodeset_def in schema.node_sets.items():
+    _infer_features_semantic(
+        nodeset_def.features,
+        container_name=f"nodeset '{nodeset_name}'",
+        raise_on_error=raise_on_error,
+        verbose=verbose,
+    )
+
+  for edgeset_name, edgeset_def in schema.edge_sets.items():
+    _infer_features_semantic(
+        edgeset_def.features,
+        container_name=f"edgeset '{edgeset_name}'",
+        raise_on_error=raise_on_error,
+        verbose=verbose,
+    )
+
+  return schema
+
+
+def _infer_features_semantic(
+    features: schema_lib.FeatureSetSchema,
+    container_name: str,
+    raise_on_error: bool,
+    verbose: bool,
+):
+  for feature_name, feature_schema in features.items():
+    if feature_name.startswith("#"):
+      if verbose:
+        log.info(
+            "Ignoring feature %r in %s because it starts with '#'.",
+            feature_name,
+            container_name,
+        )
+      continue
+    if feature_schema.semantic != schema_lib.FeatureSemantic.UNKNOWN:
+      continue
+
+    fmt = feature_schema.format
+    inferred = False
+    if fmt in (schema_lib.FeatureFormat.BYTES, schema_lib.FeatureFormat.BOOL):
+      feature_schema.semantic = schema_lib.FeatureSemantic.CATEGORICAL
+      inferred = True
+    elif fmt.is_numerical():
+      if fmt.is_integer() and feature_name.startswith("is_"):
+        feature_schema.semantic = schema_lib.FeatureSemantic.CATEGORICAL
+        if verbose:
+          log.info(
+              "Inferred feature %r in %s as CATEGORICAL because it starts with"
+              " 'is_'.",
+              feature_name,
+              container_name,
+          )
+      else:
+        feature_schema.semantic = schema_lib.FeatureSemantic.NUMERICAL
+      inferred = True
+
+    if not inferred:
+      msg = (
+          f"Could not infer semantic for feature {feature_name!r} in"
+          f" {container_name} with format {fmt!r}. Please specify the semantic"
+          " manually in the schema."
+      )
+      if raise_on_error:
+        raise ValueError(
+            f"{msg} To disable this error and print a warning instead, set"
+            " `raise_on_error=False` in `infer_schema_semantic`."
+        )
+      else:
+        log.warning(msg)

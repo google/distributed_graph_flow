@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from unittest import mock
+
 from absl.testing import absltest
 from dgf.src.analyse import schema as schema_lib
 from dgf.src.data.schema import EdgeSchema
@@ -252,6 +254,193 @@ class SchemaTest(absltest.TestCase):
         ValueError, "no feature look like a primary key"
     ):
       schema_lib.fix_schema(schema)
+
+  def test_fix_schema_create_pound_id_fallback(self):
+    schema = GraphSchema(
+        node_sets={
+            "nodes": NodeSchema(
+                features={
+                    "feat": FeatureSchema(
+                        format=FeatureFormat.FLOAT_32,
+                        semantic=FeatureSemantic.UNKNOWN,
+                    )
+                }
+            )
+        },
+        edge_sets={},
+    )
+    schema_lib.fix_schema(schema, create_pound_id_as_fall_back=True)
+    self.assertIn("#id", schema.node_sets["nodes"].features)
+    self.assertEqual(
+        schema.node_sets["nodes"].features["#id"].semantic,
+        FeatureSemantic.PRIMARY_ID,
+    )
+    self.assertEqual(
+        schema.node_sets["nodes"].features["#id"].format,
+        FeatureFormat.BYTES,
+    )
+
+  def test_fix_schema_fix_suspicious_shape(self):
+    schema = GraphSchema(
+        node_sets={
+            "nodes": NodeSchema(
+                features={
+                    "id": FeatureSchema(
+                        format=FeatureFormat.BYTES,
+                        semantic=FeatureSemantic.PRIMARY_ID,
+                        shape=(None, 1),
+                    ),
+                    "feat": FeatureSchema(
+                        format=FeatureFormat.FLOAT_32,
+                        semantic=FeatureSemantic.NUMERICAL,
+                        shape=(None, 10),
+                    ),
+                }
+            )
+        },
+        edge_sets={},
+    )
+    schema_lib.fix_schema(schema, fix_shape=True)
+    self.assertEqual(schema.node_sets["nodes"].features["id"].shape, ())
+    self.assertEqual(schema.node_sets["nodes"].features["feat"].shape, (10,))
+
+  def test_infer_schema_semantic(self):
+
+    schema = GraphSchema(
+        node_sets={
+            "nodes": NodeSchema(
+                features={
+                    # Bytes -> Categorical
+                    "f_bytes": FeatureSchema(
+                        format=FeatureFormat.BYTES,
+                        semantic=FeatureSemantic.UNKNOWN,
+                    ),
+                    # Bool -> Categorical
+                    "f_bool": FeatureSchema(
+                        format=FeatureFormat.BOOL,
+                        semantic=FeatureSemantic.UNKNOWN,
+                    ),
+                    # Float -> Numerical
+                    "f_float": FeatureSchema(
+                        format=FeatureFormat.FLOAT_32,
+                        semantic=FeatureSemantic.UNKNOWN,
+                    ),
+                    # Int -> Numerical
+                    "f_int": FeatureSchema(
+                        format=FeatureFormat.INTEGER_64,
+                        semantic=FeatureSemantic.UNKNOWN,
+                    ),
+                    # Int with "is_" -> Categorical
+                    "is_active": FeatureSchema(
+                        format=FeatureFormat.INTEGER_32,
+                        semantic=FeatureSemantic.UNKNOWN,
+                    ),
+                    # Starts with "#" -> Ignored
+                    "#id": FeatureSchema(
+                        format=FeatureFormat.BYTES,
+                        semantic=FeatureSemantic.UNKNOWN,
+                    ),
+                    # Already set -> Ignored
+                    "already_set": FeatureSchema(
+                        format=FeatureFormat.FLOAT_32,
+                        semantic=FeatureSemantic.EMBEDDING,
+                    ),
+                }
+            )
+        },
+        edge_sets={
+            "edges": EdgeSchema(
+                source="nodes",
+                target="nodes",
+                features={
+                    "f_bytes_edge": FeatureSchema(
+                        format=FeatureFormat.BYTES,
+                        semantic=FeatureSemantic.UNKNOWN,
+                    ),
+                },
+            )
+        },
+    )
+
+    inferred_schema = schema_lib.infer_schema_semantic(schema)
+
+    node_features = inferred_schema.node_sets["nodes"].features
+    self.assertEqual(
+        node_features["f_bytes"].semantic, FeatureSemantic.CATEGORICAL
+    )
+    self.assertEqual(
+        node_features["f_bool"].semantic, FeatureSemantic.CATEGORICAL
+    )
+    self.assertEqual(
+        node_features["f_float"].semantic, FeatureSemantic.NUMERICAL
+    )
+    self.assertEqual(node_features["f_int"].semantic, FeatureSemantic.NUMERICAL)
+    self.assertEqual(
+        node_features["is_active"].semantic, FeatureSemantic.CATEGORICAL
+    )
+    self.assertEqual(node_features["#id"].semantic, FeatureSemantic.UNKNOWN)
+    self.assertEqual(
+        node_features["already_set"].semantic, FeatureSemantic.EMBEDDING
+    )
+
+    edge_features = inferred_schema.edge_sets["edges"].features
+    self.assertEqual(
+        edge_features["f_bytes_edge"].semantic, FeatureSemantic.CATEGORICAL
+    )
+
+  def test_infer_schema_semantic_cannot_infer_raise(self):
+    class FakeFormat:
+
+      def is_numerical(self):
+        return False
+
+      def is_integer(self):
+        return False
+
+    schema = GraphSchema(
+        node_sets={
+            "nodes": NodeSchema(
+                features={
+                    "f_weird": FeatureSchema(
+                        format=FakeFormat(),
+                        semantic=FeatureSemantic.UNKNOWN,
+                    ),
+                }
+            )
+        },
+        edge_sets={},
+    )
+    with self.assertRaisesRegex(
+        ValueError, "Could not infer semantic for feature 'f_weird'"
+    ):
+      schema_lib.infer_schema_semantic(schema, raise_on_error=True)
+
+  @mock.patch("dgf.src.analyse.schema.log.warning")
+  def test_infer_schema_semantic_cannot_infer_warn(self, mock_warning):
+    class FakeFormat:
+
+      def is_numerical(self):
+        return False
+
+      def is_integer(self):
+        return False
+
+    schema = GraphSchema(
+        node_sets={
+            "nodes": NodeSchema(
+                features={
+                    "f_weird": FeatureSchema(
+                        format=FakeFormat(),
+                        semantic=FeatureSemantic.UNKNOWN,
+                    ),
+                }
+            )
+        },
+        edge_sets={},
+    )
+    schema_lib.infer_schema_semantic(schema, raise_on_error=False)
+    mock_warning.assert_called_once()
+    self.assertIn("Could not infer semantic", mock_warning.call_args[0][0])
 
 
 if __name__ == "__main__":

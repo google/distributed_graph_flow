@@ -23,6 +23,8 @@ from dgf.src.analyse.in_process_feature_statistics import feature_statistics
 
 # TODO: Use third_party/py/dgf/src/api/print.py version instead.
 from dgf.src.analyse.print_schema import print_schema
+from dgf.src.analyse.schema import infer_schema_semantic
+
 
 from dgf.src.analyse.reports import data_model as reports_data_model
 from dgf.src.analyse.reports import reporter
