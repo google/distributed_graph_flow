@@ -14,7 +14,6 @@
 
 """Analaysis / data extraction from a schema."""
 
-from typing import Tuple, Union
 from dgf.src.data import schema as schema_lib
 from dgf.src.util import log
 
@@ -278,8 +277,6 @@ def fix_schema(
         edgeset_name,
         primary_key,
     )
-
-
 def infer_schema_semantic(
     schema: schema_lib.GraphSchema,
     raise_on_error: bool = True,
@@ -377,3 +374,70 @@ def _infer_features_semantic(
         )
       else:
         log.warning(msg)
+
+
+def temporal_edge_info(
+    schema: schema_lib.GraphSchema,
+    edge_set_name: str | None = None,
+) -> tuple[str, str]:
+  """Gets the edge set name and timestamp feature name from the schema.
+
+  Scans the schema for edge set features with ``FeatureSemantic.TIMESTAMP``.
+  - If ``edge_set_name`` is provided, searches only that edge set.
+  - If ``edge_set_name`` is ``None``, searches all edge sets.
+
+  Args:
+    schema: The graph schema.
+    edge_set_name: Optional edge set to restrict the search to.
+
+  Returns:
+    A tuple of the edge set name and timestamp feature name.
+
+  Raises:
+    ValueError: If no TIMESTAMP feature is found, or if multiple TIMESTAMP
+      features are found (causing ambiguity).
+  """
+  if edge_set_name is not None:
+    if edge_set_name not in schema.edge_sets:
+      raise ValueError(
+          f"Edge set '{edge_set_name}' not found in schema. "
+          f"Available: {list(schema.edge_sets.keys())}"
+      )
+    edge_sets_to_search = {edge_set_name: schema.edge_sets[edge_set_name]}
+  else:
+    edge_sets_to_search = schema.edge_sets
+
+  matches = []
+  for es_name, es_schema in edge_sets_to_search.items():
+    for feat_name, feat_schema in es_schema.features.items():
+      if feat_schema.semantic == schema_lib.FeatureSemantic.TIMESTAMP:
+        matches.append((es_name, feat_name))
+
+  scope = (
+      f"edge set '{edge_set_name}'"
+      if edge_set_name is not None
+      else "the schema"
+  )
+
+  if not matches:
+    available = {
+        k: list(v.features.keys()) for k, v in edge_sets_to_search.items()
+    }
+    raise ValueError(
+        f"No feature with FeatureSemantic.TIMESTAMP found in {scope}. "
+        f"Available features: {available}"
+    )
+
+  if len(matches) > 1:
+    match_names = (
+        [feat for _, feat in matches]
+        if edge_set_name is not None
+        else [f"{es}.{feat}" for es, feat in matches]
+    )
+    raise ValueError(
+        f"Multiple TIMESTAMP features found in {scope}: {match_names}."
+        " Currently, multiple timestamp features are not supported due to"
+        " ambiguity."
+    )
+
+  return matches[0]

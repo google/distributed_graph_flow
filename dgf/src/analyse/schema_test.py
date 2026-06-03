@@ -509,6 +509,114 @@ class SchemaTest(absltest.TestCase):
     mock_warning.assert_called_once()
     self.assertIn("Could not infer semantic", mock_warning.call_args[0][0])
 
+  def test_temporal_edge_info_success(self):
+    schema = GraphSchema(
+        node_sets={},
+        edge_sets={
+            "edges": EdgeSchema(
+                source="nodes",
+                target="nodes",
+                features={
+                    "timestamp": FeatureSchema(
+                        format=FeatureFormat.INTEGER_64,
+                        semantic=FeatureSemantic.TIMESTAMP,
+                    ),
+                },
+            )
+        },
+    )
+    es_name, feat_name = schema_lib.temporal_edge_info(schema)
+    self.assertEqual(es_name, "edges")
+    self.assertEqual(feat_name, "timestamp")
+
+    # Search specific edge set
+    es_name_spec, feat_name_spec = schema_lib.temporal_edge_info(
+        schema, "edges"
+    )
+    self.assertEqual(es_name_spec, "edges")
+    self.assertEqual(feat_name_spec, "timestamp")
+
+  def test_temporal_edge_info_not_found(self):
+    schema = GraphSchema(
+        node_sets={},
+        edge_sets={
+            "edges": EdgeSchema(
+                source="nodes",
+                target="nodes",
+                features={
+                    "feat": FeatureSchema(
+                        format=FeatureFormat.INTEGER_64,
+                        semantic=FeatureSemantic.UNKNOWN,
+                    ),
+                },
+            )
+        },
+    )
+    with self.assertRaisesRegex(
+        ValueError, "No feature with FeatureSemantic.TIMESTAMP found in"
+    ):
+      schema_lib.temporal_edge_info(schema)
+
+  def test_temporal_edge_info_wrong_edgeset(self):
+    schema = GraphSchema(node_sets={}, edge_sets={})
+    with self.assertRaisesRegex(ValueError, "not found in schema"):
+      schema_lib.temporal_edge_info(schema, "edges")
+
+  def test_temporal_edge_info_multiple_in_edgeset(self):
+    schema = GraphSchema(
+        node_sets={},
+        edge_sets={
+            "edges": EdgeSchema(
+                source="nodes",
+                target="nodes",
+                features={
+                    "ts1": FeatureSchema(
+                        format=FeatureFormat.INTEGER_64,
+                        semantic=FeatureSemantic.TIMESTAMP,
+                    ),
+                    "ts2": FeatureSchema(
+                        format=FeatureFormat.INTEGER_64,
+                        semantic=FeatureSemantic.TIMESTAMP,
+                    ),
+                },
+            )
+        },
+    )
+    with self.assertRaisesRegex(
+        ValueError, "Multiple TIMESTAMP features found in edge set 'edges'"
+    ):
+      schema_lib.temporal_edge_info(schema, "edges")
+
+  def test_temporal_edge_info_multiple_global(self):
+    schema = GraphSchema(
+        node_sets={},
+        edge_sets={
+            "edges1": EdgeSchema(
+                source="nodes",
+                target="nodes",
+                features={
+                    "ts1": FeatureSchema(
+                        format=FeatureFormat.INTEGER_64,
+                        semantic=FeatureSemantic.TIMESTAMP,
+                    ),
+                },
+            ),
+            "edges2": EdgeSchema(
+                source="nodes",
+                target="nodes",
+                features={
+                    "ts2": FeatureSchema(
+                        format=FeatureFormat.INTEGER_64,
+                        semantic=FeatureSemantic.TIMESTAMP,
+                    ),
+                },
+            ),
+        },
+    )
+    with self.assertRaisesRegex(
+        ValueError, "Multiple TIMESTAMP features found in the schema:"
+    ):
+      schema_lib.temporal_edge_info(schema)
 
 if __name__ == "__main__":
   absltest.main()
