@@ -182,6 +182,13 @@ def _read_edge_set(
   if remove_dangling_edges:
     if missmatch_src != -1 or missmatch_trg != -1:
       valid_indices = (adjacency[0] != -1) & (adjacency[1] != -1)
+      num_dangling = len(valid_indices) - np.sum(valid_indices)
+      if num_dangling > 0:
+        log.warning(
+            "Removed %d dangling edges in edgeset %r.",
+            num_dangling,
+            edgeset_name,
+        )
       adjacency = adjacency[:, valid_indices]
       # Also filter features if they exist.
       for key in features:

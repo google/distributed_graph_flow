@@ -14,13 +14,14 @@
 
 import os
 import tempfile
+
 from absl.testing import absltest
-from dgf.src.io import tfrecord
+from dgf.src.io import tfexample
 import numpy as np
 import tensorflow as tf
 
 
-class TfRecordTest(absltest.TestCase):
+class TfExampleTest(absltest.TestCase):
 
   def _write_tfrecord(self, path, examples, compressed=False):
     options = tf.io.TFRecordOptions(
@@ -57,7 +58,7 @@ class TfRecordTest(absltest.TestCase):
     self._write_tfrecord(file_path1, examples1)
     self._write_tfrecord(file_path2, examples2)
 
-    data, num_examples = tfrecord.read_tf_record(
+    data, num_examples = tfexample.read_tf_record(
         [file_path1, file_path2],
         {
             "f1": (tf.float32, ()),

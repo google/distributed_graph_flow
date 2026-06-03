@@ -14,8 +14,10 @@
 
 """Reading and writing HGraph in Beam."""
 
+import logging
 import os
 from typing import Iterator, Optional, Tuple
+
 import apache_beam as beam
 from dgf.src.data import distributed_graph
 from dgf.src.data import schema as schema_lib
@@ -37,6 +39,7 @@ def read_graphai_hgraph(
     node_id_column: Optional[str] = None,
     edge_id_column: Optional[str] = None,
     override_schema: Optional[schema_lib.GraphSchema] = None,
+    remove_dangling_edges: bool = False,
 ) -> distributed_graph.Graph:
   """Reads a distributed HGraph using Beam.
 
@@ -80,6 +83,8 @@ def read_graphai_hgraph(
       node_id_column=node_id_column,
       edge_id_column=edge_id_column,
       override_schema=override_schema,
+      research_node_format=research_node_format,
+      remove_dangling_edges=remove_dangling_edges,
   )
 
 
@@ -93,6 +98,7 @@ class ReadFromHGraph(beam.PTransform):
       node_id_column: Optional[str],
       edge_id_column: Optional[str],
       override_schema: Optional[schema_lib.GraphSchema],
+      remove_dangling_edges: bool = False,
   ):
     """Initializes the ReadFromHGraph PTransform."""
     if isinstance(container_type, str):
@@ -102,6 +108,7 @@ class ReadFromHGraph(beam.PTransform):
     self.node_id_column = node_id_column
     self.edge_id_column = edge_id_column
     self.schema = override_schema
+    self.remove_dangling_edges = remove_dangling_edges
 
     # TODO(gbm): Add support for AdjacencyList format.
     self.edge_format = distributed_graph.EdgeFormat.FLAT
@@ -146,7 +153,6 @@ class ReadFromHGraph(beam.PTransform):
 
     edge_sets = {}
     for edgeset_name, edgeset_def in schema.edge_sets.items():
-      del edgeset_def
       file_pattern = shard_lib.shard_pattern_to_glob(
           os.path.join(self.path, hgraph_in_memory.PATH_EDGES, edgeset_name),
           extension,
@@ -160,6 +166,83 @@ class ReadFromHGraph(beam.PTransform):
               edge_id_column=self.edge_id_column,
           )
       )
+
+    if self.remove_dangling_edges:
+      for edgeset_name, edgeset_def in schema.edge_sets.items():
+        edges = edge_sets[edgeset_name]
+        source_nodes = node_sets[edgeset_def.source]
+        target_nodes = node_sets[edgeset_def.target]
+
+        source_node_ids = (
+            source_nodes
+            | f"Get source IDs for {edgeset_name}"
+            >> beam.Map(lambda node: (node.id, True))
+        )
+        target_node_ids = (
+            target_nodes
+            | f"Get target IDs for {edgeset_name}"
+            >> beam.Map(lambda node: (node.id, True))
+        )
+
+        edges_by_source = edges | f"EdgesBySource {edgeset_name}" >> beam.Map(
+            lambda edge: (edge.source, edge)
+        )
+        joined_source = {
+            "edges": edges_by_source,
+            "nodes": source_node_ids,
+        } | f"JoinBySource {edgeset_name}" >> beam.CoGroupByKey()
+        filtered_by_source = (
+            joined_source
+            | f"FilterDanglingSource {edgeset_name}"
+            >> beam.FlatMap(
+                lambda element: element[1]["edges"]
+                if element[1]["nodes"]
+                else []
+            )
+        )
+
+        edges_by_target = (
+            filtered_by_source
+            | f"EdgesByTarget {edgeset_name}"
+            >> beam.Map(lambda edge: (edge.target, edge))
+        )
+        joined_target = {
+            "edges": edges_by_target,
+            "nodes": target_node_ids,
+        } | f"JoinByTarget {edgeset_name}" >> beam.CoGroupByKey()
+        filtered_edges = (
+            joined_target
+            | f"FilterDanglingTarget {edgeset_name}"
+            >> beam.FlatMap(
+                lambda element: element[1]["edges"]
+                if element[1]["nodes"]
+                else []
+            )
+        )
+
+        orig_count = (
+            edges
+            | f"CountOriginal {edgeset_name}" >> beam.combiners.Count.Globally()
+        )
+        filt_count = (
+            filtered_edges
+            | f"CountFiltered {edgeset_name}" >> beam.combiners.Count.Globally()
+        )
+
+        def log_removed_fn(element, orig, name=edgeset_name):
+          removed = orig - element
+          if removed > 0:
+            logging.warning(
+                "Removed %d dangling edges in edgeset %r.",
+                removed,
+                name,
+            )
+
+        _ = filt_count | f"LogRemoved {edgeset_name}" >> beam.Map(
+            log_removed_fn, orig=beam.pvalue.AsSingleton(orig_count)
+        )
+
+        edge_sets[edgeset_name] = filtered_edges
 
     # TODO(gbm): Add support for edge features.
     # TODO(gbm): Add support for edge weights.
@@ -402,11 +485,12 @@ class ReadEdgeSet(beam.PTransform):
       self, pbegin: beam.pvalue.PBegin
   ) -> beam.PCollection[distributed_graph.Edge]:
 
+    if self.edge_id_column is None:
+      edge_id_column = hgraph_in_memory.DEFAULT_KEY_ID
+    else:
+      edge_id_column = self.edge_id_column
+
     if self.container_type == hgraph_in_memory.HGraphContainerType.TF_RECORD:
-      if self.edge_id_column is None:
-        edge_id_column = hgraph_in_memory.DEFAULT_KEY_ID
-      else:
-        edge_id_column = self.edge_id_column
       return (
           pbegin
           | ReadTfExampleContainer(
@@ -416,8 +500,8 @@ class ReadEdgeSet(beam.PTransform):
           | "Import edgeset"
           >> beam.Map(tf_example_to_edge, edge_id_column=edge_id_column)
       )
-
-    raise ValueError(f"Unsupported container type: {self.container_type}")
+    else:
+      raise ValueError(f"Unsupported container type: {self.container_type}")
 
 
 class WriteTfExampleContainer(beam.PTransform):

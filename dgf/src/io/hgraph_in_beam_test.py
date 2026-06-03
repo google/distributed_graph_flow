@@ -14,15 +14,18 @@
 
 import os
 import tempfile
+
 from absl.testing import absltest
 from apache_beam.testing import test_pipeline
 from apache_beam.testing import util as beam_test_util
 from dgf.src.data import distributed_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import hgraph_in_beam
+from dgf.src.io import tfexample as tfexample_lib
 from dgf.src.util import gen_test_graph
 from dgf.src.util import test_util
 import numpy as np
+import tensorflow as tf
 
 test_util.disable_diff_truncation()
 Edge = distributed_graph.Edge
@@ -186,6 +189,86 @@ class WriteHGraphTest(absltest.TestCase):
                 [
                     Edge(source=b"1", target=1),
                     Edge(source=b"1", target=2),
+                ],
+                equals_fn=test_util.are_equal,
+            ),
+        )
+
+  def test_remove_dangling_edges(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      path = os.path.join(tmpdir, "hgraph")
+      os.makedirs(os.path.join(path, "edges"), exist_ok=True)
+
+      schema = schema_lib.GraphSchema(
+          node_sets={
+              "n1": schema_lib.NodeSchema(
+                  features={
+                      "#id": schema_lib.FeatureSchema(
+                          format=schema_lib.FeatureFormat.BYTES,
+                          semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+                      )
+                  }
+              )
+          },
+          edge_sets={
+              "e1": schema_lib.EdgeSchema(
+                  features={},
+                  source="n1",
+                  target="n1",
+              )
+          },
+      )
+
+      tfgnn_schema = hgraph_in_beam.hgraph_in_memory.schema_to_tfgnn_schema(
+          schema
+      )
+      hgraph_in_beam.proto_lib.write_text_proto(
+          os.path.join(path, "graph_schema.pbtxt"), tfgnn_schema
+      )
+
+      os.makedirs(os.path.join(path, "node_features"), exist_ok=True)
+      n1_examples = []
+      for node_id in ["A", "B"]:
+        example = tf.train.Example()
+        example.features.feature["#id"].bytes_list.value.append(
+            node_id.encode()
+        )
+        n1_examples.append(example)
+      tfexample_lib.write_tf_record(
+          os.path.join(path, "node_features", "n1-00000-of-00001.tfrecord.gz"),
+          n1_examples,
+      )
+
+      def _create_edge_example(src, trg):
+        example = tf.train.Example()
+        example.features.feature["#source"].bytes_list.value.append(
+            src.encode()
+        )
+        example.features.feature["#target"].bytes_list.value.append(
+            trg.encode()
+        )
+        return example
+
+      edge_examples = [
+          _create_edge_example("A", "B"),
+          _create_edge_example("A", "C"),
+          _create_edge_example("C", "B"),
+      ]
+      tfexample_lib.write_tf_record(
+          os.path.join(path, "edges", "e1-00000-of-00001.tfrecord.gz"),
+          edge_examples,
+      )
+
+      with test_pipeline.TestPipeline() as p:
+        hgraph = hgraph_in_beam.read_graphai_hgraph(
+            p, path, container_type="TF_RECORD", remove_dangling_edges=True
+        )
+
+        beam_test_util.assert_that(
+            hgraph.edge_sets["e1"],
+            beam_test_util.equal_to(
+                [
+                    Edge(source=b"A", target=b"B"),
                 ],
                 equals_fn=test_util.are_equal,
             ),

@@ -304,6 +304,73 @@ class SchemaTest(absltest.TestCase):
     self.assertEqual(schema.node_sets["nodes"].features["id"].shape, ())
     self.assertEqual(schema.node_sets["nodes"].features["feat"].shape, (10,))
 
+  def test_fix_schema_tf_example(self):
+    schema = GraphSchema(
+        node_sets={
+            "nodes": NodeSchema(
+                features={
+                    "id": FeatureSchema(
+                        format=FeatureFormat.BYTES,
+                        semantic=FeatureSemantic.PRIMARY_ID,
+                    ),
+                    "feat_int32": FeatureSchema(
+                        format=FeatureFormat.INTEGER_32,
+                        semantic=FeatureSemantic.NUMERICAL,
+                    ),
+                    "feat_bool": FeatureSchema(
+                        format=FeatureFormat.BOOL,
+                        semantic=FeatureSemantic.CATEGORICAL,
+                    ),
+                    "feat_float64": FeatureSchema(
+                        format=FeatureFormat.FLOAT_64,
+                        semantic=FeatureSemantic.NUMERICAL,
+                    ),
+                    # Keep these as is
+                    "feat_int64": FeatureSchema(
+                        format=FeatureFormat.INTEGER_64,
+                        semantic=FeatureSemantic.NUMERICAL,
+                    ),
+                    "feat_float32": FeatureSchema(
+                        format=FeatureFormat.FLOAT_32,
+                        semantic=FeatureSemantic.NUMERICAL,
+                    ),
+                    "feat_bytes": FeatureSchema(
+                        format=FeatureFormat.BYTES,
+                        semantic=FeatureSemantic.CATEGORICAL,
+                    ),
+                }
+            )
+        },
+        edge_sets={
+            "edges": EdgeSchema(
+                source="nodes",
+                target="nodes",
+                features={
+                    "feat_int32": FeatureSchema(
+                        format=FeatureFormat.INTEGER_32,
+                        semantic=FeatureSemantic.NUMERICAL,
+                    ),
+                },
+            )
+        },
+    )
+    schema_lib.fix_schema(schema, tf_example=True)
+
+    # Verify nodeset
+    features = schema.node_sets["nodes"].features
+    self.assertEqual(features["feat_int32"].format, FeatureFormat.INTEGER_64)
+    self.assertEqual(features["feat_bool"].format, FeatureFormat.INTEGER_64)
+    self.assertEqual(features["feat_float64"].format, FeatureFormat.FLOAT_32)
+    self.assertEqual(features["feat_int64"].format, FeatureFormat.INTEGER_64)
+    self.assertEqual(features["feat_float32"].format, FeatureFormat.FLOAT_32)
+    self.assertEqual(features["feat_bytes"].format, FeatureFormat.BYTES)
+
+    # Verify edgeset
+    edge_features = schema.edge_sets["edges"].features
+    self.assertEqual(
+        edge_features["feat_int32"].format, FeatureFormat.INTEGER_64
+    )
+
   def test_infer_schema_semantic(self):
 
     schema = GraphSchema(

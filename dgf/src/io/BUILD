@@ -36,18 +36,21 @@ py_library(
     deps = [
         ":feature_format",
         ":hgraph_in_avro",
-        ":tfrecord",
+        ":io_ext",
+        ":tfexample",
         # apache_beam dep,
         "//dgf/src/analyse:schema",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/util:filesystem",
+        "//dgf/src/util:log",
         "//dgf/src/util:proto",
         "//dgf/src/util:shard",
+        "//dgf/src/util:util_py",
         "//dgf/src/util:weak_dep",
         # numpy dep,
         # tensorflow dep,
-        # tensorflow_gnn/proto dep,
+        # tqdm dep,
     ],
 )
 
@@ -164,11 +167,12 @@ py_library(name = "spanner_graph_in_memory")
 py_library(name = "spanner_graph_utils")
 
 py_library(
-    name = "tfrecord",
-    srcs = ["tfrecord.py"],
+    name = "tfexample",
+    srcs = ["tfexample.py"],
     deps = [
         # numpy dep,
         # tensorflow dep,
+        # tqdm dep,
     ],
 )
 
@@ -363,6 +367,7 @@ py_test(
     srcs = ["hgraph_in_memory_test.py"],
     deps = [
         ":hgraph_in_memory",
+        ":tfexample",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         # apache_beam dep,
@@ -371,6 +376,9 @@ py_test(
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:proto",
         "//dgf/src/util:test_util",
+        "//third_party/py/google/protobuf:use_fast_cpp_protos",
+        # numpy dep,
+        # tensorflow dep,
         # tensorflow_gnn/proto dep,
     ],
 )
@@ -380,13 +388,16 @@ py_test(
     srcs = ["hgraph_in_beam_test.py"],
     deps = [
         ":hgraph_in_beam",
+        ":tfexample",
         # absl/testing:absltest dep,
         # apache_beam dep,
         "//dgf/src/data:distributed_graph",
         "//dgf/src/data:schema",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
+        "//third_party/py/google/protobuf:use_fast_cpp_protos",
         # numpy dep,
+        # tensorflow dep,
     ],
 )
 
@@ -438,11 +449,12 @@ py_test(
 )
 
 py_test(
-    name = "tfrecord_test",
-    srcs = ["tfrecord_test.py"],
+    name = "tfexample_test",
+    srcs = ["tfexample_test.py"],
     deps = [
-        ":tfrecord",
+        ":tfexample",
         # absl/testing:absltest dep,
+        "//third_party/py/google/protobuf:use_fast_cpp_protos",
         # numpy dep,
         # tensorflow dep,
     ],

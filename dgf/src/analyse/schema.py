@@ -140,10 +140,37 @@ def primary_feature_or_none(
   return primary_features[0]
 
 
+def _fix_tf_example_formats(features: schema_lib.FeatureSetSchema):
+  """Fix invalid format / dtype in tf-example based graphs."""
+  # Note: tf-example only support int64, float32 and bytes.
+
+  for feature_name, feature_schema in features.items():
+    fmt = feature_schema.format
+    if (
+        fmt == schema_lib.FeatureFormat.INTEGER_32
+        or fmt == schema_lib.FeatureFormat.BOOL
+    ):
+      feature_schema.format = schema_lib.FeatureFormat.INTEGER_64
+      log.info(
+          "Converted feature '%s' format from %s to INTEGER_64 for TF Example"
+          " compatibility",
+          feature_name,
+          fmt,
+      )
+    elif fmt == schema_lib.FeatureFormat.FLOAT_64:
+      feature_schema.format = schema_lib.FeatureFormat.FLOAT_32
+      log.info(
+          "Converted feature '%s' format from FLOAT_64 to FLOAT_32 for TF"
+          " Example compatibility",
+          feature_name,
+      )
+
+
 def fix_schema(
     schema: schema_lib.GraphSchema,
     create_pound_id_as_fall_back: bool = False,
     fix_shape: bool = True,
+    tf_example: bool = False,
 ):
   """Tries to fix broken/invalid schemas by inferring and setting primary keys.
 
@@ -155,6 +182,9 @@ def fix_schema(
       the feaure "#id" is actually present in the data.
     fix_shapes: If true, fixes the extra None dimension added to all the shapes.
       This is a common issue with TF-GNN schemas.
+    tf_example: If true assumes the data comes from a TensorFlow Example
+      container. This format can only contain float32, int64, and bytes
+      (tf.string) values.
   """
 
   def shape_is_suspicious(shape: schema_lib.Shape):
@@ -177,6 +207,8 @@ def fix_schema(
       return shape[1:]
 
   for nodeset_name, nodeset_def in schema.node_sets.items():
+    if tf_example:
+      _fix_tf_example_formats(nodeset_def.features)
     all_shapes_are_suspicious = True
     for _, feature_schema in nodeset_def.features.items():
       all_shapes_are_suspicious = (
@@ -213,6 +245,8 @@ def fix_schema(
     )
 
   for edgeset_name, edgeset_def in schema.edge_sets.items():
+    if tf_example:
+      _fix_tf_example_formats(edgeset_def.features)
     all_shapes_are_suspicious = True
     for _, feature_schema in edgeset_def.features.items():
       all_shapes_are_suspicious = (

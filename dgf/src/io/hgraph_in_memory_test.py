@@ -14,14 +14,18 @@
 
 import os
 import tempfile
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.data import distributed_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import hgraph_in_memory
+from dgf.src.io import tfexample as tfexample_lib
 from dgf.src.util import gen_test_graph
 from dgf.src.util import proto as proto_lib
 from dgf.src.util import test_util
+import numpy as np
+import tensorflow as tf
 from tensorflow_gnn import proto as tf_gnn_proto
 
 test_util.disable_diff_truncation()
