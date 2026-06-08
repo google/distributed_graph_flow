@@ -80,6 +80,32 @@ def jnp_name_from_dtype(dtype: jnp.dtype) -> str:
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
+class PrecisionConfig:
+  """Precision and regularization settings for JAX GNN layers.
+
+  Separated from JaxBaseConfig to cleanly isolate precision/regularization
+  concerns from dataset-specific fields (nodeset_name, edgeset_name, etc.)
+  which should be derived from the graph schema at make() time.
+  """
+
+  matrix_precision: str = jnp_name_from_dtype(DEFAULT_MATRIX_PRECISION)
+  pointwise_norm_precision: str = jnp_name_from_dtype(
+      DEFAULT_POINTWISE_NORM_PRECISION
+  )
+  softmax_precision: str = jnp_name_from_dtype(DEFAULT_SOFTMAX_PRECISION)
+  dropout_rate: float = DEFAULT_DROPOUT_RATE
+
+  def __post_init__(self):
+    _ = jnp_dtype_from_string(self.matrix_precision)
+    _ = jnp_dtype_from_string(self.pointwise_norm_precision)
+    _ = jnp_dtype_from_string(self.softmax_precision)
+    if not 0.0 <= self.dropout_rate <= 1.0:
+      raise ValueError(
+          f"dropout_rate must be in [0, 1.0], got {self.dropout_rate}"
+      )
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
 class JaxBaseConfig(config.Config):
   """Base class for a GNN implemented in JAX."""
 
