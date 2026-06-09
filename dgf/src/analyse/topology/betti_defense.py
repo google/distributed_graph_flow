@@ -31,7 +31,7 @@ InMemoryGraph = in_memory_graph.InMemoryGraph
 InMemoryEdgeSet = in_memory_graph.InMemoryEdgeSet
 
 
-def _connected_components(
+def connected_components(
     adjacency: np.ndarray,
     num_nodes: int,
 ) -> np.ndarray:
@@ -80,7 +80,7 @@ def _num_connected_components(
     num_nodes: int,
 ) -> int:
   """Returns the number of connected components."""
-  labels = _connected_components(adjacency, num_nodes)
+  labels = connected_components(adjacency, num_nodes)
   return int(np.unique(labels).shape[0])
 
 

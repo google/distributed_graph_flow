@@ -125,7 +125,7 @@ def get_in_memory_graph_topology(
     ## Connected Components
     adj = next(iter(graph.edge_sets.values())).adjacency
     num_nodes = next(iter(graph.node_sets.values())).num_nodes or 0
-    cc_labels = betti_defense._connected_components(adj, num_nodes)
+    cc_labels = betti_defense.connected_components(adj, num_nodes)
     num_cc, cc_counts = np.unique(cc_labels, return_counts=True)
     largest_cc = int(np.max(cc_counts))
 
