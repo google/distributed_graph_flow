@@ -55,6 +55,17 @@ py_library(
 )
 
 py_library(
+    name = "evaluation",
+    srcs = ["evaluation.py"],
+    deps = [
+        # altair dep,
+        # dataclasses_json dep,
+        # numpy dep,
+        # pandas dep,
+    ],
+)
+
+py_library(
     name = "in_memory_graph",
     srcs = ["in_memory_graph.py"],
     deps = [
@@ -242,6 +253,17 @@ py_test(
         ":statistics",
         # absl/testing:absltest dep,
         "//dgf/src/util:test_util",
+    ],
+)
+
+py_test(
+    name = "evaluation_test",
+    srcs = ["evaluation_test.py"],
+    deps = [
+        ":evaluation",
+        # absl/testing:absltest dep,
+        # dataclasses_json dep,
+        # numpy dep,
     ],
 )
 

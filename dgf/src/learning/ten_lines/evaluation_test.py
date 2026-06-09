@@ -12,62 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Tests for evaluation."""
+
 from absl.testing import absltest
-from dgf.src.learning.ten_lines import evaluation
+from dgf.src.learning.ten_lines import evaluation as evaluation_lib
 import jax
 import jax.numpy as jnp
 import numpy as np
+from sklearn import metrics as sklearn_metrics
 
 
 class EvaluationTest(absltest.TestCase):
 
-  def test_evaluation_html(self):
-    eval_obj = evaluation.Evaluation(
-        loss=0.1,
-        accuracy=0.95,
-        num_examples=100,
-        num_examples_weighted=100.0,
-    )
-    html_output = eval_obj.html()
-    self.assertIn("<b>Evaluation</b>", html_output)
-    self.assertIn("<li><b>Loss:</b> 0.1</li>", html_output)
-    self.assertIn("<li><b>Accuracy:</b> 0.95</li>", html_output)
-    self.assertIn("<li><b>Num Examples:</b> 100</li>", html_output)
-    self.assertIn("<li><b>Num Examples Weighted:</b> 100.0</li>", html_output)
-    self.assertNotIn("User Metrics", html_output)
-
-    eval_obj_with_user = evaluation.Evaluation(
-        loss=0.2,
-        user_metrics={"precision": 0.8, "recall": 0.7},
-    )
-    html_output_user = eval_obj_with_user.html()
-    self.assertIn("<li><b>Loss:</b> 0.2</li>", html_output_user)
-    self.assertIn("<li><b>User Metrics:</b><ul>", html_output_user)
-    self.assertIn("<li><em>precision</em>: 0.8</li>", html_output_user)
-    self.assertIn("<li><em>recall</em>: 0.7</li>", html_output_user)
-
-  def test_evaluation_json(self):
-    eval_obj = evaluation.Evaluation(
-        loss=0.1,
-        accuracy=0.95,
-        num_examples=100,
-        user_metrics={"f1": 0.85},
-    )
-    json_str = eval_obj.to_json()
-    self.assertIsNotNone(json_str)
-
-    # Test from_json
-    loaded_eval = evaluation.Evaluation.from_json(json_str)
-    self.assertEqual(loaded_eval.loss, 0.1)
-    self.assertEqual(loaded_eval.accuracy, 0.95)
-    self.assertEqual(loaded_eval.num_examples, 100)
-    self.assertIsNone(loaded_eval.num_examples_weighted)
-    self.assertEqual(loaded_eval.user_metrics, {"f1": 0.85})
-
   def test_compute_ranking_metrics_jax(self):
     pos_scores = jnp.array([0.5, 0.8])
     neg_scores = jnp.array([0.2, 0.6, 0.7, 0.9])
-    metrics = evaluation.compute_ranking_metrics(pos_scores, neg_scores)
+    metrics = evaluation_lib.compute_ranking_metrics(pos_scores, neg_scores)
 
     self.assertIn("mrr", metrics)
     self.assertIn("hit_at_1", metrics)
@@ -86,7 +46,7 @@ class EvaluationTest(absltest.TestCase):
   def test_compute_ranking_metrics_numpy(self):
     pos_scores = np.array([0.5, 0.8])
     neg_scores = np.array([0.2, 0.6, 0.7, 0.9])
-    metrics = evaluation.compute_ranking_metrics(pos_scores, neg_scores)
+    metrics = evaluation_lib.compute_ranking_metrics(pos_scores, neg_scores)
 
     self.assertIn("mrr", metrics)
     self.assertIn("hit_at_1", metrics)
@@ -105,7 +65,7 @@ class EvaluationTest(absltest.TestCase):
   def test_compute_ranking_metrics_ties(self):
     pos_scores = np.array([0.5, 0.5])
     neg_scores = np.array([0.5] * 16)  # N=8
-    metrics = evaluation.compute_ranking_metrics(pos_scores, neg_scores)
+    metrics = evaluation_lib.compute_ranking_metrics(pos_scores, neg_scores)
 
     self.assertAlmostEqual(float(metrics["mrr"]), 0.2)
     self.assertAlmostEqual(float(metrics["hit_at_1"]), 1.0 / 9.0)
@@ -115,12 +75,149 @@ class EvaluationTest(absltest.TestCase):
   def test_compute_ranking_metrics_nans(self):
     pos_scores = np.array([np.nan, 0.5])
     neg_scores = np.array([0.2] * 16)
-    metrics = evaluation.compute_ranking_metrics(pos_scores, neg_scores)
+    metrics = evaluation_lib.compute_ranking_metrics(pos_scores, neg_scores)
 
     self.assertTrue(np.isnan(float(metrics["mrr"])))
     self.assertTrue(np.isnan(float(metrics["hit_at_1"])))
     self.assertTrue(np.isnan(float(metrics["hit_at_5"])))
     self.assertTrue(np.isnan(float(metrics["auc"])))
+
+  def test_classification_evaluation_accumulator(self):
+    np.random.seed(42)
+    num_classes = 3
+    num_examples = 1000
+    num_bins = 10000
+
+    # Generate random predictions (logits then softmax)
+    logits = np.random.randn(num_examples, num_classes)
+    predictions = np.exp(logits) / np.sum(np.exp(logits), axis=1, keepdims=True)
+    predictions = predictions.astype(np.float32)
+
+    # Generate random targets
+    targets = np.random.randint(0, num_classes, size=num_examples).astype(
+        np.int32
+    )
+
+    accumulator = evaluation_lib.ClassificationEvaluationAccumulator(
+        num_classes, num_bins
+    )
+    accumulator.add_predictions(predictions, targets)
+    per_classes = accumulator.extract_metrics()
+
+    self.assertLen(per_classes, num_classes)
+
+    for c in range(num_classes):
+      pc = per_classes[c]
+      self.assertIsNotNone(pc.auc())
+      self.assertIsNotNone(pc.pr_auc())
+      self.assertLen(pc.tp, num_bins + 1)
+      self.assertLen(pc.fp, num_bins + 1)
+      self.assertLen(pc.tn, num_bins + 1)
+      self.assertLen(pc.fn, num_bins + 1)
+      self.assertLen(pc.thresholds, num_bins + 1)
+
+      # Binary targets for class c
+      binary_targets = (targets == c).astype(int)
+      class_preds = predictions[:, c]
+
+      # Sklearn ROC AUC
+      sk_auc = sklearn_metrics.roc_auc_score(binary_targets, class_preds)
+      self.assertAlmostEqual(pc.auc(), sk_auc, places=3)
+
+      # Sklearn AP (Average Precision)
+      sk_ap = sklearn_metrics.average_precision_score(
+          binary_targets, class_preds
+      )
+      # Davis-Goadrich PR-AUC should be close to AP
+      self.assertAlmostEqual(pc.pr_auc(), sk_ap, places=2)
+
+      # Sklearn PR curve (for shape/value checks)
+      sk_precision, sk_recall, _ = sklearn_metrics.precision_recall_curve(
+          binary_targets, class_preds
+      )
+      # Sklearn PR AUC (trapezoidal - might be slightly different)
+      sk_pr_auc = sklearn_metrics.auc(sk_recall, sk_precision)
+      # Compare Davis-Goadrich with trapezoidal, should be close but DG is lower (usually)
+      # With binning it might fluctuate slightly, but should be very close.
+      self.assertAlmostEqual(pc.pr_auc(), sk_pr_auc, places=2)
+
+  def test_evaluation_populate_from_accumulator(self):
+    num_classes = 2
+    accumulator = evaluation_lib.ClassificationEvaluationAccumulator(
+        num_classes
+    )
+
+    # Add some dummy predictions
+    preds = np.array([[0.1, 0.9], [0.8, 0.2]], dtype=np.float32)
+    targets = np.array([1, 0], dtype=np.int32)
+    accumulator.add_predictions(preds, targets)
+
+    evaluation = evaluation_lib.Evaluation()
+    accumulator.populate_evaluation(evaluation)
+
+    self.assertIsNotNone(evaluation.auc)
+    self.assertLen(evaluation.per_classes, num_classes)
+    for pc in evaluation.per_classes:
+      self.assertIsNotNone(pc.auc())
+      self.assertIsNotNone(pc.pr_auc())
+      self.assertLen(pc.tp, 10001)
+      self.assertLen(pc.fp, 10001)
+      self.assertLen(pc.tn, 10001)
+      self.assertLen(pc.fn, 10001)
+      self.assertLen(pc.thresholds, 10001)
+      # Check properties
+      self.assertLen(pc.fpr, 10001)
+      self.assertLen(pc.tpr, 10001)
+      self.assertLen(pc.precision, 10001)
+      self.assertLen(pc.recall, 10001)
+
+    # Test JSON serialization
+    json_str = evaluation.to_json()
+    loaded_eval = evaluation_lib.Evaluation.from_json(json_str)
+
+    self.assertLen(loaded_eval.per_classes, num_classes)
+    for i in range(num_classes):
+      self.assertEqual(
+          loaded_eval.per_classes[i].auc(), evaluation.per_classes[i].auc()
+      )
+      self.assertEqual(
+          loaded_eval.per_classes[i].pr_auc(),
+          evaluation.per_classes[i].pr_auc(),
+      )
+      self.assertLen(loaded_eval.per_classes[i].tp, 10001)  # Serialized
+
+  def test_evaluation_html_with_curves(self):
+    num_classes = 2
+    accumulator = evaluation_lib.ClassificationEvaluationAccumulator(
+        num_classes
+    )
+    preds = np.array([[0.1, 0.9], [0.8, 0.2]], dtype=np.float32)
+    targets = np.array([1, 0], dtype=np.int32)
+    accumulator.add_predictions(preds, targets)
+
+    evaluation = evaluation_lib.Evaluation()
+    accumulator.populate_evaluation(evaluation)
+    html_output = evaluation.html()
+
+    self.assertIn("<b>Evaluation</b>", html_output)
+    self.assertIn("Per Class Metrics", html_output)
+    # Check if Altair chart HTML is present (usually contains vegaEmbed or vg-canvas)
+    self.assertIn("vegaEmbed", html_output)
+
+  def test_evaluation_populate_fails_if_not_empty(self):
+    num_classes = 2
+    accumulator = evaluation_lib.ClassificationEvaluationAccumulator(
+        num_classes
+    )
+    preds = np.array([[0.1, 0.9], [0.8, 0.2]], dtype=np.float32)
+    targets = np.array([1, 0], dtype=np.int32)
+    accumulator.add_predictions(preds, targets)
+
+    evaluation = evaluation_lib.Evaluation()
+    accumulator.populate_evaluation(evaluation)
+
+    with self.assertRaises(ValueError):
+      accumulator.populate_evaluation(evaluation)
 
 
 if __name__ == "__main__":

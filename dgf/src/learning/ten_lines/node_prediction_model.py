@@ -277,6 +277,37 @@ class NodePredictionModel(common.Model):
     )
     return self._data.core_model_config.head.num_classes
 
+  def label_classes(self) -> List[str]:
+    """Returns the string representation of the labels."""
+    if self._data.task.task_type != TaskType.NODE_CLASSIFICATION:
+      raise ValueError(
+          "label_classes is only supported for NODE_CLASSIFICATION tasks."
+      )
+
+    target_nodeset = self._data.task.target_nodeset
+    target_column = self._data.task.target_column
+
+    try:
+      stats = self._data.feature_stats.node_sets[target_nodeset].features[
+          target_column
+      ]
+    except KeyError as e:
+      raise ValueError(
+          f"Could not find statistics for target {target_nodeset}.{target_column}"
+      ) from e
+
+    if not stats.dictionary:
+      raise ValueError(
+          f"Target column {target_nodeset}.{target_column} does not have a string dictionary. "
+          "It might already be integer-encoded."
+      )
+
+    # Sort keys by their index
+    sorted_items = sorted(
+        stats.dictionary.items(), key=lambda item: item[1].index
+    )
+    return [key for key, _ in sorted_items]
+
   def predict(
       self,
       graph: in_memory_graph.InMemoryGraph,
@@ -497,6 +528,11 @@ class NodePredictionModel(common.Model):
     if verbose >= 1:
       log.info("Evaluating model on %d samples", num_examples)
 
+    accumulator = None
+    if self._data.task.task_type == TaskType.NODE_CLASSIFICATION:
+      num_classes = self.num_label_classes()
+      accumulator = evaluation.ClassificationEvaluationAccumulator(num_classes)
+
     for batch in self.predict_batch(
         graph, seed_node_idxs, verbose=verbose, input_features_only=False
     ):
@@ -511,6 +547,11 @@ class NodePredictionModel(common.Model):
       else:
         predictions = jnp.argmax(batch.predictions, axis=-1)
         num_good_predictions += jnp.sum(labels == predictions)
+        assert accumulator is not None
+        accumulator.add_predictions(
+            np.asarray(batch.predictions, dtype=np.float32),
+            np.asarray(labels, dtype=np.int32),
+        )
 
     if self._data.task.task_type == TaskType.NODE_REGRESSION:
       mean_labels = sum_labels / num_examples
@@ -525,10 +566,13 @@ class NodePredictionModel(common.Model):
           num_examples=num_examples,
       )
     else:
-      return evaluation.Evaluation(
+      eval_obj = evaluation.Evaluation(
           accuracy=num_good_predictions.item() / num_examples,
           num_examples=num_examples,
       )
+      assert accumulator is not None
+      accumulator.populate_evaluation(eval_obj)
+      return eval_obj
 
   def _normalized_target_columns(self):
     """Returns the name of the normalized target column."""

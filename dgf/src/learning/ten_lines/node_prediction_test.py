@@ -464,6 +464,13 @@ class NodePredictionRealLooking(parameterized.TestCase):
     # Note: The dataset does not contain patterns.
     self.assertGreaterEqual(evaluation.accuracy, 0.0)
 
+  def test_label_classes(self):
+    classes = self.model.label_classes()
+    self.assertLen(classes, 2)
+    for c in classes:
+      self.assertIsInstance(c, str)
+    logging.info("label_classes: %s", classes)
+
   def test_manual_seed_nodes(self):
     model = node_prediction_lib.train_node_model(
         graph=self.graph,
@@ -653,6 +660,18 @@ class NodePredictionClassificationToy(absltest.TestCase):
     )
     # TODO(gbm): Stabilize quality.
     self.assertAlmostEqual(evaluation.accuracy, 0.8, delta=0.15)
+    self.assertIsNotNone(evaluation.auc)
+    self.assertGreater(evaluation.auc, 0.5)
+    self.assertLen(evaluation.per_classes, 2)
+    for pc in evaluation.per_classes:
+      self.assertIsNotNone(pc.auc())
+      self.assertIsNotNone(pc.pr_auc())
+      self.assertLen(pc.tp, 10001)
+
+  def test_label_classes_fails_for_integer_labels(self):
+    with self.assertRaises(ValueError) as ctx:
+      self.model.label_classes()
+    self.assertIn("does not have a string dictionary", str(ctx.exception))
 
 
 class NodePredictionRegressionToy(parameterized.TestCase):
@@ -692,6 +711,12 @@ class NodePredictionRegressionToy(parameterized.TestCase):
     # TODO(gbm): Stabilize quality.
     self.assertIsNotNone(evaluation.rmse)
     self.assertLess(evaluation.rmse, 1.5)
+
+    with self.assertRaises(ValueError) as ctx:
+      model.label_classes()
+    self.assertIn(
+        "only supported for NODE_CLASSIFICATION tasks", str(ctx.exception)
+    )
 
     # Save and restore the model
     with tempfile.TemporaryDirectory() as tmpdir:
