@@ -113,6 +113,7 @@ py_library(
         "//dgf/src/analyse:padding",
         "//dgf/src/analyse:print_schema",
         "//dgf/src/analyse:schema",
+        "//dgf/src/analyse:topology_statistics",
         "//dgf/src/analyse/reports:data_model",
         "//dgf/src/analyse/reports:reporter",
         "//dgf/src/analyse/topology:global_graph_topology",
