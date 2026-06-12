@@ -242,12 +242,14 @@ py_test(
 py_test(
     name = "spanner_graph_test",
     srcs = ["spanner_graph_test.py"],
+    data = ["//test_data"],
     deps = [
         ":spanner_graph",
         ":spanner_graph_metadata",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         "//dgf/src/io:io_ext",
+        "//dgf/src/util:test_util",
         # numpy dep,
     ],
 )

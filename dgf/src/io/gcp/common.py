@@ -14,11 +14,11 @@
 
 """Library for working with Google Cloud Native Graphs (Spanner and BigQuery)."""
 
-from collections import defaultdict
+from collections import abc, defaultdict
 import json
 import os
 import re
-from typing import Any, Dict, Final, List, Literal, Tuple
+from typing import Any, Dict, Iterable, List, Literal, Tuple
 
 from dgf.src.analyse import schema as schema_analyse_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -176,7 +176,9 @@ def infer_feature_set_schema(
       )
 
     for feature_name, feature_type in graph_element_table.items():
-      feature_format, _ = raw_type_to_feature_format(feature_name, feature_type)
+      feature_format, is_utf8_string = raw_type_to_feature_format(
+          feature_name, feature_type
+      )
 
       is_primary = feature_name in key_columns
       semantic = schema_lib.FeatureSemantic.UNKNOWN
@@ -197,10 +199,32 @@ def infer_feature_set_schema(
         shape = None
 
       features[feature_name] = schema_lib.FeatureSchema(
-          format=feature_format, semantic=semantic, shape=shape
+          format=feature_format,
+          semantic=semantic,
+          shape=shape,
+          is_utf8_string=is_utf8_string,
       )
 
   return features
+
+
+IDENTIFIER_REGEX = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def validate_identifier(name: str) -> None:
+  """Validates that a string is a valid GCP identifier.
+
+  Args:
+    name: The string to validate.
+
+  Raises:
+    ValueError: If the name is not a valid identifier.
+  """
+  if not IDENTIFIER_REGEX.match(name):
+    raise ValueError(
+        f"Invalid identifier: {name!r}. Must start with a letter or underscore"
+        " and contain only letters, numbers, and underscores."
+    )
 
 
 def gql_base(
@@ -208,6 +232,7 @@ def gql_base(
     graph_element_type: str,
     graph_element_labels_string: str,
     graph_element_table_name: str,
+    omit_json: bool = False,
 ) -> str:
   """Create a GQL graph query string to read graph elements (nodes or edges) from BQ Graph or Spanner Graph.
 
@@ -216,10 +241,13 @@ def gql_base(
     graph_element_type: The type of the graph element (NODE or EDGE).
     graph_element_labels_string: The labels of the graph element.
     graph_element_table_name: The name of the graph element table.
+    omit_json: Whether to omit the JSON representation of the element.
 
   Returns:
     A BQ/Spanner Graph query string.
   """
+  validate_identifier(graph_id)
+  validate_identifier(graph_element_table_name)
 
   element_table_name_where_clause = (
       f"ELEMENT_DEFINITION_NAME(ge) = '{graph_element_table_name}'"
@@ -227,18 +255,28 @@ def gql_base(
 
   if graph_element_type == GRAPH_ELEMENT_TYPE_NODE:
     graph_element = f"(ge:{graph_element_labels_string})"
-    return_clause = """
-        ELEMENT_ID(ge) as id,
-        TO_JSON_STRING(TO_JSON(ge)) as graph_element
-    """
+    if omit_json:
+      return_clause = "ELEMENT_ID(ge) as id"
+    else:
+      return_clause = """
+          ELEMENT_ID(ge) as id,
+          TO_JSON_STRING(TO_JSON(ge)) as graph_element
+      """
   elif graph_element_type == GRAPH_ELEMENT_TYPE_EDGE:
     graph_element = f"-[ge:{graph_element_labels_string}]->"
-    return_clause = """
-        ELEMENT_ID(ge) as id,
-        SOURCE_NODE_ID(ge) as source_id,
-        DESTINATION_NODE_ID(ge) as target_id,
-        TO_JSON_STRING(TO_JSON(ge)) as graph_element
-    """
+    if omit_json:
+      return_clause = """
+          ELEMENT_ID(ge) as id,
+          SOURCE_NODE_ID(ge) as source_id,
+          DESTINATION_NODE_ID(ge) as target_id
+      """
+    else:
+      return_clause = """
+          ELEMENT_ID(ge) as id,
+          SOURCE_NODE_ID(ge) as source_id,
+          DESTINATION_NODE_ID(ge) as target_id,
+          TO_JSON_STRING(TO_JSON(ge)) as graph_element
+      """
     # TODO(tewariy): Expand to_json to individual elements. ??
   else:
     raise ValueError(
@@ -383,7 +421,7 @@ def graph_element_to_features(
 def create_in_memory_node_set(
     nodeset_name: str,
     graph_schema: schema_lib.GraphSchema,
-    query_results: List[Dict[str, Any]],
+    query_results: Iterable[Any],
     combine_as_json: bool,
     verbose: int,
 ) -> Tuple[in_memory_graph_lib.InMemoryNodeSet, io_ext.ByteIdToIdxMapper]:
@@ -405,17 +443,32 @@ def create_in_memory_node_set(
     iterator = tqdm.tqdm(iterator, desc=f"Loading nodes for {nodeset_name}")
 
   for node_row in iterator:
-    element_id = np.array(node_row[GRAPH_ELEMENT_ID_KEY].encode("utf-8"))
-    features = graph_element_to_features(
-        nodeset_name,
-        GRAPH_ELEMENT_TYPE_NODE,
-        json.loads(node_row[GRAPH_ELEMENT_JSON_KEY]),
-        graph_schema,
-        combine_as_json,
-    )
+    if isinstance(node_row, dict):
+      element_id_str = node_row[GRAPH_ELEMENT_ID_KEY]
+      has_json = GRAPH_ELEMENT_JSON_KEY in node_row
+      json_str = node_row.get(GRAPH_ELEMENT_JSON_KEY) if has_json else None
+    elif isinstance(node_row, abc.Sequence):
+      element_id_str = node_row[0]
+      has_json = len(node_row) > 1
+      json_str = node_row[1] if has_json else None
+    else:
+      log.warning(f"Row is neither a dict nor a sequence: {node_row}")
+      continue
+
+    element_id = np.array(element_id_str.encode("utf-8"))
+    if has_json and json_str is not None:
+      features = graph_element_to_features(
+          nodeset_name,
+          GRAPH_ELEMENT_TYPE_NODE,
+          json.loads(json_str),
+          graph_schema,
+          combine_as_json,
+      )
+    else:
+      features = {}
     if primary_key is not None and primary_key not in features:
       features[primary_key] = np.array(
-          node_row[GRAPH_ELEMENT_ID_KEY].encode("utf-8"),
+          element_id_str.encode("utf-8"),
           dtype=feature_format_lib.FEATURE_FORMAT_TO_NP_DTYPE[
               schema_lib.FeatureFormat.BYTES
           ],
@@ -496,7 +549,7 @@ def _optimized_adjacency(
 def create_in_memory_edge_set(
     edgeset_name: str,
     graph_schema: schema_lib.GraphSchema,
-    query_results: List[Dict[str, Any]],
+    query_results: Iterable[Any],
     source_node_id_index_map: io_ext.ByteIdToIdxMapper,
     target_node_id_index_map: io_ext.ByteIdToIdxMapper,
     combine_as_json: bool,
@@ -513,15 +566,32 @@ def create_in_memory_edge_set(
   if verbose >= 1:
     iterator = tqdm.tqdm(iterator, desc=f"Loading edges for {edgeset_name}")
   for edge_row in iterator:
-    source_ids.append(edge_row[GRAPH_ELEMENT_SOURCE_ID_KEY].encode("utf-8"))
-    target_ids.append(edge_row[GRAPH_ELEMENT_TARGET_ID_KEY].encode("utf-8"))
-    features = graph_element_to_features(
-        edgeset_name,
-        GRAPH_ELEMENT_TYPE_EDGE,
-        json.loads(edge_row[GRAPH_ELEMENT_JSON_KEY]),
-        graph_schema,
-        combine_as_json,
-    )
+    if isinstance(edge_row, dict):
+      source_id_str = edge_row[GRAPH_ELEMENT_SOURCE_ID_KEY]
+      target_id_str = edge_row[GRAPH_ELEMENT_TARGET_ID_KEY]
+      has_json = GRAPH_ELEMENT_JSON_KEY in edge_row
+      json_str = edge_row.get(GRAPH_ELEMENT_JSON_KEY) if has_json else None
+    elif isinstance(edge_row, abc.Sequence):
+      source_id_str = edge_row[1]
+      target_id_str = edge_row[2]
+      has_json = len(edge_row) > 3
+      json_str = edge_row[3] if has_json else None
+    else:
+      log.warning(f"Row is neither a dict nor a sequence: {edge_row}")
+      continue
+
+    source_ids.append(source_id_str.encode("utf-8"))
+    target_ids.append(target_id_str.encode("utf-8"))
+    if has_json and json_str is not None:
+      features = graph_element_to_features(
+          edgeset_name,
+          GRAPH_ELEMENT_TYPE_EDGE,
+          json.loads(json_str),
+          graph_schema,
+          combine_as_json,
+      )
+    else:
+      features = {}
     for feature_name, feature_value in features.items():
       edge_set_features[feature_name].append(feature_value)
 

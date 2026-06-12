@@ -115,11 +115,12 @@ class SpannerGraphBeamTest(parameterized.TestCase):
           "project", "instance", "database", "graph", metadata
       )
 
+  @mock.patch("google.cloud.spanner.Client")
   @mock.patch("dgf.src.io.gcp.spanner_graph.get_metadata")
   @mock.patch("dgf.src.io.gcp.spanner_graph_beam._generate_read_partitions")
   @mock.patch("apache_beam.io.gcp.spanner.ReadFromSpanner")
   def test_distributed_read_beam(
-      self, mock_read_spanner, mock_gen_partitions, mock_load_metadata
+      self, mock_read_spanner, mock_gen_partitions, mock_load_metadata, mock_client
   ):
     metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(
         infoschema_query_response_json

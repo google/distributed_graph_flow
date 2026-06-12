@@ -267,7 +267,9 @@ def assert_unique_subset_of_length(
   )
 
 
-def assert_golden_string(test, value: str, golden_path: str, postfix: str = ""):
+def assert_golden_string(
+    test, value: str, golden_path: str, postfix: str = "", strip: bool = False
+):
   """Ensures that "value" is equal to the content of the file "golden_path".
 
   Args:
@@ -276,6 +278,8 @@ def assert_golden_string(test, value: str, golden_path: str, postfix: str = ""):
     golden_path: Path to golden file expressed from the root of the repo.
     postfix: Optional postfix to the path of the file containing the actual
       value.
+    strip: Whether to strip whitespace from both value and golden data before
+      comparison.
   """
   # Add the test data location.
   golden_path = os.path.join(TEST_DATA_PATH_IN_REPO, golden_path)
@@ -284,7 +288,10 @@ def assert_golden_string(test, value: str, golden_path: str, postfix: str = ""):
   with open(full_golden_path) as f:
     golden_data = f.read()
 
-  if value != golden_data:
+  compare_value = value.strip() if strip else value
+  compare_golden = golden_data.strip() if strip else golden_data
+
+  if compare_value != compare_golden:
     value_path = os.path.join(
         "/tmp/gf_unit_test", os.path.basename(golden_path) + postfix
     )
@@ -308,7 +315,7 @@ def assert_golden_string(test, value: str, golden_path: str, postfix: str = ""):
     error_msg = None  # No custom message needed if values are equal
 
   test.assertEqual(
-      value,
-      golden_data,
+      compare_value,
+      compare_golden,
       msg=error_msg,
   )

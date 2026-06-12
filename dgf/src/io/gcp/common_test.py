@@ -131,6 +131,33 @@ class CommonTest(parameterized.TestCase):
     with self.assertRaisesRegex(ValueError, "graph_element_type must be"):
       gcp_common_lib.gql_base("graph_id", "INVALID", "label", "table")
 
+  def test_validate_identifier_valid(self):
+    valid_identifiers = ["graph_1", "GraphName", "_graph", "a1", "_"]
+    for identifier in valid_identifiers:
+      try:
+        gcp_common_lib.validate_identifier(identifier)
+      except ValueError:
+        self.fail(f"validate_identifier failed unexpectedly for {identifier!r}")
+
+  @parameterized.parameters(
+      ("graph-1",),
+      ("1graph",),
+      ("graph id",),
+      ("graph'id",),
+      ('graph"id',),
+      ("graph;id",),
+      ("",),
+  )
+  def test_validate_identifier_invalid(self, identifier):
+    with self.assertRaises(ValueError):
+      gcp_common_lib.validate_identifier(identifier)
+
+  def test_gql_base_validation(self):
+    with self.assertRaises(ValueError):
+      gcp_common_lib.gql_base("invalid-graph-id", "NODE", "label", "table")
+    with self.assertRaises(ValueError):
+      gcp_common_lib.gql_base("graph_id", "NODE", "label", "invalid-table")
+
   def test_is_semantic_timestamp(self):
     self.assertTrue(gcp_common_lib.is_semantic_timestamp("TIMESTAMP"))
     self.assertFalse(gcp_common_lib.is_semantic_timestamp("STRING"))
