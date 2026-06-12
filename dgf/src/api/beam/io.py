@@ -24,6 +24,7 @@ from dgf.src.io.tf_graph_sample import read_tfgnn_graphs_beam as read_tfgnn_grap
 from dgf.src.io.tf_graph_sample import write_tfgnn_graphs_beam as write_tfgnn_graphs
 
 from dgf.src.io.statistics import write_feature_statistics_beam as write_feature_statistics
+from dgf.src.io.statistics import write_topology_statistics_beam as write_topology_statistics
 
 from dgf.src.io.spanner import CreateSpannerTables
 from dgf.src.io.spanner import write_spanner

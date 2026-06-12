@@ -54,6 +54,7 @@ py_library(
     name = "data",
     srcs = ["data.py"],
     deps = [
+        "//dgf/src/data:histogram",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:jax_in_memory_graph",
         "//dgf/src/data:padding",
@@ -107,6 +108,7 @@ py_library(
     name = "analyse",
     srcs = ["analyse.py"],
     deps = [
+        "//dgf/src/analyse:histogram",
         "//dgf/src/analyse:in_process_feature_statistics",
         "//dgf/src/analyse:padding",
         "//dgf/src/analyse:print_schema",

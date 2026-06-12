@@ -47,10 +47,21 @@ py_library(
 )
 
 py_library(
+    name = "histogram",
+    srcs = ["histogram.py"],
+    deps = [
+        # dataclasses_json dep,
+    ],
+)
+
+py_library(
     name = "statistics",
     srcs = ["statistics.py"],
     deps = [
+        ":histogram",
+        # dataclasses_json dep,
         "//dgf/src/analyse:reservoir_sampling",
+        "//dgf/src/util:util_py",
     ],
 )
 
@@ -250,6 +261,7 @@ py_test(
     name = "statistics_test",
     srcs = ["statistics_test.py"],
     deps = [
+        ":histogram",
         ":statistics",
         # absl/testing:absltest dep,
         "//dgf/src/util:test_util",
@@ -285,5 +297,14 @@ py_test(
         ":schema_ext",
         # absl/testing:absltest dep,
         "//dgf/src/util:gen_test_graph",
+    ],
+)
+
+py_test(
+    name = "histogram_test",
+    srcs = ["histogram_test.py"],
+    deps = [
+        ":histogram",
+        # absl/testing:absltest dep,
     ],
 )

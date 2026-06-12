@@ -45,6 +45,7 @@ from dgf.src.data.tf_in_memory_graph import TFInMemoryGraphDict
 from dgf.src.data.statistics import GraphFeatureStatistics
 from dgf.src.data.statistics import FeatureStatistics
 from dgf.src.data.statistics import FeatureSetStatistics
+from dgf.src.data.histogram import Histogram
 
 from dgf.src.data.padding import Padding
 from dgf.src.data.padding import EdgeSetPadding

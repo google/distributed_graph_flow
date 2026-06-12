@@ -17,7 +17,10 @@
 import dataclasses
 import math
 from typing import Dict, List, Optional
+import dataclasses_json
 from dgf.src.analyse import reservoir_sampling
+from dgf.src.data import histogram
+from dgf.src.util import util
 
 
 @dataclasses.dataclass
@@ -144,3 +147,71 @@ class FeatureSetStatisticsAccumulator:
   """In-computation statistics for a set of features."""
 
   features: Dict[str, FeatureStatisticsAccumulator]
+
+
+@dataclasses.dataclass
+class NodeSetTopologyStatistics:
+  num_nodes: histogram.Histogram
+
+  def __str__(self) -> str:
+    num_nodes_str = util.indent_string(str(self.num_nodes))
+    return f"""\
+      num_nodes:
+        {num_nodes_str}"""
+
+
+@dataclasses.dataclass
+class EdgeSetTopologyStatistics:
+  num_edges: histogram.Histogram
+  in_degree_distribution: histogram.Histogram
+  out_degree_distribution: histogram.Histogram
+
+  def __str__(self) -> str:
+    num_edges_str = util.indent_string(str(self.num_edges))
+    in_dist_str = util.indent_string(str(self.in_degree_distribution))
+    out_dist_str = util.indent_string(str(self.out_degree_distribution))
+    return f"""\
+      num_edges:
+        {num_edges_str}
+      in_degree:
+        {in_dist_str}
+      out_degree:
+        {out_dist_str}"""
+
+
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass
+class GraphTopologyStatistics:
+  """Statistics about the topology of a graph."""
+
+  node_sets: Dict[str, NodeSetTopologyStatistics]
+  edge_sets: Dict[str, EdgeSetTopologyStatistics]
+  num_graphs: int = 1
+
+  def __str__(self) -> str:
+    return self.__repr__()
+
+  def __repr__(self) -> str:
+    if not self.node_sets:
+      node_sets_str = "    empty"
+    else:
+      node_sets_str = "\n".join(
+          f"    '{name}':\n{self.node_sets[name]}"
+          for name in sorted(self.node_sets.keys())
+      )
+
+    if not self.edge_sets:
+      edge_sets_str = "    empty"
+    else:
+      edge_sets_str = "\n".join(
+          f"    '{name}':\n{self.edge_sets[name]}"
+          for name in sorted(self.edge_sets.keys())
+      )
+
+    return f"""\
+GraphTopologyStatistics (num_graphs={self.num_graphs}):
+  Node Sets:
+{node_sets_str}
+  Edge Sets:
+{edge_sets_str}
+"""

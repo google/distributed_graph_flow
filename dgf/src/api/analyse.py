@@ -20,6 +20,7 @@
 from dgf.src.analyse.padding import padding_from_graph_generator
 from dgf.src.analyse.in_process_feature_statistics import feature_statistics_from_graphs
 from dgf.src.analyse.in_process_feature_statistics import feature_statistics
+from dgf.src.analyse.histogram import make_histogram
 
 # TODO: Use third_party/py/dgf/src/api/print.py version instead.
 from dgf.src.analyse.print_schema import print_schema

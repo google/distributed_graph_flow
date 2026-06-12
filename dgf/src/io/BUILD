@@ -599,3 +599,15 @@ py_test(
         "//dgf/src/util:test_util",
     ],
 )
+
+py_test(
+    name = "statistics_test",
+    srcs = ["statistics_test.py"],
+    deps = [
+        ":statistics",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:histogram",
+        "//dgf/src/data:statistics",
+        "//dgf/src/util:test_util",
+    ],
+)

@@ -78,6 +78,27 @@ py_library(
 )
 
 py_library(
+    name = "histogram",
+    srcs = ["histogram.py"],
+    deps = [
+        "//dgf/src/data:histogram",
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "histogram_test",
+    srcs = ["histogram_test.py"],
+    deps = [
+        ":histogram",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:histogram",
+        "//dgf/src/util:test_util",
+        # numpy dep,
+    ],
+)
+
+py_library(
     name = "print_schema",
     srcs = ["print_schema.py"],
     deps = [
