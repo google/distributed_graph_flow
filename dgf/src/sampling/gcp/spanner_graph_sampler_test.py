@@ -59,7 +59,7 @@ def _toy_schema(has_feat: bool = False):
 
 class SpannerGraphSamplerTest(parameterized.TestCase):
 
-  def test_generate_gql_query(self):
+  def test_generate_cte_query(self):
     schema = schema_lib.GraphSchema(
         node_sets={
             "N1": schema_lib.NodeSchema(
@@ -89,35 +89,117 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
     )
     plan_tree = config_lib.simple_sampling_config_to_sampling_plan(plan, schema)
 
-    query = spanner_graph_sampler_lib._generate_gql_query(
+    query = spanner_graph_sampler_lib.CteQueryGenerator(
         graph_name="my_graph",
-        plan=plan_tree,
         schema=schema,
-        seed_ids=["10", "11"],
+        plan=plan_tree,
         debug_sampling=False,
+    ).generate()
+
+    test_util.assert_golden_string(
+        self,
+        query,
+        "spanner_graph_sampler_test_generate_cte_query.txt",
+        strip=True,
     )
 
-    expected_query_path = os.path.join(
-        test_util.dgf_test_data_path(),
-        "spanner_graph_sampler_test_generate_gql_query.txt",
+  def test_generate_cte_query_directed(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "N1": schema_lib.NodeSchema(
+                features={
+                    "id": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+                    )
+                }
+            ),
+            "N2": schema_lib.NodeSchema(
+                features={
+                    "id": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+                    )
+                }
+            ),
+        },
+        edge_sets={
+            "E1": schema_lib.EdgeSchema(source="N1", target="N1"),
+            "E2": schema_lib.EdgeSchema(source="N1", target="N2"),
+        },
     )
-    with open(expected_query_path, "r") as f:
-      expected_query = f.read()
-
-    self.assertEqual(query, expected_query)
-
-  def test_json_to_in_memory_graphs(self):
-    # Note: "spanner_graph_sampler_test_json_to_in_memory_graphs" as been
-    # generated using the e2e manual test below.
-    raw_query_path = os.path.join(
-        test_util.dgf_test_data_path(),
-        "spanner_graph_sampler_test_json_to_in_memory_graphs.json",
+    plan = config_lib.SimpleSamplingConfig(
+        seed_nodeset="N1", num_hops=2, hop_width=2, reverse=False
     )
-    with open(raw_query_path, "r") as f:
-      query = json.load(f)
+    plan_tree = config_lib.simple_sampling_config_to_sampling_plan(plan, schema)
+
+    query = spanner_graph_sampler_lib.CteQueryGenerator(
+        graph_name="my_graph",
+        schema=schema,
+        plan=plan_tree,
+        debug_sampling=False,
+    ).generate()
+
+    test_util.assert_golden_string(
+        self,
+        query,
+        "spanner_graph_sampler_test_generate_cte_query_directed.txt",
+        strip=True,
+    )
+
+  def test_cte_result_to_in_memory_graphs(self):
+    # Mock CTE flat rows.
+    # Columns: [seed_id, node_id, element_type, element_class, source_id, target_id, properties_json]
+    # IDs are base64 encoded bytes as returned by Spanner for BYTES columns.
+    # '10' -> b'MTA='
+    # '11' -> b'MTE='
+    # '10090' -> b'MTAwOTA='
+    # '92331' -> b'OTIzMzE='
+    query_results = [
+        # Seed 10
+        [
+            b"MTA=",
+            b"MTA=",
+            "node",
+            "nodes",
+            None,
+            None,
+            '{"labels": 24, "year": 2012}',
+        ],
+        [b"MTA=", None, "edge", "edges", b"MTA=", b"MTAwOTA=", "{}"],
+        [
+            b"MTA=",
+            b"MTAwOTA=",
+            "node",
+            "nodes",
+            None,
+            None,
+            '{"labels": 34, "year": 2007}',
+        ],
+        [b"MTA=", None, "edge", "edges", b"MTA=", b"OTIzMzE=", "{}"],
+        [
+            b"MTA=",
+            b"OTIzMzE=",
+            "node",
+            "nodes",
+            None,
+            None,
+            '{"labels": 8, "year": 2013}',
+        ],
+        # Seed 11
+        [
+            b"MTE=",
+            b"MTE=",
+            "node",
+            "nodes",
+            None,
+            None,
+            '{"labels": 36, "year": 2015}',
+        ],
+    ]
     schema = _toy_schema()
-    graphs = spanner_graph_sampler_lib._json_to_in_memory_graphs(
-        query, schema, ["10", "11"], "nodes"
+    graphs = spanner_graph_sampler_lib._cte_result_to_in_memory_graphs(
+        query_results, schema, [b"10", b"11"], "nodes"
     )
 
     test_util.assert_are_equal(
@@ -127,30 +209,11 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
             InMemoryGraph(
                 node_sets={
                     "nodes": InMemoryNodeSet(
-                        num_nodes=5,
-                        features={
-                            "id": np.array(
-                                [b"10", b"10090", b"92331", b"25350", b"46510"],
-                            ),
-                            "labels": np.array([24, 34, 8, 8, 24]),
-                            "year": np.array([2012, 2007, 2013, 2011, 2013]),
-                        },
-                    )
-                },
-                edge_sets={
-                    "edges": InMemoryEdgeSet(
-                        adjacency=np.array([[0, 2, 0, 4], [1, 0, 3, 0]])
-                    )
-                },
-            ),
-            InMemoryGraph(
-                node_sets={
-                    "nodes": InMemoryNodeSet(
                         num_nodes=3,
                         features={
-                            "id": np.array([b"11", b"54035", b"142591"]),
-                            "labels": np.array([36, 36, 36]),
-                            "year": np.array([2015, 2012, 2012]),
+                            "id": np.array([b"10", b"10090", b"92331"]),
+                            "labels": np.array([24, 34, 8]),
+                            "year": np.array([2012, 2007, 2013]),
                         },
                     )
                 },
@@ -160,95 +223,21 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
                     )
                 },
             ),
-        ],
-    )
-
-  def test_json_to_in_memory_graphs_deduplication(self):
-    schema = schema_lib.GraphSchema(
-        node_sets={
-            "nodes": schema_lib.NodeSchema(
-                features={
-                    "id": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.BYTES,
-                        semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
-                    )
-                }
-            )
-        },
-        edge_sets={
-            "edges": schema_lib.EdgeSchema(source="nodes", target="nodes")
-        },
-    )
-
-    # Mock JSON result with duplicate edges.
-    # Row 0: Seed '10', Path with edge 'e1' from '10' to '20'.
-    # Row 1: Seed '10', Another path with the SAME edge 'e1' from '10' to '20'.
-    query = [
-        [
-            {
-                "kind": "node",
-                "labels": ["nodes"],
-                "identifier": "10",
-                "properties": {"id": "10"},
-            },
-            {
-                "kind": "node",
-                "labels": ["nodes"],
-                "identifier": "20",
-                "properties": {"id": "20"},
-            },
-            {
-                "kind": "edge",
-                "labels": ["edges"],
-                "identifier": "e1",
-                "source_node_identifier": "10",
-                "destination_node_identifier": "20",
-                "properties": {},
-            },
-        ],
-        [
-            {
-                "kind": "node",
-                "labels": ["nodes"],
-                "identifier": "10",
-                "properties": {"id": "10"},
-            },
-            {
-                "kind": "node",
-                "labels": ["nodes"],
-                "identifier": "20",
-                "properties": {"id": "20"},
-            },
-            {
-                "kind": "edge",
-                "labels": ["edges"],
-                "identifier": "e1",
-                "source_node_identifier": "10",
-                "destination_node_identifier": "20",
-                "properties": {},
-            },
-        ],
-    ]
-
-    graphs = spanner_graph_sampler_lib._json_to_in_memory_graphs(
-        query, schema, ["10"], "nodes"
-    )
-
-    test_util.assert_are_equal(
-        self,
-        graphs,
-        [
             InMemoryGraph(
                 node_sets={
                     "nodes": InMemoryNodeSet(
-                        num_nodes=2,
+                        num_nodes=1,
                         features={
-                            "id": np.array([b"10", b"20"]),
+                            "id": np.array([b"11"]),
+                            "labels": np.array([36]),
+                            "year": np.array([2015]),
                         },
                     )
                 },
                 edge_sets={
-                    "edges": InMemoryEdgeSet(adjacency=np.array([[0], [1]]))
+                    "edges": InMemoryEdgeSet(
+                        adjacency=np.zeros((2, 0), dtype=np.int64)
+                    )
                 },
             ),
         ],

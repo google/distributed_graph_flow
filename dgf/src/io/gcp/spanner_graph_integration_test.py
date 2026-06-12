@@ -30,10 +30,11 @@ def expected_schema() -> schema_lib.GraphSchema:
                   "id": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.BYTES,
                       semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+                      is_utf8_string=True,
                   ),
                   "feat": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.FLOAT_64,
-                      shape=(128,),
+                      shape=(None,),
                   ),
                   "labels": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.INTEGER_64,
