@@ -1,7 +1,1 @@
-package(
-    
-    default_visibility = [
-        "//dgf:__subpackages__",
-        "//:internal_users",
-    ],
-)
+package(default_applicable_licenses = ["//dgf:license"])
