@@ -15,7 +15,7 @@ Program](https://bughunters.google.com/open-source-security).
 
 ## Installation
 
-To install YDF from [PyPI](https://pypi.org/project/dgf/), run:
+To install DGF from [PyPI](https://pypi.org/project/dgf/), run:
 
 ```shell
 pip install dgf -U
