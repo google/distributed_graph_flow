@@ -228,7 +228,7 @@ def get_common_tabs(
   txt_schemas = ""
   for name, schema in schemas.items():
     txt_schemas += f"<b>{name} schema</b><pre>\n"
-    txt_schemas += print_schema_lib.print_schema(
+    txt_schemas += print_schema_lib.print_schema(  # pyrefly: ignore[unsupported-operation]
         schema, return_output=True, header=False
     )
     txt_schemas += "</pre><br>\n"
@@ -253,7 +253,7 @@ def get_common_tabs(
     txt_sampling_plan = ""
     for name, sampling_plan in sampling_plans.items():
       txt_sampling_plan += f"<b>{name} sampling plan</b><pre>\n"
-      txt_sampling_plan += analyse_sampling_lib.print_sampling_plan(
+      txt_sampling_plan += analyse_sampling_lib.print_sampling_plan(  # pyrefly: ignore[unsupported-operation]
           sampling_plan, return_output=True, header=False
       )
       txt_sampling_plan += "</pre><br>\n"
@@ -277,7 +277,7 @@ def get_common_tabs(
     txt_padding = ""
     for name, pad in padding.items():
       txt_padding += f"<b>{name} padding</b><pre>\n"
-      txt_padding += analyse_padding_lib.print_padding(
+      txt_padding += analyse_padding_lib.print_padding(  # pyrefly: ignore[unsupported-operation]
           pad, return_output=True, header=False
       )
       txt_padding += "</pre><br>\n"

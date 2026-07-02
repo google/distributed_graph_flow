@@ -218,7 +218,7 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
           initializer,
           default_value=tf.constant(self.out_of_vocab_value, dtype=tf.int64),
       )
-    return [self.tf_table]
+    return [self.tf_table]  # pyrefly: ignore[bad-return]
 
   def normalize_tensorflow(self, value: tf.Tensor) -> Dict[str, tf.Tensor]:
     self.tensorflow_resources()
@@ -385,7 +385,7 @@ class HashStringNormalizer(AbstractFeatureNormalizer):
           f"Feature '{feature_name}' has format '{input_schema.format}', but "
           "HashStringNormalizer only supports BYTES features."
       )
-    return HashStringNormalizer(
+    return HashStringNormalizer(  # pyrefly: ignore[bad-return]
         input_feature=feature_name,
         num_buckets=num_buckets,
         output_shape=input_schema.shape or (),
@@ -842,7 +842,7 @@ class GraphNormalizer:
       for normalizer in edgeset.normalizers:
         input_feature_value = input_edgeset.features[normalizer.input_feature]
         output_features.update(
-            normalizer.normalize_tensorflow(input_feature_value)
+            normalizer.normalize_tensorflow(input_feature_value)  # pyrefly: ignore[bad-argument-type]
         )
       dst_graph_edge_sets[edgeset_name] = tf_in_memory_graph.TFInMemoryEdgeSet(
           adjacency=input_edgeset.adjacency,
@@ -859,7 +859,7 @@ class GraphNormalizer:
           continue
         input_feature_value = input_nodeset.features[normalizer.input_feature]
         output_features.update(
-            normalizer.normalize_tensorflow(input_feature_value)
+            normalizer.normalize_tensorflow(input_feature_value)  # pyrefly: ignore[bad-argument-type]
         )
       dst_graph_node_sets[nodeset_name] = tf_in_memory_graph.TFInMemoryNodeSet(
           features=output_features,
@@ -907,7 +907,7 @@ class GraphNormalizer:
       dst_graph_edge_sets[edgeset_name] = (
           jax_in_memory_graph.JaxInMemoryEdgeSet(
               adjacency=(
-                  asarray(input_edgeset.adjacency)
+                  asarray(input_edgeset.adjacency)  # pyrefly: ignore[bad-argument-type]
                   if include_adjacencies
                   else None
               ),

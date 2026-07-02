@@ -86,7 +86,7 @@ def get_metadata(
         f" {graph}, found {result_set.stats().rowCountExact}"
     ) from exc
 
-  metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(
+  metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
       metadata_row[0]
   )
   # _check_metadata(database_or_snapshot, graph, metadata)
@@ -118,7 +118,7 @@ def graph_schema(
   for node_table in metadata.node_tables:
     features = gcp_common_lib.infer_feature_set_schema(
         graph_element_table=_graph_element_table(
-            node_table.property_definitions, metadata.property_types
+            node_table.property_definitions, metadata.property_types  # pyrefly: ignore[bad-argument-type]
         ),
         key_columns=node_table.key_columns,
         combine_as_json=combine_as_json,
@@ -129,7 +129,7 @@ def graph_schema(
   for edge_table in metadata.edge_tables:
     features = gcp_common_lib.infer_feature_set_schema(
         graph_element_table=_graph_element_table(
-            edge_table.property_definitions, metadata.property_types
+            edge_table.property_definitions, metadata.property_types  # pyrefly: ignore[bad-argument-type]
         ),
         key_columns=edge_table.key_columns,
         combine_as_json=combine_as_json,
@@ -209,8 +209,8 @@ def graph_data_read_sql_query(
 
   elif graph_element_type == gcp_common_lib.GRAPH_ELEMENT_TYPE_EDGE:
     # For edges, we need 'source_id' and 'target_id'. Assume single key columns.
-    source_col = graph_element_table.source_node_table.edge_table_columns[0]
-    dest_col = graph_element_table.destination_node_table.edge_table_columns[0]
+    source_col = graph_element_table.source_node_table.edge_table_columns[0]  # pyrefly: ignore[missing-attribute]
+    dest_col = graph_element_table.destination_node_table.edge_table_columns[0]  # pyrefly: ignore[missing-attribute]
     properties = graph_element_table.property_definitions
     if properties:
       # Construct TO_JSON_STRING(JSON_OBJECT('properties', JSON_OBJECT(...))) for properties

@@ -172,8 +172,8 @@ class EvaluationTest(absltest.TestCase):
       self.assertLen(pc.recall, 10001)
 
     # Test JSON serialization
-    json_str = evaluation.to_json()
-    loaded_eval = evaluation_lib.Evaluation.from_json(json_str)
+    json_str = evaluation.to_json()  # pyrefly: ignore[missing-attribute]
+    loaded_eval = evaluation_lib.Evaluation.from_json(json_str)  # pyrefly: ignore[missing-attribute]
 
     self.assertLen(loaded_eval.per_classes, num_classes)
     for i in range(num_classes):

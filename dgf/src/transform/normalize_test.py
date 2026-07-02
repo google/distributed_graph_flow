@@ -529,8 +529,8 @@ class AutoNormalierTest(absltest.TestCase):
     normalizer = normalize_lib.auto_normalize(
         self.input_schema, self.input_stats
     )
-    loaded_config = normalize_lib.GraphNormalizerConfig.from_json(
-        normalizer.config.to_json()
+    loaded_config = normalize_lib.GraphNormalizerConfig.from_json(  # pyrefly: ignore[missing-attribute]
+        normalizer.config.to_json()  # pyrefly: ignore[missing-attribute]
     )
     loaded_normalizer = loaded_config.make()
 

@@ -201,7 +201,7 @@ def infer_feature_set_schema(
       features[feature_name] = schema_lib.FeatureSchema(
           format=feature_format,
           semantic=semantic,
-          shape=shape,
+          shape=shape,  # pyrefly: ignore[bad-argument-type]
           is_utf8_string=is_utf8_string,
       )
 
@@ -360,7 +360,7 @@ def parse_property_value_to_feature(
 def graph_element_to_features(
     graph_element_name: str,
     graph_element_type: Literal[
-        GRAPH_ELEMENT_TYPE_NODE, GRAPH_ELEMENT_TYPE_EDGE
+        GRAPH_ELEMENT_TYPE_NODE, GRAPH_ELEMENT_TYPE_EDGE  # pyrefly: ignore[not-a-type]
     ],
     graph_element: Dict[str, Any],
     graph_schema: schema_lib.GraphSchema,
@@ -486,9 +486,9 @@ def create_in_memory_node_set(
       # Variable-length features must be stored as an object array.
       arr = np.empty(len(feature_values), dtype=np.object_)
       arr[:] = feature_values
-      node_set_features[feature_name] = arr
+      node_set_features[feature_name] = arr  # pyrefly: ignore[unsupported-operation]
     else:
-      node_set_features[feature_name] = np.stack(
+      node_set_features[feature_name] = np.stack(  # pyrefly: ignore[unsupported-operation]
           feature_values,
           axis=0,
           dtype=feature_format_lib.FEATURE_FORMAT_TO_NP_DTYPE[
@@ -501,7 +501,7 @@ def create_in_memory_node_set(
   return (
       in_memory_graph_lib.InMemoryNodeSet(
           num_nodes=num_nodes,
-          features=node_set_features,
+          features=node_set_features,  # pyrefly: ignore[bad-argument-type]
       ),
       io_ext.ByteIdToIdxMapper(
           np.array(
@@ -528,7 +528,7 @@ def _optimized_adjacency(
       target_mapper,
       source_ids,
       target_ids,
-      min(32, os.cpu_count()),
+      min(32, os.cpu_count()),  # pyrefly: ignore[bad-specialization]
   )
 
   if missmatch_src != -1:
@@ -604,9 +604,9 @@ def create_in_memory_edge_set(
       # Variable-length features must be stored as an object array.
       arr = np.empty(len(feature_values), dtype=np.object_)
       arr[:] = feature_values
-      edge_set_features[feature_name] = arr
+      edge_set_features[feature_name] = arr  # pyrefly: ignore[unsupported-operation]
     else:
-      edge_set_features[feature_name] = np.stack(
+      edge_set_features[feature_name] = np.stack(  # pyrefly: ignore[unsupported-operation]
           feature_values,
           axis=0,
           dtype=feature_format_lib.FEATURE_FORMAT_TO_NP_DTYPE[
@@ -637,5 +637,5 @@ def create_in_memory_edge_set(
               ],
           ),
       ),
-      features=edge_set_features,
+      features=edge_set_features,  # pyrefly: ignore[bad-argument-type]
   )

@@ -234,7 +234,7 @@ class GNNDatasetPreparator:
         graph=self.graph,
         schema=self.schema,
         batch_size=self.batch_size,
-        seed_node_idxs=self.seed_node_idxs,
+        seed_node_idxs=self.seed_node_idxs,  # pyrefly: ignore[bad-argument-type]
         sampling_config=other_live.sampling_plan,  # from other
         drop_remainder=self.drop_remainder,
         shuffle=self.shuffle,
@@ -250,7 +250,7 @@ class GNNDatasetPreparator:
         feature_stats=other_live.feature_stats,  # from other
         normalizer=other_live.normalizer,  # from other
         padding=other_live.padding,  # from other
-        sampling_plan=sample_generator.sampling_config,
+        sampling_plan=sample_generator.sampling_config,  # pyrefly: ignore[bad-argument-type]
         num_nodes_in_seed_nodeset=sample_generator.num_seed_nodes,
         sample_generator=sample_generator,
     )
@@ -297,7 +297,7 @@ class GNNDatasetPreparator:
         graph=self.graph,
         schema=self.schema,
         batch_size=self.batch_size,
-        seed_node_idxs=self.seed_node_idxs,
+        seed_node_idxs=self.seed_node_idxs,  # pyrefly: ignore[bad-argument-type]
         sampling_config=self.sampling_plan,
         drop_remainder=self.drop_remainder,
         shuffle=self.shuffle,
@@ -366,7 +366,7 @@ class GNNDatasetPreparator:
         feature_stats=feature_stats,
         normalizer=normalizer,
         padding=padding,
-        sampling_plan=sample_generator.sampling_config,
+        sampling_plan=sample_generator.sampling_config,  # pyrefly: ignore[bad-argument-type]
         num_nodes_in_seed_nodeset=sample_generator.num_seed_nodes,
         sample_generator=sample_generator,
     )
@@ -443,7 +443,7 @@ class GNNDatasetPreparator:
           # The normalized features in numpy format, and should be casted.
           jax_normalized_sample = (
               attach_features_from_jax_graph_and_cast_to_jax(
-                  live.normalized_graph, sample
+                  live.normalized_graph, sample  # pyrefly: ignore[bad-argument-type]
               )
           )
       else:

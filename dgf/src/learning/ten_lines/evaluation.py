@@ -93,7 +93,7 @@ class ClassificationEvaluationAccumulator:
     evaluation.per_classes = self.extract_metrics()
     # Compute macro average AUC as default AUC
     if evaluation.auc is None and evaluation.per_classes:
-      evaluation.auc = np.mean([pc.auc() for pc in evaluation.per_classes])
+      evaluation.auc = np.mean([pc.auc() for pc in evaluation.per_classes])  # pyrefly: ignore[bad-assignment]
 
 
 def compute_ranking_metrics(

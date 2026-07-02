@@ -146,7 +146,7 @@ class SpannerGraphTest(parameterized.TestCase):
       spanner_graph.get_metadata(mock_database, "invalid-graph-name")
 
   def test_graph_element_table(self):
-    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(
+    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
         infoschema_query_response_json
     )
     node_table = metadata.node_tables[0]
@@ -162,7 +162,7 @@ class SpannerGraphTest(parameterized.TestCase):
     )
 
   def test_graph_schema(self):
-    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(
+    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
         infoschema_query_response_json
     )
     schema = spanner_graph.graph_schema(
@@ -175,7 +175,7 @@ class SpannerGraphTest(parameterized.TestCase):
   @mock.patch("google.cloud.spanner.Client")
   @mock.patch("dgf.src.io.gcp.spanner_graph.get_metadata")
   def test_direct_read_in_memory(self, mock_load_metadata, mock_client):
-    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(
+    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
         infoschema_query_response_json
     )
     mock_load_metadata.return_value = metadata
@@ -229,7 +229,7 @@ class SpannerGraphTest(parameterized.TestCase):
     mock_database.snapshot.assert_called_once_with(multi_use=True)
 
   def test_graph_data_read_sql_query(self):
-    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(
+    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
         infoschema_query_response_json
     )
 

@@ -515,16 +515,16 @@ class NodePredictionModel(common.Model):
 
     if seed_node_idxs is None:
       # Consider all the seed nodes
-      seed_node_idxs = np.arange(num_nodes)
+      seed_node_idxs = np.arange(num_nodes)  # pyrefly: ignore[no-matching-overload]
 
-    if num_eval_steps is not None and num_eval_steps < num_nodes:
+    if num_eval_steps is not None and num_eval_steps < num_nodes:  # pyrefly: ignore[unsupported-operation]
       # Sub-select seed nodes.
       rng = np.random.default_rng(random_seed)
-      seed_node_idxs = rng.choice(
+      seed_node_idxs = rng.choice(  # pyrefly: ignore[bad-assignment]
           seed_node_idxs, size=num_eval_steps, replace=False
       )
 
-    num_examples = len(seed_node_idxs)
+    num_examples = len(seed_node_idxs)  # pyrefly: ignore[bad-argument-type]
     if verbose >= 1:
       log.info("Evaluating model on %d samples", num_examples)
 
@@ -534,7 +534,7 @@ class NodePredictionModel(common.Model):
       accumulator = evaluation.ClassificationEvaluationAccumulator(num_classes)
 
     for batch in self.predict_batch(
-        graph, seed_node_idxs, verbose=verbose, input_features_only=False
+        graph, seed_node_idxs, verbose=verbose, input_features_only=False  # pyrefly: ignore[bad-argument-type]
     ):
       labels = batch.normalized_merged_graph.node_sets[target_nodeset].features[
           target_normalized_feature
@@ -607,13 +607,13 @@ class NodePredictionModel(common.Model):
         # TODO(gbm): Add softmax.
         assert core_model is not None
         logits = core_model.apply(
-            self._data.model_params, batch, training=False
+            self._data.model_params, batch, training=False  # pyrefly: ignore[bad-argument-type]
         )
         if self._data.task.task_type == TaskType.NODE_REGRESSION:
-          return regression_lib.RegressionHead.logits_to_predictions(logits)
+          return regression_lib.RegressionHead.logits_to_predictions(logits)  # pyrefly: ignore[bad-argument-type]
         else:
           return classification_lib.ClassificationHead.logits_to_probability(
-              logits
+              logits  # pyrefly: ignore[bad-argument-type]
           )
 
       self._live = ModelLiveResource(
@@ -782,7 +782,7 @@ def normalized_schema_to_normalized_input_feature_schema(
   """
   schema = copy.deepcopy(schema)
   del schema.node_sets[task.target_nodeset].features[
-      task.normalized_target_column
+      task.normalized_target_column  # pyrefly: ignore[unsupported-operation]
   ]
   return schema
 

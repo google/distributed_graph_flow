@@ -81,7 +81,7 @@ class SpannerGraphBeamTest(parameterized.TestCase):
 
   @mock.patch("google.cloud.spanner.Client")
   def test_break_for_non_pk_fk_aligned_graph_passes(self, mock_client):
-    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(
+    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
         infoschema_query_response_json
     )
     mock_snapshot = (
@@ -96,7 +96,7 @@ class SpannerGraphBeamTest(parameterized.TestCase):
 
   @mock.patch("google.cloud.spanner.Client")
   def test_break_for_non_pk_fk_aligned_graph_raises(self, mock_client):
-    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(
+    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
         infoschema_query_response_json
     )
     mock_snapshot = (
@@ -122,7 +122,7 @@ class SpannerGraphBeamTest(parameterized.TestCase):
   def test_distributed_read_beam(
       self, mock_read_spanner, mock_gen_partitions, mock_load_metadata, mock_client
   ):
-    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(
+    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
         infoschema_query_response_json
     )
     mock_load_metadata.return_value = metadata

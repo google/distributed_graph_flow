@@ -406,7 +406,7 @@ def save_model(model: Model, path: str) -> None:
   fs.makedirs(path)
 
   with fs.open_write(os.path.join(path, FILENAME_METADATA)) as f:
-    f.write(model.metadata.to_json(indent=2))
+    f.write(model.metadata.to_json(indent=2))  # pyrefly: ignore[missing-attribute]
 
   data = model.data()
   if dataclasses.is_dataclass(data) and hasattr(data, "model_params"):
@@ -445,7 +445,7 @@ def load_model(path: str) -> Model:
     )
 
   with fs.open_read(os.path.join(path, FILENAME_METADATA)) as f:
-    metadata = Metadata.from_json(f.read())
+    metadata = Metadata.from_json(f.read())  # pyrefly: ignore[missing-attribute]
 
   registered_model = REGISTERED_MODELS.get(metadata.name)
   if registered_model is None:
@@ -464,7 +464,7 @@ def build_gnn_config(hparams: HParam) -> jax_common.GenericLayer:
   """Creates the GNN layer configuration from the hyper-parameters."""
 
   if hparams.architecture == Architecture.HETEROGENEOUS_MESSAGE_PASSING:
-    return hetero_gnn.HeterogeneousGraphConvolutionConfig(
+    return hetero_gnn.HeterogeneousGraphConvolutionConfig(  # pyrefly: ignore[bad-return]
         dims=hparams.node_embedding_dim,
         dropout_rate=hparams.dropout,
         message_pooling=hparams.message_pooling,
@@ -474,7 +474,7 @@ def build_gnn_config(hparams: HParam) -> jax_common.GenericLayer:
       hparams.architecture == Architecture.HETEROGENEOUS_GRAPH_ATTENTION_NETWORK
   ):
     return (
-        hetero_graph_attention_network.HeterogeneousGraphAttentionNetworkConfig(
+        hetero_graph_attention_network.HeterogeneousGraphAttentionNetworkConfig(  # pyrefly: ignore[bad-return]
             dims=hparams.node_embedding_dim,
             dropout_rate=hparams.dropout,
             message_pooling=hparams.message_pooling,

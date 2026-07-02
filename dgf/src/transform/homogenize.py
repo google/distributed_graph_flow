@@ -175,7 +175,7 @@ def apply_feature(
           src_nodeset.num_nodes,
       )
       new_nodeset_values[nodeset_name] = engine.nodeset_cls(
-          features=new_values,
+          features=new_values,  # pyrefly: ignore[bad-argument-type]
           num_nodes=src_nodeset.num_nodes,
       )
       new_nodeset_schemas[nodeset_name] = schema_lib.NodeSchema(
@@ -199,8 +199,8 @@ def apply_feature(
           src_edgeset.num_edges(),
       )
       new_edgeset_values[edgeset_name] = engine.edgeset_cls(
-          features=new_values,
-          adjacency=src_edgeset.adjacency,
+          features=new_values,  # pyrefly: ignore[bad-argument-type]
+          adjacency=src_edgeset.adjacency,  # pyrefly: ignore[bad-argument-type]
       )
       new_edgeset_schemas[edgeset_name] = schema_lib.EdgeSchema(
           features=new_schemas,
@@ -214,8 +214,8 @@ def apply_feature(
 
   return (
       engine.graph_cls(
-          node_sets=new_nodeset_values,
-          edge_sets=new_edgeset_values,
+          node_sets=new_nodeset_values,  # pyrefly: ignore[bad-argument-type]
+          edge_sets=new_edgeset_values,  # pyrefly: ignore[bad-argument-type]
       ),
       schema_lib.GraphSchema(
           node_sets=new_nodeset_schemas,
@@ -403,7 +403,7 @@ class Homogenizer:
       )
     return (
         engine.graph_cls(
-            node_sets={
+            node_sets={  # pyrefly: ignore[bad-argument-type]
                 self._homogenized_nodeset_name: engine.nodeset_cls(
                     num_nodes=dst_num_nodes,
                     features=new_nodeset_featureset,

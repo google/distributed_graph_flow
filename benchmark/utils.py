@@ -125,6 +125,7 @@ class BenchmarkResult:
   def __str__(self):
     name_and_result = self.name + "; " + self.details + f" ({self.num_units})"
     return (
+        # pyrefly: ignore[unsupported-operation]
         f"{self.wall_time_seconds:{_TIME_WIDTH}.5f}    "
         f"{self.cpu_time_seconds:{_TIME_WIDTH}.5f}    "
         f"{self.wall_time_seconds / self.num_units:{_TIME_WIDTH}.5f}    "

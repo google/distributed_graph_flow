@@ -792,7 +792,7 @@ class GNNLinkDatasetPreparator:
       batch_seed: NodeIdsBatch,
       padding: bool = True,
   ) -> GNNLinkDatasetPreparatorSample:
-    raw = self._sample_and_merge(live, batch_seed, live.merge_schema, padding)
+    raw = self._sample_and_merge(live, batch_seed, live.merge_schema, padding)  # pyrefly: ignore[bad-argument-type]
 
     if self.cache_normalized_features:
       if (
@@ -873,7 +873,7 @@ class GNNLinkDatasetPreparator:
       batch_seed: NodeIdsBatch,
       padding: bool = True,
   ) -> GNNLinkDatasetPreparatorJaxSample:
-    raw = self._sample_and_merge(live, batch_seed, live.merge_schema, padding)
+    raw = self._sample_and_merge(live, batch_seed, live.merge_schema, padding)  # pyrefly: ignore[bad-argument-type]
 
     if self.cache_normalized_features:
       norm_src = (
@@ -883,13 +883,13 @@ class GNNLinkDatasetPreparator:
           live.normalized_jax_target_graph or live.normalized_target_graph
       )
       pos_src_jax = node_prediction_dataset_lib.attach_features_from_jax_graph_and_cast_to_jax(
-          norm_src, raw.positive_source_graph
+          norm_src, raw.positive_source_graph  # pyrefly: ignore[bad-argument-type]
       )
       pos_trg_jax = node_prediction_dataset_lib.attach_features_from_jax_graph_and_cast_to_jax(
-          norm_trg, raw.positive_target_graph
+          norm_trg, raw.positive_target_graph  # pyrefly: ignore[bad-argument-type]
       )
       neg_trg_jax = node_prediction_dataset_lib.attach_features_from_jax_graph_and_cast_to_jax(
-          norm_trg, raw.negative_target_graph
+          norm_trg, raw.negative_target_graph  # pyrefly: ignore[bad-argument-type]
       )
     else:
       pos_src_norm = live.source_normalizer.normalize_numpy(

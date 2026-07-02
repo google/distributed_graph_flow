@@ -416,7 +416,7 @@ class CommonTest(parameterized.TestCase):
     feature_timeseries = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.INTEGER_64,
         semantic=schema_lib.FeatureSemantic.TIMESERIES,
-        shape=[None],
+        shape=[None],  # pyrefly: ignore[bad-argument-type]
     )
     ts_str = "2023-10-27T10:00:00Z"
     expected_micros = 1698400800000000
@@ -439,7 +439,7 @@ class CommonTest(parameterized.TestCase):
     feature_array_str = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.BYTES,
         semantic=schema_lib.FeatureSemantic.UNKNOWN,
-        shape=[None],
+        shape=[None],  # pyrefly: ignore[bad-argument-type]
     )
     self.assertEqual(
         gcp_common_lib.parse_property_value_to_feature(

@@ -65,10 +65,10 @@ class CommonBeamTest(parameterized.TestCase):
     node = gcp_common_beam_lib.create_distributed_node_set(
         graph_element, "nodes", graph_schema
     )
-    self.assertEqual(node.features["p_str"], b"val1")
-    self.assertEqual(node.features["p_int"], 42)
-    self.assertAlmostEqual(node.features["p_float"], 3.14, places=5)
-    self.assertEqual(node.features["p_bool"], True)
+    self.assertEqual(node.features["p_str"], b"val1")  # pyrefly: ignore[unsupported-operation]
+    self.assertEqual(node.features["p_int"], 42)  # pyrefly: ignore[unsupported-operation]
+    self.assertAlmostEqual(node.features["p_float"], 3.14, places=5)  # pyrefly: ignore[unsupported-operation]
+    self.assertEqual(node.features["p_bool"], True)  # pyrefly: ignore[unsupported-operation]
 
     # Test missing properties (currently they are not filled with defaults)
     graph_element_missing = {
@@ -78,10 +78,10 @@ class CommonBeamTest(parameterized.TestCase):
     node_missing = gcp_common_beam_lib.create_distributed_node_set(
         graph_element_missing, "nodes", graph_schema
     )
-    self.assertNotIn("p_str", node_missing.features)
-    self.assertNotIn("p_int", node_missing.features)
-    self.assertNotIn("p_float", node_missing.features)
-    self.assertNotIn("p_bool", node_missing.features)
+    self.assertNotIn("p_str", node_missing.features)  # pyrefly: ignore[bad-argument-type]
+    self.assertNotIn("p_int", node_missing.features)  # pyrefly: ignore[bad-argument-type]
+    self.assertNotIn("p_float", node_missing.features)  # pyrefly: ignore[bad-argument-type]
+    self.assertNotIn("p_bool", node_missing.features)  # pyrefly: ignore[bad-argument-type]
 
   def test_dgf_node_with_timestamp(self):
     graph_schema = schema_lib.GraphSchema(
@@ -110,7 +110,7 @@ class CommonBeamTest(parameterized.TestCase):
         graph_element, "nodes", graph_schema
     )
     expected_micros = 1698400800000000
-    self.assertEqual(node.features["p_ts"], expected_micros)
+    self.assertEqual(node.features["p_ts"], expected_micros)  # pyrefly: ignore[unsupported-operation]
 
   def test_dgf_node_json_mode(self):
     graph_schema = schema_lib.GraphSchema(node_sets={}, edge_sets={})
@@ -123,9 +123,9 @@ class CommonBeamTest(parameterized.TestCase):
     node = gcp_common_beam_lib.create_distributed_node_set(
         graph_element, "nodes", graph_schema, combine_as_json=True
     )
-    self.assertIn("__attributes__", node.features)
+    self.assertIn("__attributes__", node.features)  # pyrefly: ignore[bad-argument-type]
     self.assertEqual(
-        json.loads(node.features["__attributes__"].tobytes()),
+        json.loads(node.features["__attributes__"].tobytes()),  # pyrefly: ignore[unsupported-operation]
         graph_element_content,
     )
 
@@ -142,9 +142,9 @@ class CommonBeamTest(parameterized.TestCase):
     edge = gcp_common_beam_lib.create_distributed_edge_set(
         graph_element, "edges", graph_schema, combine_as_json=True
     )
-    self.assertIn("__attributes__", edge.features)
+    self.assertIn("__attributes__", edge.features)  # pyrefly: ignore[bad-argument-type]
     self.assertEqual(
-        json.loads(edge.features["__attributes__"].tobytes()),
+        json.loads(edge.features["__attributes__"].tobytes()),  # pyrefly: ignore[unsupported-operation]
         graph_element_content,
     )
 
@@ -174,9 +174,9 @@ class CommonBeamTest(parameterized.TestCase):
         graph_element, "nodes", graph_schema
     )
     self.assertEqual(node.id, b"node_id")
-    self.assertIn("p1", node.features)
-    self.assertEqual(node.features["p1"], b"val1")
-    self.assertEqual(node.features["#id"], b"node_id")
+    self.assertIn("p1", node.features)  # pyrefly: ignore[bad-argument-type]
+    self.assertEqual(node.features["p1"], b"val1")  # pyrefly: ignore[unsupported-operation]
+    self.assertEqual(node.features["#id"], b"node_id")  # pyrefly: ignore[unsupported-operation]
 
   def test_dgf_edge(self):
     graph_schema = schema_lib.GraphSchema(
@@ -210,9 +210,9 @@ class CommonBeamTest(parameterized.TestCase):
     self.assertEqual(edge.id, b"edge_id")
     self.assertEqual(edge.source, b"s_id")
     self.assertEqual(edge.target, b"t_id")
-    self.assertIn("p1", edge.features)
-    self.assertEqual(edge.features["p1"], b"val1")
-    self.assertEqual(edge.features["#id"], b"edge_id")
+    self.assertIn("p1", edge.features)  # pyrefly: ignore[bad-argument-type]
+    self.assertEqual(edge.features["p1"], b"val1")  # pyrefly: ignore[unsupported-operation]
+    self.assertEqual(edge.features["#id"], b"edge_id")  # pyrefly: ignore[unsupported-operation]
 
   def test_dgf_node_missing_properties_with_defaults(self):
     graph_schema = schema_lib.GraphSchema(
@@ -254,10 +254,10 @@ class CommonBeamTest(parameterized.TestCase):
     node = gcp_common_beam_lib.create_distributed_node_set(
         graph_element, "nodes", graph_schema
     )
-    self.assertEqual(node.features["p_str"], b"")
-    self.assertEqual(node.features["p_int"], 0)
-    self.assertEqual(node.features["p_float"], 0.0)
-    self.assertEqual(node.features["p_bool"], False)
+    self.assertEqual(node.features["p_str"], b"")  # pyrefly: ignore[unsupported-operation]
+    self.assertEqual(node.features["p_int"], 0)  # pyrefly: ignore[unsupported-operation]
+    self.assertEqual(node.features["p_float"], 0.0)  # pyrefly: ignore[unsupported-operation]
+    self.assertEqual(node.features["p_bool"], False)  # pyrefly: ignore[unsupported-operation]
 
 
 if __name__ == "__main__":

@@ -222,11 +222,11 @@ class HomogenizeTest(absltest.TestCase):
     dst_graph, dst_schema = homogenize_lib.apply_feature(
         graph,
         schema,
-        process_nodesets={"n1": process_n1, "n2": process_n2},
-        process_edgesets={"e1": process_e1},
+        process_nodesets={"n1": process_n1, "n2": process_n2},  # pyrefly: ignore[bad-argument-type]
+        process_edgesets={"e1": process_e1},  # pyrefly: ignore[bad-argument-type]
     )
     in_memory_graph_validate_lib.validate_graph(
-        dst_graph, dst_schema, raise_on_warning=False
+        dst_graph, dst_schema, raise_on_warning=False  # pyrefly: ignore[bad-argument-type]
     )
     expectd_graph, expected_schema = self._expectd_apply_features_numpy_output()
     test_util.assert_are_equal(self, dst_graph, expectd_graph)
@@ -265,10 +265,10 @@ class HomogenizeTest(absltest.TestCase):
     dst_jax_graph, dst_schema = homogenize_lib.apply_feature(
         jax_graph,
         schema,
-        process_nodesets={"n1": process_n1, "n2": process_n2},
-        process_edgesets={"e1": process_e1},
+        process_nodesets={"n1": process_n1, "n2": process_n2},  # pyrefly: ignore[bad-argument-type]
+        process_edgesets={"e1": process_e1},  # pyrefly: ignore[bad-argument-type]
     )
-    dst_numpy_graph = jax_lib.jax_graph_to_graph(dst_jax_graph)
+    dst_numpy_graph = jax_lib.jax_graph_to_graph(dst_jax_graph)  # pyrefly: ignore[bad-argument-type]
     in_memory_graph_validate_lib.validate_graph(
         dst_numpy_graph, dst_schema, raise_on_warning=False
     )
@@ -282,7 +282,7 @@ class HomogenizeTest(absltest.TestCase):
         graph, schema
     )
     in_memory_graph_validate_lib.validate_graph(
-        dst_graph, dst_schema, raise_on_warning=False
+        dst_graph, dst_schema, raise_on_warning=False  # pyrefly: ignore[bad-argument-type]
     )
     expectd_graph, expected_schema, expected_nodeset_offsets = (
         self._expectd_homogenize_numpy_output()
@@ -309,7 +309,7 @@ class HomogenizeTest(absltest.TestCase):
 
     dst_numpy_graph = jax_lib.jax_graph_to_graph(dst_jax_graph)
     in_memory_graph_validate_lib.validate_graph(
-        dst_numpy_graph, dst_schema, raise_on_warning=False
+        dst_numpy_graph, dst_schema, raise_on_warning=False  # pyrefly: ignore[bad-argument-type]
     )
     expectd_graph, expected_schema, expected_nodeset_offsets = (
         self._expectd_homogenize_numpy_output()

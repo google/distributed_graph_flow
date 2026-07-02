@@ -246,7 +246,7 @@ class SampleGeneratorFromAnything:
     def generator():
       assert self.in_memory_sampler is not None
       for node_idxs in util.batch_indices_generator(
-          self.seed_node_idxs
+          self.seed_node_idxs  # pyrefly: ignore[bad-argument-type]
           if self.seed_node_idxs is not None
           else self.num_seed_nodes,
           batch_size=self.batch_size,
@@ -255,7 +255,7 @@ class SampleGeneratorFromAnything:
       ):
         if self.temporal:
           # Get the seed node timestamp
-          target_nodeset = self.sampling_config.root.nodeset
+          target_nodeset = self.sampling_config.root.nodeset  # pyrefly: ignore[missing-attribute]
           ts_feature = self.nodeset_timestamp_features[target_nodeset]
           timestamps = self.graph.node_sets[target_nodeset].features[ts_feature]
           seed_timestamps = timestamps[node_idxs]

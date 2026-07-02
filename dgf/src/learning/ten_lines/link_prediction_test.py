@@ -345,10 +345,10 @@ class LinkPredictionToyTest(parameterized.TestCase):
   def test_model(self):
     self.assertEqual(self.model.data().task.target_edgeset, "A_to_B")
 
-    self.assertAlmostEqual(
+    self.assertAlmostEqual(  # pyrefly: ignore[no-matching-overload]
         self.model.data().training_stats.num_train_seed_edges, 500, delta=100
     )
-    self.assertAlmostEqual(
+    self.assertAlmostEqual(  # pyrefly: ignore[no-matching-overload]
         self.model.data().training_stats.num_valid_seed_edges, 50, delta=10
     )
 
@@ -600,7 +600,7 @@ class LinkPredictionToyTest(parameterized.TestCase):
       else:
         kwargs = {"graph": tf_source_sample, "seed_node_idxs": tf.constant([0])}
 
-      prediction = tf_predict_fn(**kwargs)
+      prediction = tf_predict_fn(**kwargs)  # pyrefly: ignore[not-callable]
       expected_prediction = model.predict_embedding(
           source_sample, [0], encoder="source"
       )
@@ -617,7 +617,7 @@ class LinkPredictionToyTest(parameterized.TestCase):
       else:
         kwargs = {"graph": tf_target_sample, "seed_node_idxs": tf.constant([0])}
 
-      prediction = tf_predict_fn(**kwargs)
+      prediction = tf_predict_fn(**kwargs)  # pyrefly: ignore[not-callable]
       expected_prediction = model.predict_embedding(
           target_sample, [0], encoder="target"
       )
@@ -642,7 +642,7 @@ class LinkPredictionToyTest(parameterized.TestCase):
             "target_seed_node_idxs": tf.constant([0]),
         }
 
-      prediction = tf_predict_fn(**kwargs)
+      prediction = tf_predict_fn(**kwargs)  # pyrefly: ignore[not-callable]
       expected_prediction = model.predict(
           graph, [0], [1], all_combinations=False, verbose=0
       )
