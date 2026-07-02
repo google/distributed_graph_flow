@@ -469,7 +469,7 @@ class SchemaTest(absltest.TestCase):
             "nodes": NodeSchema(
                 features={
                     "f_weird": FeatureSchema(
-                        format=FakeFormat(),
+                        format=FakeFormat(),  # pyrefly: ignore[bad-argument-type]
                         semantic=FeatureSemantic.UNKNOWN,
                     ),
                 }
@@ -497,7 +497,7 @@ class SchemaTest(absltest.TestCase):
             "nodes": NodeSchema(
                 features={
                     "f_weird": FeatureSchema(
-                        format=FakeFormat(),
+                        format=FakeFormat(),  # pyrefly: ignore[bad-argument-type]
                         semantic=FeatureSemantic.UNKNOWN,
                     ),
                 }

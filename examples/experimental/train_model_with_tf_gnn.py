@@ -120,7 +120,7 @@ def main(argv: Sequence[str]) -> None:
   logging.info("Model training started!")
   result, output_metadata = trainer_tfgnn.train_tfgnn_model(
       train_samples_path=_TRAIN_SAMPLES.value,
-      valid_samples_path=_VALID_SAMPLES.value,
+      valid_samples_path=_VALID_SAMPLES.value,  # pyrefly: ignore[bad-argument-type]
       schema_path=_SCHEMA.value,
       model_dir=_MODEL_DIR.value,
       training_config_path=_INPUT_TRAINING_CONFIG.value,

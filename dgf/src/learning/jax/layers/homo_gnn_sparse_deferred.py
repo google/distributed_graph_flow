@@ -481,7 +481,7 @@ class MPNN(nn.Module):
       )
 
       if self.enable_gnn_plus:
-        h_next = self.post_graph_conv(h_prev, h_next, layer_index, training)
+        h_next = self.post_graph_conv(h_prev, h_next, layer_index, training)  # pyrefly: ignore[not-callable]
       else:
         h_next = self.activation(h_next)
 

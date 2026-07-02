@@ -76,7 +76,7 @@ DEFAULT_HIDDEN_STATE_NAME = "hidden_state"
 
 def jnp_name_from_dtype(dtype: jnp.dtype) -> str:
   """Return a string name for a jnp.dtype object."""
-  return dtype.__name__
+  return dtype.__name__  # pyrefly: ignore[missing-attribute]
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)

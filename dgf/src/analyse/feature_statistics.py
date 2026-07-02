@@ -206,7 +206,7 @@ def merge_accumulators(
       if _compute_numerical_quantiles(feature_schema):
         assert merged_feature_accumulator.quantiles is not None
         merged_feature_accumulator.quantiles.add_reservoir(
-            feature_accumulator.quantiles
+            feature_accumulator.quantiles  # pyrefly: ignore[bad-argument-type]
         )
 
       if feature_accumulator.dictionary is not None:
@@ -241,7 +241,7 @@ def prune_accumulator(
   for feature_name, feature_schema in schema.items():
     if _compute_dictionary(feature_schema):
       prune_dictionary_before_wiring(
-          accumulator.features[feature_name].dictionary, config
+          accumulator.features[feature_name].dictionary, config  # pyrefly: ignore[bad-argument-type]
       )
   return accumulator
 

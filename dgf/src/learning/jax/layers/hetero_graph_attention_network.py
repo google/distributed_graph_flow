@@ -174,11 +174,11 @@ class HeterogeneousGraphAttentionNetwork(nn.Module):
         combined = jnp.concatenate(
             [dst_values, jnp.zeros((num_dst_nodes, dims))], axis=1
         )
-        combined = config.update.make(name=f"update_{dst_nodeset_name}")(
+        combined = config.update.make(name=f"update_{dst_nodeset_name}")(  # pyrefly: ignore[unexpected-keyword]
             combined, training=training
         )
         node_values = combined + dst_values
-        node_values = config.post.make(name=f"post_{dst_nodeset_name}")(
+        node_values = config.post.make(name=f"post_{dst_nodeset_name}")(  # pyrefly: ignore[unexpected-keyword]
             node_values, training=training
         )
         new_node_sets[dst_nodeset_name] = (
@@ -232,7 +232,7 @@ class HeterogeneousGraphAttentionNetwork(nn.Module):
         )
 
         # Apply config.message on the edges to get Values
-        messages = config.message.make(name=f"message_{relation_name}")(
+        messages = config.message.make(name=f"message_{relation_name}")(  # pyrefly: ignore[unexpected-keyword]
             edge_values, training=training
         )  # [E, dims]
         messages = messages.reshape(messages.shape[0], num_heads, head_dim)
@@ -273,7 +273,7 @@ class HeterogeneousGraphAttentionNetwork(nn.Module):
 
       # Join messages + update
       combined = jnp.concatenate([dst_values, aggregated_messages], axis=1)
-      combined = config.update.make(name=f"update_{dst_nodeset_name}")(
+      combined = config.update.make(name=f"update_{dst_nodeset_name}")(  # pyrefly: ignore[unexpected-keyword]
           combined, training=training
       )
 
@@ -281,7 +281,7 @@ class HeterogeneousGraphAttentionNetwork(nn.Module):
       node_values = combined + dst_values
 
       # Feed-forward
-      node_values = config.post.make(name=f"post_{dst_nodeset_name}")(
+      node_values = config.post.make(name=f"post_{dst_nodeset_name}")(  # pyrefly: ignore[unexpected-keyword]
           node_values, training=training
       )
 

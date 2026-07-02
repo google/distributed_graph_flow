@@ -58,6 +58,6 @@ def graph_to_sd_sparse_matrix(
   target_nodeset = schema.edge_sets[edgeset_name].target
   return core_graph_to_sd_sparse_matrix(
       adjacency,
-      graph.node_sets[source_nodeset].num_nodes,
-      graph.node_sets[target_nodeset].num_nodes,
+      graph.node_sets[source_nodeset].num_nodes,  # pyrefly: ignore[bad-argument-type]
+      graph.node_sets[target_nodeset].num_nodes,  # pyrefly: ignore[bad-argument-type]
   )

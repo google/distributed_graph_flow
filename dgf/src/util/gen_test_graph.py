@@ -346,7 +346,7 @@ def generate_gf_graph(
   # Metadata
   metadata = gf_metadata_lib.GFGraphMetadata(version=0)
   with open(os.path.join(path, "metadata.json"), "w") as f:
-    f.write(metadata.to_json(indent=2))
+    f.write(metadata.to_json(indent=2))  # pyrefly: ignore[missing-attribute]
 
   # Node features
   pq.write_table(
@@ -797,7 +797,7 @@ def generate_avro_graph(
       shard_idx=0,
       num_shards=2,
       extension=".avro",
-      schema=n1_schema,
+      schema=n1_schema,  # pyrefly: ignore[bad-argument-type]
       records=[{
           "#id": b"1",
           "f1": [b"blue"],
@@ -810,7 +810,7 @@ def generate_avro_graph(
       shard_idx=1,
       num_shards=2,
       extension=".avro",
-      schema=n1_schema,
+      schema=n1_schema,  # pyrefly: ignore[bad-argument-type]
       records=[{
           "#id": b"2",
           "f1": [b"red"],
@@ -825,17 +825,17 @@ def generate_avro_graph(
       {"name": "f4", "type": "long"},
   ]
   if variable_length:
-    n2_fields.append({"name": "f5", "type": {"type": "array", "items": "long"}})
+    n2_fields.append({"name": "f5", "type": {"type": "array", "items": "long"}})  # pyrefly: ignore[bad-argument-type]
   n2_schema_dict = {"type": "record", "name": "n2", "fields": n2_fields}
   n2_schema = parse_schema(n2_schema_dict)
 
   n2_record1 = {"#id": 1, "f3": 4, "f4": 10}
   if variable_length:
-    n2_record1["f5"] = [11, 12]
+    n2_record1["f5"] = [11, 12]  # pyrefly: ignore[bad-assignment]
 
   n2_record2 = {"#id": 2, "f3": 5, "f4": 11}
   if variable_length:
-    n2_record2["f5"] = [12, 13, 14]
+    n2_record2["f5"] = [12, 13, 14]  # pyrefly: ignore[bad-assignment]
 
   _write_sharded_avro(
       directory=os.path.join(path, "node_features"),
@@ -843,7 +843,7 @@ def generate_avro_graph(
       shard_idx=0,
       num_shards=1,
       extension=".avro",
-      schema=n2_schema,
+      schema=n2_schema,  # pyrefly: ignore[bad-argument-type]
       records=[n2_record1, n2_record2],
   )
 
@@ -865,7 +865,7 @@ def generate_avro_graph(
       shard_idx=0,
       num_shards=1,
       extension=".avro",
-      schema=e1_schema,
+      schema=e1_schema,  # pyrefly: ignore[bad-argument-type]
       records=[
           {"#id": b"a", "#source": b"1", "#target": b"1"},
           {"#id": b"b", "#source": b"1", "#target": b"2"},
@@ -888,7 +888,7 @@ def generate_avro_graph(
       shard_idx=0,
       num_shards=1,
       extension=".avro",
-      schema=e2_schema,
+      schema=e2_schema,  # pyrefly: ignore[bad-argument-type]
       records=[
           {"#source": b"1", "#target": 1},
           {"#source": b"1", "#target": 2},
@@ -1192,7 +1192,7 @@ def generate_in_memory_graph(
     n1_features["#id"] = np.array([b"1", b"2"])
     n2_features["#id"] = np.array([1, 2])
   if variable_length:
-    n2_features["f5"] = np.array(
+    n2_features["f5"] = np.array(  # pyrefly: ignore[bad-assignment]
         [np.array([11, 12]), np.array([12, 13, 14])], dtype=np.object_
     )
 
@@ -1512,7 +1512,7 @@ def _get_spanner_graph_metadata_and_features():
   }
 
   return (
-      sgm.SpannerGraphMetadata.from_json(json.dumps(metadata_json)),
+      sgm.SpannerGraphMetadata.from_json(json.dumps(metadata_json)),  # pyrefly: ignore[missing-attribute]
       feature_formats,
       feature_semantics,
       feature_shapes,

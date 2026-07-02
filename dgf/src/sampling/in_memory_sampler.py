@@ -361,7 +361,7 @@ def create_sampler(
 
   # TODO(gbm): Use batch_size for async sampling.
   if num_threads is None:
-    num_threads = min(batch_size, os.cpu_count())
+    num_threads = min(batch_size, os.cpu_count())  # pyrefly: ignore[bad-specialization]
 
   cc_sampler = _in_memory_sampler_ext.CreateSampler(
       graph, plan, debug_sampling, num_threads, seed, schema, edgeset_to_mask

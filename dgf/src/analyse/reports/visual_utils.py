@@ -174,7 +174,7 @@ def _nx_graph_to_pyvis_data(
     edge_data = {"from": int(u), "to": int(v)}
     if "weight" in attrs:
       edge_data["value"] = attrs["weight"]
-      edge_data["title"] = f"Weight: {attrs['weight']}"
+      edge_data["title"] = f"Weight: {attrs['weight']}"  # pyrefly: ignore[bad-assignment]
 
     if "color" in attrs:
       edge_data["color"] = attrs["color"]

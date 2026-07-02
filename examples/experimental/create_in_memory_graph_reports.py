@@ -174,7 +174,7 @@ def main(argv: Sequence[str]) -> None:
           num_hops=known_args.sampling_num_hops,
           hop_width=known_args.sampling_hop_width,
       ),
-      num_threads=os.cpu_count() * 2,
+      num_threads=os.cpu_count() * 2,  # pyrefly: ignore[unsupported-operation]
   )
   num_nodes = graph.node_sets[known_args.seed_nodeset].num_nodes
   sub_graphs = sampler.sample(

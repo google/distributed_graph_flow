@@ -118,9 +118,9 @@ def are_equal(obj1: Any, obj2: Any, abs_tol: float | None = None) -> bool:
     # JAX arrays
     if isinstance(obj1, jnp.ndarray) and isinstance(obj2, jnp.ndarray):
       if abs_tol is not None:
-        return ret(jnp.allclose(obj1, obj2, atol=abs_tol))
+        return ret(jnp.allclose(obj1, obj2, atol=abs_tol))  # pyrefly: ignore[bad-argument-type]
       else:
-        return ret(jnp.array_equal(obj1, obj2))
+        return ret(jnp.array_equal(obj1, obj2))  # pyrefly: ignore[bad-argument-type]
 
     # TensorFlow arrays
     if isinstance(obj1, tf.Tensor) and isinstance(obj2, tf.Tensor):

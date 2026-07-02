@@ -80,14 +80,14 @@ def run(node_spec: dgf.data.ComputeNodeSpec):
 
   logging.info("Start manager")
   dgf.sampling.sample_with_distributed_batching(
-      graph_path=_INPUT_GRAPH.value,
+      graph_path=_INPUT_GRAPH.value,  # pyrefly: ignore[bad-argument-type]
       plan=dgf.sampling.SimpleSamplingConfig(
-          seed_nodeset=_SEED_NODESET.value,
-          num_hops=_NUM_HOPS.value,
-          hop_width=_HOP_WIDTH.value,
+          seed_nodeset=_SEED_NODESET.value,  # pyrefly: ignore[bad-argument-type]
+          num_hops=_NUM_HOPS.value,  # pyrefly: ignore[bad-argument-type]
+          hop_width=_HOP_WIDTH.value,  # pyrefly: ignore[bad-argument-type]
       ),
       working_directory=_WORKING_DIR.value,
-      samples_path=_OUTPUT_TF_GRAPH_SAMPLES.value,
+      samples_path=_OUTPUT_TF_GRAPH_SAMPLES.value,  # pyrefly: ignore[bad-argument-type]
       node_spec=node_spec,
   )
 
@@ -97,7 +97,7 @@ def main(argv: Sequence[str]) -> None:
     raise app.UsageError("Too many command-line arguments.")
   if _NODE_SPEC.value:
     # The distribution spec is passed manually (used in manual Borg).
-    node_spec = dgf.data.ComputeNodeSpec.from_json(_NODE_SPEC.value)
+    node_spec = dgf.data.ComputeNodeSpec.from_json(_NODE_SPEC.value)  # pyrefly: ignore[missing-attribute]
   else:
     # The distribution node spec is obtained from the env (used in VertexAI and
     # TF distribution enviroments).

@@ -114,7 +114,7 @@ class EmbedNodesetFeaturesModuleTest(absltest.TestCase):
     node_embeddings = embed_module.apply(params, graph, training=True)
     self.assertEqual(params["params"]["embed_n1_f1"]["embedding"].shape, (3, 5))
     self.assertEqual(params["params"]["embed_n1_f2"]["embedding"].shape, (4, 5))
-    self.assertEqual(node_embeddings["n1"].shape, (2, 3 * 5))
+    self.assertEqual(node_embeddings["n1"].shape, (2, 3 * 5))  # pyrefly: ignore[bad-index]
 
   def test_embed_unsupported_embedding_format_raises_error(self):
     schema = schema_lib.GraphSchema(

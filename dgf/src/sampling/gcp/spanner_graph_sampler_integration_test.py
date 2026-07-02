@@ -103,7 +103,7 @@ def print_graph_stats(
     seed_ids: List[bytes],
 ):
   for sample, seed_id in zip(samples, seed_ids):
-    num_nodes = sum(nodeset.num_nodes for nodeset in sample.node_sets.values())
+    num_nodes = sum(nodeset.num_nodes for nodeset in sample.node_sets.values())  # pyrefly: ignore[no-matching-overload]
     num_edges = sum(
         edgeset.num_edges() for edgeset in sample.edge_sets.values()
     )

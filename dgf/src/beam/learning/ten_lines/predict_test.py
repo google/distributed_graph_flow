@@ -104,7 +104,7 @@ class PredictTest(absltest.TestCase):
     )
 
     # Generate reference predictions
-    seed_node_idxs = np.arange(graph.node_sets["client"].num_nodes)
+    seed_node_idxs = np.arange(graph.node_sets["client"].num_nodes)  # pyrefly: ignore[no-matching-overload]
     expected_raw_predictions = model.predict(graph, seed_node_idxs)
 
     expected_predictions = []

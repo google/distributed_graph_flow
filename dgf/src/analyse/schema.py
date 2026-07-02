@@ -200,10 +200,10 @@ def fix_schema(
   ) -> schema_lib.Shape:
     log.info("Fix suspicious shape of feature '%s'", feature_name)
     assert shape_is_suspicious(shape)
-    if shape[1] == 1:
+    if shape[1] == 1:  # pyrefly: ignore[unsupported-operation]
       return tuple()
     else:
-      return shape[1:]
+      return shape[1:]  # pyrefly: ignore[unsupported-operation]
 
   for nodeset_name, nodeset_def in schema.node_sets.items():
     if tf_example:

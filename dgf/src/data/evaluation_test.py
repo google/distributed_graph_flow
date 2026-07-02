@@ -53,11 +53,11 @@ class EvaluationTest(absltest.TestCase):
         num_examples=100,
         user_metrics={"f1": 0.85},
     )
-    json_str = eval_obj.to_json()
+    json_str = eval_obj.to_json()  # pyrefly: ignore[missing-attribute]
     self.assertIsNotNone(json_str)
 
     # Test from_json
-    loaded_eval = evaluation.Evaluation.from_json(json_str)
+    loaded_eval = evaluation.Evaluation.from_json(json_str)  # pyrefly: ignore[missing-attribute]
     self.assertEqual(loaded_eval.loss, 0.1)
     self.assertEqual(loaded_eval.accuracy, 0.95)
     self.assertEqual(loaded_eval.num_examples, 100)
@@ -95,11 +95,11 @@ class EvaluationTest(absltest.TestCase):
         fn=np.array([7, 8]),
         thresholds=np.array([0.5, 0.1]),
     )
-    json_str = pc.to_json()
+    json_str = pc.to_json()  # pyrefly: ignore[missing-attribute]
     self.assertIsNotNone(json_str)
     self.assertIn('"tp": [1, 2]', json_str)
 
-    loaded = evaluation.PerClass.from_json(json_str)
+    loaded = evaluation.PerClass.from_json(json_str)  # pyrefly: ignore[missing-attribute]
     self.assertEqual(loaded.auc_value, 0.9)
     self.assertEqual(loaded.pr_auc_value, 0.8)
     np.testing.assert_array_equal(loaded.tp, np.array([1, 2]))
