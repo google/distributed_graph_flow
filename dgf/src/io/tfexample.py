@@ -42,7 +42,7 @@ def _read_dataset_generic(
       col: tf.io.VarLenFeature(dtype) for col, (dtype, _) in columns.items()
   }
 
-  path_dataset = tf.data.Dataset.from_tensor_slices(paths)
+  path_dataset = tf.data.Dataset.from_tensor_slices(paths)  # pyrefly: ignore[bad-argument-type]
 
   if not paths:
     raise ValueError("paths should not be empty")
@@ -215,7 +215,7 @@ def read_tf_record(
   """
 
   def _read_tfrecord_dataset(path):
-    return tf.data.TFRecordDataset(
+    return tf.data.TFRecordDataset(  # pyrefly: ignore[bad-instantiation]
         path, compression_type="GZIP" if compressed else ""
     )
 

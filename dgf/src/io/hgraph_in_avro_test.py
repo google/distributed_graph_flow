@@ -148,7 +148,7 @@ class HGraphAvroTest(absltest.TestCase):
           "f1": ("int64", ()),
           "f2": ("float32", ()),
       }
-      data, num_records = avro_lib.read_avro_record([path], columns, False)
+      data, num_records = avro_lib.read_avro_record([path], columns, False)  # pyrefly: ignore[bad-argument-type]
 
       self.assertEqual(num_records, 2)
       np.testing.assert_array_equal(data["f1"], np.array([1, 2], dtype="int64"))
@@ -175,7 +175,7 @@ class HGraphAvroTest(absltest.TestCase):
 
       columns = {"f1": ("int64", ())}
       data, num_records = avro_lib.read_avro_record(
-          [path1, path2], columns, False
+          [path1, path2], columns, False  # pyrefly: ignore[bad-argument-type]
       )
 
       self.assertEqual(num_records, 3)
@@ -194,7 +194,7 @@ class HGraphAvroTest(absltest.TestCase):
         fastavro.writer(f, schema, records)
 
       columns = {"f1": ("int64", ())}
-      data, num_records = avro_lib.read_avro_record([path], columns, False)
+      data, num_records = avro_lib.read_avro_record([path], columns, False)  # pyrefly: ignore[bad-argument-type]
 
       self.assertEqual(num_records, 0)
       self.assertEqual(data["f1"].shape, (0,))
@@ -221,7 +221,7 @@ class HGraphAvroTest(absltest.TestCase):
           "f2": ("float32", (2,)),
       }
       n1_data, n1_num_records = avro_lib.read_avro_record(
-          [n1_path], n1_cols, False
+          [n1_path], n1_cols, False  # pyrefly: ignore[bad-argument-type]
       )
       self.assertEqual(n1_num_records, 2)
       np.testing.assert_array_equal(n1_data["#id"], np.array([b"1", b"2"]))
@@ -237,7 +237,7 @@ class HGraphAvroTest(absltest.TestCase):
       self.assertTrue(os.path.exists(n2_path))
       n2_cols = {"#id": ("int64", ()), "f3": ("int64", ()), "f4": ("int64", ())}
       n2_data, n2_num_records = avro_lib.read_avro_record(
-          [n2_path], n2_cols, False
+          [n2_path], n2_cols, False  # pyrefly: ignore[bad-argument-type]
       )
       self.assertEqual(n2_num_records, 2)
       np.testing.assert_array_equal(n2_data["#id"], np.array([1, 2]))
@@ -272,7 +272,7 @@ class HGraphAvroTest(absltest.TestCase):
           "#id": ("bytes", ()),
       }
       e1_data, e1_num_records = avro_lib.read_avro_record(
-          [e1_path], e1_cols, False
+          [e1_path], e1_cols, False  # pyrefly: ignore[bad-argument-type]
       )
       self.assertEqual(e1_num_records, 2)
       np.testing.assert_array_equal(e1_data["#source"], np.array([b"1", b"1"]))
@@ -288,7 +288,7 @@ class HGraphAvroTest(absltest.TestCase):
           "#id": ("bytes", ()),
       }
       e2_data, e2_num_records = avro_lib.read_avro_record(
-          [e2_path], e2_cols, False
+          [e2_path], e2_cols, False  # pyrefly: ignore[bad-argument-type]
       )
       self.assertEqual(e2_num_records, 2)
       np.testing.assert_array_equal(e2_data["#source"], np.array([b"1", b"1"]))

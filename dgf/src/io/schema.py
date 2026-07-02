@@ -34,7 +34,7 @@ def read_schema(path: str) -> schema_lib.GraphSchema:
     The loaded graph schema.
   """
   with filesystem.open_read(path) as f:
-    return schema_lib.GraphSchema.from_json(f.read())
+    return schema_lib.GraphSchema.from_json(f.read())  # pyrefly: ignore[missing-attribute]
 
 
 def write_schema(schema: schema_lib.GraphSchema, path: str):
@@ -52,4 +52,4 @@ def write_schema(schema: schema_lib.GraphSchema, path: str):
     path: Output path.
   """
   with filesystem.open_write(path) as f:
-    f.write(schema.to_json(indent=2))
+    f.write(schema.to_json(indent=2))  # pyrefly: ignore[missing-attribute]

@@ -123,7 +123,7 @@ def cache(
 
       if len(found_vars) == len(variable_names):
         if return_tuple:
-          return tuple(found_vars)
+          return tuple(found_vars)  # pyrefly: ignore[bad-return]
         else:
           return found_vars[0]
 

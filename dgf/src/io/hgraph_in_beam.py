@@ -369,7 +369,7 @@ def tf_feature_to_feature(
       )
     value = np.squeeze(value, axis=0)
   elif value.ndim != 1:
-    value = np.reshape(value, feature_schema.shape)
+    value = np.reshape(value, feature_schema.shape)  # pyrefly: ignore[no-matching-overload]
   return value
 
 
@@ -558,7 +558,7 @@ def node_to_tf_example(
     if feature_name == node_id_column:
       value = [node.id]
     else:
-      value = node.features[feature_name]
+      value = node.features[feature_name]  # pyrefly: ignore[unsupported-operation]
       if value.ndim == 0:
         value = np.expand_dims(value, axis=0)
 

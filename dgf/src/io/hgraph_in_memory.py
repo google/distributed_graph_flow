@@ -334,11 +334,11 @@ def read_graphai_hgraph(
     """Reads features given a container type."""
     if container_type == HGraphContainerType.TF_RECORD:
       features, num_records = tfexample_lib.read_tf_record(
-          paths=paths, columns=columns, verbose=verbose, preserve_order=False
+          paths=paths, columns=columns, verbose=verbose, preserve_order=False  # pyrefly: ignore[bad-argument-type]
       )
     elif container_type == HGraphContainerType.AVRO:
       features, num_records = hgraph_in_avro.read_avro_record(
-          paths=paths, columns=columns, verbose=verbose
+          paths=paths, columns=columns, verbose=verbose  # pyrefly: ignore[bad-argument-type]
       )
     else:
       raise ValueError(
@@ -488,7 +488,7 @@ def read_graphai_hgraph(
       raw_edges, _ = _read_container(
           paths=paths,
           container_type=container_type,
-          columns=columns,
+          columns=columns,  # pyrefly: ignore[bad-argument-type]
           verbose=verbose,
           key_column=edge_id_column,
       )
@@ -511,7 +511,7 @@ def read_graphai_hgraph(
           target_mapper,
           source_ids,
           target_ids,
-          min(32, os.cpu_count()),
+          min(32, os.cpu_count()),  # pyrefly: ignore[bad-specialization]
       )
     else:
       # Slow path
@@ -629,16 +629,16 @@ def in_memory_node_to_tf_example(
       node_id_column is not None
       and node_id_column not in example.features.feature
   ):
-    if np.issubdtype(features[DEFAULT_KEY_ID].dtype, np.integer):
+    if np.issubdtype(features[DEFAULT_KEY_ID].dtype, np.integer):  # pyrefly: ignore[unsupported-operation]
       example.features.feature[node_id_column].int64_list.value.append(
-          features[DEFAULT_KEY_ID][node_index]
+          features[DEFAULT_KEY_ID][node_index]  # pyrefly: ignore[unsupported-operation]
       )
-    elif features[DEFAULT_KEY_ID].dtype.kind == "S":
+    elif features[DEFAULT_KEY_ID].dtype.kind == "S":  # pyrefly: ignore[unsupported-operation]
       example.features.feature[node_id_column].bytes_list.value.append(
-          features[DEFAULT_KEY_ID][node_index]
+          features[DEFAULT_KEY_ID][node_index]  # pyrefly: ignore[unsupported-operation]
       )
     else:
-      raise ValueError(f"Non supported type {features[DEFAULT_KEY_ID]}")
+      raise ValueError(f"Non supported type {features[DEFAULT_KEY_ID]}")  # pyrefly: ignore[unsupported-operation]
   return example
 
 
@@ -773,7 +773,7 @@ def _write_tfrecord_node_sets(
   """Writes node sets to TFRecord files."""
   for nodeset_name, nodeset in graph.node_sets.items():
     num_shards, num_nodes_per_shard = shard_lib.estimate_num_node_shards(
-        nodeset.num_nodes
+        nodeset.num_nodes  # pyrefly: ignore[bad-argument-type]
     )
     for shard_index in range(num_shards):
       examples = []
@@ -785,7 +785,7 @@ def _write_tfrecord_node_sets(
       )
       for node_index in range(
           shard_index * num_nodes_per_shard,
-          min(
+          min(  # pyrefly: ignore[bad-argument-type, bad-specialization]
               (shard_index + 1) * num_nodes_per_shard,
               nodeset.num_nodes,
           ),

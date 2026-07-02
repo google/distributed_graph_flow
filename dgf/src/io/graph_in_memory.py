@@ -171,7 +171,7 @@ def _read_edge_set(
         target_mapper,
         source_ids,
         target_ids,
-        min(32, os.cpu_count()),
+        min(32, os.cpu_count()),  # pyrefly: ignore[bad-specialization]
     )
   else:
     # Slow path
@@ -280,7 +280,7 @@ def read_graph(
   with filesystem.open_read(os.path.join(path, FILENAME_METADATA)) as f:
     if verbose:
       log.info("Reading metadata from %s", path)
-    metadata = gf_metadata_lib.GFGraphMetadata.from_json(f.read())
+    metadata = gf_metadata_lib.GFGraphMetadata.from_json(f.read())  # pyrefly: ignore[missing-attribute]
 
   if metadata.version > MAX_SUPPORTED_GF_VERSION:
     raise NotImplementedError(
@@ -376,7 +376,7 @@ def write_graph(
   if verbose:
     log.info("Writing metadata to %s", metadata_path)
   with filesystem.open_write(metadata_path) as f:
-    f.write(metadata.to_json(indent=2))
+    f.write(metadata.to_json(indent=2))  # pyrefly: ignore[missing-attribute]
 
   # Write Node Sets
   node_dir = os.path.join(path, FILENAME_NODE_FEATURE)
@@ -390,7 +390,7 @@ def write_graph(
     if verbose:
       log.info("Writing nodeset %s to %s", nodeset_name, node_dir)
 
-    num_shards, _ = shard_lib.estimate_num_node_shards(node_set.num_nodes)
+    num_shards, _ = shard_lib.estimate_num_node_shards(node_set.num_nodes)  # pyrefly: ignore[bad-argument-type]
     if max_num_shards is not None:
       num_shards = min(num_shards, max_num_shards)
 

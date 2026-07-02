@@ -34,7 +34,7 @@ import pyarrow.parquet as pq
 @numba.njit(parallel=False)
 def _numba_copy_kernel(offset, offsets: np.ndarray, data, out, max_len):
   """Copies data from a flat array to a padded output array using Numba."""
-  for i in numba.prange(len(offsets) - 1):
+  for i in numba.prange(len(offsets) - 1):  # pyrefly: ignore[not-iterable]
     start = offsets[i]
     end = offsets[i + 1]
     length = end - start
