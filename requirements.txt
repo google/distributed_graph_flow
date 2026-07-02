@@ -36,3 +36,4 @@ networkx
 pyarrow
 fastavro
 datasketch
+protobuf
