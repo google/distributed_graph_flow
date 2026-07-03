@@ -28,6 +28,8 @@ struct GraphSchema {
     // Shape of the feature. -1 (in cc) is equivalent to None (in python).
     std::vector<int> shape;
     eFormat format;
+    bool is_timeseries = false;
+    std::string timestamps;
 
     std::string to_string(int indent) const;
 

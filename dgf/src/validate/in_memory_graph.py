@@ -122,6 +122,101 @@ def feature_set_issues(
             )
         )
 
+    if feature_schema.timestamps is not None:
+      if not feature_schema.is_timeseries:
+        items.append(
+            Issue.error(
+                f"The feature {feature_name!r} in {source} has timestamps set"
+                f" to {feature_schema.timestamps!r}, but is_timeseries is"
+                " False."
+            )
+        )
+      ts_name = feature_schema.timestamps
+      if ts_name not in featureset_schema:
+        items.append(
+            Issue.error(
+                f"The feature {feature_name!r} in {source} references"
+                f" timestamps feature {ts_name!r} which is not defined in the"
+                " schema."
+            )
+        )
+      else:
+        ts_schema = featureset_schema[ts_name]
+        if (
+            not ts_schema.is_timeseries
+            or ts_schema.semantic != schema_lib.FeatureSemantic.TIMESTAMP
+        ):
+          if not ts_schema.is_timeseries:
+            items.append(
+                Issue.error(
+                    f"The feature {feature_name!r} in {source} references"
+                    f" timestamps feature {ts_name!r}, but {ts_name!r} does not"
+                    " have is_timeseries=True."
+                )
+            )
+          if ts_schema.semantic != schema_lib.FeatureSemantic.TIMESTAMP:
+            items.append(
+                Issue.error(
+                    f"The feature {feature_name!r} in {source} references"
+                    f" timestamps feature {ts_name!r}, but {ts_name!r} does not"
+                    " have semantic=TIMESTAMP."
+                )
+            )
+          continue
+        ts_shape = ts_schema.shape or ()
+        feat_shape = feature_schema.shape or ()
+        if len(ts_shape) != 1:
+          items.append(
+              Issue.error(
+                  f"The feature {feature_name!r} in {source} references"
+                  f" timestamps feature {ts_name!r}, but {ts_name!r} must have"
+                  " exactly 1 sequence dimension in schema shape."
+              )
+          )
+        if len(feat_shape) < 1:
+          items.append(
+              Issue.error(
+                  f"The feature {feature_name!r} in {source} references"
+                  f" timestamps feature {ts_name!r}, but {feature_name!r} must"
+                  " have at least 1 sequence dimension in schema shape."
+              )
+          )
+        if (
+            len(ts_shape) == 1
+            and len(feat_shape) >= 1
+            and ts_shape[0] != feat_shape[0]
+        ):
+          items.append(
+              Issue.error(
+                  f"The feature {feature_name!r} in {source} has schema shape"
+                  f" {feat_shape} whose 0th dimension ({feat_shape[0]}) does not"
+                  f" match timestamps feature {ts_name!r} schema shape 0th"
+                  f" dimension ({ts_shape[0]})."
+              )
+          )
+        if feature_name in featureset_data and ts_name in featureset_data:
+          if feat_shape and feat_shape[0] is None:
+            feature_data = featureset_data[feature_name]
+            ts_data = featureset_data[ts_name]
+            if len(feature_data) == len(ts_data):
+              for i in range(len(feature_data)):
+                f_val = feature_data[i]
+                t_val = ts_data[i]
+                if f_val is not None and t_val is not None:
+                  f_len = len(f_val) if hasattr(f_val, "__len__") else 1
+                  t_len = len(t_val) if hasattr(t_val, "__len__") else 1
+                  if f_len != t_len:
+                    items.append(
+                        Issue.error(
+                            f"The feature {feature_name!r} in {source} has a"
+                            f" variable-length timeseries at index {i} of"
+                            f" length {f_len}, which does not match the"
+                            f" timestamps sequence {ts_name!r} of length"
+                            f" {t_len}."
+                        )
+                    )
+                    break
+
   return items
 
 

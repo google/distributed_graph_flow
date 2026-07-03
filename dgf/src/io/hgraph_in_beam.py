@@ -83,7 +83,6 @@ def read_graphai_hgraph(
       node_id_column=node_id_column,
       edge_id_column=edge_id_column,
       override_schema=override_schema,
-      research_node_format=research_node_format,
       remove_dangling_edges=remove_dangling_edges,
   )
 

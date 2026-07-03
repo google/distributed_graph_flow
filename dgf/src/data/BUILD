@@ -294,6 +294,7 @@ py_test(
     name = "schema_cc_test",
     srcs = ["schema_cc_test.py"],
     deps = [
+        ":schema",
         ":schema_ext",
         # absl/testing:absltest dep,
         "//dgf/src/util:gen_test_graph",

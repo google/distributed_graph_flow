@@ -90,6 +90,12 @@ class FeatureSchema:
     is_utf8_string: Whether the feature is a UTF-8 string. This is only relevant
       when feature_format is BYTES, to distinguish between Spanner STRING (True)
       and Spanner BYTES (False).
+    is_timeseries: Whether the feature represents a temporal series / sequence.
+    timestamps: For temporal sequence features, the name of the feature
+      containing the corresponding timestamp sequence (e.g., "time"). The
+      length of the corresponding timestamps feature must equal the length of
+      the timeseries feature along the 0th dimension. Cannot be set for non
+      timeseries features.
   """
 
   format: FeatureFormat
@@ -97,6 +103,8 @@ class FeatureSchema:
   shape: Shape = None
   num_categorical_values: Optional[int] = None
   is_utf8_string: Optional[bool] = False
+  is_timeseries: Optional[bool] = False
+  timestamps: Optional[str] = None
 
   def is_static_shape(self) -> bool:
     """Returns true if the feature has a fully static shape."""
