@@ -1,5 +1,9 @@
-load("@rules_python//python:py_library.bzl", "py_library")
-load("@rules_python//python:py_test.bzl", "py_test")
+load(
+    "//devtools/python/blaze:pytype.bzl",
+    "py_binary",
+    "py_test",
+    "py_library",
+)
 
 package(
     
@@ -32,6 +36,31 @@ py_library(
     srcs = ["signals.py"],
     deps = [
         # numpy dep,
+    ],
+)
+
+py_library(
+    name = "gen_temporal_alert_graph",
+    srcs = ["gen_temporal_alert_graph.py"],
+    visibility = ["//dgf:__subpackages__"],
+    deps = [
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/io:graph_in_memory",
+        "//dgf/src/validate:in_memory_graph",
+        # numpy dep,
+    ],
+)
+
+py_binary(
+    name = "gen_temporal_alert_graph_main",
+    srcs = ["gen_temporal_alert_graph_main.py"],
+    visibility = ["//dgf:__subpackages__"],
+    deps = [
+        ":gen_temporal_alert_graph",
+        # absl:app dep,
+        # absl/flags dep,
+        # absl/logging dep,
     ],
 )
 
@@ -86,6 +115,17 @@ py_test(
     deps = [
         ":signals",
         # absl/testing:absltest dep,
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "gen_temporal_alert_graph_test",
+    srcs = ["gen_temporal_alert_graph_test.py"],
+    deps = [
+        ":gen_temporal_alert_graph",
+        # absl/testing:absltest dep,
+        "//dgf/src/util:filesystem",
         # numpy dep,
     ],
 )

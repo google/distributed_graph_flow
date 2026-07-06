@@ -40,7 +40,7 @@ py_library(
         # numpy dep,
         # pyarrow:pyarrow_modules dep,
         # tensorflow dep,
-        # tensorflow_gnn/proto dep,
+        # tensorflow_gnn/proto dep,  # buildcleaner: keep
     ],
 )
 
