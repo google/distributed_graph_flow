@@ -21,6 +21,7 @@ py_library(
         "//dgf/src/data:distributed_graph",
         "//dgf/src/data:schema",
         "//dgf/src/data:statistics",
+        "//dgf/src/util:temporal",
         # numpy dep,
     ],
 )

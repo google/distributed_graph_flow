@@ -202,6 +202,49 @@ class InMemoryGraphTest(absltest.TestCase):
         ],
     )
 
+  def test_conflicting_timestamps_in_group(self):
+    graph, schema = valid_graph()
+    schema.node_sets["n1"].features["f1"].is_timeseries = True
+    schema.node_sets["n1"].features["f1"].timestamps = "time1"
+    schema.node_sets["n1"].features["f1"].timeseries_group = "my_group"
+    schema.node_sets["n1"].features["f1"].shape = (None,)
+    schema.node_sets["n1"].features["f2"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        is_timeseries=True,
+        timestamps="time2",
+        timeseries_group="my_group",
+        shape=(None,),
+    )
+    schema.node_sets["n1"].features["time1"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_timeseries=True,
+        timeseries_group="my_group",
+        shape=(None,),
+    )
+    schema.node_sets["n1"].features["time2"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_timeseries=True,
+        timeseries_group="my_group",
+        shape=(None,),
+    )
+    arr = np.array([[10, 20], [10, 20]], dtype=object)
+    graph.node_sets["n1"].features["f1"] = arr
+    graph.node_sets["n1"].features["f2"] = arr
+    graph.node_sets["n1"].features["time1"] = arr
+    graph.node_sets["n1"].features["time2"] = arr
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertTrue(
+        any(
+            "Multiple conflicting timestamps features found for timeseries"
+            " group 'my_group' in nodeset 'n1': 'time1' and 'time2'"
+            in issue.text
+            for issue in issues
+        ),
+        f"Expected conflicting timestamps issue not found in: {issues}",
+    )
+
   def test_timeseries_length_mismatch(self):
     graph, schema = valid_graph()
     num_nodes = graph.node_sets["n1"].num_nodes
@@ -437,6 +480,101 @@ class InMemoryGraphTest(absltest.TestCase):
         issues,
     )
 
+  def test_mask_missing_timeseries_group(self):
+    graph, schema = valid_graph()
+    num_nodes = graph.node_sets["n1"].num_nodes
+    schema.node_sets["n1"].features["bad_mask"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.BOOL,
+        semantic=schema_lib.FeatureSemantic.MASK,
+        shape=(5,),
+        is_timeseries=True,
+    )
+    graph.node_sets["n1"].features["bad_mask"] = np.zeros(
+        (num_nodes, 5), dtype=np.bool_
+    )
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertIn(
+        Issue.error(
+            "The mask feature 'bad_mask' in nodeset 'n1' must have a"
+            " timeseries_group to associate it with the features it masks."
+        ),
+        issues,
+    )
+
+  def test_conflicting_timeseries_group_with_timestamp(self):
+    graph, schema = valid_graph()
+    schema.node_sets["n1"].features["f1"].is_timeseries = True
+    schema.node_sets["n1"].features["f1"].timestamps = "time1"
+    schema.node_sets["n1"].features["f1"].timeseries_group = "groupA"
+    schema.node_sets["n1"].features["f1"].shape = (None,)
+    schema.node_sets["n1"].features["time1"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_timeseries=True,
+        timeseries_group="groupB",
+        shape=(None,),
+    )
+    arr = np.array([[10, 20], [10, 20]], dtype=object)
+    graph.node_sets["n1"].features["f1"] = arr
+    graph.node_sets["n1"].features["time1"] = arr
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertTrue(
+        any(
+            "Features with the same timestamps must be in the same timeseries"
+            " group"
+            in issue.text
+            for issue in issues
+        ),
+        f"Expected conflicting timeseries group issue not found in: {issues}",
+    )
+
+  def test_multiple_masks_in_group(self):
+    graph, schema = valid_graph()
+    num_nodes = graph.node_sets["n1"].num_nodes
+    schema.node_sets["n1"].features["mask1"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.BOOL,
+        semantic=schema_lib.FeatureSemantic.MASK,
+        shape=(5,),
+        is_timeseries=True,
+        timeseries_group="my_group",
+    )
+    schema.node_sets["n1"].features["mask2"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.BOOL,
+        semantic=schema_lib.FeatureSemantic.MASK,
+        shape=(5,),
+        is_timeseries=True,
+        timeseries_group="my_group",
+    )
+
+    # Test identical masks yield warning
+    mask_data = np.zeros((num_nodes, 5), dtype=np.bool_)
+    graph.node_sets["n1"].features["mask1"] = mask_data
+    graph.node_sets["n1"].features["mask2"] = mask_data
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertTrue(
+        any(
+            "Since they are identical, consider consolidating them into a"
+            " single mask"
+            in issue.text
+            for issue in issues
+        ),
+        f"Expected identical masks warning not found in: {issues}",
+    )
+
+    # Test differing masks yield error
+    graph.node_sets["n1"].features["mask2"] = np.ones(
+        (num_nodes, 5), dtype=np.bool_
+    )
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertTrue(
+        any(
+            "Multiple features with semantic=MASK found for timeseries group"
+            " 'my_group' in nodeset 'n1' with differing or unavailable values"
+            in issue.text
+            for issue in issues
+        ),
+        f"Expected differing masks error not found in: {issues}",
+    )
 
 
 if __name__ == "__main__":

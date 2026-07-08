@@ -16,7 +16,7 @@
 
 import collections
 import dataclasses
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
 from dgf.src.data import schema as schema_lib
 import numpy as np
@@ -45,6 +45,43 @@ class TimeseriesSchemaCache:
   has_timeseries: bool
 
 
+def resolve_timeseries_group(
+    feature_schema: schema_lib.FeatureSchema,
+    feature_name: Optional[str] = None,
+    schemas: Optional[Mapping[str, schema_lib.FeatureSchema]] = None,
+) -> Optional[str]:
+  """Resolves the timeseries group of a feature."""
+  if not feature_schema.is_timeseries:
+    return None
+
+  # 1. If explicitly defined in the feature's schema, this takes precedence.
+  if feature_schema.timeseries_group is not None:
+    return feature_schema.timeseries_group
+
+  # 2. If the feature references a timestamp feature, inherit the group from the
+  # timestamp feature if it has one. Otherwise, the timestamp feature name
+  # itself becomes the group name.
+  if feature_schema.timestamps is not None:
+    ts_name = feature_schema.timestamps
+    if schemas is not None:
+      ts_schema = schemas.get(ts_name)
+      if ts_schema is not None and ts_schema.timeseries_group is not None:
+        return ts_schema.timeseries_group
+    return ts_name
+
+  # 3. If the feature is itself a timestamp feature (and didn't have an explicit
+  # group defined), its own name is its group name.
+  if (
+      feature_name is not None
+      and feature_schema.semantic == schema_lib.FeatureSemantic.TIMESTAMP
+  ):
+    return feature_name
+
+  # 4. If none of the above apply, the feature does not belong to a named group
+  # (it is a non-timestamped sequence).
+  return None
+
+
 def _extract_entity_set_timeseries_specs(
     features: Dict[str, schema_lib.FeatureSchema],
 ) -> List[TimeseriesGroupSpec]:
@@ -53,18 +90,44 @@ def _extract_entity_set_timeseries_specs(
   for fname, fschema in features.items():
     if not fschema.is_timeseries:
       continue
-    # Extract timeseries features associated with a timestamp feature.
-    if fschema.timestamps is not None:
-      ts_groups[fschema.timestamps].append(fname)
-    elif fschema.semantic == schema_lib.FeatureSemantic.TIMESTAMP:
-      ts_groups[fname].append(fname)
-    else:
-      ts_groups[None].append(fname)
+    grp = resolve_timeseries_group(
+        feature_schema=fschema, feature_name=fname, schemas=features
+    )
+    ts_groups[grp].append(fname)
 
   return [
-      TimeseriesGroupSpec(timestamp_feature_name=ts_fname, feature_names=fnames)
-      for ts_fname, fnames in ts_groups.items()
+      TimeseriesGroupSpec(timestamp_feature_name=grp_name, feature_names=fnames)
+      for grp_name, fnames in ts_groups.items()
   ]
+
+
+def get_mask_feature_name(
+    feature_name: str, schemas: schema_lib.FeatureSetSchema
+) -> Optional[str]:
+  """Gets the authoritative mask feature name associated with a given feature.
+
+  A mask feature has `semantic=FeatureSemantic.MASK` and explicitly shares the
+  same `timeseries_group` as the feature being masked.
+
+  Args:
+    feature_name: Name of the feature to find the mask for.
+    schemas: The feature set schema (`Dict[str, FeatureSchema]`).
+
+  Returns:
+    The name of the mask feature if found, or None if the feature has no
+    associated sequence group or mask in the schema.
+  """
+  feature_schema = schemas[feature_name]
+  ts_group = feature_schema.timeseries_group
+  if ts_group is None:
+    return None
+  for name, sch in schemas.items():
+    if (
+        sch.semantic == schema_lib.FeatureSemantic.MASK
+        and sch.timeseries_group == ts_group
+    ):
+      return name
+  return None
 
 
 def extract_timeseries_schema_cache(

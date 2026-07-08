@@ -18,6 +18,7 @@ from typing import Sequence
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import feature_format
+from dgf.src.util import temporal as temporal_util
 from dgf.src.validate import validate as validate_lib
 import numpy as np
 
@@ -151,6 +152,21 @@ def feature_set_issues(
       else:
         ts_schema = featureset_schema[ts_name]
         if (
+            feature_schema.timeseries_group is not None
+            and ts_schema.timeseries_group is not None
+            and feature_schema.timeseries_group != ts_schema.timeseries_group
+        ):
+          items.append(
+              Issue.error(
+                  f"The feature {feature_name!r} in {source} has"
+                  f" timeseries_group={feature_schema.timeseries_group!r} and"
+                  f" timestamps={ts_name!r}, but {ts_name!r} has"
+                  f" timeseries_group={ts_schema.timeseries_group!r}. Features"
+                  " with the same timestamps must be in the same timeseries"
+                  " group."
+              )
+          )
+        if (
             not ts_schema.is_timeseries
             or ts_schema.semantic != schema_lib.FeatureSemantic.TIMESTAMP
         ):
@@ -223,7 +239,74 @@ def feature_set_issues(
                             f" {t_len}."
                         )
                     )
-                    break
+  group_to_masks = {}
+  group_to_timestamps = {}
+  for feature_name, feature_schema in featureset_schema.items():
+    ts_group = temporal_util.resolve_timeseries_group(
+        feature_schema, feature_name, featureset_schema
+    )
+    if ts_group is not None and feature_schema.timestamps is not None:
+      ts_val = feature_schema.timestamps
+      if (
+          ts_group in group_to_timestamps
+          and group_to_timestamps[ts_group] != ts_val
+      ):
+        ts_pair = sorted([group_to_timestamps[ts_group], ts_val])
+        items.append(
+            Issue.error(
+                f"Multiple conflicting timestamps features found for timeseries"
+                f" group {ts_group!r} in {source}:"
+                f" {ts_pair[0]!r} and {ts_pair[1]!r}. All"
+                " features in the same timeseries group must reference the same"
+                " timestamps feature."
+            )
+        )
+      else:
+        group_to_timestamps[ts_group] = ts_val
+
+    if feature_schema.semantic == schema_lib.FeatureSemantic.MASK:
+      if ts_group is None:
+        items.append(
+            Issue.error(
+                f"The mask feature {feature_name!r} in {source} must have a"
+                " timeseries_group to associate it with the features it masks."
+            )
+        )
+      else:
+        if ts_group not in group_to_masks:
+          group_to_masks[ts_group] = []
+        group_to_masks[ts_group].append(feature_name)
+
+  for ts_group, masks_in_group in group_to_masks.items():
+    if len(masks_in_group) > 1:
+      all_identical = True
+      first_data = featureset_data.get(masks_in_group[0])
+      for m_name in masks_in_group[1:]:
+        m_data = featureset_data.get(m_name)
+        if (
+            first_data is None
+            or m_data is None
+            or not np.array_equal(first_data, m_data)
+        ):
+          all_identical = False
+          break
+      if all_identical:
+        items.append(
+            Issue.warning(
+                f"Multiple features with semantic=MASK found for timeseries"
+                f" group {ts_group!r} in {source}: {masks_in_group}. Since they"
+                " are identical, consider consolidating them into a single"
+                " mask."
+            )
+        )
+      else:
+        items.append(
+            Issue.error(
+                f"Multiple features with semantic=MASK found for timeseries"
+                f" group {ts_group!r} in {source} with differing or unavailable"
+                f" values: {masks_in_group}."
+            )
+        )
   return items
 
 

@@ -194,6 +194,30 @@ class TemporalTest(absltest.TestCase):
     self.assertEqual(expanded_4d.shape, (5, 10, 1, 1))
     np.testing.assert_array_equal(expanded_4d[:, :, 0, 0], mask)
 
+  def test_resolve_timeseries_group_inheritance(self):
+    schemas = {
+        "time": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.INTEGER_64,
+            semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+            is_timeseries=True,
+            timeseries_group="group",
+        ),
+        "feature": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            is_timeseries=True,
+            timestamps="time",
+        ),
+    }
+
+    # feature references "time" which has timeseries_group="group"
+    # so feature should inherit "group".
+    group = temporal.resolve_timeseries_group(
+        feature_schema=schemas["feature"],
+        feature_name="feature",
+        schemas=schemas,
+    )
+    self.assertEqual(group, "group")
+
 
 if __name__ == "__main__":
   absltest.main()

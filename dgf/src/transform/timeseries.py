@@ -14,6 +14,10 @@
 
 """Padding and capping for timeseries sequence features in graphs."""
 
+# TODO(simonmeierhans): Split output schema computation (done once at
+# preparation) and output value computation (done per node/execution) for
+# all functions.
+
 # pytype: disable=module-attr
 import dataclasses
 import enum
@@ -140,6 +144,18 @@ class CalendarFeatureConfig:
   features: Tuple[CalendarFeature, ...] = _SUPPORTED_CALENDAR_FEATURES
 
 
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass
+class TimestampFeatureConfig:
+  """Configuration for extracting time delta features.
+
+  Attributes:
+    fill_value: Value used for masked time steps and missing boundary deltas.
+  """
+
+  fill_value: Any = 0
+
+
 def _compute_calendar_feature(
     ts_array: np.ndarray, feature: CalendarFeature
 ) -> np.ndarray:
@@ -181,43 +197,67 @@ def _process_feature_set(
   # Map timeseries feature names to their associated timestamp feature name.
   ts_features = {}
   for group in ts_specs:
-    for fname in group.feature_names:
-      ts_features[fname] = group.timestamp_feature_name
+    for feature_name in group.feature_names:
+      ts_features[feature_name] = group.timestamp_feature_name
 
-  for fname, schema in schemas.items():
-    if fname not in ts_features:
-      new_values[fname] = values[fname]
-      new_schemas[fname] = schema
+  for feature_name, feature_schema in schemas.items():
+    if feature_name not in ts_features:
+      new_values[feature_name] = values[feature_name]
+      new_schemas[feature_name] = feature_schema
 
   if not ts_features:
     return new_values, new_schemas
 
-  for fname in ts_features:
-    schema = schemas[fname]
+  for feature_name in ts_features:
+    feature_schema = schemas[feature_name]
 
-    dtype = feature_format.FEATURE_FORMAT_TO_NP_DTYPE[schema.format]
-    feat_shape = temporal_util.get_timeseries_step_shape(schema)
+    dtype = feature_format.FEATURE_FORMAT_TO_NP_DTYPE[feature_schema.format]
+    feat_shape = temporal_util.get_timeseries_step_shape(feature_schema)
 
     padded_matrix, mask_matrix = _pad_and_cap_single_feature(
-        raw_series=values[fname],
+        raw_series=values[feature_name],
         seq_len=seq_len,
         feat_shape=feat_shape,
         padding_value=config.padding_value,
         dtype=dtype,
-        is_static_shape=schema.is_static_shape(),
+        is_static_shape=feature_schema.is_static_shape(),
     )
 
-    new_values[fname] = padded_matrix
-    new_schemas[fname] = temporal_util.with_sequence_length(schema, seq_len)
-
-    new_values[f"{fname}_mask"] = mask_matrix
-    new_schemas[f"{fname}_mask"] = schema_lib.FeatureSchema(
-        format=schema_lib.FeatureFormat.BOOL,
-        semantic=schema_lib.FeatureSemantic.MASK,
-        shape=(seq_len,),
-        is_timeseries=schema.is_timeseries,
-        timestamps=schema.timestamps,
+    ts_group = (
+        temporal_util.resolve_timeseries_group(
+            feature_schema, feature_name, schemas
+        )
+        or feature_name
     )
+    new_values[feature_name] = padded_matrix
+    new_schemas[feature_name] = dataclasses.replace(
+        temporal_util.with_sequence_length(feature_schema, seq_len),
+        timeseries_group=ts_group,
+    )
+    if feature_schema.semantic == schema_lib.FeatureSemantic.MASK:
+      continue
+
+    mask_name = temporal_util.get_mask_feature_name(feature_name, schemas)
+    if mask_name is None:
+      mask_name = f"{ts_group}_mask"
+      if mask_name in schemas:
+        raise ValueError(
+            f"Cannot generate mask for timeseries group '{ts_group}'. The"
+            f" fallback mask name '{mask_name}' clashes with an existing"
+            " feature in the schema that is not a valid mask. Please"
+            " explicitly define a mask feature for this group or rename the"
+            " clashing feature."
+        )
+
+    if mask_name not in new_values:
+      new_values[mask_name] = mask_matrix
+      new_schemas[mask_name] = schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.BOOL,
+          semantic=schema_lib.FeatureSemantic.MASK,
+          shape=(seq_len,),
+          is_timeseries=feature_schema.is_timeseries,
+          timeseries_group=ts_group,
+      )
 
   return new_values, new_schemas
 
@@ -232,11 +272,12 @@ def pad_and_cap_timeseries_features(
 
   For every feature where `is_timeseries=True`, this function caps long causal
   histories (`[-K:]`) and left-pads short histories to `config.sequence_length`
-  ($K$). Generates parallel binary attention masks (`{feature_name}_mask`).
+  ($K$). Generates exactly one binary attention mask per sequence group,
+  shared across all co-grouped features.
 
   All resulting features have fixed `shape=(K,)` and maintain
   `is_timeseries=True`, allowing downstream sequence models to identify
-  temporal features.
+  temporal features and inherit the group mask.
 
   Usage example:
 
@@ -448,3 +489,157 @@ def extract_calendar_features(
       ),
   )
 
+
+def _compute_seed_deltas(
+    raw_val: np.ndarray,
+    mask: Optional[np.ndarray],
+    seed_timestamp: int,
+    fill_value: Any,
+) -> np.ndarray:
+  """Computes seed_timestamp - t_i."""
+  deltas = seed_timestamp - raw_val
+  if mask is not None:
+    mask_for_where = temporal_util.expand_mask_dims(mask, raw_val)
+    deltas = np.where(mask_for_where, deltas, fill_value)
+  return deltas
+
+
+def _extract_feature_set_timestamp_features(
+    values: in_memory_graph.Features,
+    schemas: schema_lib.FeatureSetSchema,
+    config: TimestampFeatureConfig,
+    seed_timestamp: int,
+) -> Tuple[in_memory_graph.Features, schema_lib.FeatureSetSchema]:
+  """Extracts time delta features for a single feature set.
+
+  Args:
+    values: Feature values.
+    schemas: Feature schemas.
+    config: Configuration for time delta feature extraction.
+    seed_timestamp: The seed timestamp for computing seed deltas.
+
+  Returns:
+    A tuple of the new feature values and new schemas.
+  """
+  new_values: in_memory_graph.Features = {}
+  new_schemas: schema_lib.FeatureSetSchema = {}
+
+  for fname, schema in schemas.items():
+    raw_val = values[fname]
+    new_values[fname] = raw_val
+    new_schemas[fname] = schema
+
+    if schema.semantic != schema_lib.FeatureSemantic.TIMESTAMP:
+      continue
+
+    if not schema.is_static_shape() or raw_val.dtype == np.object_:
+      raise ValueError(
+          "extract_timestamp_features requires fixed-length timestamp tensors,"
+          f" but feature '{fname}' is a variable-length object array or has a"
+          f" dynamic shape ({schema.shape}). Please run"
+          " pad_and_cap_timeseries_features first."
+      )
+
+    mask = None
+    ts_group = temporal_util.resolve_timeseries_group(schema, fname, schemas)
+    if ts_group is not None:
+      mask_name = temporal_util.get_mask_feature_name(fname, schemas)
+      if mask_name is not None and mask_name in values:
+        mask = values[mask_name]
+
+    if schema.is_timeseries is None or not schema.is_timeseries:
+      # Case 1: For non-timeseries timestamps, derived time delta features do
+      # not reference a timestamp sequence.
+      ref_timestamps = None
+    elif schema.timestamps is not None:
+      # Case 2: For timeseries features that reference a timestamp sequence.
+      ref_timestamps = schema.timestamps
+    else:
+      # Case 3: For timeseries features that do not reference a timestamp
+      # sequence.
+      ref_timestamps = fname
+
+    if seed_timestamp is None:
+      raise ValueError(
+          "seed_timestamp must be provided to extract seed deltas."
+      )
+    out_fname = f"{fname}_seed_delta"
+    new_values[out_fname] = _compute_seed_deltas(
+        raw_val, mask, seed_timestamp, config.fill_value
+    )
+    new_schemas[out_fname] = schema_lib.FeatureSchema(
+        format=schema.format,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=schema.shape,
+        is_timeseries=schema.is_timeseries,
+        timestamps=ref_timestamps,
+        timeseries_group=ts_group,
+    )
+
+  return new_values, new_schemas
+
+
+def extract_timestamp_features(
+    graph: in_memory_graph.InMemoryGraph,
+    schema: schema_lib.GraphSchema,
+    seed_timestamp: int,
+    config: Optional[TimestampFeatureConfig] = None,
+) -> Tuple[in_memory_graph.InMemoryGraph, schema_lib.GraphSchema]:
+  """Extracts time delta features from timestamp features.
+
+  Args:
+    graph: The input in-memory graph.
+    schema: The graph schema containing timestamp features.
+    seed_timestamp: Seed timestamp for calculating seed deltas.
+    config: Optional `TimestampFeatureConfig`.
+
+  Returns:
+    Tuple `(new_graph, new_schema)`.
+  """
+  if config is None:
+    config = TimestampFeatureConfig()
+
+  new_node_sets = {}
+  new_ns_schemas = {}
+
+  for ns_name, ns_schema in schema.node_sets.items():
+    ns_val = graph.node_sets[ns_name]
+    new_vals, new_schemas = _extract_feature_set_timestamp_features(
+        values=ns_val.features,
+        schemas=ns_schema.features,
+        config=config,
+        seed_timestamp=seed_timestamp,
+    )
+    new_node_sets[ns_name] = in_memory_graph.InMemoryNodeSet(
+        num_nodes=ns_val.num_nodes, features=new_vals
+    )
+    new_ns_schemas[ns_name] = schema_lib.NodeSchema(features=new_schemas)
+
+  new_edge_sets = {}
+  new_es_schemas = {}
+
+  for es_name, es_schema in schema.edge_sets.items():
+    es_val = graph.edge_sets[es_name]
+    new_vals, new_schemas = _extract_feature_set_timestamp_features(
+        values=es_val.features,
+        schemas=es_schema.features,
+        config=config,
+        seed_timestamp=seed_timestamp,
+    )
+    new_edge_sets[es_name] = in_memory_graph.InMemoryEdgeSet(
+        adjacency=es_val.adjacency, features=new_vals
+    )
+    new_es_schemas[es_name] = schema_lib.EdgeSchema(
+        source=es_schema.source,
+        target=es_schema.target,
+        features=new_schemas,
+    )
+
+  return (
+      in_memory_graph.InMemoryGraph(
+          node_sets=new_node_sets, edge_sets=new_edge_sets
+      ),
+      schema_lib.GraphSchema(
+          node_sets=new_ns_schemas, edge_sets=new_es_schemas
+      ),
+  )
