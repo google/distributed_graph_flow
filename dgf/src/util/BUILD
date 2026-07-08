@@ -167,6 +167,14 @@ py_library(
     ],
 )
 
+py_library(
+    name = "temporal",
+    srcs = ["temporal.py"],
+    deps = [
+        "//dgf/src/data:schema",
+    ],
+)
+
 cc_library(
     name = "test_util_cc",
     testonly = True,
@@ -378,5 +386,15 @@ py_test(
     deps = [
         ":weak_dep",
         # absl/testing:absltest dep,
+    ],
+)
+
+py_test(
+    name = "temporal_test",
+    srcs = ["temporal_test.py"],
+    deps = [
+        ":temporal",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:schema",
     ],
 )

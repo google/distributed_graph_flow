@@ -20,6 +20,8 @@ from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.sampling import _in_memory_sampler_ext
 from dgf.src.sampling import config as config_lib
+from dgf.src.sampling import temporal as sampling_temporal_lib
+from dgf.src.util import temporal as util_temporal
 import numpy as np
 
 
@@ -32,11 +34,22 @@ class Sampler:
       full_graph: in_memory_graph_lib.InMemoryGraph,
       return_features: bool,
       return_node_idxs: bool,
+      schema: Optional[schema_lib.GraphSchema] = None,
+      slice_timeseries_by_seed: bool = True,
+      max_timeseries_len: Optional[int] = None,
   ):
     self._cc_sampler = cc_sampler
     self._full_graph = full_graph
     self._return_features = return_features
     self._return_node_idxs = return_node_idxs
+    self._schema = schema
+    self._slice_timeseries_by_seed = slice_timeseries_by_seed
+    self._max_timeseries_len = max_timeseries_len
+    self._timeseries_schema_cache = (
+        util_temporal.extract_timeseries_schema_cache(self._schema)
+        if self._schema is not None and self._slice_timeseries_by_seed
+        else None
+    )
 
   def set_return_options(self, return_features: bool, return_node_idxs: bool):
     """Sets whether to return features and node indices in sampled graphs.
@@ -149,7 +162,7 @@ class Sampler:
         seed_node_idxs, seed_timestamps, masked_edge_idxs
     )
 
-    self._add_finalize_graphs(graphs)
+    self._add_finalize_graphs(graphs, seed_timestamps=seed_timestamps)
 
     if return_single_graph:
       return graphs[0]
@@ -246,20 +259,54 @@ class Sampler:
   def __str__(self) -> str:
     return str(self._cc_sampler)
 
+  def _has_timeseries_features(self) -> bool:
+    if self._timeseries_schema_cache is None:
+      return False
+    return bool(
+        self._timeseries_schema_cache.node_sets
+        or self._timeseries_schema_cache.edge_sets
+    )
+
   def _add_finalize_graphs(
-      self, graphs: List[in_memory_graph_lib.InMemoryGraph]
+      self,
+      graphs: List[in_memory_graph_lib.InMemoryGraph],
+      seed_timestamps: Optional[np.ndarray] = None,
   ):
     """Adds features and removes temporary node indices based on settings.
 
     If `_return_features` is True, full feature values are added.
     If `_return_node_idxs` is False, the "#idx" feature is removed.
+    If `seed_timestamps` and `_schema` are available and
+    `_slice_timeseries_by_seed` is True, any `is_timeseries=True` features are
+    causally filtered by the seed node timestamp.
 
     Args:
       graphs: A list of `InMemoryGraph` objects to be finalized.
+      seed_timestamps: Optional timestamps for causal timeseries filtering.
     """
     add_features_to_samples(
         self._full_graph, graphs, self._return_features, self._return_node_idxs
     )
+    if self._slice_timeseries_by_seed and self._return_features:
+      if seed_timestamps is None and self._has_timeseries_features():
+        raise ValueError(
+            "`seed_timestamps` must be provided when"
+            " `slice_timeseries_by_seed=True` and the schema contains"
+            " `is_timeseries=True` features."
+        )
+      if seed_timestamps is not None:
+        if self._schema is None:
+          raise ValueError(
+              "schema must be provided when `slice_timeseries_by_seed=True` and"
+              " `seed_timestamps` are passed."
+          )
+        for i, sample in enumerate(graphs):
+          sampling_temporal_lib.filter_timeseries_by_timestamp(
+              graph=sample,
+              schema_cache=self._timeseries_schema_cache,
+              target_timestamp=int(seed_timestamps[i]),
+              max_timeseries_len=self._max_timeseries_len,
+          )
 
 
 def add_features_to_samples(
@@ -310,6 +357,8 @@ def create_sampler(
     num_threads: Optional[int] = None,
     seed: Optional[int] = None,
     edgeset_to_mask: Optional[str] = None,
+    slice_timeseries_by_seed: bool = True,
+    max_timeseries_len: Optional[int] = None,
 ) -> Sampler:
   """Creates an in-memory sampler.
 
@@ -334,6 +383,10 @@ def create_sampler(
       to different results--though this should be rare). Note: For writing unit
       tests,using debug_sampling=True is better.
     edgeset_to_mask: Optional edgeset name to mask during sampling.
+    slice_timeseries_by_seed: Whether to causally slice `is_timeseries=True`
+      sequence features by the seed node timestamp.
+    max_timeseries_len: Optional cap on the number of historical causal sequence
+      steps retained for each timeseries feature.
 
   TODO(gbm): Should we remove the compilation variations (e.g., change in random
     number generator, change in hashmaps).
@@ -371,4 +424,7 @@ def create_sampler(
       full_graph=graph,
       return_features=return_features,
       return_node_idxs=return_node_idxs,
+      schema=schema,
+      slice_timeseries_by_seed=slice_timeseries_by_seed,
+      max_timeseries_len=max_timeseries_len,
   )

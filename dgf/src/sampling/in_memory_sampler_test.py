@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import logging
 from typing import List
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -21,6 +20,7 @@ from dgf.src.data import schema as schema_lib
 from dgf.src.sampling import _in_memory_sampler_ext
 from dgf.src.sampling import config as config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
+from dgf.src.transform import temporal as temporal_lib
 from dgf.src.util import gen_test_graph
 from dgf.src.util import test_util
 import numpy as np
@@ -1317,6 +1317,175 @@ Node(nodeset_idx=0, children=[
     sampled = negatives[0]
     for n in sampled:
       self.assertIn(n, [0, 1, 2, 3, 4, 5])
+
+  def test_causal_timeseries_filtering_in_sample(self):
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "alerts": in_memory_graph_lib.InMemoryNodeSet(
+                num_nodes=2,
+                features={"#creation_time": np.array([30, 60], dtype=np.int64)},
+            ),
+            "hardware": in_memory_graph_lib.InMemoryNodeSet(
+                num_nodes=1,
+                features={
+                    "time": np.array(
+                        [
+                            np.array([10, 20, 30, 40, 50, 60, 70]),
+                        ],
+                        dtype=np.object_,
+                    ),
+                    "signal": np.array(
+                        [
+                            np.array(
+                                [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+                                dtype=np.float32,
+                            ),
+                        ],
+                        dtype=np.object_,
+                    ),
+                },
+            ),
+        },
+        edge_sets={
+            "hardware_to_alert": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array([[0, 0], [0, 1]], dtype=np.int64),
+                features={},
+            )
+        },
+    )
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "alerts": schema_lib.NodeSchema(
+                features={
+                    "#creation_time": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                    )
+                }
+            ),
+            "hardware": schema_lib.NodeSchema(
+                features={
+                    "time": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_timeseries=True,
+                    ),
+                    "signal": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                        is_timeseries=True,
+                        timestamps="time",
+                    ),
+                }
+            ),
+        },
+        edge_sets={
+            "hardware_to_alert": schema_lib.EdgeSchema(
+                source="hardware", target="alerts"
+            )
+        },
+    )
+    # Propagate timestamps to edges so temporal sampling works.
+    graph, schema = temporal_lib.propagate_timestamp_to_edges(
+        graph, schema, node_timestamps={"alerts": "#creation_time"}
+    )
+    plan = config_lib.SimpleSamplingConfig(
+        seed_nodeset="alerts",
+        num_hops=1,
+        hop_width=10,
+        reverse=True,
+        edgeset_timestamp_features={"hardware_to_alert": "timestamps"},
+    )
+    sampler = in_memory_sampler_lib.create_sampler(
+        graph,
+        plan,
+        schema,
+        batch_size=2,
+        return_features=True,
+        slice_timeseries_by_seed=True,
+        max_timeseries_len=3,
+    )
+    samples = sampler.sample(
+        [0, 1], seed_timestamps=np.array([30, 60], dtype=np.int64)
+    )
+    # Verify exact seed creation timestamps remain intact on seed nodes.
+    self.assertEqual(
+        samples[0].node_sets["alerts"].features["#creation_time"][0], 30
+    )
+    self.assertEqual(
+        samples[1].node_sets["alerts"].features["#creation_time"][0], 60
+    )
+    # Sample 0 (alert 0 at target_timestamp=30): <= 30 is [10, 20, 30].
+    np.testing.assert_array_equal(
+        samples[0].node_sets["hardware"].features["time"][0], [10, 20, 30]
+    )
+    np.testing.assert_array_equal(
+        samples[0].node_sets["hardware"].features["signal"][0], [1.0, 2.0, 3.0]
+    )
+    # Sample 1 (alert 1 at target_timestamp=60): <= 60 is [10, ..., 60].
+    # max_timeseries_len=3 -> [40, 50, 60].
+    np.testing.assert_array_equal(
+        samples[1].node_sets["hardware"].features["time"][0], [40, 50, 60]
+    )
+    np.testing.assert_array_equal(
+        samples[1].node_sets["hardware"].features["signal"][0], [4.0, 5.0, 6.0]
+    )
+
+  def test_slice_timeseries_by_seed_validation_errors(self):
+    empty_graph = in_memory_graph_lib.InMemoryGraph(node_sets={}, edge_sets={})
+
+    # 1. Missing schema when slice_timeseries_by_seed=True and seed_timestamps
+    # passed
+    sampler_no_schema = in_memory_sampler_lib.Sampler(
+        cc_sampler=None,
+        full_graph=empty_graph,
+        return_features=True,
+        return_node_idxs=False,
+        schema=None,
+        slice_timeseries_by_seed=True,
+    )
+    with self.assertRaisesRegex(
+        ValueError,
+        "schema must be provided when `slice_timeseries_by_seed=True` and"
+        " `seed_timestamps` are passed",
+    ):
+      sampler_no_schema._add_finalize_graphs(
+          [empty_graph], seed_timestamps=np.array([123], dtype=np.int64)
+      )
+
+    # 2. Missing seed_timestamps when schema contains is_timeseries=True
+    # features
+    ts_schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "time": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_timeseries=True,
+                    ),
+                }
+            ),
+        },
+        edge_sets={},
+    )
+    sampler_with_schema = in_memory_sampler_lib.Sampler(
+        cc_sampler=None,
+        full_graph=empty_graph,
+        return_features=True,
+        return_node_idxs=False,
+        schema=ts_schema,
+        slice_timeseries_by_seed=True,
+    )
+    with self.assertRaisesRegex(
+        ValueError,
+        "`seed_timestamps` must be provided when"
+        " `slice_timeseries_by_seed=True` and the schema contains"
+        " `is_timeseries=True` features.",
+    ):
+      sampler_with_schema._add_finalize_graphs(
+          [empty_graph], seed_timestamps=None
+      )
 
 
 if __name__ == "__main__":

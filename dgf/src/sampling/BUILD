@@ -26,13 +26,25 @@ py_library(
 )
 
 py_library(
+    name = "temporal",
+    srcs = ["temporal.py"],
+    deps = [
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/util:temporal",
+        # numpy dep,
+    ],
+)
+
+py_library(
     name = "in_memory_sampler",
     srcs = ["in_memory_sampler.py"],
     deps = [
         ":_in_memory_sampler_ext",
         ":config",
+        ":temporal",
         "//dgf/src/data:in_memory_graph",  # buildcleaner: keep
         "//dgf/src/data:schema",
+        "//dgf/src/util:temporal",
         # numpy dep,
     ],
 )
@@ -167,8 +179,23 @@ py_test(
         # absl/testing:parameterized dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
+        "//dgf/src/transform:temporal",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "temporal_test",
+    srcs = ["temporal_test.py"],
+    deps = [
+        ":temporal",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/util:gen_test_graph",
+        "//dgf/src/util:temporal",
         # numpy dep,
     ],
 )
