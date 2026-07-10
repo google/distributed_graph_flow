@@ -21,7 +21,7 @@ from dgf.src.data import schema as schema_lib
 from dgf.src.sampling import _in_memory_sampler_ext
 from dgf.src.sampling import config as config_lib
 from dgf.src.sampling import temporal as sampling_temporal_lib
-from dgf.src.util import temporal as util_temporal
+from dgf.src.util import temporal as temporal_util
 import numpy as np
 
 
@@ -46,7 +46,7 @@ class Sampler:
     self._slice_timeseries_by_seed = slice_timeseries_by_seed
     self._max_timeseries_len = max_timeseries_len
     self._timeseries_schema_cache = (
-        util_temporal.extract_timeseries_schema_cache(self._schema)
+        temporal_util.extract_timeseries_schema_cache(self._schema)
         if self._schema is not None and self._slice_timeseries_by_seed
         else None
     )
@@ -262,10 +262,7 @@ class Sampler:
   def _has_timeseries_features(self) -> bool:
     if self._timeseries_schema_cache is None:
       return False
-    return bool(
-        self._timeseries_schema_cache.node_sets
-        or self._timeseries_schema_cache.edge_sets
-    )
+    return self._timeseries_schema_cache.has_timeseries
 
   def _add_finalize_graphs(
       self,

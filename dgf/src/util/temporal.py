@@ -16,7 +16,7 @@
 
 import collections
 import dataclasses
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from dgf.src.data import schema as schema_lib
 
@@ -26,11 +26,12 @@ class TimeseriesGroupSpec:
   """Pre-resolved metadata grouping features that share the same timestamp feature.
 
   Attributes:
-    timestamp_feature_name: Name of the timestamp feature.
+    timestamp_feature_name: Name of the associated timestamp feature. None for
+      un-timestamped timeseries.
     feature_names: List of feature names associated with this timestamp.
   """
 
-  timestamp_feature_name: str
+  timestamp_feature_name: Optional[str]
   feature_names: List[str]
 
 
@@ -40,22 +41,24 @@ class TimeseriesSchemaCache:
 
   node_sets: Dict[str, List[TimeseriesGroupSpec]]
   edge_sets: Dict[str, List[TimeseriesGroupSpec]]
+  has_timeseries: bool
 
 
 def _extract_entity_set_timeseries_specs(
     features: Dict[str, schema_lib.FeatureSchema],
 ) -> List[TimeseriesGroupSpec]:
   """Extracts and groups timeseries feature specs for a node set or edge set."""
-  ts_groups: Dict[str, List[str]] = collections.defaultdict(list)
+  ts_groups: Dict[Optional[str], List[str]] = collections.defaultdict(list)
   for fname, fschema in features.items():
     if not fschema.is_timeseries:
       continue
     # Extract timeseries features associated with a timestamp feature.
     if fschema.timestamps is not None:
       ts_groups[fschema.timestamps].append(fname)
-    # Extract timestamp features themselves so they are sliced in sync.
     elif fschema.semantic == schema_lib.FeatureSemantic.TIMESTAMP:
       ts_groups[fname].append(fname)
+    else:
+      ts_groups[None].append(fname)
 
   return [
       TimeseriesGroupSpec(timestamp_feature_name=ts_fname, feature_names=fnames)
@@ -69,16 +72,19 @@ def extract_timeseries_schema_cache(
   """Extracts and pre-resolves timeseries feature metadata from a schema."""
   node_sets_cache: Dict[str, List[TimeseriesGroupSpec]] = {}
   for ns_name, ns_schema in schema.node_sets.items():
-    specs = _extract_entity_set_timeseries_specs(ns_schema.features)
-    if specs:
-      node_sets_cache[ns_name] = specs
+    node_sets_cache[ns_name] = _extract_entity_set_timeseries_specs(
+        ns_schema.features
+    )
 
   edge_sets_cache: Dict[str, List[TimeseriesGroupSpec]] = {}
   for es_name, es_schema in schema.edge_sets.items():
-    specs = _extract_entity_set_timeseries_specs(es_schema.features)
-    if specs:
-      edge_sets_cache[es_name] = specs
+    edge_sets_cache[es_name] = _extract_entity_set_timeseries_specs(
+        es_schema.features
+    )
 
+  has_ts = any(node_sets_cache.values()) or any(edge_sets_cache.values())
   return TimeseriesSchemaCache(
-      node_sets=node_sets_cache, edge_sets=edge_sets_cache
+      node_sets=node_sets_cache,
+      edge_sets=edge_sets_cache,
+      has_timeseries=has_ts,
   )

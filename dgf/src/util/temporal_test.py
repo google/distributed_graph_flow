@@ -27,8 +27,41 @@ class TemporalTest(absltest.TestCase):
         edge_sets={},
     )
     cache = temporal.extract_timeseries_schema_cache(schema)
-    self.assertEqual(cache.node_sets, {})
+    self.assertEqual(cache.node_sets, {"nodes": []})
     self.assertEqual(cache.edge_sets, {})
+    self.assertFalse(cache.has_timeseries)
+
+  def test_extract_timeseries_schema_cache_no_timeseries_features(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "nodes": schema_lib.NodeSchema(
+                features={
+                    "feat1": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                        is_timeseries=False,
+                    )
+                }
+            )
+        },
+        edge_sets={
+            "edges": schema_lib.EdgeSchema(
+                source="nodes",
+                target="nodes",
+                features={
+                    "feat2": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                        is_timeseries=False,
+                    )
+                },
+            )
+        },
+    )
+    cache = temporal.extract_timeseries_schema_cache(schema)
+    self.assertEqual(cache.node_sets, {"nodes": []})
+    self.assertEqual(cache.edge_sets, {"edges": []})
+    self.assertFalse(cache.has_timeseries)
 
   def test_extract_timeseries_schema_cache_grouped(self):
     schema = schema_lib.GraphSchema(
@@ -76,6 +109,7 @@ class TemporalTest(absltest.TestCase):
     )
 
     cache = temporal.extract_timeseries_schema_cache(schema)
+    self.assertTrue(cache.has_timeseries)
 
     self.assertIn("hardware", cache.node_sets)
     self.assertLen(cache.node_sets["hardware"], 1)

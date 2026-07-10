@@ -254,6 +254,7 @@ class TemporalTest(absltest.TestCase):
             ]
         },
         edge_sets={},
+        has_timeseries=True,
     )
     # Should not raise ValueError for missing node set
     temporal.filter_timeseries_by_timestamp(

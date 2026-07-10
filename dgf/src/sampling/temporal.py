@@ -32,6 +32,12 @@ def _filter_entity_set_timeseries(
 ) -> None:
   """Causally slices pre-scanned timeseries features for a node set or edge set in place."""
   for group in ts_specs:
+    # The features is a timeseries, but does not have associated timestamps
+    # this can be the case for regularly sampled features, but prevents
+    # filtering to a specific timestamp to prevent lookahead.
+    if group.timestamp_feature_name is None:
+      continue
+
     ts_val = entity_val.features[group.timestamp_feature_name]
     feature_names = group.feature_names
     feature_arrays = [entity_val.features[fname] for fname in feature_names]

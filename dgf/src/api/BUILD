@@ -100,6 +100,7 @@ py_library(
         "//dgf/src/transform:schema",
         "//dgf/src/transform:table_2_graph",
         "//dgf/src/transform:temporal",
+        "//dgf/src/transform:timeseries",
         "//dgf/src/util:util_py",
     ],
 )

@@ -117,6 +117,19 @@ py_library(
     ],
 )
 
+py_library(
+    name = "timeseries",
+    srcs = ["timeseries.py"],
+    deps = [
+        # dataclasses_json dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/io:feature_format",
+        "//dgf/src/util:temporal",
+        # numpy dep,
+    ],
+)
+
 # Tests
 # =====
 
@@ -230,6 +243,18 @@ py_test(
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/util:test_util",
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "timeseries_test",
+    srcs = ["timeseries_test.py"],
+    deps = [
+        ":timeseries",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
         # numpy dep,
     ],
 )
