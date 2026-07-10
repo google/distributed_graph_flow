@@ -30,11 +30,13 @@ from dgf.src.data import schema as schema_lib
 from dgf.src.data import statistics as statistics_lib
 from dgf.src.io import jax as jax_lib
 from dgf.src.learning.jax import common as jax_common_lib
+from dgf.src.learning.ten_lines import common
 from dgf.src.learning.ten_lines import dataset
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import normalize as normalize_lib
 from dgf.src.util import log
+from dgf.src.util import util
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -441,10 +443,8 @@ class GNNDatasetPreparator:
           )
         else:
           # The normalized features in numpy format, and should be casted.
-          jax_normalized_sample = (
-              attach_features_from_jax_graph_and_cast_to_jax(
-                  live.normalized_graph, sample  # pyrefly: ignore[bad-argument-type]
-              )
+          jax_normalized_sample = attach_features_from_jax_graph_and_cast_to_jax(
+              live.normalized_graph, sample  # pyrefly: ignore[bad-argument-type]
           )
       else:
         normalized_sample = live.normalizer.normalize_numpy(sample)
@@ -504,3 +504,181 @@ def attach_features_from_jax_graph_and_cast_to_jax(
   return jax_in_memory_graph.JaxInMemoryGraph(
       node_sets=jax_node_sets, edge_sets=jax_edge_sets
   )
+
+
+def compute_train_and_valid_node_idxs(
+    graph: common.Graph,
+    valid_graph: Optional[common.Graph],
+    graph_format: Union[dataset.GraphFormat, str],
+    target_nodeset: str,
+    random_seed: int,
+    validation_ratio: float,
+    train_seed_nodes: Optional[common.SeedNodeIdxs],
+    valid_seed_nodes: Optional[common.SeedNodeIdxs],
+    max_num_valid_examples: Optional[int],
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+  """Computes the training and validation seed node indices."""
+  if not isinstance(graph, in_memory_graph_lib.InMemoryGraph) or (
+      valid_graph is not None
+      and not isinstance(valid_graph, in_memory_graph_lib.InMemoryGraph)
+  ):
+    if train_seed_nodes is not None or valid_seed_nodes is not None:
+      raise ValueError(
+          "Specifying 'train_seed_nodes' or 'valid_seed_nodes' is not supported"
+          f" for the current graph format ({graph_format}). Currently, only"
+          " the InMemoryGraph format is supported."
+      )
+    return None, None
+
+  num_graph_seed_nodes = graph.node_sets[target_nodeset].num_nodes
+  if valid_graph is None:
+    num_valid_graph_seed_nodes = num_graph_seed_nodes
+  else:
+    assert isinstance(valid_graph, in_memory_graph_lib.InMemoryGraph)
+    num_valid_graph_seed_nodes = valid_graph.node_sets[target_nodeset].num_nodes
+  assert num_graph_seed_nodes is not None
+  assert num_valid_graph_seed_nodes is not None
+
+  if train_seed_nodes is not None:
+    return np.array(train_seed_nodes), (
+        np.array(valid_seed_nodes) if valid_seed_nodes else None
+    )
+
+  if valid_seed_nodes is not None:
+    if valid_graph is None:
+      raise ValueError(
+          "`valid_seed_nodes` can only be specified when `train_seed_nodes` is"
+          " also specified if not validation graph (valid_graph) is provided."
+      )
+    return None, np.array(valid_seed_nodes)
+
+  if validation_ratio == 0 or valid_graph is not None:
+    log.info(
+        "Train model on the full provided graphs. Num training seed nodes:"
+        " %d. Num validation seed nodes: %d",
+        num_graph_seed_nodes,
+        num_valid_graph_seed_nodes,
+    )
+    return None, None
+
+  train_seed_node_idxs, valid_seed_node_idxs = util.split_train_valid(
+      num_graph_seed_nodes,
+      validation_ratio,
+      random_seed,
+      max_num_valid_examples=max_num_valid_examples,
+  )
+  log.info(
+      "Num. training seed nodes: %d, Num. validation seed nodes: %d",
+      len(train_seed_node_idxs),
+      len(valid_seed_node_idxs),
+  )
+  return train_seed_node_idxs, valid_seed_node_idxs
+
+
+def prepare_datasets(
+    graph: common.Graph,
+    valid_graph: common.Graph,
+    schema: schema_lib.GraphSchema,
+    target_nodeset: str,
+    random_seed: int,
+    batch_size: int,
+    num_sampling_hops: int,
+    sampling_width: int,
+    verbose: int,
+    graph_format: Union[dataset.GraphFormat, str],
+    validation_ratio: float,
+    train_seed_nodes: Optional[common.SeedNodeIdxs],
+    valid_seed_nodes: Optional[common.SeedNodeIdxs],
+    temporal_sampling: bool,
+    nodeset_timestamp_features: dict[str, str],
+    edgeset_timestamp_features: dict[str, str],
+    num_valid_steps: Optional[int],
+    cache_valid_dataset: bool,
+    cache_normalized_features: bool,
+    cache_normalized_features_device: Literal["host", "device"],
+    sampling_plan: Optional[sampling_config_lib.SamplingPlan],
+    auto_normalize_config: Optional[normalize_lib.AutoNormalizeConfig] = None,
+    keep_raw_features: Optional[set[str]] = None,
+) -> Tuple["GNNDatasetPreparator", Optional["GNNDatasetPreparator"]]:
+  """Prepares the training dataset by sampling, normalizing, and padding."""
+  if not cache_valid_dataset or num_valid_steps is None:
+    max_num_valid_examples = None
+  else:
+    max_num_valid_examples = num_valid_steps * batch_size
+
+  train_seed_node_idxs, valid_seed_node_idxs = (
+      compute_train_and_valid_node_idxs(
+          graph,
+          valid_graph,
+          graph_format,
+          target_nodeset=target_nodeset,
+          random_seed=random_seed,
+          validation_ratio=validation_ratio,
+          train_seed_nodes=train_seed_nodes,
+          valid_seed_nodes=valid_seed_nodes,
+          max_num_valid_examples=max_num_valid_examples,
+      )
+  )
+
+  if sampling_plan is None:
+    sampling_config = sampling_config_lib.SimpleSamplingConfig(
+        seed_nodeset=target_nodeset,
+        num_hops=num_sampling_hops,
+        hop_width=sampling_width,
+        reverse=True,
+        edgeset_timestamp_features=edgeset_timestamp_features
+        if temporal_sampling
+        else {},
+    )
+    sampling_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
+        sampling_config, schema
+    )
+
+  if auto_normalize_config is None:
+    auto_normalize_config = normalize_lib.AutoNormalizeConfig(
+        keep_raw_features=keep_raw_features or set(),
+        ignore_features_without_stats=True,
+    )
+  elif keep_raw_features is not None:
+    auto_normalize_config.keep_raw_features.update(keep_raw_features)
+
+  common_kwargs = {
+      "format": graph_format,
+      "schema": schema,
+      "sampling_plan": sampling_plan,
+      "batch_size": batch_size,
+      "drop_remainder": True,
+      "verbose_preparation": verbose >= 2,
+      "auto_normalize_config": auto_normalize_config,
+      "skip_overflow_padding_error": True,
+      "temporal_sampling": temporal_sampling,
+      "nodeset_timestamp_features": nodeset_timestamp_features,
+      "edgeset_timestamp_features": edgeset_timestamp_features,
+      "cache_normalized_features": cache_normalized_features,
+      "cache_normalized_features_device": cache_normalized_features_device,
+  }
+
+  train_dataset = GNNDatasetPreparator(
+      graph=graph,
+      seed_node_idxs=train_seed_node_idxs,
+      shuffle=True,
+      **common_kwargs,
+  )
+  train_dataset.prepare()
+
+  valid_dataset = GNNDatasetPreparator(
+      graph=valid_graph if valid_graph is not None else graph,
+      seed_node_idxs=valid_seed_node_idxs,
+      shuffle=not cache_valid_dataset,
+      **common_kwargs,
+  )
+  valid_dataset.prepare_from_existing_one(train_dataset)
+
+  common.check_number_of_seeds(
+      batch_size=batch_size,
+      num_training=train_dataset.num_nodes_in_seed_nodeset(),
+      num_validation=valid_dataset.num_nodes_in_seed_nodeset(),
+      key="node",
+  )
+
+  return train_dataset, valid_dataset

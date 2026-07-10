@@ -251,6 +251,7 @@ py_library(
     name = "node_prediction_dataset",
     srcs = ["node_prediction_dataset.py"],
     deps = [
+        ":common",
         ":dataset",
         "//dgf/src/analyse:in_process_feature_statistics",
         "//dgf/src/analyse:padding",
@@ -265,6 +266,7 @@ py_library(
         "//dgf/src/sampling:in_memory_sampler",
         "//dgf/src/transform:normalize",
         "//dgf/src/util:log",
+        "//dgf/src/util:util_py",
         # jax dep,
         # numpy dep,
     ],

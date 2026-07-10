@@ -293,13 +293,14 @@ class NodePredictionModel(common.Model):
       ]
     except KeyError as e:
       raise ValueError(
-          f"Could not find statistics for target {target_nodeset}.{target_column}"
+          "Could not find statistics for target"
+          f" {target_nodeset}.{target_column}"
       ) from e
 
     if not stats.dictionary:
       raise ValueError(
-          f"Target column {target_nodeset}.{target_column} does not have a string dictionary. "
-          "It might already be integer-encoded."
+          f"Target column {target_nodeset}.{target_column} does not have a"
+          " string dictionary. It might already be integer-encoded."
       )
 
     # Sort keys by their index
