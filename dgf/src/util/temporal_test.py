@@ -123,6 +123,59 @@ class TemporalTest(absltest.TestCase):
     self.assertEqual(e1_group.timestamp_feature_name, "ts")
     self.assertCountEqual(e1_group.feature_names, ["ts", "weight_series"])
 
+  def test_feature_schema_helpers(self):
+    scalar_ts = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        shape=(None,),
+        is_timeseries=True,
+    )
+    self.assertEqual(temporal.get_timeseries_step_shape(scalar_ts), ())
+    self.assertEqual(temporal.with_sequence_length(scalar_ts, 30).shape, (30,))
+    self.assertTrue(temporal.with_sequence_length(scalar_ts, 30).is_timeseries)
+
+    vector_ts = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        shape=(None, 8),
+        is_timeseries=True,
+    )
+    self.assertEqual(temporal.get_timeseries_step_shape(vector_ts), (8,))
+    self.assertEqual(
+        temporal.with_sequence_length(vector_ts, 30).shape, (30, 8)
+    )
+
+    unknown_ts = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        shape=None,
+        is_timeseries=True,
+    )
+    with self.assertRaisesRegex(
+        ValueError,
+        r"Timeseries feature schema must have at least 1 dimension \(sequence"
+        r" length at shape\[0\]\), but got shape=None\.",
+    ):
+      temporal.get_timeseries_step_shape(unknown_ts)
+
+    empty_tuple_ts = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        shape=(),
+        is_timeseries=True,
+    )
+    with self.assertRaisesRegex(
+        ValueError,
+        r"Timeseries feature schema must have at least 1 dimension \(sequence"
+        r" length at shape\[0\]\), but got shape=\(\)\.",
+    ):
+      temporal.get_timeseries_step_shape(empty_tuple_ts)
+
+    non_ts = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        shape=(10,),
+        is_timeseries=False,
+    )
+    with self.assertRaisesRegex(
+        ValueError, r"Feature schema must be a timeseries feature\."
+    ):
+      temporal.get_timeseries_step_shape(non_ts)
 
 if __name__ == "__main__":
   absltest.main()

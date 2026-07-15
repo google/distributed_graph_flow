@@ -16,7 +16,7 @@
 
 import collections
 import dataclasses
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from dgf.src.data import schema as schema_lib
 
@@ -87,4 +87,31 @@ def extract_timeseries_schema_cache(
       node_sets=node_sets_cache,
       edge_sets=edge_sets_cache,
       has_timeseries=has_ts,
+  )
+
+
+def get_timeseries_step_shape(
+    fschema: schema_lib.FeatureSchema,
+) -> Tuple[Optional[int], ...]:
+  """Returns per-step feature dimension, excluding leading sequence length shape[0]."""
+  if not fschema.is_timeseries:
+    raise ValueError("Feature schema must be a timeseries feature.")
+  elif fschema.shape is None or not fschema.shape:
+    raise ValueError(
+        "Timeseries feature schema must have at least 1 dimension (sequence"
+        f" length at shape[0]), but got shape={fschema.shape}."
+    )
+  return fschema.shape[1:]
+
+
+def with_sequence_length(
+    fschema: schema_lib.FeatureSchema,
+    seq_len: int,
+) -> schema_lib.FeatureSchema:
+  """Returns a copy of the schema with shape[0] set to seq_len."""
+  step_shape = get_timeseries_step_shape(fschema)
+  return dataclasses.replace(
+      fschema,
+      shape=(seq_len,) + step_shape,
+      is_timeseries=True,
   )

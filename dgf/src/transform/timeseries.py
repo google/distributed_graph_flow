@@ -16,6 +16,7 @@
 
 # pytype: disable=module-attr
 import dataclasses
+import enum
 from typing import Any, List, Optional, Tuple
 
 import dataclasses_json
@@ -112,15 +113,70 @@ def _pad_and_cap_single_feature(
   return padded_matrix, mask_matrix
 
 
+class CalendarFeature(str, enum.Enum):
+  """Supported calendar features to extract from timestamps."""
+
+  SECOND = "second"
+  MINUTE = "minute"
+  HOUR = "hour"
+  DAY_OF_WEEK = "day_of_week"
+  MONTH = "month"
+  YEAR = "year"
+
+
+_SUPPORTED_CALENDAR_FEATURES = tuple(CalendarFeature)
+
+
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass
+class CalendarFeatureConfig:
+  """Configuration for extracting calendar features from timestamps.
+
+  Attributes:
+    features: Tuple of calendar feature enums to extract. Supported values:
+      CalendarFeature.SECOND, CalendarFeature.MINUTE, CalendarFeature.HOUR,
+      CalendarFeature.DAY_OF_WEEK, CalendarFeature.MONTH, CalendarFeature.YEAR.
+  """
+
+  features: Tuple[CalendarFeature, ...] = _SUPPORTED_CALENDAR_FEATURES
+
+
+def _compute_calendar_feature(
+    ts_array: np.ndarray, feature: CalendarFeature
+) -> np.ndarray:
+  """Computes a single vectorized calendar feature from an int64 timestamp array."""
+
+  if feature == CalendarFeature.SECOND:
+    return (ts_array % 60).astype(np.float32)
+  if feature == CalendarFeature.MINUTE:
+    return ((ts_array // 60) % 60).astype(np.float32)
+  if feature == CalendarFeature.HOUR:
+    return ((ts_array // 3600) % 24).astype(np.float32)
+  if feature == CalendarFeature.DAY_OF_WEEK:
+    return (((ts_array // 86400) + 3) % 7).astype(np.float32)
+
+  dt = ts_array.astype("datetime64[s]")
+
+  if feature == CalendarFeature.MONTH:
+    return (dt.astype("datetime64[M]").astype(int) % 12 + 1).astype(np.float32)
+  if feature == CalendarFeature.YEAR:
+    return (dt.astype("datetime64[Y]").astype(int) + 1970).astype(np.float32)
+
+  raise ValueError(
+      f"Unsupported calendar feature: '{feature}'. Supported features:"
+      f" {[f.value for f in _SUPPORTED_CALENDAR_FEATURES]}"
+  )
+
+
 def _process_feature_set(
-    features: in_memory_graph.Features,
-    feature_schemas: schema_lib.FeatureSetSchema,
+    values: in_memory_graph.Features,
+    schemas: schema_lib.FeatureSetSchema,
     ts_specs: List[temporal_util.TimeseriesGroupSpec],
     config: PadAndCapTimeseriesConfig,
 ) -> Tuple[in_memory_graph.Features, schema_lib.FeatureSetSchema]:
   """Extracts fixed-dimension sequence features for a feature set."""
-  new_features: in_memory_graph.Features = {}
-  new_feat_schemas: schema_lib.FeatureSetSchema = {}
+  new_values: in_memory_graph.Features = {}
+  new_schemas: schema_lib.FeatureSetSchema = {}
   seq_len = config.sequence_length
 
   # Map timeseries feature names to their associated timestamp feature name.
@@ -129,46 +185,42 @@ def _process_feature_set(
     for fname in group.feature_names:
       ts_features[fname] = group.timestamp_feature_name
 
-  for fname, fschema in feature_schemas.items():
+  for fname, schema in schemas.items():
     if fname not in ts_features:
-      new_features[fname] = features[fname]
-      new_feat_schemas[fname] = fschema
+      new_values[fname] = values[fname]
+      new_schemas[fname] = schema
 
   if not ts_features:
-    return new_features, new_feat_schemas
+    return new_values, new_schemas
 
   for fname in ts_features:
-    fschema = feature_schemas[fname]
+    schema = schemas[fname]
 
-    dtype = feature_format.FEATURE_FORMAT_TO_NP_DTYPE[fschema.format]
-    feat_shape = fschema.shape[1:] if fschema.shape is not None else ()
+    dtype = feature_format.FEATURE_FORMAT_TO_NP_DTYPE[schema.format]
+    feat_shape = temporal_util.get_timeseries_step_shape(schema)
 
     padded_matrix, mask_matrix = _pad_and_cap_single_feature(
-        raw_series=features[fname],
+        raw_series=values[fname],
         seq_len=seq_len,
         feat_shape=feat_shape,
         padding_value=config.padding_value,
         dtype=dtype,
-        is_static_shape=fschema.is_static_shape(),
+        is_static_shape=schema.is_static_shape(),
     )
 
-    new_features[fname] = padded_matrix
-    new_feat_schemas[fname] = dataclasses.replace(
-        fschema,
-        shape=(seq_len,) + feat_shape,
-        is_timeseries=True,
-    )
+    new_values[fname] = padded_matrix
+    new_schemas[fname] = temporal_util.with_sequence_length(schema, seq_len)
 
-    new_features[f"{fname}_mask"] = mask_matrix
-    new_feat_schemas[f"{fname}_mask"] = schema_lib.FeatureSchema(
+    new_values[f"{fname}_mask"] = mask_matrix
+    new_schemas[f"{fname}_mask"] = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.BOOL,
         semantic=schema_lib.FeatureSemantic.NUMERICAL,
         shape=(seq_len,) + feat_shape,
-        is_timeseries=fschema.is_timeseries,
-        timestamps=fschema.timestamps,
+        is_timeseries=schema.is_timeseries,
+        timestamps=schema.timestamps,
     )
 
-  return new_features, new_feat_schemas
+  return new_values, new_schemas
 
 
 def pad_and_cap_timeseries_features(
@@ -221,14 +273,14 @@ def pad_and_cap_timeseries_features(
       new_ns_schemas[ns_name] = ns_schema
       continue
 
-    new_feats, new_schemas = _process_feature_set(
-        features=ns_val.features,
-        feature_schemas=ns_schema.features,
+    new_vals, new_schemas = _process_feature_set(
+        values=ns_val.features,
+        schemas=ns_schema.features,
         ts_specs=ts_specs,
         config=config,
     )
     new_node_sets[ns_name] = in_memory_graph.InMemoryNodeSet(
-        num_nodes=ns_val.num_nodes, features=new_feats
+        num_nodes=ns_val.num_nodes, features=new_vals
     )
     new_ns_schemas[ns_name] = schema_lib.NodeSchema(features=new_schemas)
 
@@ -243,14 +295,144 @@ def pad_and_cap_timeseries_features(
       new_es_schemas[es_name] = es_schema
       continue
 
-    new_feats, new_schemas = _process_feature_set(
-        features=es_val.features,
-        feature_schemas=es_schema.features,
+    new_vals, new_schemas = _process_feature_set(
+        values=es_val.features,
+        schemas=es_schema.features,
         ts_specs=ts_specs,
         config=config,
     )
     new_edge_sets[es_name] = in_memory_graph.InMemoryEdgeSet(
-        adjacency=es_val.adjacency, features=new_feats
+        adjacency=es_val.adjacency, features=new_vals
+    )
+    new_es_schemas[es_name] = schema_lib.EdgeSchema(
+        source=es_schema.source,
+        target=es_schema.target,
+        features=new_schemas,
+    )
+
+  return (
+      in_memory_graph.InMemoryGraph(
+          node_sets=new_node_sets, edge_sets=new_edge_sets
+      ),
+      schema_lib.GraphSchema(
+          node_sets=new_ns_schemas, edge_sets=new_es_schemas
+      ),
+  )
+
+
+def _extract_feature_set_calendar_features(
+    values: in_memory_graph.Features,
+    schemas: schema_lib.FeatureSetSchema,
+    config: CalendarFeatureConfig,
+) -> Tuple[in_memory_graph.Features, schema_lib.FeatureSetSchema]:
+  """Extracts calendar features from timestamp features of a single feature set."""
+  new_values: in_memory_graph.Features = {}
+  new_schemas: schema_lib.FeatureSetSchema = {}
+
+  for fname, schema in schemas.items():
+    raw_val = values[fname]
+    new_values[fname] = raw_val
+    new_schemas[fname] = schema
+
+    # Skip non-timestamp features.
+    if schema.semantic != schema_lib.FeatureSemantic.TIMESTAMP:
+      continue
+
+    if raw_val.dtype == np.object_:
+      raise ValueError(
+          "extract_calendar_features requires fixed-length timestamp tensors,"
+          f" but feature '{fname}' is a variable-length object array."
+          " Please run pad_and_cap_timeseries_features first."
+      )
+
+    # Case 1: For non-timeseries timestamps, derived calendar features do not
+    # reference a timestamp sequence.
+    if not schema.is_timeseries:
+      calendar_timestamps = None
+    # Case 2: For timeseries features that reference a timestamp sequence.
+    elif schema.timestamps is not None:
+      calendar_timestamps = schema.timestamps
+    # Case 3: For timeseries features that do not reference a timestamp
+    # sequence, derived calendar sequences reference the original feature
+    # as their timestamp sequence.
+    else:
+      calendar_timestamps = fname
+
+    for cal_feat in config.features:
+      out_fname = f"{fname}_{cal_feat.value}"
+      cal_arr = _compute_calendar_feature(raw_val, cal_feat)
+      new_values[out_fname] = cal_arr
+      new_schemas[out_fname] = schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.FLOAT_32,
+          semantic=schema_lib.FeatureSemantic.NUMERICAL,
+          shape=schema.shape,
+          is_timeseries=schema.is_timeseries,
+          timestamps=calendar_timestamps,
+      )
+
+  return new_values, new_schemas
+
+
+def extract_calendar_features(
+    graph: in_memory_graph.InMemoryGraph,
+    schema: schema_lib.GraphSchema,
+    config: Optional[CalendarFeatureConfig] = None,
+) -> Tuple[in_memory_graph.InMemoryGraph, schema_lib.GraphSchema]:
+  """Extracts calendar features (e.g. hour, day_of_week) from timestamp features.
+
+  Requires fixed-length timestamp tensors (e.g., produced after running
+  `pad_and_cap_timeseries_features`).
+
+  Usage example:
+
+  ```python
+  graph, schema = dgf.transform.pad_and_cap_timeseries_features(
+      graph, schema, cap_config
+  )
+  graph, schema = dgf.transform.extract_calendar_features(graph, schema)
+  ```
+
+  Args:
+    graph: The input in-memory graph.
+    schema: The graph schema containing timestamp features.
+    config: Optional `CalendarFeatureConfig`.
+
+  Returns:
+    Tuple `(new_graph, new_schema)` containing original and extracted calendar
+    features.
+  """
+
+  # Default to extracting all calendar features
+  if config is None:
+    config = CalendarFeatureConfig()
+
+  new_node_sets = {}
+  new_ns_schemas = {}
+
+  for ns_name, ns_schema in schema.node_sets.items():
+    ns_val = graph.node_sets[ns_name]
+    new_vals, new_schemas = _extract_feature_set_calendar_features(
+        values=ns_val.features,
+        schemas=ns_schema.features,
+        config=config,
+    )
+    new_node_sets[ns_name] = in_memory_graph.InMemoryNodeSet(
+        num_nodes=ns_val.num_nodes, features=new_vals
+    )
+    new_ns_schemas[ns_name] = schema_lib.NodeSchema(features=new_schemas)
+
+  new_edge_sets = {}
+  new_es_schemas = {}
+
+  for es_name, es_schema in schema.edge_sets.items():
+    es_val = graph.edge_sets[es_name]
+    new_vals, new_schemas = _extract_feature_set_calendar_features(
+        values=es_val.features,
+        schemas=es_schema.features,
+        config=config,
+    )
+    new_edge_sets[es_name] = in_memory_graph.InMemoryEdgeSet(
+        adjacency=es_val.adjacency, features=new_vals
     )
     new_es_schemas[es_name] = schema_lib.EdgeSchema(
         source=es_schema.source,

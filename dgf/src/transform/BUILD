@@ -255,6 +255,7 @@ py_test(
         # absl/testing:absltest dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
+        "//dgf/src/util:test_util",
         # numpy dep,
     ],
 )
