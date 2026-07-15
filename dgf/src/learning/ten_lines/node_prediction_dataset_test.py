@@ -17,7 +17,6 @@
 import os
 from absl.testing import absltest
 from absl.testing import parameterized
-from dgf.src.data import schema as schema_lib
 from dgf.src.io import jax as jax_io_lib
 from dgf.src.io import tf_graph_sample
 from dgf.src.learning.ten_lines import node_prediction_dataset

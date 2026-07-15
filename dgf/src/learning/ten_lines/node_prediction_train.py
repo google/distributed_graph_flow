@@ -23,7 +23,6 @@ import textwrap
 import time
 from typing import Callable, Dict, Literal, Optional, Tuple, Union
 from dgf.src.analyse import print_schema as print_schema_lib
-from dgf.src.data import in_memory_graph
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import jax as jax_lib
@@ -58,209 +57,6 @@ NodePredictionModel = node_prediction_model.NodePredictionModel
 ModelData = node_prediction_model.ModelData
 TrainingStats = node_prediction_model.TrainingStats
 CoreModelConfig = node_prediction_core_model.CoreModelConfig
-
-
-# TODO(gbm): Add support for dataset from other sources.
-def prepare_datasets(
-    graph: common.Graph,
-    valid_graph: common.Graph,
-    schema: schema_lib.GraphSchema,
-    hparams: node_prediction_model.HParam,
-    task: node_prediction_model.NodePredictionTask,
-    verbose: int,
-    graph_format: Union[dataset.GraphFormat, str],
-    validation_ratio: float,
-    train_seed_nodes: Optional[common.SeedNodeIdxs],
-    valid_seed_nodes: Optional[common.SeedNodeIdxs],
-    temporal_sampling: bool,
-    nodeset_timestamp_features: dict[str, str],
-    edgeset_timestamp_features: dict[str, str],
-    num_valid_steps: Optional[int],
-    cache_valid_dataset: bool,
-    batch_size: int,
-    cache_normalized_features: bool,
-    cache_normalized_features_device: Literal["host", "device"],
-    sampling_plan: Optional[sampling_config_lib.SamplingPlan],
-) -> Tuple[
-    node_prediction_dataset.GNNDatasetPreparator,
-    Optional[node_prediction_dataset.GNNDatasetPreparator],
-]:
-  """Prepares the training dataset by sampling, normalizing, and padding."""
-
-  if not cache_valid_dataset or num_valid_steps is None:
-    max_num_valid_examples = None
-  else:
-    max_num_valid_examples = num_valid_steps * batch_size
-
-  train_seed_node_idxs, valid_seed_node_idxs = (
-      compute_train_and_valid_node_idxs(
-          graph,
-          valid_graph,
-          graph_format,
-          hparams=hparams,
-          task=task,
-          validation_ratio=validation_ratio,
-          train_seed_nodes=train_seed_nodes,
-          valid_seed_nodes=valid_seed_nodes,
-          max_num_valid_examples=max_num_valid_examples,
-      )
-  )
-
-  if sampling_plan is None:
-    sampling_config = sampling_config_lib.SimpleSamplingConfig(
-        seed_nodeset=task.target_nodeset,
-        num_hops=hparams.num_sampling_hops,
-        hop_width=hparams.sampling_width,
-        reverse=True,
-        edgeset_timestamp_features=edgeset_timestamp_features
-        if temporal_sampling
-        else {},
-    )
-    sampling_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
-        sampling_config, schema
-    )
-
-  # TODO(gbm): Should we allow for the training and validation graphs to be in
-  # different format?
-  common_kwargs = {
-      "format": graph_format,
-      "schema": schema,
-      "sampling_plan": sampling_plan,
-      "batch_size": hparams.batch_size,
-      "drop_remainder": True,
-      "verbose_preparation": verbose >= 2,
-      "auto_normalize_config": normalize_lib.AutoNormalizeConfig(
-          keep_raw_features={task.target_column}
-          if task.task_type == node_prediction_model.TaskType.NODE_REGRESSION
-          else set(),
-          ignore_features_without_stats=True,
-      ),
-      "skip_overflow_padding_error": True,
-      "temporal_sampling": temporal_sampling,
-      "nodeset_timestamp_features": nodeset_timestamp_features,
-      "edgeset_timestamp_features": edgeset_timestamp_features,
-      "cache_normalized_features": cache_normalized_features,
-      "cache_normalized_features_device": cache_normalized_features_device,
-  }
-
-  train_dataset = node_prediction_dataset.GNNDatasetPreparator(
-      graph=graph,
-      seed_node_idxs=train_seed_node_idxs,
-      shuffle=True,
-      **common_kwargs,
-  )
-  # Note: This stage computes the feature statistics and the padder.
-  train_dataset.prepare()
-
-  valid_dataset = node_prediction_dataset.GNNDatasetPreparator(
-      graph=valid_graph if valid_graph is not None else graph,
-      seed_node_idxs=valid_seed_node_idxs,
-      # We shuffle the validation iff. it is not cached.
-      shuffle=not cache_valid_dataset,
-      **common_kwargs,
-  )
-  valid_dataset.prepare_from_existing_one(train_dataset)
-
-  common.check_number_of_seeds(
-      batch_size=hparams.batch_size,
-      num_training=train_dataset.num_nodes_in_seed_nodeset(),
-      num_validation=valid_dataset.num_nodes_in_seed_nodeset(),
-      key="node",
-  )
-
-  return train_dataset, valid_dataset
-
-
-def compute_train_and_valid_node_idxs(
-    graph: common.Graph,
-    valid_graph: Optional[common.Graph],
-    graph_format: Union[dataset.GraphFormat, str],
-    hparams: HParam,
-    task: NodePredictionTask,
-    validation_ratio: float,
-    train_seed_nodes: Optional[common.SeedNodeIdxs],
-    valid_seed_nodes: Optional[common.SeedNodeIdxs],
-    max_num_valid_examples: Optional[int],
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-  """Computes the training and validation seed node indices.
-
-  This method handles the various cases:
-    - The user provided only a training graph, or both a training and validation
-      graph.
-    - The user provided some seed nodes (training and/or validation) or none.
-    - The user provided a validation ratio >0, or not.
-
-  Returns:
-    A tuple containing two elements:
-      - The training node indices: An np.ndarray of integers, or None if all
-      nodes in the graph should be used for training.
-      - The validation node indices: An np.ndarray of integers, or None if all
-      nodes in the graph should be used for validation.
-  """
-
-  if not isinstance(graph, in_memory_graph.InMemoryGraph) or (
-      valid_graph is not None
-      and not isinstance(valid_graph, in_memory_graph.InMemoryGraph)
-  ):
-    if train_seed_nodes is not None or valid_seed_nodes is not None:
-      raise ValueError(
-          "Specifying 'train_seed_nodes' or 'valid_seed_nodes' is not supported"
-          f" for the current graph format ({graph_format}). Currently, only"
-          " the InMemoryGraph format is supported."
-      )
-    return None, None
-
-  num_graph_seed_nodes = graph.node_sets[task.target_nodeset].num_nodes
-  if valid_graph is None:
-    num_valid_graph_seed_nodes = num_graph_seed_nodes
-  else:
-    assert isinstance(valid_graph, in_memory_graph.InMemoryGraph)
-    num_valid_graph_seed_nodes = valid_graph.node_sets[
-        task.target_nodeset
-    ].num_nodes
-  assert num_graph_seed_nodes is not None
-  assert num_valid_graph_seed_nodes is not None
-
-  if train_seed_nodes is not None:
-    # The user provided the seed nodes.
-    return np.array(train_seed_nodes), (
-        np.array(valid_seed_nodes) if valid_seed_nodes else None
-    )
-
-  if valid_seed_nodes is not None:
-    # Validation idxs but not training idxs.
-    if valid_graph is None:
-      raise ValueError(
-          "`valid_seed_nodes` can only be specified when `train_seed_nodes` is"
-          " also specified if not validation graph (valid_graph) is provided."
-      )
-    return None, np.array(valid_seed_nodes)
-
-  # The user did not provide any seed node.
-
-  if validation_ratio == 0 or valid_graph is not None:
-    # Use the full dataset for training.
-    log.info(
-        "Train model on the full provided graphs. Num training seed nodes:"
-        " %d. Num validation seed nodes: %d",
-        num_graph_seed_nodes,
-        num_valid_graph_seed_nodes,
-    )
-    return None, None
-
-  # The user only provided a train graph (no valid graph) and no seed nodes.
-  train_seed_node_idxs, valid_seed_node_idxs = util.split_train_valid(
-      num_graph_seed_nodes,
-      validation_ratio,
-      hparams.random_seed,
-      max_num_valid_examples=max_num_valid_examples,
-  )
-  log.info(
-      "Num. training seed nodes: %d, Num. validation seed nodes: %d",
-      len(train_seed_node_idxs),
-      len(valid_seed_node_idxs),
-  )
-  return train_seed_node_idxs, valid_seed_node_idxs
 
 
 def create_core_model_config(
@@ -520,12 +316,18 @@ def train_node_model(
 
   with util.print_timer("Preparing dataset", verbose >= 1):
     with jax.profiler.TraceAnnotation("prepare dataset"):
-      train_dataset, valid_dataset = prepare_datasets(
+      train_dataset, valid_dataset = node_prediction_dataset.prepare_datasets(
           graph=graph,
           valid_graph=valid_graph,  # pyrefly: ignore[bad-argument-type]
           schema=schema,
-          hparams=hparams,
-          task=task,
+          target_nodeset=task.target_nodeset,
+          random_seed=hparams.random_seed,
+          batch_size=hparams.batch_size,
+          num_sampling_hops=hparams.num_sampling_hops,
+          sampling_width=hparams.sampling_width,
+          keep_raw_features={task.target_column}
+          if task.task_type == node_prediction_model.TaskType.NODE_REGRESSION
+          else set(),
           verbose=verbose,
           graph_format=graph_format,
           validation_ratio=validation_ratio,
@@ -535,7 +337,6 @@ def train_node_model(
           nodeset_timestamp_features=nodeset_ts_features,
           edgeset_timestamp_features=edgeset_ts_features,
           num_valid_steps=num_valid_steps,
-          batch_size=batch_size,
           cache_valid_dataset=cache_valid_dataset,
           cache_normalized_features=cache_normalized_features,
           cache_normalized_features_device=cache_normalized_features_device,
