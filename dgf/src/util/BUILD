@@ -280,14 +280,15 @@ py_test(
 )
 
 py_test(
-    name = "filesystem_gcs_test",
-    srcs = ["filesystem_gcs_test.py"],
+    name = "filesystem_integration_test",
+    srcs = ["filesystem_integration_test.py"],
     tags = [
         "manual",
         "notap",
     ],
     deps = [
         ":filesystem",
+        # absl/flags dep,
         # absl/testing:absltest dep,
     ],
 )
