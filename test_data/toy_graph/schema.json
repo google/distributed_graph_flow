@@ -11,7 +11,8 @@
           "num_categorical_values": null,
           "is_utf8_string": false,
           "is_timeseries": false,
-          "timestamps": null
+          "is_creation_time": false,
+          "group": null
         },
         "f1": {
           "format": "BYTES",
@@ -22,7 +23,8 @@
           "num_categorical_values": null,
           "is_utf8_string": false,
           "is_timeseries": false,
-          "timestamps": null
+          "is_creation_time": false,
+          "group": null
         },
         "#id": {
           "format": "BYTES",
@@ -31,7 +33,8 @@
           "num_categorical_values": null,
           "is_utf8_string": false,
           "is_timeseries": false,
-          "timestamps": null
+          "is_creation_time": false,
+          "group": null
         }
       }
     },
@@ -44,7 +47,8 @@
           "num_categorical_values": null,
           "is_utf8_string": false,
           "is_timeseries": false,
-          "timestamps": null
+          "is_creation_time": false,
+          "group": null
         },
         "f4": {
           "format": "INTEGER_64",
@@ -53,7 +57,8 @@
           "num_categorical_values": null,
           "is_utf8_string": false,
           "is_timeseries": false,
-          "timestamps": null
+          "is_creation_time": false,
+          "group": null
         },
         "f5": {
           "format": "INTEGER_64",
@@ -64,7 +69,8 @@
           "num_categorical_values": null,
           "is_utf8_string": false,
           "is_timeseries": false,
-          "timestamps": null
+          "is_creation_time": false,
+          "group": null
         },
         "#id": {
           "format": "BYTES",
@@ -73,7 +79,8 @@
           "num_categorical_values": null,
           "is_utf8_string": false,
           "is_timeseries": false,
-          "timestamps": null
+          "is_creation_time": false,
+          "group": null
         }
       }
     }

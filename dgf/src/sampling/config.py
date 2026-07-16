@@ -27,8 +27,9 @@ This file defines the following important objects:
 
 import collections
 import dataclasses
-from typing import Dict, List, Union
+from typing import Dict, List
 import dataclasses_json
+from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import schema as schema_lib
 
 
@@ -58,9 +59,8 @@ class SimpleSamplingConfig:
       sampled graph. If true, the sampled graph is a tree where nodes / edges in
       the original graph might lead to multiple nodes / edges in the sampled
       grpah.
-    edgeset_timestamp_features: A dictionary mapping edgeset names to the name
-      of the feature to use as a timestamp for temporal sampling. Edgesets not
-      present in the dictionary are considered atemporal.
+    temporal_sampling: If True, temporal sampling is enabled and causal
+      timestamps are inferred from the schema.
   """
 
   seed_nodeset: str
@@ -68,9 +68,7 @@ class SimpleSamplingConfig:
   hop_width: int = 5
   reverse: bool = True
   with_replacement: bool = False
-  edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
-      default_factory=dict
-  )
+  temporal_sampling: bool = False
 
 
 @dataclasses.dataclass
@@ -110,17 +108,18 @@ class SamplingPlan:
     with_replacement: Test if the sampling is done with replacement. See
       documentation for "with_replacement" attribute in SimpleSamplingConfig for
       the full explanation.
-    edgeset_timestamp_features: A dictionary mapping edgeset names to the name
-      of the feature to use as a timestamp for temporal sampling. Edgesets not
-      present in the dictionary are considered atemporal.
+    temporal_sampling: If True, temporal sampling is enabled and causal
+      timestamps are inferred from the schema.
+    edgeset_timestamp_features: Mapping from edgeset name to its timestamp
+      feature name for causal filtering.
   """
 
   root: PlanNode
   with_replacement: bool = False
+  temporal_sampling: bool = False
   edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
       default_factory=dict
   )
-
 
 
 def simple_sampling_config_to_sampling_plan(
@@ -167,8 +166,16 @@ def simple_sampling_config_to_sampling_plan(
         )
     return PlanNode(nodeset, children_list)
 
+  edgeset_ts_features = {}
+  if src.temporal_sampling:
+    edgeset_ts_features = analyse_schema_lib.get_edgeset_timestamp_features(
+        schema
+    )
+
   return SamplingPlan(
       root=rec_build(src.seed_nodeset, depth=0),
       with_replacement=src.with_replacement,
-      edgeset_timestamp_features=src.edgeset_timestamp_features,
+      temporal_sampling=src.temporal_sampling,
+      edgeset_timestamp_features=edgeset_ts_features,
   )
+

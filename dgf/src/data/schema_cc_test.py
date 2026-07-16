@@ -55,26 +55,29 @@ GraphSchema(nodesets=[
                     "#creation_time": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_creation_time=True,
                     ),
                     "time": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
                         shape=(None,),
                         is_timeseries=True,
+                        is_creation_time=True,
+                        group="g1",
                     ),
                     "f1_seq": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
                         semantic=schema_lib.FeatureSemantic.NUMERICAL,
                         shape=(None,),
                         is_timeseries=True,
-                        timestamps="time",
+                        group="g1",
                     ),
                     "f2_seq": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
                         semantic=schema_lib.FeatureSemantic.EMBEDDING,
                         shape=(None, 4),
                         is_timeseries=True,
-                        timestamps="time",
+                        group="g1",
                     ),
                 }
             ),
@@ -103,13 +106,15 @@ GraphSchema(nodesets=[
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
                         shape=(None,),
                         is_timeseries=True,
+                        is_creation_time=True,
+                        group="edge_g",
                     ),
                     "edge_val": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.INTEGER_32,
                         semantic=schema_lib.FeatureSemantic.NUMERICAL,
                         shape=(None,),
                         is_timeseries=True,
-                        timestamps="edge_time",
+                        group="edge_g",
                     ),
                 },
             )
@@ -120,11 +125,11 @@ GraphSchema(nodesets=[
         """\
 GraphSchema(nodesets=[
   Nodeset(name='n1', features=[
-    Feature(name='#creation_time', shape=[], format=INTEGER_64),
+    Feature(name='#creation_time', shape=[], format=INTEGER_64, is_creation_time=true),
     Feature(name='#id', shape=[], format=BYTES),
-    Feature(name='f1_seq', shape=[None], format=FLOAT_32, is_timeseries=true, timestamps='time'),
-    Feature(name='f2_seq', shape=[None, 4], format=FLOAT_32, is_timeseries=true, timestamps='time'),
-    Feature(name='time', shape=[None], format=INTEGER_64, is_timeseries=true)
+    Feature(name='f1_seq', shape=[None], format=FLOAT_32, is_timeseries=true, group='g1'),
+    Feature(name='f2_seq', shape=[None, 4], format=FLOAT_32, is_timeseries=true, group='g1'),
+    Feature(name='time', shape=[None], format=INTEGER_64, is_timeseries=true, is_creation_time=true, group='g1')
   ]),
   Nodeset(name='n2', features=[
     Feature(name='#id', shape=[], format=INTEGER_64),
@@ -132,11 +137,32 @@ GraphSchema(nodesets=[
   ])
 ], edgesets=[
   Edgeset(name='e1', source_nodeset=0, target_nodeset=1, features=[
-    Feature(name='edge_time', shape=[None], format=INTEGER_64, is_timeseries=true),
-    Feature(name='edge_val', shape=[None], format=INTEGER_32, is_timeseries=true, timestamps='edge_time')
+    Feature(name='edge_time', shape=[None], format=INTEGER_64, is_timeseries=true, is_creation_time=true, group='edge_g'),
+    Feature(name='edge_val', shape=[None], format=INTEGER_32, is_timeseries=true, group='edge_g')
   ])
 ])""",
     )
+
+  def test_parse_feature_invalid_type_attributes(self):
+    class CustomFeatureSchema:
+      format = schema_lib.FeatureFormat.FLOAT_32
+      semantic = schema_lib.FeatureSemantic.NUMERICAL
+      shape = ()
+      is_timeseries = False
+      is_creation_time = "not_a_bool"
+      group = 12345
+
+    class CustomNodeSchema:
+      features = {"f1": CustomFeatureSchema()}
+
+    schema = schema_lib.GraphSchema(
+        node_sets={"n1": CustomNodeSchema()},
+        edge_sets={},
+    )
+    res = lib.ParseAndDebugPrintSchema(schema)
+    self.assertIn("Feature(name='f1', shape=[], format=FLOAT_32)", res)
+    self.assertNotIn("is_creation_time=true", res)
+    self.assertNotIn("group=", res)
 
 
 if __name__ == "__main__":

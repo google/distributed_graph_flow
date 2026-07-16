@@ -181,43 +181,62 @@ def _process_feature_set(
   # Map timeseries feature names to their associated timestamp feature name.
   ts_features = {}
   for group in ts_specs:
-    for fname in group.feature_names:
-      ts_features[fname] = group.timestamp_feature_name
+    for feature_name in group.feature_names:
+      ts_features[feature_name] = group.timestamp_feature_name
 
-  for fname, schema in schemas.items():
-    if fname not in ts_features:
-      new_values[fname] = values[fname]
-      new_schemas[fname] = schema
+  for feature_name, feature_schema in schemas.items():
+    if feature_name not in ts_features:
+      new_values[feature_name] = values[feature_name]
+      new_schemas[feature_name] = feature_schema
 
   if not ts_features:
     return new_values, new_schemas
 
-  for fname in ts_features:
-    schema = schemas[fname]
+  for feature_name in ts_features:
+    feature_schema = schemas[feature_name]
 
-    dtype = feature_format.FEATURE_FORMAT_TO_NP_DTYPE[schema.format]
-    feat_shape = temporal_util.get_timeseries_step_shape(schema)
+    dtype = feature_format.FEATURE_FORMAT_TO_NP_DTYPE[feature_schema.format]
+    feat_shape = temporal_util.get_timeseries_step_shape(feature_schema)
 
     padded_matrix, mask_matrix = _pad_and_cap_single_feature(
-        raw_series=values[fname],
+        raw_series=values[feature_name],
         seq_len=seq_len,
         feat_shape=feat_shape,
         padding_value=config.padding_value,
         dtype=dtype,
-        is_static_shape=schema.is_static_shape(),
+        is_static_shape=feature_schema.is_static_shape(),
     )
 
-    new_values[fname] = padded_matrix
-    new_schemas[fname] = temporal_util.with_sequence_length(schema, seq_len)
-
-    new_values[f"{fname}_mask"] = mask_matrix
-    new_schemas[f"{fname}_mask"] = schema_lib.FeatureSchema(
-        format=schema_lib.FeatureFormat.BOOL,
-        semantic=schema_lib.FeatureSemantic.MASK,
-        shape=(seq_len,),
-        is_timeseries=schema.is_timeseries,
-        timestamps=schema.timestamps,
+    ts_group = feature_schema.group or feature_name
+    new_values[feature_name] = padded_matrix
+    new_schemas[feature_name] = dataclasses.replace(
+        temporal_util.with_sequence_length(feature_schema, seq_len),
+        group=ts_group,
     )
+    if feature_schema.semantic == schema_lib.FeatureSemantic.MASK:
+      continue
+
+    mask_name = temporal_util.get_mask_feature_name(feature_name, schemas)
+    if mask_name is None:
+      mask_name = f"{ts_group}_mask"
+      if mask_name in schemas:
+        raise ValueError(
+            f"Cannot generate mask for sequence group '{ts_group}'. The"
+            f" fallback mask name '{mask_name}' clashes with an existing"
+            " feature in the schema that is not a valid mask. Please"
+            " explicitly define a mask feature for this group or rename the"
+            " clashing feature."
+        )
+
+    if mask_name not in new_values:
+      new_values[mask_name] = mask_matrix
+      new_schemas[mask_name] = schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.BOOL,
+          semantic=schema_lib.FeatureSemantic.MASK,
+          shape=(seq_len,),
+          is_timeseries=feature_schema.is_timeseries,
+          group=ts_group,
+      )
 
   return new_values, new_schemas
 
@@ -232,11 +251,12 @@ def pad_and_cap_timeseries_features(
 
   For every feature where `is_timeseries=True`, this function caps long causal
   histories (`[-K:]`) and left-pads short histories to `config.sequence_length`
-  ($K$). Generates parallel binary attention masks (`{feature_name}_mask`).
+  ($K$). Generates exactly one binary attention mask per sequence group,
+  shared across all co-grouped features.
 
   All resulting features have fixed `shape=(K,)` and maintain
   `is_timeseries=True`, allowing downstream sequence models to identify
-  temporal features.
+  temporal features and inherit the group mask.
 
   Usage example:
 
@@ -344,18 +364,19 @@ def _extract_feature_set_calendar_features(
           " Please run pad_and_cap_timeseries_features first."
       )
 
-    # Case 1: For non-timeseries timestamps, derived calendar features do not
-    # reference a timestamp sequence.
-    if not schema.is_timeseries:
-      calendar_timestamps = None
-    # Case 2: For timeseries features that reference a timestamp sequence.
-    elif schema.timestamps is not None:
-      calendar_timestamps = schema.timestamps
-    # Case 3: For timeseries features that do not reference a timestamp
-    # sequence, derived calendar sequences reference the original feature
-    # as their timestamp sequence.
+    # Determine the group name for the generated calendar feature.
+    if schema.group is not None:
+      # If the original feature specifies an explicit sequence group, inherit
+      # it.
+      cal_group = schema.group
+    elif schema.is_timeseries:
+      # If the original feature is a sequence timestamp without an explicit
+      # group, its feature name acts as its implicit sequence group name.
+      cal_group = fname
     else:
-      calendar_timestamps = fname
+      # Non-timeseries (scalar) timestamp features do not belong to any sequence
+      # group.
+      cal_group = None
 
     for cal_feat in config.features:
       out_fname = f"{fname}_{cal_feat.value}"
@@ -366,7 +387,7 @@ def _extract_feature_set_calendar_features(
           semantic=schema_lib.FeatureSemantic.NUMERICAL,
           shape=schema.shape,
           is_timeseries=schema.is_timeseries,
-          timestamps=calendar_timestamps,
+          group=cal_group,
       )
 
   return new_values, new_schemas
@@ -447,4 +468,3 @@ def extract_calendar_features(
           node_sets=new_ns_schemas, edge_sets=new_es_schemas
       ),
   )
-

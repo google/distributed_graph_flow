@@ -55,8 +55,9 @@ class FeatureSemantic(enum.Enum):
     TIMESTAMP: The feature represents a timestamp.
     TIMESERIES: The feature represents a time series of values.
     PRIMARY_ID: The feature represents a primary ID.
-    MASK: The feature represents a boolean sequence padding mask. Its shape has
-      to be broadcastable to the feature it is masking.
+    MASK: The feature represents a boolean sequence padding mask. It must belong
+      to a `timeseries_group`, and its shape has to be broadcastable to the
+      features in that group.
   """
 
   UNKNOWN = "UNKNOWN"
@@ -94,11 +95,17 @@ class FeatureSchema:
       when feature_format is BYTES, to distinguish between Spanner STRING (True)
       and Spanner BYTES (False).
     is_timeseries: Whether the feature represents a temporal series / sequence.
-    timestamps: For temporal sequence features, the name of the feature
-      containing the corresponding timestamp sequence (e.g., "time"). The
-      length of the corresponding timestamps feature must equal the length of
-      the timeseries feature along the 0th dimension. Cannot be set for non
-      timeseries features.
+    is_creation_time: Whether the feature represents a creation time. For
+      non-timeseries features (`is_timeseries=False`), it indicates the creation
+      time of the node or edge entity itself. For timeseries features
+      (`is_timeseries=True`), it marks the sequence as the reference timestamp
+      sequence for all features in the same `group`. This information is used
+      used in temporal neighbor sampling and for masking future information in
+      timeseries.
+    group: Name of the sequence group this feature belongs to. All sequence
+      features sharing the same `group` share the same sequence length along
+      `shape[0]` and share a single optional group mask and optional group
+      timestamp sequence.
   """
 
   format: FeatureFormat
@@ -107,7 +114,8 @@ class FeatureSchema:
   num_categorical_values: Optional[int] = None
   is_utf8_string: Optional[bool] = False
   is_timeseries: Optional[bool] = False
-  timestamps: Optional[str] = None
+  is_creation_time: Optional[bool] = False
+  group: Optional[str] = None
 
   def is_static_shape(self) -> bool:
     """Returns true if the feature has a fully static shape."""

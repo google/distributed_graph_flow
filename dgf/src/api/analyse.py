@@ -27,6 +27,11 @@ from dgf.src.analyse.histogram import make_histogram
 # TODO: Use third_party/py/dgf/src/api/print.py version instead.
 from dgf.src.analyse.print_schema import print_schema
 from dgf.src.analyse.schema import infer_schema_semantic
+from dgf.src.analyse.schema import auto_detect_timestamp_feature
+from dgf.src.analyse.schema import validate_timestamp_feature
+from dgf.src.analyse.schema import get_nodeset_timestamp_features
+from dgf.src.analyse.schema import get_edgeset_timestamp_features
+from dgf.src.analyse.schema import parse_temporal_config
 
 
 from dgf.src.analyse.reports import data_model as reports_data_model

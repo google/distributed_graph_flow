@@ -18,9 +18,8 @@ import abc
 import dataclasses
 import enum
 import os
-from typing import Any, Dict, List, Literal, Optional, Tuple, Type, Union
+from typing import Any, Dict, List, Literal, Optional, Type, Union
 import dataclasses_json
-from dgf.src.data import schema as schema_lib
 from dgf.src.learning.jax import common as jax_common
 from dgf.src.learning.jax.layers import hetero_gnn
 from dgf.src.learning.jax.layers import hetero_graph_attention_network
@@ -251,143 +250,6 @@ class HParam:
   dropout: float = 0.1
   message_pooling: str = "sum"
   architecture: Architecture = DEFAULT_ARCHITECTURE
-
-
-def _auto_detect_timestamp_feature(
-    features: schema_lib.FeatureSetSchema, name: str, type_name: str
-) -> Optional[str]:
-  """Auto-detects a single timestamp feature."""
-
-  ts_features: List[str] = []
-  for feat_name, feat in features.items():
-    if feat.semantic == schema_lib.FeatureSemantic.TIMESTAMP:
-      if feat.format != schema_lib.FeatureFormat.INTEGER_64:
-        raise ValueError(
-            f"Timestamp feature '{feat_name}' in {type_name} '{name}' must have"
-            f" format INTEGER_64. Got {feat.format}."
-        )
-      ts_features.append(feat_name)
-  if len(ts_features) > 1:
-    raise ValueError(
-        f"Multiple timestamp features found in {type_name} '{name}':"
-        f" {ts_features}. Please specify one manually."
-    )
-  return ts_features[0] if ts_features else None
-
-
-def _validate_timestamp_feature(
-    schema: schema_lib.FeatureSchema,
-    feature_name: str,
-    container_name: str,
-    container_type: Literal["nodeset", "edgeset"],
-):
-  """Validates that a feature is a valid timestamp feature.
-
-  Args:
-    schema: Schema of the feature.
-    name: Name of the feature.
-    type_name: Name of the nodeset or edgeset.
-    type_name: The type of the container, either "nodeset" or "edgeset".
-  """
-
-  if (
-      schema.semantic != schema_lib.FeatureSemantic.TIMESTAMP
-      or schema.format != schema_lib.FeatureFormat.INTEGER_64
-  ):
-    raise ValueError(
-        f"Feature '{feature_name}' in {container_name} '{container_type}' must"
-        " have semantic=TIMESTAMP and format=INTEGER_64. Got"
-        " semantic={feat.semantic} and format={feat.format}."
-    )
-
-
-def parse_temporal_config(
-    schema: schema_lib.GraphSchema,
-    timestamp_features: Optional[Dict[str, str]],
-    target_nodeset: str,
-) -> Tuple[Dict[str, str], Dict[str, str]]:
-  """Parses the temporal configuration and extracts timestamp features.
-
-  Args:
-    schema: The graph schema.
-    timestamp_features: Optional; if None, timestamp features are auto-detected.
-      Otherwise, a flat dict mapping nodeset/edgeset names to their timestamp
-      feature names.
-    target_nodeset: The name of the target nodeset.
-
-  Returns:
-    A tuple containing (nodeset_timestamp_features, edgeset_timestamp_features)
-  """
-  nodeset_timestamp_features = {}
-  edgeset_timestamp_features = {}
-
-  if timestamp_features is None:
-    # Auto-detect TIMESTAMP features
-    for name, nodeset in schema.node_sets.items():
-      ts_feat = _auto_detect_timestamp_feature(
-          nodeset.features, name, "nodeset"
-      )
-      if ts_feat:
-        nodeset_timestamp_features[name] = ts_feat
-
-    for name, edgeset in schema.edge_sets.items():
-      ts_feat = _auto_detect_timestamp_feature(
-          edgeset.features, name, "edgeset"
-      )
-      if ts_feat:
-        edgeset_timestamp_features[name] = ts_feat
-
-  else:
-    # User-provided flat dict
-    for name, feat_name in timestamp_features.items():
-      is_nodeset = name in schema.node_sets
-      is_edgeset = name in schema.edge_sets
-      if not is_nodeset and not is_edgeset:
-        raise ValueError(
-            f"Name '{name}' in temporal configuration is neither a nodeset nor"
-            " an edgeset."
-        )
-
-      if is_nodeset:
-        nodeset = schema.node_sets[name]
-        if feat_name not in nodeset.features:
-          raise ValueError(
-              f"Feature '{feat_name}' not found in nodeset '{name}'"
-          )
-        feat = nodeset.features[feat_name]
-        _validate_timestamp_feature(feat, feat_name, name, "nodeset")
-        nodeset_timestamp_features[name] = feat_name
-
-      if is_edgeset:
-        edgeset = schema.edge_sets[name]
-        if feat_name not in edgeset.features:
-          raise ValueError(
-              f"Feature '{feat_name}' not found in edgeset '{name}'"
-          )
-        feat = edgeset.features[feat_name]
-        _validate_timestamp_feature(feat, feat_name, name, "edgeset")
-        edgeset_timestamp_features[name] = feat_name
-
-  # Constraints validations
-  if target_nodeset not in nodeset_timestamp_features:
-    raise ValueError(
-        f"The target nodeset '{target_nodeset}' must have a timestamp feature."
-        " Specify it with the `time_aware` argument (e.g. `time_aware={<target"
-        " nodeset>:<timestamp feature>}`), or set one of the feature semantic"
-        " as TIMESTAMP (e.g. `schema.node_sets[<target"
-        " nodeset>].features[<timestamp feature>].semantic ="
-        " dgf.data.FeatureSemantic.TIMESTAMP`)."
-    )
-  if not edgeset_timestamp_features:
-    raise ValueError(
-        "At least one edgeset must have a timestamp feature. Specify it with"
-        " the `time_aware` argument (e.g. `time_aware={<edgeset>:<timestamp"
-        " feature>}`), or set one of the feature semantic as TIMESTAMP (e.g."
-        " `schema.edge_sets[<some edgeset>].features[<timestamp"
-        " feature>].semantic = dgf.data.FeatureSemantic.TIMESTAMP`)."
-    )
-
-  return nodeset_timestamp_features, edgeset_timestamp_features
 
 
 def save_model(model: Model, path: str) -> None:

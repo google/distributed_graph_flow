@@ -28,10 +28,10 @@ class TemporalTest(absltest.TestCase):
     graph = in_memory_graph.InMemoryGraph(
         node_sets={
             "n1": in_memory_graph.InMemoryNodeSet(
-                num_nodes=2, features={"timestamps": np.array([10.0, 20.0])}
+                num_nodes=2, features={"timestamps": np.array([10, 20], dtype=np.int64)}
             ),
             "n2": in_memory_graph.InMemoryNodeSet(
-                num_nodes=2, features={"timestamps": np.array([5.0, 25.0])}
+                num_nodes=2, features={"timestamps": np.array([5, 25], dtype=np.int64)}
             ),
         },
         edge_sets={
@@ -46,16 +46,18 @@ class TemporalTest(absltest.TestCase):
             "n1": schema_lib.NodeSchema(
                 features={
                     "timestamps": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.FLOAT_64,
+                        format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_creation_time=True,
                     )
                 }
             ),
             "n2": schema_lib.NodeSchema(
                 features={
                     "timestamps": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.FLOAT_64,
+                        format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_creation_time=True,
                     )
                 }
             ),
@@ -65,7 +67,7 @@ class TemporalTest(absltest.TestCase):
 
     new_graph, new_schema = temporal.propagate_timestamp_to_edges(graph, schema)
 
-    expected_edge_ts = np.array([25.0, 20.0])
+    expected_edge_ts = np.array([25, 20], dtype=np.int64)
     test_util.assert_are_equal(
         self, new_graph.edge_sets["e1"].features["timestamps"], expected_edge_ts
     )
@@ -79,7 +81,7 @@ class TemporalTest(absltest.TestCase):
     graph = in_memory_graph.InMemoryGraph(
         node_sets={
             "n1": in_memory_graph.InMemoryNodeSet(
-                num_nodes=2, features={"timestamps": np.array([10.0, 20.0])}
+                num_nodes=2, features={"timestamps": np.array([10, 20], dtype=np.int64)}
             ),
             "n2": in_memory_graph.InMemoryNodeSet(num_nodes=2, features={}),
         },
@@ -95,8 +97,9 @@ class TemporalTest(absltest.TestCase):
             "n1": schema_lib.NodeSchema(
                 features={
                     "timestamps": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.FLOAT_64,
+                        format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_creation_time=True,
                     )
                 }
             ),
@@ -107,7 +110,7 @@ class TemporalTest(absltest.TestCase):
 
     new_graph, _ = temporal.propagate_timestamp_to_edges(graph, schema)
 
-    expected_edge_ts = np.array([10.0, 20.0])
+    expected_edge_ts = np.array([10, 20], dtype=np.int64)
     test_util.assert_are_equal(
         self, new_graph.edge_sets["e1"].features["timestamps"], expected_edge_ts
     )
@@ -140,10 +143,10 @@ class TemporalTest(absltest.TestCase):
     graph = in_memory_graph.InMemoryGraph(
         node_sets={
             "n1": in_memory_graph.InMemoryNodeSet(
-                num_nodes=2, features={"time": np.array([10.0, 20.0])}
+                num_nodes=2, features={"time": np.array([10, 20], dtype=np.int64)}
             ),
             "n2": in_memory_graph.InMemoryNodeSet(
-                num_nodes=2, features={"ts": np.array([5.0, 25.0])}
+                num_nodes=2, features={"ts": np.array([5, 25], dtype=np.int64)}
             ),
         },
         edge_sets={
@@ -158,16 +161,18 @@ class TemporalTest(absltest.TestCase):
             "n1": schema_lib.NodeSchema(
                 features={
                     "time": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.FLOAT_64,
+                        format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_creation_time=True,
                     )
                 }
             ),
             "n2": schema_lib.NodeSchema(
                 features={
                     "ts": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.FLOAT_64,
+                        format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_creation_time=True,
                     )
                 }
             ),
@@ -178,11 +183,10 @@ class TemporalTest(absltest.TestCase):
     new_graph, new_schema = temporal.propagate_timestamp_to_edges(
         graph,
         schema,
-        node_timestamps={"n1": "time", "n2": "ts"},
         target_feature="edge_ts",
     )
 
-    expected_edge_ts = np.array([25.0, 20.0])
+    expected_edge_ts = np.array([25, 20], dtype=np.int64)
     test_util.assert_are_equal(
         self, new_graph.edge_sets["e1"].features["edge_ts"], expected_edge_ts
     )
@@ -192,13 +196,13 @@ class TemporalTest(absltest.TestCase):
     graph = in_memory_graph.InMemoryGraph(
         node_sets={
             "n1": in_memory_graph.InMemoryNodeSet(
-                num_nodes=2, features={"timestamps": np.array([10.0, 20.0])}
+                num_nodes=2, features={"timestamps": np.array([10, 20], dtype=np.int64)}
             ),
         },
         edge_sets={
             "e1": in_memory_graph.InMemoryEdgeSet(
                 adjacency=np.array([[0, 1]]),
-                features={"timestamps": np.array([1.0])},
+                features={"timestamps": np.array([1], dtype=np.int64)},
             )
         },
     )
@@ -208,7 +212,7 @@ class TemporalTest(absltest.TestCase):
             "n1": schema_lib.NodeSchema(
                 features={
                     "timestamps": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.FLOAT_64,
+                        format=schema_lib.FeatureFormat.INTEGER_64,
                     )
                 }
             ),
@@ -219,7 +223,7 @@ class TemporalTest(absltest.TestCase):
                 target="n1",
                 features={
                     "timestamps": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.FLOAT_64,
+                        format=schema_lib.FeatureFormat.INTEGER_64,
                     )
                 },
             )

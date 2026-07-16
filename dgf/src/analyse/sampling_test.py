@@ -62,7 +62,6 @@ Root: n1
         hop_width=3,
         reverse=False,
         with_replacement=True,
-        edgeset_timestamp_features={"e1": "t1"},
     )
     plan = config_lib.simple_sampling_config_to_sampling_plan(
         simple_config, schema
@@ -75,9 +74,7 @@ Root: n1 (with replacement)
 ├── e1 [width=3] ➔ n1
 │   ├── e1 [width=3] ➔ n1
 │   └── e2 [width=3] ➔ n2
-└── e2 [width=3] ➔ n2
-
-Temporal Features: {'e1': 't1'}"""
+└── e2 [width=3] ➔ n2"""
     self.assertEqual(output, expected_output)
 
 

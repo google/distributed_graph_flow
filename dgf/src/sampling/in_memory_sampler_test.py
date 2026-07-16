@@ -418,26 +418,26 @@ Node(nodeset_idx=0, children=[
     np.testing.assert_array_equal(n2_idxs, np.array([0, 2]))
 
   def test_create_sampler_temporal_and_masking_error(self):
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
+        include_e2=True
+    )
     sampling_config = config_lib.SimpleSamplingConfig(
         seed_nodeset="n1",
         num_hops=1,
         hop_width=2,
-        edgeset_timestamp_features={"e12": "timestamp"},
-    )
-    plan = config_lib.simple_sampling_config_to_sampling_plan(
-        sampling_config, self.schema
+        temporal_sampling=True,
     )
     with self.assertRaisesRegex(
         ValueError,
         "Temporal filtering and edge masking cannot be used at the same time.",
     ):
       in_memory_sampler_lib.create_sampler(
-          self.graph,
-          plan,
-          self.schema,
+          graph,
+          sampling_config,
+          schema,
+          edgeset_to_mask="e1",
           debug_sampling=True,
           batch_size=5,
-          edgeset_to_mask="e12",
       )
 
   def test_sample_with_edge_masking_reverse(self):
@@ -991,7 +991,7 @@ Node(nodeset_idx=0, children=[
             num_hops=2,
             hop_width=2,
             reverse=False,
-            edgeset_timestamp_features={"e1": "timestamp"},
+            temporal_sampling=True,
         ),
         schema,
         return_features=True,
@@ -1085,44 +1085,6 @@ Node(nodeset_idx=0, children=[
     )
     test_util.assert_are_equal(self, expected_graph, sample[0])
 
-  def test_temporal_sampling_wrong_edgeset(self):
-    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
-        include_e2=True
-    )
-    with self.assertRaisesRegex(
-        ValueError, "Edgeset 'do_not_exist1' does not exist in schema"
-    ):
-      in_memory_sampler_lib.create_sampler(
-          graph,
-          config_lib.SimpleSamplingConfig(
-              seed_nodeset="n1",
-              num_hops=2,
-              hop_width=2,
-              reverse=False,
-              edgeset_timestamp_features={"do_not_exist1": "feature"},
-          ),
-          schema,
-          batch_size=5,
-      )
-
-  def test_temporal_sampling_wrong_feature(self):
-    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
-        include_e2=True
-    )
-    with self.assertRaisesRegex(ValueError, 'Key ".*" not found in map'):
-      _ = in_memory_sampler_lib.create_sampler(
-          graph,
-          config_lib.SimpleSamplingConfig(
-              seed_nodeset="n1",
-              num_hops=2,
-              hop_width=2,
-              reverse=False,
-              edgeset_timestamp_features={"e1": "do_not_exist"},
-          ),
-          schema,
-          batch_size=5,
-      )
-
   def test_temporal_sampling_missing_seed_timestamp(self):
     graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
         include_e2=True
@@ -1135,7 +1097,7 @@ Node(nodeset_idx=0, children=[
             num_hops=2,
             hop_width=2,
             reverse=False,
-            edgeset_timestamp_features={"e1": "timestamp"},
+            temporal_sampling=True,
         ),
         schema,
         batch_size=5,
@@ -1148,9 +1110,8 @@ Node(nodeset_idx=0, children=[
       _ = sampler.sample([0])
 
   def test_temporal_sampling_unexpected_seed_timestamp(self):
-    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
-        include_e2=True
-    )
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
     sampler = in_memory_sampler_lib.create_sampler(
         graph,
         config_lib.SimpleSamplingConfig(
@@ -1180,7 +1141,7 @@ Node(nodeset_idx=0, children=[
             num_hops=2,
             hop_width=2,
             reverse=False,
-            edgeset_timestamp_features={"e1": "timestamp"},
+            temporal_sampling=True,
         ),
         schema,
         return_features=True,
@@ -1360,6 +1321,7 @@ Node(nodeset_idx=0, children=[
                     "#creation_time": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_creation_time=True,
                     )
                 }
             ),
@@ -1369,12 +1331,14 @@ Node(nodeset_idx=0, children=[
                         format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
                         is_timeseries=True,
+                        is_creation_time=True,
+                        group="time",
                     ),
                     "signal": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
                         semantic=schema_lib.FeatureSemantic.NUMERICAL,
                         is_timeseries=True,
-                        timestamps="time",
+                        group="time",
                     ),
                 }
             ),
@@ -1387,14 +1351,14 @@ Node(nodeset_idx=0, children=[
     )
     # Propagate timestamps to edges so temporal sampling works.
     graph, schema = temporal_lib.propagate_timestamp_to_edges(
-        graph, schema, node_timestamps={"alerts": "#creation_time"}
+        graph, schema
     )
     plan = config_lib.SimpleSamplingConfig(
         seed_nodeset="alerts",
         num_hops=1,
         hop_width=10,
         reverse=True,
-        edgeset_timestamp_features={"hardware_to_alert": "timestamps"},
+        temporal_sampling=True,
     )
     sampler = in_memory_sampler_lib.create_sampler(
         graph,
