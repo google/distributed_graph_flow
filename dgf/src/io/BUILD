@@ -597,6 +597,8 @@ py_test(
         # absl/testing:absltest dep,
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
+        # networkx dep,
+        # numpy dep,
     ],
 )
 

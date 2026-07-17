@@ -25,22 +25,49 @@ import numpy as np
 def graph_to_networkx(
     in_memory_graph: in_memory_graph_lib.InMemoryGraph,
     schema: schema_lib.GraphSchema,
+    for_graphml: bool = False,
 ) -> nx.MultiDiGraph:
   """Converts an InMemoryGraph into a NetworkX MultiDiGraph.
 
   Usage:
-    ```
+    ```python
+    # Normal conversion
     nx_graph = dgf.convert.graph_to_networkx(graph, schema)
+
+    # Convert and write to GraphML
+    nx_graph = dgf.convert.graph_to_networkx(graph, schema, for_graphml=True)
+    nx.write_graphml(nx_graph, "/tmp/graph.graphml")
     ```
 
   Args:
     in_memory_graph: The input graph in `InMemoryGraph` format.
     schema: A `GraphSchema` instance describing the graph structure. Required to
       determine the source and target node sets for edges.
+    for_graphml: If True, convert complex node and edge features (such as NumPy
+      arrays and NumPy bytes) into basic strings and scalars that are strictly
+      supported by the GraphML export format. Setting this to True breaks
+      `networkx_to_graph`, as multidimensional data is degraded to strings.
 
   Returns:
     A NetworkX `MultiDiGraph` containing the graph data.
   """
+
+  def _get_element_id(set_name: str, index: int):
+    if not for_graphml:
+      return (set_name, index)
+    return f"{set_name}_{index}"
+
+  def _get_feature_value(v):
+    if not for_graphml:
+      return v
+    if isinstance(v, (bytes, np.bytes_)):
+      return v.decode("utf-8", errors="replace")
+    if isinstance(v, (list, np.ndarray)):
+      return ",".join(map(str, np.array(v).flatten()))
+    if isinstance(v, np.generic):
+      return v.item()
+    return v
+
   nx_graph = nx.MultiDiGraph()
 
   for node_set_name, node_set in in_memory_graph.node_sets.items():
@@ -48,10 +75,10 @@ def graph_to_networkx(
     assert num_nodes is not None
 
     for i in range(num_nodes):
-      node_id = (node_set_name, i)
+      node_id = _get_element_id(node_set_name, i)
       node_attrs = {"node_set": node_set_name}
       for feat_name, feat_val in node_set.features.items():
-        node_attrs[feat_name] = feat_val[i]
+        node_attrs[feat_name] = _get_feature_value(feat_val[i])
       nx_graph.add_node(node_id, **node_attrs)
 
   for edge_set_name, edge_set in in_memory_graph.edge_sets.items():
@@ -65,12 +92,14 @@ def graph_to_networkx(
     targets = edge_set.adjacency[1]
 
     for i in range(edge_set.num_edges()):
-      src_node = (source_set_name, sources[i])
-      tgt_node = (target_set_name, targets[i])
+      src_node = _get_element_id(source_set_name, sources[i])
+      tgt_node = _get_element_id(target_set_name, targets[i])
       edge_attrs = {"edge_set": edge_set_name}
+      edge_key = f"{edge_set_name}_{i}" if for_graphml else None
+
       for feat_name, feat_val in edge_set.features.items():
-        edge_attrs[feat_name] = feat_val[i]
-      nx_graph.add_edge(src_node, tgt_node, **edge_attrs)
+        edge_attrs[feat_name] = _get_feature_value(feat_val[i])
+      nx_graph.add_edge(src_node, tgt_node, key=edge_key, **edge_attrs)
 
   return nx_graph
 
