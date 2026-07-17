@@ -17,6 +17,7 @@
 from absl.testing import absltest
 from dgf.src.data import schema as schema_lib
 from dgf.src.util import temporal
+import numpy as np
 
 
 class TemporalTest(absltest.TestCase):
@@ -176,6 +177,23 @@ class TemporalTest(absltest.TestCase):
         ValueError, r"Feature schema must be a timeseries feature\."
     ):
       temporal.get_timeseries_step_shape(non_ts)
+
+  def test_expand_mask_dims(self):
+    # Create a mask with alternating True/False entries.
+    mask = np.arange(50).reshape(5, 10) % 2 == 0
+    target_2d = np.zeros((5, 10), dtype=np.float32)
+    target_4d = np.ones((5, 10, 3, 4), dtype=np.float32) * 42.0
+
+    # Check 2D target (no extra dimensions needed).
+    expanded_2d = temporal.expand_mask_dims(mask, target_2d)
+    self.assertIs(expanded_2d, mask)
+    self.assertEqual(expanded_2d.shape, (5, 10))
+
+    # Check 4D target (two extra dimensions added).
+    expanded_4d = temporal.expand_mask_dims(mask, target_4d)
+    self.assertEqual(expanded_4d.shape, (5, 10, 1, 1))
+    np.testing.assert_array_equal(expanded_4d[:, :, 0, 0], mask)
+
 
 if __name__ == "__main__":
   absltest.main()

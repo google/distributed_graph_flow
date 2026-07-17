@@ -227,11 +227,11 @@ class TimeseriesTest(absltest.TestCase):
         "emb": np.array(
             [[[0.0, 0.0], [1.0, 2.0], [3.0, 4.0]]], dtype=np.float32
         ),
-        "emb_mask": np.array([[[False, False], [True, True], [True, True]]]),
+        "emb_mask": np.array([[False, True, True]]),
     }
     test_util.assert_are_equal(self, hw_val.features, expected_features)
     self.assertEqual(hw_sch.features["emb"].shape, (3, 2))
-    self.assertEqual(hw_sch.features["emb_mask"].shape, (3, 2))
+    self.assertEqual(hw_sch.features["emb_mask"].shape, (3,))
 
   def test_empty_sequence(self):
     graph, schema = _make_graph_and_schema(
@@ -389,6 +389,7 @@ class TimeseriesTest(absltest.TestCase):
             "time": _ts_schema(
                 fmt=schema_lib.FeatureFormat.INTEGER_64,
                 sem=schema_lib.FeatureSemantic.TIMESTAMP,
+                shape=(5,),
             ),
         },
         num_nodes=2,
@@ -421,7 +422,7 @@ class TimeseriesTest(absltest.TestCase):
         schemas={
             "emb": _ts_schema(
                 sem=schema_lib.FeatureSemantic.EMBEDDING,
-                shape=(None, 2),
+                shape=(2, 2),
             ),
         },
         num_nodes=2,
@@ -443,8 +444,8 @@ class TimeseriesTest(absltest.TestCase):
             dtype=np.float32,
         ),
         "emb_mask": np.array([
-            [[False, False], [True, True], [True, True]],
-            [[False, False], [True, True], [True, True]],
+            [False, True, True],
+            [False, True, True],
         ]),
     }
     test_util.assert_are_equal(self, hw_val.features, expected_features)

@@ -172,6 +172,7 @@ py_library(
     srcs = ["temporal.py"],
     deps = [
         "//dgf/src/data:schema",
+        # numpy dep,
     ],
 )
 
@@ -397,5 +398,6 @@ py_test(
         ":temporal",
         # absl/testing:absltest dep,
         "//dgf/src/data:schema",
+        # numpy dep,
     ],
 )

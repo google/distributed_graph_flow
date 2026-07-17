@@ -58,7 +58,7 @@ def _pad_and_cap_single_feature(
   if num_entities == 0:
     return (
         np.empty((0, seq_len) + feat_shape, dtype=dtype),
-        np.empty((0, seq_len) + feat_shape, dtype=np.bool_),
+        np.empty((0, seq_len), dtype=np.bool_),
     )
 
   # Fast vectorized path when all entities share a fixed sequence length.
@@ -66,9 +66,7 @@ def _pad_and_cap_single_feature(
     num_steps = raw_series.shape[1]
     if num_steps >= seq_len:
       padded_matrix = raw_series[:, -seq_len:].astype(dtype, copy=True)
-      mask_matrix = np.ones(
-          (num_entities, seq_len) + feat_shape, dtype=np.bool_
-      )
+      mask_matrix = np.ones((num_entities, seq_len), dtype=np.bool_)
       return padded_matrix, mask_matrix
 
     pad_width = [(0, 0), (seq_len - num_steps, 0)] + [(0, 0)] * len(feat_shape)
@@ -78,9 +76,10 @@ def _pad_and_cap_single_feature(
         mode="constant",
         constant_values=padding_value,
     )
+    mask_width = [(0, 0), (seq_len - num_steps, 0)]
     mask_matrix = np.pad(
-        np.ones((num_entities, num_steps) + feat_shape, dtype=np.bool_),
-        pad_width=pad_width,
+        np.ones((num_entities, num_steps), dtype=np.bool_),
+        pad_width=mask_width,
         mode="constant",
         constant_values=False,
     )
@@ -91,10 +90,10 @@ def _pad_and_cap_single_feature(
       fill_value=padding_value,
       dtype=dtype,
   )
-  # Binary mask matrix matching padded_matrix shape ((num_entities, seq_len) +
-  # feat_shape) where True indicates valid observed time steps and False
-  # indicates left-padded steps.
-  mask_matrix = np.zeros((num_entities, seq_len) + feat_shape, dtype=np.bool_)
+  # Binary mask matrix matching sequence length shape (num_entities, seq_len)
+  # where True indicates valid observed time steps and False indicates
+  # left-padded steps.
+  mask_matrix = np.zeros((num_entities, seq_len), dtype=np.bool_)
 
   # TODO(mesimon): Move into C++ for performance.
   for idx in range(num_entities):
@@ -215,7 +214,7 @@ def _process_feature_set(
     new_schemas[f"{fname}_mask"] = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.BOOL,
         semantic=schema_lib.FeatureSemantic.NUMERICAL,
-        shape=(seq_len,) + feat_shape,
+        shape=(seq_len,),
         is_timeseries=schema.is_timeseries,
         timestamps=schema.timestamps,
     )
@@ -448,3 +447,4 @@ def extract_calendar_features(
           node_sets=new_ns_schemas, edge_sets=new_es_schemas
       ),
   )
+

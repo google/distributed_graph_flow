@@ -19,6 +19,7 @@ import dataclasses
 from typing import Dict, List, Optional, Tuple
 
 from dgf.src.data import schema as schema_lib
+import numpy as np
 
 
 @dataclasses.dataclass(frozen=True)
@@ -115,3 +116,25 @@ def with_sequence_length(
       shape=(seq_len,) + step_shape,
       is_timeseries=True,
   )
+
+
+def expand_mask_dims(mask: np.ndarray, target: np.ndarray) -> np.ndarray:
+  """Expands `mask` dimensions to match `target.ndim` for broadcasting.
+
+  Usage example:
+  ```python
+    mask_for_where = dgf.src.util.temporal.expand_mask_dims(mask, raw_val)
+    result = np.where(mask_for_where, raw_val, fill_value)
+  ```
+
+  Args:
+    mask: Input boolean mask array.
+    target: Target array whose number of dimensions `mask` should match.
+
+  Returns:
+    The expanded `mask` array with trailing singleton dimensions added if
+    `mask.ndim < target.ndim`, or the original `mask` otherwise.
+  """
+  if mask.ndim < target.ndim:
+    return np.expand_dims(mask, axis=tuple(range(mask.ndim, target.ndim)))
+  return mask
