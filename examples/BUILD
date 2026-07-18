@@ -1,9 +1,6 @@
 load("//devtools/python/blaze:pytype.bzl", "py_binary")
 
-package(
-    
-    default_visibility = ["//dgf/src:__subpackages__"],
-)
+package(default_applicable_licenses = ["//dgf:license"])
 
 # Binary
 # =========
