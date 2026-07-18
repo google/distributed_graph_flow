@@ -171,8 +171,8 @@ def main(argv):
     spanner_config = in_process_io.SpannerGraphConfig(
         project_id=_SPANNER_PROJECT.value,
         instance_id=_SPANNER_INSTANCE.value,
-        database_id=_SPANNER_DATABASE.value,
-        graph_id=_SPANNER_GRAPH_ID.value,
+        database_id=_SPANNER_DATABASE.value,  # pyrefly: ignore[bad-argument-type]
+        graph_id=_SPANNER_GRAPH_ID.value,  # pyrefly: ignore[bad-argument-type]
     )
 
   spanner_write_config = None
@@ -180,12 +180,12 @@ def main(argv):
     spanner_write_config = in_process_io.SpannerGraphConfig(
         project_id=_SPANNER_PROJECT.value,
         instance_id=_SPANNER_INSTANCE.value,
-        database_id=_SPANNER_DATABASE_2.value,
-        graph_id=_SPANNER_GRAPH_ID_2.value,
+        database_id=_SPANNER_DATABASE_2.value,  # pyrefly: ignore[bad-argument-type]
+        graph_id=_SPANNER_GRAPH_ID_2.value,  # pyrefly: ignore[bad-argument-type]
     )
 
   in_process_io.io_in_memory_dataset_in_process(
-      work_dir=_WORK_DIR_PATH.value,
+      work_dir=_WORK_DIR_PATH.value,  # pyrefly: ignore[bad-argument-type]
       hgraph_path=_HGRAPH_PATH.value,
       gf_graph_path=_GF_GRAPH_PATH.value,
       tf_graph_samples_path=_TF_GRAPH_SAMPLES_PATH.value,

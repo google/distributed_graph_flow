@@ -1,5 +1,6 @@
 load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
+load("@nanobind_bazel//:build_defs.bzl", "nanobind_extension")
 
 package(
     
@@ -79,11 +80,24 @@ py_library(
     ],
 )
 
+nanobind_extension(
+    name = "evaluation_ext",
+    srcs = ["evaluation_ext.cc"],
+    deps = [
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings",
+        "//dgf/src/util:nanobind_util",
+        "//dgf/src/util:status_caster",
+    ],
+)
+
 py_library(
     name = "evaluation",
     srcs = ["evaluation.py"],
     deps = [
-        # dataclasses_json dep,
+        ":evaluation_ext",
+        "//dgf/src/data:evaluation",
         # jax dep,
         # numpy dep,
     ],
@@ -310,8 +324,10 @@ py_test(
     deps = [
         ":evaluation",
         # absl/testing:absltest dep,
+        # dataclasses_json dep,
         # jax dep,
         # numpy dep,
+        # sklearn dep,
     ],
 )
 

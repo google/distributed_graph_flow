@@ -324,13 +324,13 @@ class LinkPredictionModel(common.Model):
       @jax.jit
       def apply_core_model(batch: InferenceBatch):
         return core_model.apply(
-            self._data.model_params, batch, method=core_model.call_inference
+            self._data.model_params, batch, method=core_model.call_inference  # pyrefly: ignore[bad-argument-type]
         )
 
       @jax.jit
       def apply_encoder_source(graph: object, offset: jax.Array):
         return core_model.apply(
-            self._data.model_params,
+            self._data.model_params,  # pyrefly: ignore[bad-argument-type]
             graph,
             offset,
             method=core_model.call_src_encoder,
@@ -339,7 +339,7 @@ class LinkPredictionModel(common.Model):
       @jax.jit
       def apply_encoder_target(graph: object, offset: jax.Array):
         return core_model.apply(
-            self._data.model_params,
+            self._data.model_params,  # pyrefly: ignore[bad-argument-type]
             graph,
             offset,
             method=core_model.call_trg_encoder,
@@ -928,10 +928,10 @@ class LinkPredictionModel(common.Model):
           live.apply_core_model,
           polymorphic_shapes=[
               InferenceBatch(  # pytype: disable=wrong-arg-types
-                  source_graph=None,
-                  target_graph=None,
-                  source_offset="(b,)",
-                  target_offset="(b,)",
+                  source_graph=None,  # pyrefly: ignore[bad-argument-type]
+                  target_graph=None,  # pyrefly: ignore[bad-argument-type]
+                  source_offset="(b,)",  # pyrefly: ignore[bad-argument-type]
+                  target_offset="(b,)",  # pyrefly: ignore[bad-argument-type]
               )
           ],
           native_serialization_platforms=["cpu", "cuda"],
@@ -993,8 +993,8 @@ class LinkPredictionModel(common.Model):
           batch = InferenceBatch(  # pytype: disable=wrong-arg-types
               source_graph=jax_source,
               target_graph=jax_target,
-              source_offset=source_seed_idxs,
-              target_offset=target_seed_idxs,
+              source_offset=source_seed_idxs,  # pyrefly: ignore[bad-argument-type]
+              target_offset=target_seed_idxs,  # pyrefly: ignore[bad-argument-type]
           )
           logits = self._tf_apply(batch)
           return tf.math.sigmoid(logits)
@@ -1159,15 +1159,15 @@ class LinkPredictionModel(common.Model):
     num_edges = graph.edge_sets[target_edgeset].num_edges()
 
     if seed_edge_idxs is None:
-      seed_edge_idxs = np.arange(num_edges)
+      seed_edge_idxs = np.arange(num_edges)  # pyrefly: ignore[bad-assignment]
 
-    if num_eval_steps is not None and num_eval_steps < len(seed_edge_idxs):
+    if num_eval_steps is not None and num_eval_steps < len(seed_edge_idxs):  # pyrefly: ignore[bad-argument-type]
       rng = np.random.default_rng(random_seed)
-      seed_edge_idxs = rng.choice(
+      seed_edge_idxs = rng.choice(  # pyrefly: ignore[no-matching-overload]
           seed_edge_idxs, size=num_eval_steps, replace=False
       )
 
-    num_examples = len(seed_edge_idxs)
+    num_examples = len(seed_edge_idxs)  # pyrefly: ignore[bad-argument-type]
     if verbose >= 1:
       util.log.info("Evaluating model on %d edges", num_examples)
 
@@ -1191,7 +1191,7 @@ class LinkPredictionModel(common.Model):
 
     # Generate neighbors for all seed edges
     # TODO(gbm): Generate neighbors by batch.
-    neighbor_idxs = neighbor_generator.generate(seed_edge_idxs)
+    neighbor_idxs = neighbor_generator.generate(seed_edge_idxs)  # pyrefly: ignore[bad-argument-type]
 
     full_src, full_trg = _interleave_positives_and_negatives(
         neighbor_idxs.pos_src_node_idxs,

@@ -50,7 +50,7 @@ def main(argv):
         project_id=_PROJECT.value,
         dataset_id=_DATASET.value,
         graph_id=_GRAPH_ID.value,
-        gcs_prefix=_GCS_PREFIX.value,
+        gcs_prefix=_GCS_PREFIX.value,  # pyrefly: ignore[bad-argument-type]
     )
 
   if bigquery_config:

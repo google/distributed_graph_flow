@@ -95,3 +95,50 @@ def write_feature_statistics_beam(
     write_feature_statistics(stats, path)
 
   _ = stats | "Write to json" >> beam.Map(_write_to_json, path=path)
+
+
+def read_topology_statistics(
+    path: str,
+) -> statistics_lib.GraphTopologyStatistics:
+  """Reads topology statistics from disk in a JSON format.
+
+  Args:
+    path: Input path.
+
+  Returns:
+    The loaded statistics.
+  """
+  serialized_stats = json_lib.read_json(path)
+  return dacite.from_dict(
+      data_class=statistics_lib.GraphTopologyStatistics, data=serialized_stats
+  )
+
+
+def write_topology_statistics(
+    stats: statistics_lib.GraphTopologyStatistics, path: str
+):
+  """Saves topology statistics to disk in a json format.
+
+  Args:
+    stats: The statistics to save.
+    path: Output path.
+  """
+  json_lib.write_json(path, dataclasses.asdict(stats))
+
+
+def write_topology_statistics_beam(
+    stats: beam.PCollection[statistics_lib.GraphTopologyStatistics], path: str
+):
+  """Writes a beam pcollection of topology statistics to disk in json format.
+
+  Args:
+    stats: A PCollection with a single statistics object.
+    path: Output path.
+  """
+
+  def _write_to_json(
+      stats: statistics_lib.GraphTopologyStatistics, path: str
+  ) -> None:
+    write_topology_statistics(stats, path)
+
+  _ = stats | "Write to json" >> beam.Map(_write_to_json, path=path)

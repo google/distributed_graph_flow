@@ -106,7 +106,7 @@ def get_in_memory_graph_topology(
   total_edges = 0
 
   for node_set in graph.node_sets.values():
-    total_nodes += node_set.num_nodes
+    total_nodes += node_set.num_nodes  # pyrefly: ignore[unsupported-operation]
   for edge_set in graph.edge_sets.values():
     total_edges += edge_set.num_edges()
 

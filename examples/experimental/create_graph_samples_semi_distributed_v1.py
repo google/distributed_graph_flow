@@ -70,7 +70,7 @@ def run():
     else:
       override_schema = None
     graph = dgf.beam.io.read_graphai_hgraph(
-        root, _INPUT_HGRAPH.value, _INPUT_FORMAT.value, override_schema
+        root, _INPUT_HGRAPH.value, _INPUT_FORMAT.value, override_schema  # pyrefly: ignore[bad-argument-type]
     )
 
     # Create sampling config

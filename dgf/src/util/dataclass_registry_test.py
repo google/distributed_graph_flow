@@ -41,14 +41,14 @@ class RegisterTest(parameterized.TestCase):
 
   def test_base(self):
     b = B(a=A(2))
-    b_json = b.to_json()
+    b_json = b.to_json()  # pyrefly: ignore[missing-attribute]
     self.assertEqual(b_json, '{"a": {"x": 2, "__type": "my_registry.A"}}')
-    new_b = B.from_json(b_json)
+    new_b = B.from_json(b_json)  # pyrefly: ignore[missing-attribute]
     test_util.assert_are_equal(self, b, new_b)
 
   def test_none(self):
     b = B(a=None)
-    new_b = B.from_json(b.to_json())
+    new_b = B.from_json(b.to_json())  # pyrefly: ignore[missing-attribute]
     test_util.assert_are_equal(self, b, new_b)
 
   def test_double_registration(self):
@@ -68,19 +68,19 @@ class RegisterTest(parameterized.TestCase):
 
     b = B(a=C(2))
     with self.assertRaises(ValueError):
-      b.to_json()
+      b.to_json()  # pyrefly: ignore[missing-attribute]
 
   def test_invalid_json_missing_field(self):
     with self.assertRaises(KeyError):
-      _ = B.from_json('{"a": {"__type": "my_registry.A"}}')
+      _ = B.from_json('{"a": {"__type": "my_registry.A"}}')  # pyrefly: ignore[missing-attribute]
 
   def test_invalid_json_extra_field(self):
     with self.assertRaises(dataclasses_json.undefined.UndefinedParameterError):
-      _ = B.from_json('{"a": {"x": 2, "y": 3, "__type": "my_registry.A"}}')
+      _ = B.from_json('{"a": {"x": 2, "y": 3, "__type": "my_registry.A"}}')  # pyrefly: ignore[missing-attribute]
 
   def test_invalid_json_wrong_field_type(self):
     with self.assertRaises(ValueError):
-      _ = B.from_json('{"a": {"x": "hello", "__type": "my_registry.A"}}')
+      _ = B.from_json('{"a": {"x": "hello", "__type": "my_registry.A"}}')  # pyrefly: ignore[missing-attribute]
 
 
 if __name__ == '__main__':

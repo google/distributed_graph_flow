@@ -76,7 +76,7 @@ def main(argv):
   in_process_sampling.in_process_sampling(
       work_dir=_WORK_DIR_PATH.value,
       list_num_hops=[int(x) for x in _LIST_NUM_HOPS.value],
-      gf_graph_path=_GRAPH_PATH.value,
+      gf_graph_path=_GRAPH_PATH.value,  # pyrefly: ignore[bad-argument-type]
       seed_nodeset=_SEED_NODESET.value,
       benchmark_output_formats=_BENCHMARK_OUTPUT_FORMATS.value,
   )

@@ -78,6 +78,39 @@ py_library(
 )
 
 py_library(
+    name = "histogram",
+    srcs = ["histogram.py"],
+    deps = [
+        "//dgf/src/data:histogram",
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "histogram_test",
+    srcs = ["histogram_test.py"],
+    deps = [
+        ":histogram",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:histogram",
+        "//dgf/src/util:test_util",
+        # numpy dep,
+    ],
+)
+
+py_library(
+    name = "topology_statistics",
+    srcs = ["topology_statistics.py"],
+    deps = [
+        ":histogram",
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/data:statistics",
+        # numpy dep,
+    ],
+)
+
+py_library(
     name = "print_schema",
     srcs = ["print_schema.py"],
     deps = [
@@ -174,6 +207,20 @@ py_test(
         "//dgf/src/data:statistics",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
+    ],
+)
+
+py_test(
+    name = "topology_statistics_test",
+    srcs = ["topology_statistics_test.py"],
+    deps = [
+        ":topology_statistics",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:histogram",
+        "//dgf/src/data:statistics",
+        "//dgf/src/util:gen_test_graph",
+        "//dgf/src/util:test_util",
+        # numpy dep,
     ],
 )
 

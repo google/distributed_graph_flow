@@ -27,7 +27,7 @@ _T = TypeVar("_T")
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
-class Config(Protocol[_T]):
+class Config(Protocol[_T]):  # pyrefly: ignore[bad-class-definition]
   """Base class for configurations that can instantiate objects.
 
   Subclasses should, at least, implement `name`, `make`. Other functions such as
@@ -48,7 +48,7 @@ class Config(Protocol[_T]):
 
   def to_dict(self) -> dict[str, Any]:
     """Convert the configuration to a dictionary."""
-    params = dataclasses.asdict(self)
+    params = dataclasses.asdict(self)  # pyrefly: ignore[bad-argument-type]
     params["name"] = self.name()
     return params
 
@@ -81,4 +81,4 @@ class Config(Protocol[_T]):
     params = json.loads(cfg_str)
     if "name" in params:
       del params["name"]
-    return cls(**params)
+    return cls(**params)  # pyrefly: ignore[bad-return]

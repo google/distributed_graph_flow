@@ -278,7 +278,7 @@ def create_core_model_config(
           pre_mlp=standard.ingest_feature(
               dims=hparams.node_embedding_dim,
           ),
-          graph_conv=common.build_gnn_config(hparams),
+          graph_conv=common.build_gnn_config(hparams),  # pyrefly: ignore[bad-argument-type]
           post_mlp=standard.identity(),
           num_layers=hparams.num_layers,
           dropout=hparams.dropout,
@@ -510,7 +510,7 @@ def train_link_model(
     )
 
   # Optimizer
-  warmup_steps = min(200, 1 + num_train_steps // 5)
+  warmup_steps = min(200, 1 + num_train_steps // 5)  # pyrefly: ignore[unsupported-operation]
   learning_rate_plan = optax.join_schedules(
       schedules=[
           optax.linear_schedule(
@@ -590,7 +590,7 @@ def train_link_model(
     )
 
     if batch_stats:
-      pos_logits, neg_logits, new_model_state = output
+      pos_logits, neg_logits, new_model_state = output  # pyrefly: ignore[bad-unpacking]
     else:
       pos_logits, neg_logits = output
       new_model_state = {}
@@ -610,14 +610,14 @@ def train_link_model(
         / num_positives
         + jnp.mean(
             optax.sigmoid_binary_cross_entropy(
-                neg_logits, jnp.zeros_like(neg_logits)
+                neg_logits, jnp.zeros_like(neg_logits)  # pyrefly: ignore[bad-argument-type]
             )
         )
         / num_negatives
     )
 
     # Ranking metrics
-    ranking_metrics = evaluation.compute_ranking_metrics(pos_logits, neg_logits)
+    ranking_metrics = evaluation.compute_ranking_metrics(pos_logits, neg_logits)  # pyrefly: ignore[bad-argument-type]
     aux_data = {
         "metrics": ranking_metrics,
         "model_state": new_model_state,
@@ -636,7 +636,7 @@ def train_link_model(
     updates, opt_state = opt.update(grads, opt_state, core_params)
     core_params = optax.apply_updates(core_params, updates)
 
-    params = {**core_params}
+    params = {**core_params}  # pyrefly: ignore[invalid-argument]
     if has_batch_stats:
       params["batch_stats"] = batch_stats
     return params, opt_state, {"loss": loss, **aux_data["metrics"]}
@@ -723,7 +723,7 @@ def train_link_model(
         opt=opt,
         train_step=train_step,
         dataset_iterator=infinite_train_iterator(),
-        num_train_steps=num_train_steps,
+        num_train_steps=num_train_steps,  # pyrefly: ignore[bad-argument-type]
         rng_key=jax.random.PRNGKey(hparams.random_seed),
         working_path=checkpoint_dir,
         disable_progress_bar=verbose == 0,
@@ -788,8 +788,8 @@ def _diagnose_train_batch(
   ):
     graph_np = jax_lib.jax_graph_to_graph(graph)
     offsets_np = {k: np.asarray(v) for k, v in offsets.items()}
-    graph = merge_lib.remove_padding_sentinels(graph_np, schema, offsets_np)
-    network_lib.plot_graph(graph, schema).render(
+    graph = merge_lib.remove_padding_sentinels(graph_np, schema, offsets_np)  # pyrefly: ignore[bad-assignment]
+    network_lib.plot_graph(graph, schema).render(  # pyrefly: ignore[bad-argument-type]
         os.path.join(
             diagnostic_dir,
             f"{name}_{batch_idx}",

@@ -62,6 +62,22 @@ absl::StatusOr<GraphSchema::Feature> ParseFeatureSchema(
     return absl::InvalidArgumentError(
         absl::StrCat("Invalid shape type for feature '", feature_name, "'"));
   }
+
+  if (nb::hasattr(py_feature_schema, "is_timeseries")) {
+    nb::object py_is_timeseries = py_feature_schema.attr("is_timeseries");
+    if (!py_is_timeseries.is_none() &&
+        nb::isinstance<nb::bool_>(py_is_timeseries)) {
+      feature.is_timeseries = nb::cast<bool>(py_is_timeseries);
+    }
+  }
+
+  if (nb::hasattr(py_feature_schema, "timestamps")) {
+    nb::object py_timestamps = py_feature_schema.attr("timestamps");
+    if (!py_timestamps.is_none() && nb::isinstance<nb::str>(py_timestamps)) {
+      feature.timestamps = nb::cast<std::string>(py_timestamps);
+    }
+  }
+
   return feature;
 }
 

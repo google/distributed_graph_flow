@@ -234,3 +234,9 @@ def split_train_valid(
   valid_idxs = all_idxs[:num_valid]
   train_idxs = all_idxs[num_valid:]
   return train_idxs, valid_idxs
+
+
+def indent_string(s: str, num_spaces: int = 8) -> str:
+  """Indents a multi-line string by num_spaces."""
+  indent = " " * num_spaces
+  return s.strip().replace("\n", f"\n{indent}")

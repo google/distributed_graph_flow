@@ -12,90 +12,88 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Evaluation of a model."""
+"""Evaluation utilities for ten_lines model."""
 
-import dataclasses
-from typing import Dict, Optional, Union
-import dataclasses_json
+from typing import Any, Dict, List, Union
+from dgf.src.data import evaluation as evaluation_data_lib
+from dgf.src.learning.ten_lines import evaluation_ext
+
+Evaluation = evaluation_data_lib.Evaluation
+PerClass = evaluation_data_lib.PerClass
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 
-@dataclasses_json.dataclass_json
-@dataclasses.dataclass
-class Evaluation:
-  """A collection of metrics, plots and tables about the quality of a model.
+class ClassificationEvaluationAccumulator:
+  """Accumulator for classification metrics (ROC, PR-ROC, AUC, PR-AUC).
 
-  Usage example:
+  This class accumulates predictions and targets in a memory-efficient way
+  using fixed-bin density histograms, allowing evaluation on large datasets
+  where storing all predictions is not feasible.
 
-    ```python
-    evaluation = model.evaluate(graph)
-    print(evaluation)
-    print(evaluation.accuracy)
-    evaluation  # Html evaluation in notebook
-    ```
+  For each class (one-vs-rest), it maintains two histograms of size `num_bins`:
+  - `pos_histograms`: counts of positive examples in each score bin.
+  - `neg_histograms`: counts of negative examples in each score bin.
 
-  Attributes:
-    loss: Model loss. The loss of the model.
-    num_examples: Number of examples (non weighted).
-    num_examples_weighted: Number of examples (with weight).
-    accuracy: Accuracy of the model.
-    rmse: Root mean squared error of the model.
-    r2: R-squared of the model.
-    mrr: Mean Reciprocal Rank (MRR) of the model.
-    auc: Area Under the Curve (AUC) of the model.
-    hit_at: Dictionary of Hit@N metrics.
-    user_metrics: Additional user-defined metrics.
+  Predictions (scores between 0.0 and 1.0) are mapped to bins:
+  `bin = min(int(score * num_bins), num_bins - 1)`
+
+  When `extract_metrics` is called, it computes:
+  - Confusion matrix counts (TP, FP, TN, FN) for each threshold. The thresholds
+    are defined by the bin boundaries: `threshold = bin_index / num_bins`.
+  - ROC AUC: Computed using the trapezoidal rule on the ROC curve (FPR vs TPR).
+    Since TPR and FPR evolve linearly between bins, the trapezoidal rule gives
+    an exact calculation of the area under the binned curve.
+  - PR-AUC: Computed using the Davis-Goadrich integration method. Linear
+    interpolation of Precision-Recall curves mathematically overestimates the
+    area because Precision does not evolve linearly between bins (its
+    denominator
+    TP+FP changes non-linearly). Davis-Goadrich method interpolates linearly
+    in the ROC space (TP vs FP) and integrates the corresponding Precision
+    exactly over the interval, ensuring accurate PR-AUC calculation.
+
+  The metrics are returned as a list of `PerClass` objects, one for each class.
   """
 
-  loss: Optional[float] = None
-  accuracy: Optional[float] = None
-  rmse: Optional[float] = None
-  r2: Optional[float] = None
-  num_examples: Optional[int] = None
-  num_examples_weighted: Optional[float] = None
-  mrr: Optional[float] = None
-  auc: Optional[float] = None
-  hit_at: Dict[int, float] = dataclasses.field(default_factory=dict)
-  user_metrics: Dict[str, float] = dataclasses.field(default_factory=dict)
+  def __init__(self, num_classes: int, num_bins: int = 10000):
+    self._impl = evaluation_ext.ClassificationEvaluationAccumulator(
+        num_classes, num_bins
+    )
 
-  def _repr_html_(self) -> str:
-    """Html representation of the metrics."""
+  def add_predictions(
+      self, predictions: np.ndarray, targets: np.ndarray
+  ) -> None:
+    """Adds predictions to the accumulator."""
+    self._impl.add_predictions(predictions, targets)
 
-    html_parts = ["<b>Evaluation</b>", "<ul>"]
+  def extract_metrics(self) -> List[PerClass]:
+    """Extracts metrics from the accumulator."""
+    raw_metrics = self._impl.extract_metrics()
+    per_classes = []
+    for m in raw_metrics:
+      per_classes.append(
+          PerClass(
+              auc_value=m["auc"],
+              pr_auc_value=m["pr_auc"],
+              tp=m["tp"],
+              fp=m["fp"],
+              tn=m["tn"],
+              fn=m["fn"],
+              thresholds=m["thresholds"],
+          )
+      )
+    return per_classes
 
-    def _add_metric(name, value):
-      if value is not None:
-        html_parts.append(f"<li><b>{name}:</b> {value}</li>")
+  def populate_evaluation(self, evaluation: Evaluation) -> None:
+    """Populates an Evaluation object with metrics from this accumulator."""
+    if evaluation.per_classes:
+      raise ValueError("per_classes is already populated.")
 
-    _add_metric("Loss", self.loss)
-    _add_metric("Accuracy", self.accuracy)
-    _add_metric("RMSE", self.rmse)
-    _add_metric("R2", self.r2)
-    _add_metric("Num Examples", self.num_examples)
-    _add_metric("Num Examples Weighted", self.num_examples_weighted)
-    _add_metric("MRR", self.mrr)
-    _add_metric("AUC", self.auc)
-    if self.hit_at:
-      html_parts.append("<li><b>Hit@N:</b><ul>")
-      for key, value in self.hit_at.items():
-        html_parts.append(f"<li><em>@{key}</em>: {value}</li>")
-      html_parts.append("</ul></li>")
-
-    if self.user_metrics:
-      html_parts.append("<li><b>User Metrics:</b><ul>")
-      for key, value in self.user_metrics.items():
-        html_parts.append(f"<li><em>{key}</em>: {value}</li>")
-      html_parts.append("</ul></li>")
-
-    html_parts.append("</ul>")
-    return "\n".join(html_parts)
-
-  def html(self) -> str:
-    """Html representation of the metrics."""
-
-    return self._repr_html_()
+    evaluation.per_classes = self.extract_metrics()
+    # Compute macro average AUC as default AUC
+    if evaluation.auc is None and evaluation.per_classes:
+      evaluation.auc = np.mean([pc.auc() for pc in evaluation.per_classes])  # pyrefly: ignore[bad-assignment]
 
 
 def compute_ranking_metrics(

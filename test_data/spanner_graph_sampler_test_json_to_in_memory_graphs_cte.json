@@ -1,0 +1,740 @@
+[
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAwOTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10090",
+        "labels": 34,
+        "year": 2007
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZOTIzMzEAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "92331",
+        "labels": 8,
+        "year": 2013
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "destination_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAwOTAAeA==",
+      "element_definition_name": "edges",
+      "identifier": "mW9nYm5fYXJ4aXYuZWRnZXMAeJyZMTAAeJyZMTAwOTAAeJlvZ2JuX2FyeGl2Lm5vZGVzAHicmTEwAHiZb2dibl9hcnhpdi5ub2RlcwB4nJkxMDA5MAB4",
+      "kind": "edge",
+      "labels": [
+        "edges"
+      ],
+      "properties": {
+        "id": "10",
+        "target_id": "10090"
+      },
+      "source_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA=="
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "destination_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "element_definition_name": "edges",
+      "identifier": "mW9nYm5fYXJ4aXYuZWRnZXMAeJyZOTIzMzEAeJyZMTAAeJlvZ2JuX2FyeGl2Lm5vZGVzAHicmTkyMzMxAHiZb2dibl9hcnhpdi5ub2RlcwB4nJkxMAB4",
+      "kind": "edge",
+      "labels": [
+        "edges"
+      ],
+      "properties": {
+        "id": "92331",
+        "target_id": "10"
+      },
+      "source_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZOTIzMzEAeA=="
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMjUzNTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "25350",
+        "labels": 8,
+        "year": 2011
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZOTIzMzEAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "92331",
+        "labels": 8,
+        "year": 2013
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "destination_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMjUzNTAAeA==",
+      "element_definition_name": "edges",
+      "identifier": "mW9nYm5fYXJ4aXYuZWRnZXMAeJyZMTAAeJyZMjUzNTAAeJlvZ2JuX2FyeGl2Lm5vZGVzAHicmTEwAHiZb2dibl9hcnhpdi5ub2RlcwB4nJkyNTM1MAB4",
+      "kind": "edge",
+      "labels": [
+        "edges"
+      ],
+      "properties": {
+        "id": "10",
+        "target_id": "25350"
+      },
+      "source_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA=="
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "destination_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "element_definition_name": "edges",
+      "identifier": "mW9nYm5fYXJ4aXYuZWRnZXMAeJyZOTIzMzEAeJyZMTAAeJlvZ2JuX2FyeGl2Lm5vZGVzAHicmTkyMzMxAHiZb2dibl9hcnhpdi5ub2RlcwB4nJkxMAB4",
+      "kind": "edge",
+      "labels": [
+        "edges"
+      ],
+      "properties": {
+        "id": "92331",
+        "target_id": "10"
+      },
+      "source_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZOTIzMzEAeA=="
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAwOTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10090",
+        "labels": 34,
+        "year": 2007
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZNDY1MTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "46510",
+        "labels": 24,
+        "year": 2013
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "destination_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAwOTAAeA==",
+      "element_definition_name": "edges",
+      "identifier": "mW9nYm5fYXJ4aXYuZWRnZXMAeJyZMTAAeJyZMTAwOTAAeJlvZ2JuX2FyeGl2Lm5vZGVzAHicmTEwAHiZb2dibl9hcnhpdi5ub2RlcwB4nJkxMDA5MAB4",
+      "kind": "edge",
+      "labels": [
+        "edges"
+      ],
+      "properties": {
+        "id": "10",
+        "target_id": "10090"
+      },
+      "source_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA=="
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "destination_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "element_definition_name": "edges",
+      "identifier": "mW9nYm5fYXJ4aXYuZWRnZXMAeJyZNDY1MTAAeJyZMTAAeJlvZ2JuX2FyeGl2Lm5vZGVzAHicmTQ2NTEwAHiZb2dibl9hcnhpdi5ub2RlcwB4nJkxMAB4",
+      "kind": "edge",
+      "labels": [
+        "edges"
+      ],
+      "properties": {
+        "id": "46510",
+        "target_id": "10"
+      },
+      "source_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZNDY1MTAAeA=="
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMjUzNTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "25350",
+        "labels": 8,
+        "year": 2011
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZNDY1MTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "46510",
+        "labels": 24,
+        "year": 2013
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "destination_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMjUzNTAAeA==",
+      "element_definition_name": "edges",
+      "identifier": "mW9nYm5fYXJ4aXYuZWRnZXMAeJyZMTAAeJyZMjUzNTAAeJlvZ2JuX2FyeGl2Lm5vZGVzAHicmTEwAHiZb2dibl9hcnhpdi5ub2RlcwB4nJkyNTM1MAB4",
+      "kind": "edge",
+      "labels": [
+        "edges"
+      ],
+      "properties": {
+        "id": "10",
+        "target_id": "25350"
+      },
+      "source_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA=="
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "10",
+        "labels": 24,
+        "year": 2012
+      }
+    },
+    {
+      "destination_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTAAeA==",
+      "element_definition_name": "edges",
+      "identifier": "mW9nYm5fYXJ4aXYuZWRnZXMAeJyZNDY1MTAAeJyZMTAAeJlvZ2JuX2FyeGl2Lm5vZGVzAHicmTQ2NTEwAHiZb2dibl9hcnhpdi5ub2RlcwB4nJkxMAB4",
+      "kind": "edge",
+      "labels": [
+        "edges"
+      ],
+      "properties": {
+        "id": "46510",
+        "target_id": "10"
+      },
+      "source_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZNDY1MTAAeA=="
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTEAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "11",
+        "labels": 36,
+        "year": 2015
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTEAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "11",
+        "labels": 36,
+        "year": 2015
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTEAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "11",
+        "labels": 36,
+        "year": 2015
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZNTQwMzUAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "54035",
+        "labels": 36,
+        "year": 2012
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTEAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "11",
+        "labels": 36,
+        "year": 2015
+      }
+    },
+    {
+      "destination_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZNTQwMzUAeA==",
+      "element_definition_name": "edges",
+      "identifier": "mW9nYm5fYXJ4aXYuZWRnZXMAeJyZMTEAeJyZNTQwMzUAeJlvZ2JuX2FyeGl2Lm5vZGVzAHicmTExAHiZb2dibl9hcnhpdi5ub2RlcwB4nJk1NDAzNQB4",
+      "kind": "edge",
+      "labels": [
+        "edges"
+      ],
+      "properties": {
+        "id": "11",
+        "target_id": "54035"
+      },
+      "source_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTEAeA=="
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTEAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "11",
+        "labels": 36,
+        "year": 2015
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTEAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "11",
+        "labels": 36,
+        "year": 2015
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTEAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "11",
+        "labels": 36,
+        "year": 2015
+      }
+    },
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTQyNTkxAHg=",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "142591",
+        "labels": 36,
+        "year": 2012
+      }
+    }
+  ],
+  [
+    {
+      "element_definition_name": "nodes",
+      "identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTEAeA==",
+      "kind": "node",
+      "labels": [
+        "nodes"
+      ],
+      "properties": {
+        "id": "11",
+        "labels": 36,
+        "year": 2015
+      }
+    },
+    {
+      "destination_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTQyNTkxAHg=",
+      "element_definition_name": "edges",
+      "identifier": "mW9nYm5fYXJ4aXYuZWRnZXMAeJyZMTEAeJyZMTQyNTkxAHiZb2dibl9hcnhpdi5ub2RlcwB4nJkxMQB4mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTQyNTkxAHg=",
+      "kind": "edge",
+      "labels": [
+        "edges"
+      ],
+      "properties": {
+        "id": "11",
+        "target_id": "142591"
+      },
+      "source_node_identifier": "mW9nYm5fYXJ4aXYubm9kZXMAeJyZMTEAeA=="
+    }
+  ]
+]

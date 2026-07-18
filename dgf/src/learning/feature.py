@@ -134,7 +134,7 @@ class EmbedNodesetFeaturesModule(nn.Module):
         raw_value = jnp.expand_dims(raw_value, axis=1)
       # Create an embedding table.
       embedding = nn.Embed(
-          num_embeddings=feature_schema.num_categorical_values,
+          num_embeddings=feature_schema.num_categorical_values,  # pyrefly: ignore[bad-argument-type]
           features=self.categorical_feature_embedding_dim,
           name=f"embed_{nodeset_name}_{feature_name}",
       )

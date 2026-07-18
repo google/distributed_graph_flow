@@ -37,7 +37,7 @@ class ResidualMLP(nn.Module):
   name_prefix: str = "residual_mlp"
 
   def setup(self):
-    self.activation = common.get_activation(self.activation)
+    self.activation = common.get_activation(self.activation)  # pyrefly: ignore[bad-assignment]
 
     self.hidden_layer = nn.Dense(
         features=self.hidden_dim,
@@ -61,7 +61,7 @@ class ResidualMLP(nn.Module):
       self, x: jt.Float[jt.Array, "... D"], training: bool = False
   ) -> jt.Float[jt.Array, "... D"]:
     return self.output_layer(
-        self.activation(self.hidden_layer(x))
+        self.activation(self.hidden_layer(x))  # pyrefly: ignore[not-callable]
     ) + self.residual_layer(x)
 
 

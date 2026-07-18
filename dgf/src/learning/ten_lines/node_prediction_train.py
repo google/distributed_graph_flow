@@ -288,10 +288,10 @@ def create_core_model_config(
           feature_embedder=preprocess.EmbedFeatureSetConfig()
       ),
       pre_mlp=standard.ingest_feature(hparams.node_embedding_dim),
-      graph_conv=common.build_gnn_config(hparams),
+      graph_conv=common.build_gnn_config(hparams),  # pyrefly: ignore[bad-argument-type]
       post_mlp=standard.identity(),
       head=classification_lib.ClassificationHeadConfig(
-          num_classes=label_spec.num_categorical_values,
+          num_classes=label_spec.num_categorical_values,  # pyrefly: ignore[bad-argument-type]
       )
       if task.task_type == node_prediction_model.TaskType.NODE_CLASSIFICATION
       else regression_lib.RegressionHeadConfig(),
@@ -522,7 +522,7 @@ def train_node_model(
     with jax.profiler.TraceAnnotation("prepare dataset"):
       train_dataset, valid_dataset = prepare_datasets(
           graph=graph,
-          valid_graph=valid_graph,
+          valid_graph=valid_graph,  # pyrefly: ignore[bad-argument-type]
           schema=schema,
           hparams=hparams,
           task=task,
@@ -608,7 +608,7 @@ def train_node_model(
   else:
     raise ValueError(f"Unsupported task type: {task.task_type}")
 
-  warmup_steps = min(200, 1 + num_train_steps // 5)
+  warmup_steps = min(200, 1 + num_train_steps // 5)  # pyrefly: ignore[unsupported-operation]
   learning_rate_plan = optax.join_schedules(
       schedules=[
           optax.linear_schedule(
@@ -692,11 +692,11 @@ def train_node_model(
     logits, new_model_state = output if batch_stats else (output, {})
 
     if task.task_type == node_prediction_model.TaskType.NODE_CLASSIFICATION:
-      loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels)
-      accuracy = jnp.argmax(logits, axis=-1) == labels
+      loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels)  # pyrefly: ignore[bad-argument-type]
+      accuracy = jnp.argmax(logits, axis=-1) == labels  # pyrefly: ignore[bad-argument-type]
       metrics = {"accuracy": accuracy.mean()}
     elif task.task_type == node_prediction_model.TaskType.NODE_REGRESSION:
-      predictions = regression_lib.RegressionHead.logits_to_predictions(logits)
+      predictions = regression_lib.RegressionHead.logits_to_predictions(logits)  # pyrefly: ignore[bad-argument-type]
       loss = optax.squared_error(predictions, labels)
       metrics = {"rmse": jnp.sqrt(loss.mean())}
     else:
@@ -712,7 +712,7 @@ def train_node_model(
     graph, seed_node_idxs = batch
 
     labels = graph.node_sets[task.target_nodeset].features[
-        task.normalized_target_column
+        task.normalized_target_column  # pyrefly: ignore[bad-index]
     ][seed_node_idxs]
 
     has_batch_stats = "batch_stats" in params
@@ -726,7 +726,7 @@ def train_node_model(
     updates, opt_state = opt.update(grads, opt_state, core_params)
     core_params = optax.apply_updates(core_params, updates)
 
-    params = {**core_params}
+    params = {**core_params}  # pyrefly: ignore[invalid-argument]
     if has_batch_stats:
       params["batch_stats"] = batch_stats
     return params, opt_state, {"loss": loss, **aux_data["metrics"]}
@@ -805,7 +805,7 @@ def train_node_model(
     def valid_step(params, opt_state, batch: Batch):
       graph, seed_node_idxs = batch
       labels = graph.node_sets[task.target_nodeset].features[
-          task.normalized_target_column
+          task.normalized_target_column  # pyrefly: ignore[bad-index]
       ][seed_node_idxs]
       loss, aux = loss_fn(params, {}, batch, labels, None, False)
       return {"loss": loss, **aux["metrics"]}
@@ -825,7 +825,7 @@ def train_node_model(
           opt=opt,
           train_step=jitted_train_step,
           dataset_iterator=infinite_train_dataset_iterator(),
-          num_train_steps=num_train_steps,
+          num_train_steps=num_train_steps,  # pyrefly: ignore[bad-argument-type]
           rng_key=jax.random.PRNGKey(hparams.random_seed),
           working_path=checkpoint_dir,
           disable_progress_bar=verbose == 0,
@@ -882,8 +882,8 @@ def _diagnose_train_batch(
   """Exports diagnostic information about a training batch."""
   graph_np = jax_lib.jax_graph_to_graph(graph)
   offsets_np = {k: np.asarray(v) for k, v in offsets.items()}
-  graph = merge_lib.remove_padding_sentinels(graph_np, schema, offsets_np)
-  network_lib.plot_graph(graph, schema).render(
+  graph = merge_lib.remove_padding_sentinels(graph_np, schema, offsets_np)  # pyrefly: ignore[bad-assignment]
+  network_lib.plot_graph(graph, schema).render(  # pyrefly: ignore[bad-argument-type]
       os.path.join(diagnostic_dir, f"graph_{batch_idx}"),
       format="png",
       cleanup=True,

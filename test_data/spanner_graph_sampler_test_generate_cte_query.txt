@@ -1,0 +1,251 @@
+WITH
+  source_node AS (
+  SELECT n0_id AS seed_id, n0_id AS n0_id
+  FROM GRAPH_TABLE(my_graph
+    MATCH (n0:N1 WHERE n0.id IN UNNEST(@seed_ids))
+    RETURN n0.id AS n0_id
+  )
+),
+  hop_1 AS (
+  SELECT p.seed_id, gt.edge_json, gt.child_id AS n1_id, p.n0_id AS parent_id
+  FROM source_node p
+  JOIN GRAPH_TABLE(my_graph
+      MATCH (gp:N1)-[ge:E1]->(gc:N1)
+      FILTER IS_FIRST(2) OVER (PARTITION BY gp.id ORDER BY GENERATE_UUID())
+      RETURN gp.id AS parent_id, TO_JSON(ge) AS edge_json, gc.id AS child_id
+    ) AS gt ON p.n0_id = gt.parent_id
+),
+  hop_2 AS (
+  SELECT p.seed_id, gt.edge_json, gt.child_id AS n2_id, p.n1_id AS parent_id
+  FROM hop_1 p
+  JOIN GRAPH_TABLE(my_graph
+      MATCH (gp:N1)-[ge:E1]->(gc:N1)
+      FILTER IS_FIRST(2) OVER (PARTITION BY gp.id ORDER BY GENERATE_UUID())
+      RETURN gp.id AS parent_id, TO_JSON(ge) AS edge_json, gc.id AS child_id
+    ) AS gt ON p.n1_id = gt.parent_id
+),
+  hop_3 AS (
+  SELECT p.seed_id, gt.edge_json, gt.child_id AS n3_id, p.n1_id AS parent_id
+  FROM hop_1 p
+  JOIN GRAPH_TABLE(my_graph
+      MATCH (gp:N1)<-[ge:E1]-(gc:N1)
+      FILTER IS_FIRST(2) OVER (PARTITION BY gp.id ORDER BY GENERATE_UUID())
+      RETURN gp.id AS parent_id, TO_JSON(ge) AS edge_json, gc.id AS child_id
+    ) AS gt ON p.n1_id = gt.parent_id
+),
+  hop_4 AS (
+  SELECT p.seed_id, gt.edge_json, gt.child_id AS n4_id, p.n1_id AS parent_id
+  FROM hop_1 p
+  JOIN GRAPH_TABLE(my_graph
+      MATCH (gp:N1)-[ge:E2]->(gc:N2)
+      FILTER IS_FIRST(2) OVER (PARTITION BY gp.id ORDER BY GENERATE_UUID())
+      RETURN gp.id AS parent_id, TO_JSON(ge) AS edge_json, gc.id AS child_id
+    ) AS gt ON p.n1_id = gt.parent_id
+),
+  hop_5 AS (
+  SELECT p.seed_id, gt.edge_json, gt.child_id AS n5_id, p.n0_id AS parent_id
+  FROM source_node p
+  JOIN GRAPH_TABLE(my_graph
+      MATCH (gp:N1)<-[ge:E1]-(gc:N1)
+      FILTER IS_FIRST(2) OVER (PARTITION BY gp.id ORDER BY GENERATE_UUID())
+      RETURN gp.id AS parent_id, TO_JSON(ge) AS edge_json, gc.id AS child_id
+    ) AS gt ON p.n0_id = gt.parent_id
+),
+  hop_6 AS (
+  SELECT p.seed_id, gt.edge_json, gt.child_id AS n6_id, p.n5_id AS parent_id
+  FROM hop_5 p
+  JOIN GRAPH_TABLE(my_graph
+      MATCH (gp:N1)-[ge:E1]->(gc:N1)
+      FILTER IS_FIRST(2) OVER (PARTITION BY gp.id ORDER BY GENERATE_UUID())
+      RETURN gp.id AS parent_id, TO_JSON(ge) AS edge_json, gc.id AS child_id
+    ) AS gt ON p.n5_id = gt.parent_id
+),
+  hop_7 AS (
+  SELECT p.seed_id, gt.edge_json, gt.child_id AS n7_id, p.n5_id AS parent_id
+  FROM hop_5 p
+  JOIN GRAPH_TABLE(my_graph
+      MATCH (gp:N1)<-[ge:E1]-(gc:N1)
+      FILTER IS_FIRST(2) OVER (PARTITION BY gp.id ORDER BY GENERATE_UUID())
+      RETURN gp.id AS parent_id, TO_JSON(ge) AS edge_json, gc.id AS child_id
+    ) AS gt ON p.n5_id = gt.parent_id
+),
+  hop_8 AS (
+  SELECT p.seed_id, gt.edge_json, gt.child_id AS n8_id, p.n5_id AS parent_id
+  FROM hop_5 p
+  JOIN GRAPH_TABLE(my_graph
+      MATCH (gp:N1)-[ge:E2]->(gc:N2)
+      FILTER IS_FIRST(2) OVER (PARTITION BY gp.id ORDER BY GENERATE_UUID())
+      RETURN gp.id AS parent_id, TO_JSON(ge) AS edge_json, gc.id AS child_id
+    ) AS gt ON p.n5_id = gt.parent_id
+),
+  hop_9 AS (
+  SELECT p.seed_id, gt.edge_json, gt.child_id AS n9_id, p.n0_id AS parent_id
+  FROM source_node p
+  JOIN GRAPH_TABLE(my_graph
+      MATCH (gp:N1)-[ge:E2]->(gc:N2)
+      FILTER IS_FIRST(2) OVER (PARTITION BY gp.id ORDER BY GENERATE_UUID())
+      RETURN gp.id AS parent_id, TO_JSON(ge) AS edge_json, gc.id AS child_id
+    ) AS gt ON p.n0_id = gt.parent_id
+),
+  hop_10 AS (
+  SELECT p.seed_id, gt.edge_json, gt.child_id AS n10_id, p.n9_id AS parent_id
+  FROM hop_9 p
+  JOIN GRAPH_TABLE(my_graph
+      MATCH (gp:N2)<-[ge:E2]-(gc:N1)
+      FILTER IS_FIRST(2) OVER (PARTITION BY gp.id ORDER BY GENERATE_UUID())
+      RETURN gp.id AS parent_id, TO_JSON(ge) AS edge_json, gc.id AS child_id
+    ) AS gt ON p.n9_id = gt.parent_id
+)
+SELECT seed_id, node_id, element_type, element_class, source_id, target_id, properties_json FROM (
+SELECT n0_id AS seed_id, n0_id AS node_id, 'node' AS element_type, 'N1' AS element_class, CAST(NULL AS BYTES) AS source_id, CAST(NULL AS BYTES) AS target_id, TO_JSON(n) AS properties_json FROM source_node AS h JOIN N1 AS n ON h.n0_id = n.id
+UNION ALL
+SELECT seed_id AS seed_id, CAST(NULL AS BYTES) AS node_id, 'edge' AS element_type, 'E1' AS element_class, parent_id AS source_id, n1_id AS target_id, edge_json AS properties_json FROM hop_1
+UNION ALL
+
+      SELECT 
+        seed_id AS seed_id, 
+        n1_id AS node_id, 
+        'node' AS element_type, 
+        'N1' AS element_class, 
+        CAST(NULL AS BYTES) AS source_id, 
+        CAST(NULL AS BYTES) AS target_id, 
+        TO_JSON(n) AS properties_json 
+      FROM hop_1 AS h
+      JOIN N1 AS n ON h.n1_id = n.id
+      
+UNION ALL
+SELECT seed_id AS seed_id, CAST(NULL AS BYTES) AS node_id, 'edge' AS element_type, 'E1' AS element_class, parent_id AS source_id, n2_id AS target_id, edge_json AS properties_json FROM hop_2
+UNION ALL
+
+      SELECT 
+        seed_id AS seed_id, 
+        n2_id AS node_id, 
+        'node' AS element_type, 
+        'N1' AS element_class, 
+        CAST(NULL AS BYTES) AS source_id, 
+        CAST(NULL AS BYTES) AS target_id, 
+        TO_JSON(n) AS properties_json 
+      FROM hop_2 AS h
+      JOIN N1 AS n ON h.n2_id = n.id
+      
+UNION ALL
+SELECT seed_id AS seed_id, CAST(NULL AS BYTES) AS node_id, 'edge' AS element_type, 'E1' AS element_class, n3_id AS source_id, parent_id AS target_id, edge_json AS properties_json FROM hop_3
+UNION ALL
+
+      SELECT 
+        seed_id AS seed_id, 
+        n3_id AS node_id, 
+        'node' AS element_type, 
+        'N1' AS element_class, 
+        CAST(NULL AS BYTES) AS source_id, 
+        CAST(NULL AS BYTES) AS target_id, 
+        TO_JSON(n) AS properties_json 
+      FROM hop_3 AS h
+      JOIN N1 AS n ON h.n3_id = n.id
+      
+UNION ALL
+SELECT seed_id AS seed_id, CAST(NULL AS BYTES) AS node_id, 'edge' AS element_type, 'E2' AS element_class, parent_id AS source_id, n4_id AS target_id, edge_json AS properties_json FROM hop_4
+UNION ALL
+
+      SELECT 
+        seed_id AS seed_id, 
+        n4_id AS node_id, 
+        'node' AS element_type, 
+        'N2' AS element_class, 
+        CAST(NULL AS BYTES) AS source_id, 
+        CAST(NULL AS BYTES) AS target_id, 
+        TO_JSON(n) AS properties_json 
+      FROM hop_4 AS h
+      JOIN N2 AS n ON h.n4_id = n.id
+      
+UNION ALL
+SELECT seed_id AS seed_id, CAST(NULL AS BYTES) AS node_id, 'edge' AS element_type, 'E1' AS element_class, n5_id AS source_id, parent_id AS target_id, edge_json AS properties_json FROM hop_5
+UNION ALL
+
+      SELECT 
+        seed_id AS seed_id, 
+        n5_id AS node_id, 
+        'node' AS element_type, 
+        'N1' AS element_class, 
+        CAST(NULL AS BYTES) AS source_id, 
+        CAST(NULL AS BYTES) AS target_id, 
+        TO_JSON(n) AS properties_json 
+      FROM hop_5 AS h
+      JOIN N1 AS n ON h.n5_id = n.id
+      
+UNION ALL
+SELECT seed_id AS seed_id, CAST(NULL AS BYTES) AS node_id, 'edge' AS element_type, 'E1' AS element_class, parent_id AS source_id, n6_id AS target_id, edge_json AS properties_json FROM hop_6
+UNION ALL
+
+      SELECT 
+        seed_id AS seed_id, 
+        n6_id AS node_id, 
+        'node' AS element_type, 
+        'N1' AS element_class, 
+        CAST(NULL AS BYTES) AS source_id, 
+        CAST(NULL AS BYTES) AS target_id, 
+        TO_JSON(n) AS properties_json 
+      FROM hop_6 AS h
+      JOIN N1 AS n ON h.n6_id = n.id
+      
+UNION ALL
+SELECT seed_id AS seed_id, CAST(NULL AS BYTES) AS node_id, 'edge' AS element_type, 'E1' AS element_class, n7_id AS source_id, parent_id AS target_id, edge_json AS properties_json FROM hop_7
+UNION ALL
+
+      SELECT 
+        seed_id AS seed_id, 
+        n7_id AS node_id, 
+        'node' AS element_type, 
+        'N1' AS element_class, 
+        CAST(NULL AS BYTES) AS source_id, 
+        CAST(NULL AS BYTES) AS target_id, 
+        TO_JSON(n) AS properties_json 
+      FROM hop_7 AS h
+      JOIN N1 AS n ON h.n7_id = n.id
+      
+UNION ALL
+SELECT seed_id AS seed_id, CAST(NULL AS BYTES) AS node_id, 'edge' AS element_type, 'E2' AS element_class, parent_id AS source_id, n8_id AS target_id, edge_json AS properties_json FROM hop_8
+UNION ALL
+
+      SELECT 
+        seed_id AS seed_id, 
+        n8_id AS node_id, 
+        'node' AS element_type, 
+        'N2' AS element_class, 
+        CAST(NULL AS BYTES) AS source_id, 
+        CAST(NULL AS BYTES) AS target_id, 
+        TO_JSON(n) AS properties_json 
+      FROM hop_8 AS h
+      JOIN N2 AS n ON h.n8_id = n.id
+      
+UNION ALL
+SELECT seed_id AS seed_id, CAST(NULL AS BYTES) AS node_id, 'edge' AS element_type, 'E2' AS element_class, parent_id AS source_id, n9_id AS target_id, edge_json AS properties_json FROM hop_9
+UNION ALL
+
+      SELECT 
+        seed_id AS seed_id, 
+        n9_id AS node_id, 
+        'node' AS element_type, 
+        'N2' AS element_class, 
+        CAST(NULL AS BYTES) AS source_id, 
+        CAST(NULL AS BYTES) AS target_id, 
+        TO_JSON(n) AS properties_json 
+      FROM hop_9 AS h
+      JOIN N2 AS n ON h.n9_id = n.id
+      
+UNION ALL
+SELECT seed_id AS seed_id, CAST(NULL AS BYTES) AS node_id, 'edge' AS element_type, 'E2' AS element_class, n10_id AS source_id, parent_id AS target_id, edge_json AS properties_json FROM hop_10
+UNION ALL
+
+      SELECT 
+        seed_id AS seed_id, 
+        n10_id AS node_id, 
+        'node' AS element_type, 
+        'N1' AS element_class, 
+        CAST(NULL AS BYTES) AS source_id, 
+        CAST(NULL AS BYTES) AS target_id, 
+        TO_JSON(n) AS properties_json 
+      FROM hop_10 AS h
+      JOIN N1 AS n ON h.n10_id = n.id
+      
+)

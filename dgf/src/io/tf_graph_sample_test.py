@@ -200,7 +200,7 @@ class TfGnnGraphSampleTest(parameterized.TestCase):
           graph, schema=schema
       )
       for current_path in paths:
-        for tensor in tf.data.TFRecordDataset(
+        for tensor in tf.data.TFRecordDataset(  # pyrefly: ignore[bad-instantiation]
             current_path, compression_type="GZIP"
         ):
           read_example = tf.train.Example.FromString(tensor.numpy())

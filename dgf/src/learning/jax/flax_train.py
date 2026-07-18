@@ -323,13 +323,13 @@ def train(
     writers = [metric_writers.LoggingWriter()]
     if working_path is not None:
       writers.append(
-          metric_writers.SummaryWriter(os.path.join(working_path, "summary"))
+          metric_writers.SummaryWriter(os.path.join(working_path, "summary"))  # pyrefly: ignore[bad-argument-type]
       )
     if export_metrics_to_xm:
       try:
         from clu.metric_writers import XmMeasurementsWriter
 
-        writers.append(XmMeasurementsWriter(asynchronous=True))
+        writers.append(XmMeasurementsWriter(asynchronous=True))  # pyrefly: ignore[bad-argument-type]
       except ImportError:
         pass
     metric_writer = metric_writers.MultiWriter(writers)
@@ -404,7 +404,7 @@ def train(
     with jax.profiler.TraceAnnotation("validation"):
 
       start_time = time.time()
-      for batch in valid_dataset_iterator_fn():
+      for batch in valid_dataset_iterator_fn():  # pyrefly: ignore[not-callable]
         with jax.profiler.TraceAnnotation("valid step"):
           step_valid_metrics = valid_step(
               params=model_params,

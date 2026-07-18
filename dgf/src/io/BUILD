@@ -376,7 +376,7 @@ py_test(
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:proto",
         "//dgf/src/util:test_util",
-        "//third_party/py/google/protobuf:use_fast_cpp_protos",
+        # google/protobuf:use_fast_cpp_protos dep,
         # numpy dep,
         # tensorflow dep,
         # tensorflow_gnn/proto dep,
@@ -395,7 +395,7 @@ py_test(
         "//dgf/src/data:schema",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
-        "//third_party/py/google/protobuf:use_fast_cpp_protos",
+        # google/protobuf:use_fast_cpp_protos dep,
         # numpy dep,
         # tensorflow dep,
     ],
@@ -454,7 +454,7 @@ py_test(
     deps = [
         ":tfexample",
         # absl/testing:absltest dep,
-        "//third_party/py/google/protobuf:use_fast_cpp_protos",
+        # google/protobuf:use_fast_cpp_protos dep,
         # numpy dep,
         # tensorflow dep,
     ],
@@ -596,6 +596,18 @@ py_test(
         ":networkx",
         # absl/testing:absltest dep,
         "//dgf/src/util:gen_test_graph",
+        "//dgf/src/util:test_util",
+    ],
+)
+
+py_test(
+    name = "statistics_test",
+    srcs = ["statistics_test.py"],
+    deps = [
+        ":statistics",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:histogram",
+        "//dgf/src/data:statistics",
         "//dgf/src/util:test_util",
     ],
 )

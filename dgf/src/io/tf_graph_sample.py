@@ -77,7 +77,7 @@ def graph_dict_to_graph(
     feature_value = example[src_feature_name]
 
     if feature_schema.is_static_shape():
-      feature_value = feature_value.reshape(
+      feature_value = feature_value.reshape(  # pyrefly: ignore[no-matching-overload]
           (num_items,) + (feature_schema.shape or ())
       )
       dst_dict[dst_feature_name] = feature_value
@@ -626,7 +626,7 @@ def read_tfgnn_graphs(
   if isinstance(container_type, str):
     container_type = TFGraphSampleContainerType[container_type]
   paths = shard_lib.expand_input_paths(path)
-  path_dataset = tf.data.Dataset.from_tensor_slices(paths)
+  path_dataset = tf.data.Dataset.from_tensor_slices(paths)  # pyrefly: ignore[bad-argument-type]
 
   # Build the tf parsing spec.
   feature_spec = build_tfgnn_feature_spec(schema)
@@ -634,7 +634,7 @@ def read_tfgnn_graphs(
   if container_type == TFGraphSampleContainerType.TF_RECORD:
 
     def read_serialized_proto_dataset(path):
-      return tf.data.TFRecordDataset(path, compression_type=compression)
+      return tf.data.TFRecordDataset(path, compression_type=compression)  # pyrefly: ignore[bad-instantiation]
 
   else:
     raise ValueError("Non supported container type")
@@ -712,7 +712,7 @@ def graphs_to_serialized_tfgnn_graphs(
     graphs: Sequence[in_memory_graph.InMemoryGraph],
     schema: schema_lib.GraphSchema | None = None,
     *,
-    num_threads: int = os.cpu_count() * 2,
+    num_threads: int = os.cpu_count() * 2,  # pyrefly: ignore[unsupported-operation]
 ) -> List[bytes]:
   """Converts a sequence of InMemoryGraphs into serialized TF-GNN graph sample protos.
 

@@ -54,5 +54,6 @@ py_test(
         "//dgf/src/data:schema",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
+        # numpy dep,
     ],
 )

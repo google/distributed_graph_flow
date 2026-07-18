@@ -41,9 +41,13 @@ std::string GraphSchema::Feature::to_string(int indent) const {
   auto shape_formatter = [](std::string* out, int dim) {
     absl::StrAppend(out, dim == -1 ? "None" : std::to_string(dim));
   };
-  return absl::StrCat(prefix, "Feature(name='", name, "', shape=[",
-                      absl::StrJoin(shape, ", ", shape_formatter),
-                      "], format=", FormatToString(format), ")");
+  return absl::StrCat(
+      prefix, "Feature(name='", name, "', shape=[",
+      absl::StrJoin(shape, ", ", shape_formatter),
+      "], format=", FormatToString(format),
+      is_timeseries ? ", is_timeseries=true" : "",
+      timestamps.empty() ? "" : absl::StrCat(", timestamps='", timestamps, "'"),
+      ")");
 }
 
 std::string GraphSchema::Nodeset::to_string(int indent) const {

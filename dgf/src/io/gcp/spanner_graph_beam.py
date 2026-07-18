@@ -112,13 +112,13 @@ def distributed_read_beam(
   Returns:
     A distributed GraphFlow graph.
   """
-  spanner_graph_metadata = spanner_graph.get_metadata(
-      project, instance, database, graph
-  )
+  spanner_client = gcp_spanner.Client(project=project)
+  db = spanner_client.instance(instance).database(database)
+  spanner_graph_metadata = spanner_graph.get_metadata(db, graph)
   graph_schema = spanner_graph.graph_schema(
       spanner_graph_metadata, combine_as_json
   )
-  log.info("Spanner graph metadata: %s", spanner_graph_metadata.to_json())
+  log.info("Spanner graph metadata: %s", spanner_graph_metadata.to_json())  # pyrefly: ignore[missing-attribute]
   log.info("Graph schema: %s", graph_schema)
 
   node_sets = {}

@@ -107,9 +107,9 @@ class DataflowRunnerConfig(RunnerBuildableConfig):
     if self.machine_type is not None:
       opts["machine_type"] = self.machine_type
     if self.num_workers is not None:
-      opts["num_workers"] = self.num_workers
+      opts["num_workers"] = self.num_workers  # pyrefly: ignore[bad-assignment]
     if self.max_num_workers is not None:
-      opts["max_num_workers"] = self.max_num_workers
+      opts["max_num_workers"] = self.max_num_workers  # pyrefly: ignore[bad-assignment]
     if self.setup_file is not None:
       opts["setup_file"] = self.setup_file
     if self.sdk_container_image is not None:

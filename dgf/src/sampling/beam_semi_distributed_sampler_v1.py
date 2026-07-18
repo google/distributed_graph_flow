@@ -285,8 +285,8 @@ def compute_dense_adjacencies(
         source_node_id_to_idx: Dict[bytes, int],
         target_node_id_to_idx: Dict[bytes, int],
     ) -> Tuple[int, int]:
-      source_node_idx = source_node_id_to_idx[edge.source]
-      target_node_idx = target_node_id_to_idx[edge.target]
+      source_node_idx = source_node_id_to_idx[edge.source]  # pyrefly: ignore[bad-index]
+      target_node_idx = target_node_id_to_idx[edge.target]  # pyrefly: ignore[bad-index]
       return (source_node_idx, target_node_idx)
 
     return (

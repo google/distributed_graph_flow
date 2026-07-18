@@ -107,7 +107,7 @@ def propagate_timestamp_to_edges(
       edge_ts = src_ts[src_indices]
       ts_format = src_format
     else:
-      edge_ts = tgt_ts[tgt_indices]
+      edge_ts = tgt_ts[tgt_indices]  # pyrefly: ignore[unsupported-operation]
       ts_format = tgt_format
 
     new_edge_sets[edgeset_name] = in_memory_graph.InMemoryEdgeSet(

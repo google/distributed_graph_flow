@@ -110,7 +110,7 @@ class BigqueryGraphBeamTest(parameterized.TestCase):
   @mock.patch("dgf.src.io.gcp.bigquery_graph.get_metadata")
   @mock.patch("apache_beam.io.gcp.bigquery.ReadFromBigQuery")
   def test_distributed_read_beam(self, mock_read_bq, mock_load_metadata):
-    metadata = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(
+    metadata = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
         infoschema_query_response_json
     )
     mock_load_metadata.return_value = metadata

@@ -363,7 +363,7 @@ class NodePredictionRealLooking(parameterized.TestCase):
         consume_tf_graph_dict=consume_tf_graph_dict
     )
 
-    prediction_sample_1 = tf_predict_fn(**kwargs_call_1)
+    prediction_sample_1 = tf_predict_fn(**kwargs_call_1)  # pyrefly: ignore[not-callable]
 
     # Expected prediction
     expected_prediction_sample_1 = self.model.predict(sample_1, [0])
@@ -433,9 +433,9 @@ class NodePredictionRealLooking(parameterized.TestCase):
         tensor = next((t for t in signature.inputs if key in t.name), None)
         self.assertIsNotNone(tensor, f"Tensor for key {key} not found")
         if expected_shape == ():
-          self.assertEqual(tensor.shape, ())
+          self.assertEqual(tensor.shape, ())  # pyrefly: ignore[missing-attribute]
         else:
-          self.assertEqual(tensor.shape.as_list(), expected_shape)
+          self.assertEqual(tensor.shape.as_list(), expected_shape)  # pyrefly: ignore[missing-attribute]
 
       self.assertTrue(
           any("seed_node_idxs" in name for name in input_names),
@@ -462,7 +462,14 @@ class NodePredictionRealLooking(parameterized.TestCase):
         self.graph.node_sets["client"].num_nodes,
     )
     # Note: The dataset does not contain patterns.
-    self.assertGreaterEqual(evaluation.accuracy, 0.0)
+    self.assertGreaterEqual(evaluation.accuracy, 0.0)  # pyrefly: ignore[no-matching-overload]
+
+  def test_label_classes(self):
+    classes = self.model.label_classes()
+    self.assertLen(classes, 2)
+    for c in classes:
+      self.assertIsInstance(c, str)
+    logging.info("label_classes: %s", classes)
 
   def test_manual_seed_nodes(self):
     model = node_prediction_lib.train_node_model(
@@ -607,7 +614,7 @@ class NodePredictionRealLookingStandaloneTest(parameterized.TestCase):
         num_sampling_hops=0,  # The transactions table is not visited.
         target_nodeset="client",
         target_column="categorical_label",
-        **my_args,
+        **my_args,  # pyrefly: ignore[potential-bad-keyword-argument]
     )
 
 
@@ -652,7 +659,19 @@ class NodePredictionClassificationToy(absltest.TestCase):
         self.graph_test.node_sets["N1"].num_nodes,
     )
     # TODO(gbm): Stabilize quality.
-    self.assertAlmostEqual(evaluation.accuracy, 0.8, delta=0.15)
+    self.assertAlmostEqual(evaluation.accuracy, 0.8, delta=0.15)  # pyrefly: ignore[no-matching-overload]
+    self.assertIsNotNone(evaluation.auc)
+    self.assertGreater(evaluation.auc, 0.5)  # pyrefly: ignore[no-matching-overload]
+    self.assertLen(evaluation.per_classes, 2)
+    for pc in evaluation.per_classes:
+      self.assertIsNotNone(pc.auc())
+      self.assertIsNotNone(pc.pr_auc())
+      self.assertLen(pc.tp, 10001)
+
+  def test_label_classes_fails_for_integer_labels(self):
+    with self.assertRaises(ValueError) as ctx:
+      self.model.label_classes()
+    self.assertIn("does not have a string dictionary", str(ctx.exception))
 
 
 class NodePredictionRegressionToy(parameterized.TestCase):
@@ -691,7 +710,13 @@ class NodePredictionRegressionToy(parameterized.TestCase):
     )
     # TODO(gbm): Stabilize quality.
     self.assertIsNotNone(evaluation.rmse)
-    self.assertLess(evaluation.rmse, 1.5)
+    self.assertLess(evaluation.rmse, 1.5)  # pyrefly: ignore[no-matching-overload]
+
+    with self.assertRaises(ValueError) as ctx:
+      model.label_classes()
+    self.assertIn(
+        "only supported for NODE_CLASSIFICATION tasks", str(ctx.exception)
+    )
 
     # Save and restore the model
     with tempfile.TemporaryDirectory() as tmpdir:

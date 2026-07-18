@@ -47,7 +47,7 @@ def graph_to_jax_graph(
   for node_set_name, node_set in src.node_sets.items():
     jax_features = {k: _asarray(v) for k, v in node_set.features.items()}
     jax_node_sets[node_set_name] = jax_in_memory_graph_lib.JaxInMemoryNodeSet(
-        features=jax_features, num_nodes=node_set.num_nodes
+        features=jax_features, num_nodes=node_set.num_nodes  # pyrefly: ignore[bad-argument-type]
     )
 
   jax_edge_sets = {}

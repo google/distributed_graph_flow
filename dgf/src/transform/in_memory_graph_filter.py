@@ -78,8 +78,8 @@ class NumNodesPredicate:
 
   # TODO(bmayer): Consider supporting List[str].
   nodeset_name: Optional[str] = None
-  lower: int = -np.inf
-  upper: int = np.inf
+  lower: int = -np.inf  # pyrefly: ignore[bad-assignment]
+  upper: int = np.inf  # pyrefly: ignore[bad-assignment]
 
   def __post_init__(self):
     if self.lower > self.upper:
@@ -89,11 +89,11 @@ class NumNodesPredicate:
     if self.nodeset_name is None:
       nn = 0
       for _, ns in graph.node_sets.items():
-        nn += ns.num_nodes
+        nn += ns.num_nodes  # pyrefly: ignore[unsupported-operation]
     else:
       nn = graph.node_sets[self.nodeset_name].num_nodes
 
-    if self.lower <= nn < self.upper:
+    if self.lower <= nn < self.upper:  # pyrefly: ignore[unsupported-operation]
       return True
 
     return False

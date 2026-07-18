@@ -47,7 +47,7 @@ class ReadHGraphInMemory(benchmark_utils.Benchmark):
   def run(self):
     graph, schema = dgf.io.read_graphai_hgraph(self.hgraph_path, verbose=True)
     del schema
-    self.num_nodes = sum([x.num_nodes for x in graph.node_sets.values()])
+    self.num_nodes = sum([x.num_nodes for x in graph.node_sets.values()])  # pyrefly: ignore[no-matching-overload]
     self.num_edges = sum(
         [x.adjacency.shape[1] for x in graph.edge_sets.values()]
     )
@@ -80,7 +80,7 @@ class ReadGFGraphInMemory(benchmark_utils.Benchmark):
   def run(self):
     graph, schema = dgf.io.read_graph(self._gf_graph_path, verbose=True)
     del schema
-    self._num_nodes = sum([x.num_nodes for x in graph.node_sets.values()])
+    self._num_nodes = sum([x.num_nodes for x in graph.node_sets.values()])  # pyrefly: ignore[no-matching-overload]
     self._num_edges = sum(
         [x.adjacency.shape[1] for x in graph.edge_sets.values()]
     )
@@ -112,7 +112,7 @@ class ReadPickleInMemoryGraph(benchmark_utils.Benchmark):
         os.path.join(self.work_dir, "cache_ReadPickleInMemoryGraph.pickle"),
         lambda: dgf.io.read_graphai_hgraph(self.hgraph_path, verbose=True),
     )
-    self.num_nodes = sum([x.num_nodes for x in graph.node_sets.values()])
+    self.num_nodes = sum([x.num_nodes for x in graph.node_sets.values()])  # pyrefly: ignore[no-matching-overload]
     self.num_edges = sum(
         [x.adjacency.shape[1] for x in graph.edge_sets.values()]
     )
@@ -185,7 +185,7 @@ class WriteTFGraphSamplesInMemory(benchmark_utils.Benchmark):
     def build_graphs():
       graphs = []
       generator = dgf.io.read_tfgnn_graphs(
-          os.path.join(self.tf_graph_samples_path, "data@*.rio"), self.schema
+          os.path.join(self.tf_graph_samples_path, "data@*.rio"), self.schema  # pyrefly: ignore[bad-argument-type]
       )
       for graph in generator:
         graphs.append(graph)
@@ -202,7 +202,7 @@ class WriteTFGraphSamplesInMemory(benchmark_utils.Benchmark):
   def run(self):
     assert self.schema is not None
     dgf.io.write_tfgnn_graphs(
-        iter(self.graphs),
+        iter(self.graphs),  # pyrefly: ignore[bad-argument-type]
         os.path.join(self.work_dir, "samples@20.rio"),
         schema=self.schema,
     )
@@ -236,7 +236,7 @@ class ReadSpannerGraphInMemory(benchmark_utils.Benchmark):
         verbose=True,
     )
 
-    self.num_nodes = sum(x.num_nodes for x in graph.node_sets.values())
+    self.num_nodes = sum(x.num_nodes for x in graph.node_sets.values())  # pyrefly: ignore[no-matching-overload]
     self.num_edges = sum(x.adjacency.shape[1] for x in graph.edge_sets.values())
 
     del graph

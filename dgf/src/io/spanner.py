@@ -193,7 +193,7 @@ def schema_to_spanner_ddl(
   Raises:
     ValueError: If the max_str_length is not a valid value.
   """
-  max_bytes_length = max_bytes_length if max_bytes_length else "MAX"
+  max_bytes_length = max_bytes_length if max_bytes_length else "MAX"  # pyrefly: ignore[bad-assignment]
 
   ddl_statements: Dict[str, str] = {}
 
@@ -217,9 +217,9 @@ def schema_to_spanner_ddl(
 
       sql_type = feature_format_to_spanner_type(
           feature_schema.format,
-          feature_schema.shape,
+          feature_schema.shape,  # pyrefly: ignore[bad-argument-type]
           max_bytes_length=max_bytes_length,
-          is_utf8_string=feature_schema.is_utf8_string,
+          is_utf8_string=feature_schema.is_utf8_string,  # pyrefly: ignore[bad-argument-type]
       )
       if is_id:
         feature_ddls.append(f"{feature_name} {sql_type} NOT NULL")
@@ -254,9 +254,9 @@ def schema_to_spanner_ddl(
 
     source_type = feature_format_to_spanner_type(
         source_feature_id.format,
-        source_feature_id.shape,
+        source_feature_id.shape,  # pyrefly: ignore[bad-argument-type]
         max_bytes_length=max_bytes_length,
-        is_utf8_string=source_feature_id.is_utf8_string,
+        is_utf8_string=source_feature_id.is_utf8_string,  # pyrefly: ignore[bad-argument-type]
     )
 
     tgt_node_schema = schema.node_sets[edge_set_schema.target]
@@ -268,9 +268,9 @@ def schema_to_spanner_ddl(
 
     target_type = feature_format_to_spanner_type(
         target_feature_id.format,
-        target_feature_id.shape,
+        target_feature_id.shape,  # pyrefly: ignore[bad-argument-type]
         max_bytes_length=max_bytes_length,
-        is_utf8_string=target_feature_id.is_utf8_string,
+        is_utf8_string=target_feature_id.is_utf8_string,  # pyrefly: ignore[bad-argument-type]
     )
 
     current_ddl_statement = (
@@ -297,8 +297,8 @@ def schema_to_spanner_ddl(
 
         sql_type = feature_format_to_spanner_type(
             feature_schema.format,
-            feature_schema.shape,
-            is_utf8_string=feature_schema.is_utf8_string,
+            feature_schema.shape,  # pyrefly: ignore[bad-argument-type]
+            is_utf8_string=feature_schema.is_utf8_string,  # pyrefly: ignore[bad-argument-type]
         )
         if is_id:
           feature_ddls.append(f"  {feature_name} {sql_type} NOT NULL")
@@ -402,7 +402,7 @@ def node_to_spanner_row(
   Returns:
     An instance a `cls` object with the node data.
   """
-  node_dict = features_to_dict(node.features)
+  node_dict = features_to_dict(node.features)  # pyrefly: ignore[bad-argument-type]
   node_dict[id_key] = node.id
   return cls(**node_dict)
 
@@ -617,10 +617,10 @@ def create_spanner_row_type_from_node_schema(
     column_names_and_types.append((
         feature_name,
         feature_format_to_type_hint(
-            feature_schema.format, feature_schema.shape
+            feature_schema.format, feature_schema.shape  # pyrefly: ignore[bad-argument-type]
         ),
     ))
-  return NamedTuple(f"{node_set_name}_{name_suffix}", column_names_and_types)
+  return NamedTuple(f"{node_set_name}_{name_suffix}", column_names_and_types)  # pyrefly: ignore[bad-argument-count, bad-return]
 
 
 def create_spanner_row_type_from_edge_schema(
@@ -645,13 +645,13 @@ def create_spanner_row_type_from_edge_schema(
       _DEFAULT_ID_KEY_GNN
   ]
   source_hint = feature_format_to_type_hint(
-      source_feature_id.format, source_feature_id.shape
+      source_feature_id.format, source_feature_id.shape  # pyrefly: ignore[bad-argument-type]
   )
   target_feature_id = schema.node_sets[edge_schema.target].features[
       _DEFAULT_ID_KEY_GNN
   ]
   target_hint = feature_format_to_type_hint(
-      target_feature_id.format, target_feature_id.shape
+      target_feature_id.format, target_feature_id.shape  # pyrefly: ignore[bad-argument-type]
   )
   column_names_and_types = [("source", source_hint), ("target", target_hint)]
 
@@ -659,10 +659,10 @@ def create_spanner_row_type_from_edge_schema(
     column_names_and_types.append((
         feature_name,
         feature_format_to_type_hint(
-            feature_schema.format, feature_schema.shape
+            feature_schema.format, feature_schema.shape  # pyrefly: ignore[bad-argument-type]
         ),
     ))
-  return NamedTuple(f"{edge_set_name}_{name_suffix}", column_names_and_types)
+  return NamedTuple(f"{edge_set_name}_{name_suffix}", column_names_and_types)  # pyrefly: ignore[bad-argument-count, bad-return]
 
 
 def create_spanner_row_types_from_schema(

@@ -104,7 +104,7 @@ def read_graph(
 
   # Metadata
   with filesystem.open_read(os.path.join(path, FILENAME_METADATA)) as f:
-    metadata = gf_metadata_lib.GFGraphMetadata.from_json(f.read())
+    metadata = gf_metadata_lib.GFGraphMetadata.from_json(f.read())  # pyrefly: ignore[missing-attribute]
 
   if metadata.version > MAX_SUPPORTED_GF_VERSION:
     raise NotImplementedError(
@@ -289,7 +289,7 @@ def write_graph(
   metadata = gf_metadata_lib.GFGraphMetadata(version=MAX_SUPPORTED_GF_VERSION)
   metadata_path = os.path.join(path, FILENAME_METADATA)
   with filesystem.open_write(metadata_path) as f:
-    f.write(metadata.to_json(indent=2))
+    f.write(metadata.to_json(indent=2))  # pyrefly: ignore[missing-attribute]
 
   write_results = []
 
@@ -346,7 +346,7 @@ def _feature_schema_to_parquet_fields(
   """Creates the schema for the parquet node container."""
   fields = []
   # Note: The schema has the node "#id".
-  for feature_name, feature_schema in feature_schema.items():
+  for feature_name, feature_schema in feature_schema.items():  # pyrefly: ignore[missing-attribute]
     pa_type = FEATURE_FORMAT_TO_PY_ARROW_DTYPE[feature_schema.format]
     shape = feature_schema.shape
     if shape is None:
@@ -364,7 +364,7 @@ def _node_schema_to_parquet_schema(
     node_schema: schema_lib.NodeSchema,
 ) -> pyarrow.Schema:
   """Creates the schema for the parquet node container."""
-  return pyarrow.schema(_feature_schema_to_parquet_fields(node_schema.features))
+  return pyarrow.schema(_feature_schema_to_parquet_fields(node_schema.features))  # pyrefly: ignore[bad-argument-type]
 
 
 def _edge_schema_to_parquet_schema(
@@ -397,7 +397,7 @@ def _edge_schema_to_parquet_schema(
       pyarrow.field(
           KEY_TARGET, FEATURE_FORMAT_TO_PY_ARROW_DTYPE[target_node_format]
       ),
-  ] + _feature_schema_to_parquet_fields(edge_schema.features)
+  ] + _feature_schema_to_parquet_fields(edge_schema.features)  # pyrefly: ignore[bad-argument-type]
   return pyarrow.schema(fields)
 
 
@@ -411,7 +411,7 @@ def _node_to_raw(
     if feature_name == primary_key:
       raw_dict[feature_name] = node.id
     else:
-      feature_values = node.features[feature_name]
+      feature_values = node.features[feature_name]  # pyrefly: ignore[unsupported-operation]
       raw_dict[feature_name] = feature_values.tolist()
   return raw_dict
 
@@ -425,6 +425,6 @@ def _edge_to_raw(
       KEY_TARGET: edge.target,
   }
   for feature_name in schema.features:
-    feature_values = edge.features[feature_name]
+    feature_values = edge.features[feature_name]  # pyrefly: ignore[unsupported-operation]
     raw_dict[feature_name] = feature_values.tolist()
   return raw_dict

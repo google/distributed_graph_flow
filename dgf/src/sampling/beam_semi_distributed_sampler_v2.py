@@ -255,7 +255,7 @@ class RawSamplerV2(beam.DoFn):
 
     # Emit the samples
     for seed, sample in zip(seeds, samples):
-      yield distributed_graph.KeyedInMemoryGraph(seed, sample)
+      yield distributed_graph.KeyedInMemoryGraph(seed, sample)  # pyrefly: ignore[bad-argument-type]
 
 
 def add_features_to_graph_samples(
@@ -435,7 +435,7 @@ def Stage6IndexBySampleId(
   # ensures there is only one element.
   d_list = d["s"]
   for sample_id, node_idx in d_list:
-    yield sample_id, (node_idx, features)
+    yield sample_id, (node_idx, features)  # pyrefly: ignore[invalid-yield]
 
 
 def Stage8IndexSample(
@@ -474,14 +474,14 @@ def Stage8AddFeatureValueToSample(
     ].features.items():
       if feature_name == KEY_ID:
         continue
-      values = [None] * num_nodes
+      values = [None] * num_nodes  # pyrefly: ignore[unsupported-operation]
       num_values = 0
       for node_idx, row_features in src_features:  # pytype: disable=attribute-error
-        values[node_idx] = row_features[feature_name]
+        values[node_idx] = row_features[feature_name]  # pyrefly: ignore[unsupported-operation]
         num_values += 1
       assert num_nodes == num_values
       # TODO(gbm): Handle variable length features.
-      dst_features[feature_name] = safe_stack(values, feature_schema)
+      dst_features[feature_name] = safe_stack(values, feature_schema)  # pyrefly: ignore[bad-argument-type]
 
     dst_features[KEY_ID] = raw_nodeset.features[KEY_ID]
     augmented_nodesets[nodeset_name] = in_memory_graph_lib.InMemoryNodeSet(
@@ -489,7 +489,7 @@ def Stage8AddFeatureValueToSample(
     )
 
   return distributed_graph.KeyedInMemoryGraph(
-      sample_id,
+      sample_id,  # pyrefly: ignore[bad-argument-type]
       in_memory_graph_lib.InMemoryGraph(
           node_sets=augmented_nodesets,
           edge_sets=raw_graph.edge_sets,
@@ -503,7 +503,7 @@ def safe_stack(
   """Stacks feature value arrays, handling static and variable shapes."""
   try:
     if not values:
-      return np.empty(
+      return np.empty(  # pyrefly: ignore[no-matching-overload]
           dtype=feature_format_lib.FEATURE_FORMAT_TO_NP_DTYPE[schema.format],
           shape=(0,) + (schema.shape or ()),
       )

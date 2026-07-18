@@ -47,6 +47,11 @@ setup(
         "Source": "https://github.com/google/dgf.git",
         "Tracker": "https://github.com/google/dgf/issues",
     },
+    entry_points={
+        "console_scripts": [
+            "dgf-validate-graph=dgf.src.bin:validate_graph",
+        ],
+    },
     license="Apache 2.0",
     distclass=BinaryDistribution,
     include_package_data=True,

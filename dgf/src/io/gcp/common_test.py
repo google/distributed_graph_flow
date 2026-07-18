@@ -131,6 +131,33 @@ class CommonTest(parameterized.TestCase):
     with self.assertRaisesRegex(ValueError, "graph_element_type must be"):
       gcp_common_lib.gql_base("graph_id", "INVALID", "label", "table")
 
+  def test_validate_identifier_valid(self):
+    valid_identifiers = ["graph_1", "GraphName", "_graph", "a1", "_"]
+    for identifier in valid_identifiers:
+      try:
+        gcp_common_lib.validate_identifier(identifier)
+      except ValueError:
+        self.fail(f"validate_identifier failed unexpectedly for {identifier!r}")
+
+  @parameterized.parameters(
+      ("graph-1",),
+      ("1graph",),
+      ("graph id",),
+      ("graph'id",),
+      ('graph"id',),
+      ("graph;id",),
+      ("",),
+  )
+  def test_validate_identifier_invalid(self, identifier):
+    with self.assertRaises(ValueError):
+      gcp_common_lib.validate_identifier(identifier)
+
+  def test_gql_base_validation(self):
+    with self.assertRaises(ValueError):
+      gcp_common_lib.gql_base("invalid-graph-id", "NODE", "label", "table")
+    with self.assertRaises(ValueError):
+      gcp_common_lib.gql_base("graph_id", "NODE", "label", "invalid-table")
+
   def test_is_semantic_timestamp(self):
     self.assertTrue(gcp_common_lib.is_semantic_timestamp("TIMESTAMP"))
     self.assertFalse(gcp_common_lib.is_semantic_timestamp("STRING"))
@@ -389,7 +416,7 @@ class CommonTest(parameterized.TestCase):
     feature_timeseries = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.INTEGER_64,
         semantic=schema_lib.FeatureSemantic.TIMESERIES,
-        shape=[None],
+        shape=[None],  # pyrefly: ignore[bad-argument-type]
     )
     ts_str = "2023-10-27T10:00:00Z"
     expected_micros = 1698400800000000
@@ -412,7 +439,7 @@ class CommonTest(parameterized.TestCase):
     feature_array_str = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.BYTES,
         semantic=schema_lib.FeatureSemantic.UNKNOWN,
-        shape=[None],
+        shape=[None],  # pyrefly: ignore[bad-argument-type]
     )
     self.assertEqual(
         gcp_common_lib.parse_property_value_to_feature(

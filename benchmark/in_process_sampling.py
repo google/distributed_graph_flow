@@ -148,7 +148,7 @@ class GenGraphSamples(benchmark_utils.Benchmark):
 
     for sample in samples:
       for ns in sample.node_sets.values():
-        self.sum_sampled_nodes += ns.num_nodes
+        self.sum_sampled_nodes += ns.num_nodes  # pyrefly: ignore[unsupported-operation]
     _ = self.output_fn(samples)
     self.num_samples += 1
 
@@ -223,7 +223,7 @@ class GenGraphSubsets(benchmark_utils.Benchmark):
     ]
     subgraph = self.sampler.subgraph(seed_node_idxs)
     for ns in subgraph.node_sets.values():
-      self.sum_sampled_nodes += ns.num_nodes
+      self.sum_sampled_nodes += ns.num_nodes  # pyrefly: ignore[unsupported-operation]
     self.num_samples += 1
 
   def details(self) -> str:

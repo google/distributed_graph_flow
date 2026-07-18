@@ -12,29 +12,40 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-r"""Run filesystem test on gcs.
+r"""Run filesystem integration test on GCS or CNS.
 
-Usage example:
+Usage examples:
 
-Create find an existing a GC project and update "kTestBucket" bellow.
+1. Run on GCS:
+   blaze build //third_party/py/dgf/src/util:filesystem_integration_test && \
+   blaze-bin/third_party/py/dgf/src/util/filesystem_integration_test \
+     --test_dir=gs://graph-flow/integration_test --alsologtostderr
 
-gcloud auth application-default login
-gcloud config set project <project id>
-blaze build //third_party/py/dgf/src/util:filesystem_gcs_test && \
-blaze-bin/third_party/py/dgf/src/util/filesystem_gcs_test --alsologtostderr
+2. Run on CNS:
+   blaze build //third_party/py/dgf/src/util:filesystem_integration_test && \
+   blaze-bin/third_party/py/dgf/src/util/filesystem_integration_test \
+     --test_dir=/cns/is-d/home/gbm/tmp/ttl=365d/integration_test --alsologtostderr
 """
 
 import os
+from absl import flags
 from absl.testing import absltest
 from dgf.src.util import filesystem as fs
 
-TEST_BUCKET = "graph-flow"
+FLAGS = flags.FLAGS
+
+flags.DEFINE_string(
+    "test_dir",
+    None,
+    "Directory path for testing (GCS gs://... or CNS /cns/... path).",
+    required=True,
+)
 
 
-class FilesystemGcsTest(absltest.TestCase):
+class FilesystemIntegrationTest(absltest.TestCase):
 
   def test_base(self):
-    dir_path = f"gs://{TEST_BUCKET}/test_dir"
+    dir_path = FLAGS.test_dir
     file_path = os.path.join(dir_path, "test.txt")
     fs.makedirs(dir_path)
     content = "hello world"

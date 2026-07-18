@@ -51,7 +51,7 @@ class ReadBigQueryGraphInMemoryParquetExport(benchmark_utils.Benchmark):
         graph=self.config.graph_id,
         work_dir=self.config.gcs_prefix,
     )
-    self._num_nodes = sum(x.num_nodes for x in graph.node_sets.values())
+    self._num_nodes = sum(x.num_nodes for x in graph.node_sets.values())  # pyrefly: ignore[no-matching-overload]
     self._num_edges = sum(
         x.adjacency.shape[1] for x in graph.edge_sets.values()
     )

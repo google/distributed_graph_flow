@@ -74,8 +74,8 @@ class EmbedFeatureSetConfig:
     for _, feature_schema in schema.items():
       if feature_schema.semantic == schema_lib.FeatureSemantic.EMBEDDING:
         shape = feature_schema.shape
-        num_output_dims += (
-            feature_schema.shape[0]
+        num_output_dims += (  # pyrefly: ignore[unsupported-operation]
+            feature_schema.shape[0]  # pyrefly: ignore[unsupported-operation]
             if shape is not None and shape is not tuple()
             else 1
         )
@@ -173,7 +173,7 @@ class EmbedFeatureSet(nn.Module):
           )
         # Create an embedding table
         embedding = nn.Embed(
-            num_embeddings=feature_schema.num_categorical_values,
+            num_embeddings=feature_schema.num_categorical_values,  # pyrefly: ignore[bad-argument-type]
             features=self.config.categorical_feature_embedding_dim,
             name=f"embed_{feature_name}",
         )
@@ -405,7 +405,7 @@ class EmbedAndHomogenizeGraph(nn.Module):
     )
 
     self._homogenizer = homogenize_lib.Homogenizer(projected_schema)
-    self.output_schema = self._homogenizer.output_schema()
+    self.output_schema = self._homogenizer.output_schema()  # pyrefly: ignore[bad-assignment]
     super().__post_init__()
 
   @nn.compact

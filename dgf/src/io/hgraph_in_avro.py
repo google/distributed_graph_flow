@@ -82,7 +82,7 @@ def _generate_node_records(
   """Generates records for writing node sets to Avro."""
   iterator = range(start_index, end_index)
   if verbose:
-    iterator = tqdm(
+    iterator = tqdm(  # pyrefly: ignore[not-callable]
         iterator,
         desc=f"  - Writing nodes for '{name}'",
         unit="node",
@@ -109,7 +109,7 @@ def _generate_edge_records(
   """Generates records for writing edge sets to Avro."""
   iterator = range(start_index, end_index)
   if verbose:
-    iterator = tqdm(
+    iterator = tqdm(  # pyrefly: ignore[not-callable]
         iterator,
         desc=f"  - Writing edges for '{name}'",
         unit="edge",
@@ -152,7 +152,7 @@ def write_avro_node_sets(
     parsed_schema = fastavro.parse_schema(avro_schema_dict)
     feature_items = list(nodeset.features.items())
     num_shards, num_nodes_per_shard = shard_lib.estimate_num_node_shards(
-        nodeset.num_nodes
+        nodeset.num_nodes  # pyrefly: ignore[bad-argument-type]
     )
     for shard_index in range(num_shards):
       filename = shard_lib.sharded_filename(
@@ -163,7 +163,7 @@ def write_avro_node_sets(
       )
       filepath = os.path.join(directory, filename)
       start_index = shard_index * num_nodes_per_shard
-      end_index = min(
+      end_index = min(  # pyrefly: ignore[bad-specialization]
           (shard_index + 1) * num_nodes_per_shard, nodeset.num_nodes
       )
       with filesystem.open_write(filepath, binary=True) as f_out:
@@ -173,7 +173,7 @@ def write_avro_node_sets(
             _generate_node_records(
                 feature_items,
                 start_index,
-                end_index,
+                end_index,  # pyrefly: ignore[bad-argument-type]
                 nodeset_name,
                 verbose,
             ),
@@ -280,7 +280,7 @@ def read_avro_record(
       reader = fastavro_reader(f_in)
       record_iterator = reader
       if verbose:
-        record_iterator = tqdm(
+        record_iterator = tqdm(  # pyrefly: ignore[not-callable]
             reader,
             desc=f"  - Reading records from {avro_file}",
             unit="record",
@@ -288,7 +288,7 @@ def read_avro_record(
       for record in record_iterator:
         num_records += 1
         for feature_name in feature_builders.keys():
-          feature_builders[feature_name].append(record[feature_name])
+          feature_builders[feature_name].append(record[feature_name])  # pyrefly: ignore[bad-index, unsupported-operation]
 
   # Convert lists to numpy arrays
   final_features = {}

@@ -54,6 +54,7 @@ py_library(
     name = "data",
     srcs = ["data.py"],
     deps = [
+        "//dgf/src/data:histogram",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:jax_in_memory_graph",
         "//dgf/src/data:padding",
@@ -99,6 +100,7 @@ py_library(
         "//dgf/src/transform:schema",
         "//dgf/src/transform:table_2_graph",
         "//dgf/src/transform:temporal",
+        "//dgf/src/transform:timeseries",
         "//dgf/src/util:util_py",
     ],
 )
@@ -107,10 +109,12 @@ py_library(
     name = "analyse",
     srcs = ["analyse.py"],
     deps = [
+        "//dgf/src/analyse:histogram",
         "//dgf/src/analyse:in_process_feature_statistics",
         "//dgf/src/analyse:padding",
         "//dgf/src/analyse:print_schema",
         "//dgf/src/analyse:schema",
+        "//dgf/src/analyse:topology_statistics",
         "//dgf/src/analyse/reports:data_model",
         "//dgf/src/analyse/reports:reporter",
         "//dgf/src/analyse/topology:global_graph_topology",

@@ -166,7 +166,7 @@ def heterogeneous_graph_from_pieces(
   pedge_features = None
   if edge_features is not None:
     pedge_features = {}
-    for name, edge_features in edge_features.items():
+    for name, edge_features in edge_features.items():  # pyrefly: ignore[bad-assignment]
       pedge_features[name] = (
           p
           | f"{stage_prefix}CreateEdgeFeatures_{name}"
@@ -177,7 +177,7 @@ def heterogeneous_graph_from_pieces(
       schema=schema,
       node_sets=pnode_sets,
       edge_sets=pedge_sets,
-      edge_format=edge_format,
+      edge_format=edge_format,  # pyrefly: ignore[bad-argument-type]
       edge_features=pedge_features,
   )
 

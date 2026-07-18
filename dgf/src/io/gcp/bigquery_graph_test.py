@@ -163,7 +163,7 @@ class BigqueryGraphTest(parameterized.TestCase):
       bigquery_graph.get_metadata("project", "dataset", "graph")
 
   def test_is_source_and_destination_pk_fk_aligned(self):
-    metadata = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(
+    metadata = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
         infoschema_query_response_json
     )
     edge_table = metadata.edge_tables[0]
@@ -175,7 +175,7 @@ class BigqueryGraphTest(parameterized.TestCase):
     )
 
   def test_graph_element_table(self):
-    node_table = bigquery_graph_metadata_lib.NodeTable.from_dict(
+    node_table = bigquery_graph_metadata_lib.NodeTable.from_dict(  # pyrefly: ignore[missing-attribute]
         infoschema_query_response_json["nodeTables"][0]
     )
     table_dict = bigquery_graph._graph_element_table(
@@ -192,7 +192,7 @@ class BigqueryGraphTest(parameterized.TestCase):
     )
 
   def test_graph_schema(self):
-    metadata = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(
+    metadata = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
         infoschema_query_response_json
     )
     schema = bigquery_graph.metadata_to_schema(
@@ -208,7 +208,7 @@ class BigqueryGraphTest(parameterized.TestCase):
     metadata_json["edgeTables"][0]["sourceNodeReference"][
         "nodeTableColumns"
     ] = ["misaligned_id"]
-    metadata = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(
+    metadata = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
         metadata_json
     )
     with self.assertRaisesRegex(
@@ -233,7 +233,7 @@ class BigqueryGraphTest(parameterized.TestCase):
       mock_execute_query,
       mock_load_metadata,
   ):
-    metadata = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(
+    metadata = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
         infoschema_query_response_json
     )
     mock_load_metadata.return_value = metadata

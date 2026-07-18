@@ -40,7 +40,7 @@ py_library(
         # numpy dep,
         # pyarrow:pyarrow_modules dep,
         # tensorflow dep,
-        # tensorflow_gnn/proto dep,
+        # tensorflow_gnn/proto dep,  # buildcleaner: keep
     ],
 )
 
@@ -167,6 +167,15 @@ py_library(
     ],
 )
 
+py_library(
+    name = "temporal",
+    srcs = ["temporal.py"],
+    deps = [
+        "//dgf/src/data:schema",
+        # numpy dep,
+    ],
+)
+
 cc_library(
     name = "test_util_cc",
     testonly = True,
@@ -272,14 +281,15 @@ py_test(
 )
 
 py_test(
-    name = "filesystem_gcs_test",
-    srcs = ["filesystem_gcs_test.py"],
+    name = "filesystem_integration_test",
+    srcs = ["filesystem_integration_test.py"],
     tags = [
         "manual",
         "notap",
     ],
     deps = [
         ":filesystem",
+        # absl/flags dep,
         # absl/testing:absltest dep,
     ],
 )
@@ -378,5 +388,16 @@ py_test(
     deps = [
         ":weak_dep",
         # absl/testing:absltest dep,
+    ],
+)
+
+py_test(
+    name = "temporal_test",
+    srcs = ["temporal_test.py"],
+    deps = [
+        ":temporal",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:schema",
+        # numpy dep,
     ],
 )

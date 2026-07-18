@@ -81,7 +81,7 @@ def get_metadata(
         f" {graph_id}, found {len(metadata_rows)}"
     )
 
-  bq_meta_data = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(
+  bq_meta_data = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
       metadata_rows[0][BQ_GRAPH_METADATA_JSON_COLUMN_NAME]
   )
 
@@ -107,7 +107,7 @@ def _graph_element_table(
     and feature type as value.
   """
   graph_element_table = {}
-  for label_and_properties in labels_and_properties:
+  for label_and_properties in labels_and_properties:  # pyrefly: ignore[not-iterable]
     if label_and_properties.properties:
       for label_property in label_and_properties.properties:
         feature_name = label_property.name
@@ -129,7 +129,7 @@ def metadata_to_schema(
   for node_table in bigquery_graph_metadata.node_tables:
     node_sets[node_table.name] = schema_lib.NodeSchema(
         features=gcp_common_lib.infer_feature_set_schema(
-            _graph_element_table(node_table.label_and_properties),
+            _graph_element_table(node_table.label_and_properties),  # pyrefly: ignore[bad-argument-type]
             node_table.key_columns,
             combine_as_json,
         )
@@ -141,7 +141,7 @@ def metadata_to_schema(
         source=edge_table.source_node_reference.node_table,
         target=edge_table.destination_node_reference.node_table,
         features=gcp_common_lib.infer_feature_set_schema(
-            _graph_element_table(edge_table.label_and_properties),
+            _graph_element_table(edge_table.label_and_properties),  # pyrefly: ignore[bad-argument-type]
             [],  # Add support for edge ids,
             combine_as_json,
         ),
@@ -412,4 +412,4 @@ def export_bigquery_to_disk(
 
   metadata = gf_metadata_lib.GFGraphMetadata(version=MAX_SUPPORTED_GF_VERSION)
   with filesystem.open_write(os.path.join(path, FILENAME_METADATA)) as f:
-    f.write(metadata.to_json(indent=2))
+    f.write(metadata.to_json(indent=2))  # pyrefly: ignore[missing-attribute]
