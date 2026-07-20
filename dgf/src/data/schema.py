@@ -55,8 +55,9 @@ class FeatureSemantic(enum.Enum):
     TIMESTAMP: The feature represents a timestamp.
     TIMESERIES: The feature represents a time series of values.
     PRIMARY_ID: The feature represents a primary ID.
-    MASK: The feature represents a boolean sequence padding mask. Its shape has
-      to be broadcastable to the feature it is masking.
+    MASK: The feature represents a boolean sequence padding mask. It must belong
+      to a `timeseries_group`, and its shape has to be broadcastable to the
+      features in that group.
   """
 
   UNKNOWN = "UNKNOWN"
@@ -99,6 +100,9 @@ class FeatureSchema:
       length of the corresponding timestamps feature must equal the length of
       the timeseries feature along the 0th dimension. Cannot be set for non
       timeseries features.
+    timeseries_group: Name of the timeseries group this sequence feature belongs
+      to. All features sharing the same `timeseries_group` share the same
+      sequence length along shape[0] and share a single group mask.
   """
 
   format: FeatureFormat
@@ -108,6 +112,7 @@ class FeatureSchema:
   is_utf8_string: Optional[bool] = False
   is_timeseries: Optional[bool] = False
   timestamps: Optional[str] = None
+  timeseries_group: Optional[str] = None
 
   def is_static_shape(self) -> bool:
     """Returns true if the feature has a fully static shape."""

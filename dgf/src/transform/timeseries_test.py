@@ -15,6 +15,7 @@
 """Tests for padding and capping timeseries sequence features."""
 
 from absl.testing import absltest
+from absl.testing import parameterized
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.transform import timeseries
@@ -75,7 +76,7 @@ def _ts_schema(
   )
 
 
-class TimeseriesTest(absltest.TestCase):
+class TimeseriesTest(parameterized.TestCase):
 
   def test_capping_and_padding(self):
     # Both 'time' and 'signal' are variable-length sequence object arrays.
@@ -120,7 +121,6 @@ class TimeseriesTest(absltest.TestCase):
         "signal": np.array(
             [[3.0, 4.0, 5.0], [0.0, 0.5, 1.5]], dtype=np.float32
         ),
-        "signal_mask": np.array([[True, True, True], [False, True, True]]),
         "time_mask": np.array([[True, True, True], [False, True, True]]),
         "id": np.array([101, 102]),
     }
@@ -238,6 +238,94 @@ class TimeseriesTest(absltest.TestCase):
     self.assertEqual(
         hw_sch.features["emb_mask"].semantic, schema_lib.FeatureSemantic.MASK
     )
+
+  def test_custom_mask_name_is_reused(self):
+    graph, schema = _make_graph_and_schema(
+        values={
+            "emb": np.array(
+                [np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)],
+                dtype=np.object_,
+            ),
+            "my_custom_mask": np.array(
+                [np.array([True, True], dtype=bool)],
+                dtype=np.object_,
+            ),
+        },
+        schemas={
+            "emb": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.FLOAT_32,
+                semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                is_timeseries=True,
+                shape=(None, 2),
+                timeseries_group="emb_group",
+            ),
+            "my_custom_mask": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.BOOL,
+                semantic=schema_lib.FeatureSemantic.MASK,
+                is_timeseries=True,
+                shape=(None,),
+                timeseries_group="emb_group",
+            ),
+        },
+    )
+    new_graph, new_schema = timeseries.pad_and_cap_timeseries_features(
+        graph,
+        schema,
+        timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
+    )
+    hw_val = new_graph.node_sets["hardware"]
+    hw_sch = new_schema.node_sets["hardware"]
+
+    expected_features = {
+        "emb": np.array(
+            [[[0.0, 0.0], [1.0, 2.0], [3.0, 4.0]]], dtype=np.float32
+        ),
+        "my_custom_mask": np.array([[False, True, True]]),
+    }
+    test_util.assert_are_equal(self, hw_val.features, expected_features)
+    self.assertEqual(hw_sch.features["emb"].shape, (3, 2))
+    self.assertEqual(hw_sch.features["my_custom_mask"].shape, (3,))
+    self.assertNotIn("emb_mask", hw_sch.features)
+
+  def test_clashing_mask_name_raises(self):
+    graph, schema = _make_graph_and_schema(
+        values={
+            "emb": np.array(
+                [np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)],
+                dtype=np.object_,
+            ),
+            "emb_mask": np.array(
+                [np.array([42.0], dtype=np.float32)],
+                dtype=np.object_,
+            ),
+        },
+        schemas={
+            "emb": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.FLOAT_32,
+                semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                is_timeseries=True,
+                shape=(None, 2),
+                timeseries_group="emb",
+            ),
+            # This feature is named "emb_mask", which is the fallback mask name
+            # for the group "emb", but its semantic is not MASK.
+            "emb_mask": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.FLOAT_32,
+                semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                is_timeseries=True,
+                shape=(None, 1),
+                timeseries_group="emb",
+            ),
+        },
+    )
+    with self.assertRaisesRegex(
+        ValueError, "clashes with an existing feature"
+    ):
+      timeseries.pad_and_cap_timeseries_features(
+          graph,
+          schema,
+          timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
+      )
 
   def test_empty_sequence(self):
     graph, schema = _make_graph_and_schema(
@@ -380,7 +468,6 @@ class TimeseriesTest(absltest.TestCase):
     expected_features = {
         "time": np.array([[-1, -1, 10]], dtype=np.int64),
         "signal": np.array([[-1.0, -1.0, 2.0]], dtype=np.float32),
-        "signal_mask": np.array([[False, False, True]]),
         "time_mask": np.array([[False, False, True]]),
     }
     test_util.assert_are_equal(self, hw_val.features, expected_features)
@@ -673,6 +760,198 @@ class TimeseriesTest(absltest.TestCase):
     self.assertEqual(
         hw_sch.features["master_time_hour"].timestamps, "master_time"
     )
+
+  def test_extract_timestamp_features(self):
+    graph, schema = _make_graph_and_schema(
+        values={
+            "time": np.array(
+                [np.array([100, 250, 300], dtype=np.int64)], dtype=np.object_
+            )
+        },
+        schemas={
+            "time": _ts_schema(
+                fmt=schema_lib.FeatureFormat.INTEGER_64,
+                sem=schema_lib.FeatureSemantic.TIMESTAMP,
+            )
+        },
+    )
+    padded_graph, padded_schema = timeseries.pad_and_cap_timeseries_features(
+        graph,
+        schema,
+        timeseries.PadAndCapTimeseriesConfig(sequence_length=4),
+    )
+    delta_graph, delta_schema = timeseries.extract_timestamp_features(
+        padded_graph,
+        padded_schema,
+        seed_timestamp=500,
+        config=timeseries.TimestampFeatureConfig(),
+    )
+
+    hw_val = delta_graph.node_sets["hardware"]
+    hw_sch = delta_schema.node_sets["hardware"]
+
+    # Padded sequence: [0, 100, 250, 300] with mask [0, 1, 1, 1]
+    # Seed delta (seed=500): [0, 400, 250, 200]
+    expected_features = {
+        "time": np.array([[0, 100, 250, 300]], dtype=np.int64),
+        "time_mask": np.array([[False, True, True, True]]),
+        "time_seed_delta": np.array([[0, 400, 250, 200]], dtype=np.int64),
+    }
+    test_util.assert_are_equal(self, hw_val.features, expected_features)
+
+    expected_schemas = {
+        "time": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.INTEGER_64,
+            semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+            shape=(4,),
+            is_timeseries=True,
+            timestamps=None,
+            timeseries_group="time",
+        ),
+        "time_mask": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.BOOL,
+            semantic=schema_lib.FeatureSemantic.MASK,
+            shape=(4,),
+            is_timeseries=True,
+            timestamps=None,
+            timeseries_group="time",
+        ),
+        "time_seed_delta": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.INTEGER_64,
+            semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+            shape=(4,),
+            is_timeseries=True,
+            timestamps="time",
+            timeseries_group="time",
+        ),
+    }
+    test_util.assert_are_equal(self, hw_sch.features, expected_schemas)
+
+  def test_extract_timestamp_features_static_timestamp(self):
+    values = {"created_at": np.array([65, 1680000015], dtype=np.int64)}
+    schemas = {
+        "created_at": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.INTEGER_64,
+            semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+            is_timeseries=False,
+            shape=(),
+        )
+    }
+    new_vals, new_schs = timeseries._extract_feature_set_timestamp_features(
+        values, schemas, timeseries.TimestampFeatureConfig(), seed_timestamp=500
+    )
+    np.testing.assert_array_equal(
+        new_vals["created_at_seed_delta"], [435, -1679999515]
+    )
+    self.assertFalse(new_schs["created_at_seed_delta"].is_timeseries)
+
+  def test_extract_timestamp_features_parent_timestamp(self):
+    values = {
+        "event_time": np.array([[65, 3665]], dtype=np.int64),
+        "master_time": np.array([[65, 3665]], dtype=np.int64),
+    }
+    schemas = {
+        "event_time": _ts_schema(
+            sem=schema_lib.FeatureSemantic.TIMESTAMP,
+            timestamps="master_time",
+            shape=(2,),
+        ),
+        "master_time": _ts_schema(
+            sem=schema_lib.FeatureSemantic.TIMESTAMP, shape=(2,)
+        ),
+    }
+    _, new_schs = timeseries._extract_feature_set_timestamp_features(
+        values, schemas, timeseries.TimestampFeatureConfig(), seed_timestamp=500
+    )
+    self.assertEqual(
+        new_schs["event_time_seed_delta"].timestamps, "master_time"
+    )
+    self.assertEqual(
+        new_schs["master_time_seed_delta"].timestamps, "master_time"
+    )
+
+  def test_extract_timestamp_features_requires_fixed_length(self):
+    graph, schema = _make_graph_and_schema(
+        values={
+            "time": np.array(
+                [np.array([100, 250], dtype=np.int64)], dtype=np.object_
+            )
+        },
+        schemas={
+            "time": _ts_schema(
+                fmt=schema_lib.FeatureFormat.INTEGER_64,
+                sem=schema_lib.FeatureSemantic.TIMESTAMP,
+            )
+        },
+    )
+    with self.assertRaisesRegex(
+        ValueError,
+        "extract_timestamp_features requires fixed-length timestamp tensors",
+    ):
+      timeseries.extract_timestamp_features(
+          graph,
+          schema,
+          seed_timestamp=500,
+          config=timeseries.TimestampFeatureConfig(),
+      )
+
+  def test_extract_timestamp_features_edge_sets(self):
+    graph, schema = _make_graph_and_schema(
+        values={},
+        schemas={},
+        node_set_name="nodes",
+        edge_values={"time": np.array([[100, 250]], dtype=np.int64)},
+        edge_schemas={
+            "time": _ts_schema(
+                fmt=schema_lib.FeatureFormat.INTEGER_64,
+                sem=schema_lib.FeatureSemantic.TIMESTAMP,
+                shape=(2,),
+            )
+        },
+        edge_set_name="ts_edges",
+    )
+    graph.edge_sets["ts_edges"].features["time_mask"] = np.array(
+        [[1, 1]], dtype=np.bool_
+    )
+    schema.edge_sets["ts_edges"].features["time_mask"] = _ts_schema(
+        fmt=schema_lib.FeatureFormat.BOOL,
+        sem=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(2,),
+    )
+
+    delta_graph, delta_schema = timeseries.extract_timestamp_features(
+        graph,
+        schema, seed_timestamp=500, config=timeseries.TimestampFeatureConfig(),
+    )
+    es_val = delta_graph.edge_sets["ts_edges"]
+    es_sch = delta_schema.edge_sets["ts_edges"]
+
+    self.assertIn("time_seed_delta", es_val.features)
+    self.assertEqual(es_sch.features["time_seed_delta"].timestamps, "time")
+
+  def test_extract_timestamp_features_non_timeseries(self):
+    values = {"x": np.array([1.0], dtype=np.float32)}
+    schemas = {
+        "x": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        )
+    }
+    new_vals, new_schs = timeseries._extract_feature_set_timestamp_features(
+        values, schemas, timeseries.TimestampFeatureConfig(), seed_timestamp=500
+    )
+    self.assertEqual(new_vals, values)
+    self.assertEqual(new_schs, schemas)
+
+  @parameterized.parameters(
+      (np.array([[False, True, True]]), 0, [[0, 400, 250]]),
+      (None, 0, [[500, 400, 250]]),
+      (np.array([[False, True, True]]), -999, [[-999, 400, 250]]),
+  )
+  def test_compute_seed_deltas(self, mask, fill_value, expected):
+    raw_val = np.array([[0, 100, 250]], dtype=np.int64)
+    deltas = timeseries._compute_seed_deltas(raw_val, mask, 500, fill_value)
+    np.testing.assert_array_equal(deltas, expected)
 
 
 if __name__ == "__main__":
