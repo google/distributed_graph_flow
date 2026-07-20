@@ -54,7 +54,9 @@ class FeatureSemantic(enum.Enum):
       be directly consumed by a neural network.
     TIMESTAMP: The feature represents a timestamp.
     TIMESERIES: The feature represents a time series of values.
-    PRIMARY_ID: The feature represent a primary ID.
+    PRIMARY_ID: The feature represents a primary ID.
+    MASK: The feature represents a boolean sequence padding mask. Its shape has
+      to be broadcastable to the feature it is masking.
   """
 
   UNKNOWN = "UNKNOWN"
@@ -64,6 +66,7 @@ class FeatureSemantic(enum.Enum):
   TIMESTAMP = "TIMESTAMP"
   TIMESERIES = "TIMESERIES"
   PRIMARY_ID = "PRIMARY_ID"
+  MASK = "MASK"
 
 
 @dataclasses_json.dataclass_json

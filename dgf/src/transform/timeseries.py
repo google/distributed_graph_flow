@@ -213,7 +213,7 @@ def _process_feature_set(
     new_values[f"{fname}_mask"] = mask_matrix
     new_schemas[f"{fname}_mask"] = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.BOOL,
-        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        semantic=schema_lib.FeatureSemantic.MASK,
         shape=(seq_len,),
         is_timeseries=schema.is_timeseries,
         timestamps=schema.timestamps,

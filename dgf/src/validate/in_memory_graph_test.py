@@ -416,6 +416,28 @@ class InMemoryGraphTest(absltest.TestCase):
         ],
     )
 
+  def test_mask_format_invalid(self):
+    graph, schema = valid_graph()
+    num_nodes = graph.node_sets["n1"].num_nodes
+    schema.node_sets["n1"].features["bad_mask"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.MASK,
+        shape=(5,),
+        is_timeseries=True,
+    )
+    graph.node_sets["n1"].features["bad_mask"] = np.zeros(
+        (num_nodes, 5), dtype=np.float32
+    )
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertIn(
+        Issue.error(
+            "The mask feature 'bad_mask' in nodeset 'n1' must have format"
+            " BOOL, but has format <FeatureFormat.FLOAT_32: 'FLOAT_32'>."
+        ),
+        issues,
+    )
+
+
 
 if __name__ == "__main__":
   absltest.main()

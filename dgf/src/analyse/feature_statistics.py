@@ -81,6 +81,7 @@ def filter_feature_schema(
       if v.semantic
       not in [
           schema_lib.FeatureSemantic.UNKNOWN,
+          schema_lib.FeatureSemantic.MASK,
       ]
   }
 

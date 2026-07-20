@@ -190,6 +190,7 @@ class StatisticsTest(parameterized.TestCase):
       (schema_lib.FeatureSemantic.TIMESERIES, True),
       (schema_lib.FeatureSemantic.TIMESTAMP, True),
       (schema_lib.FeatureSemantic.UNKNOWN, False),
+      (schema_lib.FeatureSemantic.MASK, False),
   )
   def test_filter_feature_schema_by_semantic(self, semantic, should_keep):
     schema = {

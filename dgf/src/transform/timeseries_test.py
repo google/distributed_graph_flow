@@ -129,6 +129,9 @@ class TimeseriesTest(absltest.TestCase):
     self.assertEqual(hw_sch.features["time"].shape, (3,))
     self.assertTrue(hw_sch.features["time"].is_timeseries)
     self.assertTrue(hw_sch.features["time_mask"].is_timeseries)
+    self.assertEqual(
+        hw_sch.features["time_mask"].semantic, schema_lib.FeatureSemantic.MASK
+    )
 
   def test_edge_sets_and_non_timeseries(self):
     graph = in_memory_graph.InMemoryGraph(
@@ -232,6 +235,9 @@ class TimeseriesTest(absltest.TestCase):
     test_util.assert_are_equal(self, hw_val.features, expected_features)
     self.assertEqual(hw_sch.features["emb"].shape, (3, 2))
     self.assertEqual(hw_sch.features["emb_mask"].shape, (3,))
+    self.assertEqual(
+        hw_sch.features["emb_mask"].semantic, schema_lib.FeatureSemantic.MASK
+    )
 
   def test_empty_sequence(self):
     graph, schema = _make_graph_and_schema(
@@ -301,6 +307,9 @@ class TimeseriesTest(absltest.TestCase):
     self.assertEqual(user_sch.features["time"].shape, (3,))
     self.assertTrue(user_sch.features["time"].is_timeseries)
     self.assertTrue(user_sch.features["time_mask"].is_timeseries)
+    self.assertEqual(
+        user_sch.features["time_mask"].semantic, schema_lib.FeatureSemantic.MASK
+    )
 
   def test_missing_entity_set_raises(self):
     graph = in_memory_graph.InMemoryGraph(

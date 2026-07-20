@@ -113,6 +113,14 @@ def feature_set_issues(
                 " consume by some tools."
             )
         )
+      elif feature_schema.semantic == schema_lib.FeatureSemantic.MASK:
+        if feature_schema.format != schema_lib.FeatureFormat.BOOL:
+          items.append(
+              Issue.error(
+                  f"The mask feature {feature_name!r} in {source} must have"
+                  f" format BOOL, but has format {feature_schema.format!r}."
+              )
+          )
     else:
       if feature_schema.semantic != schema_lib.FeatureSemantic.PRIMARY_ID:
         items.append(
@@ -189,8 +197,8 @@ def feature_set_issues(
           items.append(
               Issue.error(
                   f"The feature {feature_name!r} in {source} has schema shape"
-                  f" {feat_shape} whose 0th dimension ({feat_shape[0]}) does not"
-                  f" match timestamps feature {ts_name!r} schema shape 0th"
+                  f" {feat_shape} whose 0th dimension ({feat_shape[0]}) does"
+                  f" not match timestamps feature {ts_name!r} schema shape 0th"
                   f" dimension ({ts_shape[0]})."
               )
           )
@@ -216,7 +224,6 @@ def feature_set_issues(
                         )
                     )
                     break
-
   return items
 
 
