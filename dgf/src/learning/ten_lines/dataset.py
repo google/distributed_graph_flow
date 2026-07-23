@@ -24,6 +24,7 @@ from dgf.src.io import tf_graph_sample
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import merge as merge_lib
+from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 import numpy as np
 
@@ -136,8 +137,12 @@ class SampleGeneratorFromAnything:
 
   num_seed_nodes: Optional[int] = dataclasses.field(init=False)
   iterator: SampleGeneratorIteratorFn = dataclasses.field(init=False)
-
   in_memory_sampler: Optional[in_memory_sampler_lib.Sampler] = None
+  _target_nodeset: Optional[str] = dataclasses.field(init=False, default=None)
+  _ts_feature: Optional[str] = dataclasses.field(init=False, default=None)
+  _seed_timestamps_all: Optional[np.ndarray] = dataclasses.field(
+      init=False, default=None
+  )
 
   def __post_init__(self):
     if isinstance(self.format, str):
@@ -154,10 +159,20 @@ class SampleGeneratorFromAnything:
               self.sampling_config, self.schema
           )
       )
+
     if self.temporal:
-      self.sampling_config.edgeset_timestamp_features = (
-          self.edgeset_timestamp_features
+      self._target_nodeset = self.sampling_config.root.nodeset  # pyrefly: ignore[missing-attribute]
+      self._ts_feature = temporal_util.get_creation_time_feature_name(
+          self.schema.node_sets[self._target_nodeset].features
       )
+      if (
+          self.format == GraphFormat.IN_MEMORY_GRAPH
+          and self._ts_feature is not None
+      ):
+        assert isinstance(self.graph, in_memory_graph.InMemoryGraph)
+        self._seed_timestamps_all = self.graph.node_sets[
+            self._target_nodeset
+        ].features[self._ts_feature]
 
     if self.format == GraphFormat.IN_MEMORY_GRAPH:
       assert isinstance(self.graph, in_memory_graph.InMemoryGraph)
@@ -255,10 +270,9 @@ class SampleGeneratorFromAnything:
       ):
         if self.temporal:
           # Get the seed node timestamp
-          target_nodeset = self.sampling_config.root.nodeset  # pyrefly: ignore[missing-attribute]
-          ts_feature = self.nodeset_timestamp_features[target_nodeset]
-          timestamps = self.graph.node_sets[target_nodeset].features[ts_feature]
-          seed_timestamps = timestamps[node_idxs]
+          seed_timestamps = None
+          if self._seed_timestamps_all is not None:
+            seed_timestamps = self._seed_timestamps_all[node_idxs]
 
           graph_samples = self.in_memory_sampler.sample(
               node_idxs, seed_timestamps=seed_timestamps

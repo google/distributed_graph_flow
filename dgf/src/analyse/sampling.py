@@ -43,9 +43,6 @@ def print_sampling_plan(
 
   _append_plan_node_str(plan.root, lines, prefix="")
 
-  if plan.edgeset_timestamp_features:
-    lines.append(f"\nTemporal Features: {plan.edgeset_timestamp_features}")
-
   text_content = "\n".join(lines)
 
   if return_output:

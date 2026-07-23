@@ -1216,7 +1216,8 @@ absl::Status Sampler::IndexEdgeSets(const nb::object& py_graph,
 absl::StatusOr<std::unique_ptr<Sampler>> CreateSampler(
     const nb::object& graph, const nb::object& plan, const bool debug_sampling,
     const size_t num_threads, const int64_t seed, const nb::object& py_schema,
-    std::optional<std::string> edgeset_to_mask = std::nullopt) {
+    std::optional<std::string> edgeset_to_mask = std::nullopt,
+    nb::dict edgeset_timestamp_features = nb::dict()) {
   auto sampler = std::make_unique<Sampler>(num_threads);
 
   // Import the schema
@@ -1232,9 +1233,6 @@ absl::StatusOr<std::unique_ptr<Sampler>> CreateSampler(
     }
     sampler->edgeset_to_mask_idx_ = it->second;
   }
-
-  DGF_GET_ATTR_OR_RETURN(nb::dict, edgeset_timestamp_features, plan,
-                         "edgeset_timestamp_features");
 
   DGF_RETURN_IF_ERROR(
       sampler->IndexEdgeSets(graph, edgeset_timestamp_features));
@@ -1268,7 +1266,8 @@ NB_MODULE(_in_memory_sampler_ext, m) {
   m.def("CreateSampler", ValueOrThrowWrapper(CreateSampler), nb::arg("graph"),
         nb::arg("plan"), nb::arg("debug_sampling"), nb::arg("num_threads"),
         nb::arg("seed"), nb::arg("py_schema"),
-        nb::arg("edgeset_to_mask") = nb::none());
+        nb::arg("edgeset_to_mask") = nb::none(),
+        nb::arg("edgeset_timestamp_features") = nb::dict());
 
   m.def("BuildAdjacencyIndex", ValueOrThrowWrapper(BuildAdjacencyIndex),
         nb::arg("py_adjacency"), nb::arg("py_timestamps") = nb::none(),

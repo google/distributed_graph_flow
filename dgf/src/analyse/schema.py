@@ -14,8 +14,10 @@
 
 """Analaysis / data extraction from a schema."""
 
+from typing import Literal
 from dgf.src.data import schema as schema_lib
 from dgf.src.util import log
+from dgf.src.util import temporal as temporal_util
 
 
 def infer_most_likely_primary_key_or_none(
@@ -376,68 +378,162 @@ def _infer_features_semantic(
         log.warning(msg)
 
 
-def temporal_edge_info(
-    schema: schema_lib.GraphSchema,
-    edge_set_name: str | None = None,
-) -> tuple[str, str]:
-  """Gets the edge set name and timestamp feature name from the schema.
+def auto_detect_timestamp_feature(
+    features: schema_lib.FeatureSetSchema, name: str, type_name: str
+) -> str | None:
+  """Auto-detects a single creation timestamp feature."""
+  ts_features = []
+  for feat_name, feat in features.items():
+    if feat.is_creation_time and not feat.is_timeseries and feat.group is None:
+      if feat.format != schema_lib.FeatureFormat.INTEGER_64:
+        raise ValueError(
+            f"Creation time feature '{feat_name}' in {type_name} '{name}' must"
+            f" have format INTEGER_64. Got {feat.format}."
+        )
+      ts_features.append(feat_name)
+  if len(ts_features) > 1:
+    raise ValueError(
+        f"Multiple creation time features found in {type_name} '{name}':"
+        f" {ts_features}. Please only provide one."
+    )
+  return ts_features[0] if ts_features else None
 
-  Scans the schema for edge set features with ``FeatureSemantic.TIMESTAMP``.
-  - If ``edge_set_name`` is provided, searches only that edge set.
-  - If ``edge_set_name`` is ``None``, searches all edge sets.
+
+def validate_timestamp_feature(
+    schema: schema_lib.FeatureSchema,
+    feature_name: str,
+    container_name: str,
+    container_type: Literal["nodeset", "edgeset"],
+) -> None:
+  """Validates that a feature is a valid timestamp feature.
+
+  Args:
+    schema: Schema of the feature.
+    feature_name: Name of the feature.
+    container_name: Name of the nodeset or edgeset.
+    container_type: The type of the container, either "nodeset" or "edgeset".
+  """
+  if (
+      not schema.is_creation_time
+      or schema.is_timeseries
+      or schema.group is not None
+      or schema.format != schema_lib.FeatureFormat.INTEGER_64
+  ):
+    raise ValueError(
+        f"Feature '{feature_name}' in {container_name} '{container_type}' must"
+        " have is_creation_time=True, is_timeseries=False, group=None, and"
+        f" format=INTEGER_64. Got is_creation_time={schema.is_creation_time},"
+        f" is_timeseries={schema.is_timeseries}, group={schema.group}, and"
+        f" format={schema.format}."
+    )
+
+
+def get_nodeset_timestamp_features(
+    schema: schema_lib.GraphSchema,
+) -> dict[str, str]:
+  """Auto-detects nodeset creation timestamp feature names from schema.
+
+  Iterates over all NodeSets in the schema and identifies features marked as
+  creation timestamps (e.g., where `is_creation_time` is True or inferred).
+
+  Usage example:
+
+  ```python
+    ts_features = dgf.analyse.get_nodeset_timestamp_features(schema)
+  ```
+
+  Args:
+    schema: The graph schema to inspect.
+
+  Returns:
+    A dictionary mapping each NodeSet name to its detected timestamp feature
+    name.
+  """
+  nodeset_timestamp_features = {}
+  for ns_name, ns_schema in schema.node_sets.items():
+    node_ts_feat = temporal_util.get_creation_time_feature_name(
+        ns_schema.features
+    )
+    if node_ts_feat is not None:
+      nodeset_timestamp_features[ns_name] = node_ts_feat
+  return nodeset_timestamp_features
+
+
+def get_edgeset_timestamp_features(
+    schema: schema_lib.GraphSchema,
+) -> dict[str, str]:
+  """Auto-detects edgeset creation timestamp feature names from schema.
+
+  Iterates over all EdgeSets in the schema and identifies features marked as
+  creation timestamps (e.g., via `is_creation_time` or schema inference).
+
+  Usage example:
+
+  ```python
+    ts_features = dgf.analyse.get_edgeset_timestamp_features(schema)
+  ```
+
+  Args:
+    schema: The graph schema to inspect.
+
+  Returns:
+    A dictionary mapping each EdgeSet name to its detected timestamp feature
+    name.
+  """
+  edgeset_timestamp_features = {}
+  for es_name, es_schema in schema.edge_sets.items():
+    edge_ts_feat = temporal_util.get_edgeset_creation_time_feature_name(
+        es_schema, schema
+    )
+    if edge_ts_feat is not None:
+      edgeset_timestamp_features[es_name] = edge_ts_feat
+  return edgeset_timestamp_features
+
+
+def parse_temporal_config(
+    schema: schema_lib.GraphSchema,
+    target_nodeset: str,
+) -> tuple[dict[str, str], dict[str, str]]:
+  """Parses the temporal configuration and extracts timestamp features from schema.
 
   Args:
     schema: The graph schema.
-    edge_set_name: Optional edge set to restrict the search to.
+    target_nodeset: The name of the target nodeset.
 
   Returns:
-    A tuple of the edge set name and timestamp feature name.
-
-  Raises:
-    ValueError: If no TIMESTAMP feature is found, or if multiple TIMESTAMP
-      features are found (causing ambiguity).
+    A tuple containing (nodeset_timestamp_features, edgeset_timestamp_features)
   """
-  if edge_set_name is not None:
-    if edge_set_name not in schema.edge_sets:
-      raise ValueError(
-          f"Edge set '{edge_set_name}' not found in schema. "
-          f"Available: {list(schema.edge_sets.keys())}"
-      )
-    edge_sets_to_search = {edge_set_name: schema.edge_sets[edge_set_name]}
-  else:
-    edge_sets_to_search = schema.edge_sets
+  nodeset_timestamp_features = {}
+  edgeset_timestamp_features = {}
 
-  matches = []
-  for es_name, es_schema in edge_sets_to_search.items():
-    for feat_name, feat_schema in es_schema.features.items():
-      if feat_schema.semantic == schema_lib.FeatureSemantic.TIMESTAMP:
-        matches.append((es_name, feat_name))
+  for name, nodeset in schema.node_sets.items():
+    ts_feat = auto_detect_timestamp_feature(
+        nodeset.features, name, "nodeset"
+    )
+    if ts_feat:
+      nodeset_timestamp_features[name] = ts_feat
 
-  scope = (
-      f"edge set '{edge_set_name}'"
-      if edge_set_name is not None
-      else "the schema"
-  )
+  for name, edgeset in schema.edge_sets.items():
+    ts_feat = auto_detect_timestamp_feature(
+        edgeset.features, name, "edgeset"
+    )
+    if ts_feat:
+      edgeset_timestamp_features[name] = ts_feat
 
-  if not matches:
-    available = {
-        k: list(v.features.keys()) for k, v in edge_sets_to_search.items()
-    }
+  # Constraints validations
+  if target_nodeset not in nodeset_timestamp_features:
     raise ValueError(
-        f"No feature with FeatureSemantic.TIMESTAMP found in {scope}. "
-        f"Available features: {available}"
+        f"The target nodeset '{target_nodeset}' must have a creation time"
+        " feature. Set is_creation_time=True on the creation time feature"
+        " (e.g. `schema.node_sets[<target nodeset>].features[<creation time"
+        " feature>].is_creation_time = True`)."
     )
-
-  if len(matches) > 1:
-    match_names = (
-        [feat for _, feat in matches]
-        if edge_set_name is not None
-        else [f"{es}.{feat}" for es, feat in matches]
-    )
+  if not edgeset_timestamp_features:
     raise ValueError(
-        f"Multiple TIMESTAMP features found in {scope}: {match_names}."
-        " Currently, multiple timestamp features are not supported due to"
-        " ambiguity."
+        "At least one edgeset must have a creation time feature. Set"
+        " is_creation_time=True on the creation time feature (e.g."
+        " `schema.edge_sets[<some edgeset>].features[<creation time"
+        " feature>].is_creation_time = True`)."
     )
 
-  return matches[0]
+  return nodeset_timestamp_features, edgeset_timestamp_features

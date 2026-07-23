@@ -23,6 +23,7 @@ import textwrap
 import time
 from typing import Callable, Dict, Literal, Optional, Tuple, Union
 from dgf.src.analyse import print_schema as print_schema_lib
+from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import in_memory_graph
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
@@ -112,9 +113,7 @@ def prepare_datasets(
         num_hops=hparams.num_sampling_hops,
         hop_width=hparams.sampling_width,
         reverse=True,
-        edgeset_timestamp_features=edgeset_timestamp_features
-        if temporal_sampling
-        else {},
+        temporal_sampling=temporal_sampling,
     )
     sampling_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
         sampling_config, schema
@@ -362,7 +361,7 @@ def train_node_model(
     node_embedding_dim: int = 128,
     learning_rate: float = 1e-3,
     cache_valid_dataset: bool = True,
-    time_aware: Union[bool, Dict[str, str]] = False,
+    time_aware: bool = False,
     message_pooling: str = "sum",
     experimental_preprocess_core_model_config: Optional[
         Callable[[CoreModelConfig], CoreModelConfig]
@@ -424,9 +423,7 @@ def train_node_model(
       time-consuming, but it will increase memory usage.
     time_aware: Enables temporal-aware training. If `False` (default), no
       temporal masking is applied. If `True`, timestamp features are inferred
-      from the schema. If a dictionary, it maps nodeset/edgeset names to their
-      timestamp feature. Nodesets/edgesets without specified timestamp features
-      are treated as atemporal.
+      from the schema (via features marked as creation timestamps).
     message_pooling: The pooling method to use for aggregating messages.
     experimental_preprocess_core_model_config: Advanced option. An optional
       callable to modify the `CoreModelConfig` before it is used to build the
@@ -482,10 +479,11 @@ def train_node_model(
   # Note: Maybe one day, the timestamp features will be used for something else.
   temporal_sampling = bool(time_aware)
   if temporal_sampling:
-    nodeset_ts_features, edgeset_ts_features = common.parse_temporal_config(
-        schema=schema,
-        target_nodeset=target_nodeset,
-        timestamp_features=None if isinstance(time_aware, bool) else time_aware,
+    nodeset_ts_features, edgeset_ts_features = (
+        analyse_schema_lib.parse_temporal_config(
+            schema=schema,
+            target_nodeset=target_nodeset,
+        )
     )
   else:
     nodeset_ts_features = {}

@@ -46,8 +46,14 @@ class GenTemporalAlertGraphTest(absltest.TestCase):
         graph.node_sets["alerts"].features["signal_regression"].dtype,
         np.float32,
     )
-    creation_times = graph.node_sets["alerts"].features["#creation_time"]
+    creation_times = graph.node_sets["alerts"].features["creation_time"]
     self.assertTrue(np.all(creation_times >= 1700000000 + 3600))
+    self.assertTrue(
+        schema.node_sets["hardware"].features["time"].is_creation_time
+    )
+    self.assertTrue(
+        schema.node_sets["alerts"].features["creation_time"].is_creation_time
+    )
 
   def test_generate_signal_regression_graph(self):
     work_dir = self.create_tempdir().full_path

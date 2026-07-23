@@ -73,12 +73,14 @@ class TemporalTest(absltest.TestCase):
                         format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
                         is_timeseries=True,
+                        is_creation_time=True,
+                        group="g1",
                     ),
                     "signal": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
                         semantic=schema_lib.FeatureSemantic.NUMERICAL,
                         is_timeseries=True,
-                        timestamps="time",
+                        group="g1",
                     ),
                     "non_ts": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
@@ -97,12 +99,14 @@ class TemporalTest(absltest.TestCase):
                         format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
                         is_timeseries=True,
+                        is_creation_time=True,
+                        group="e1_g",
                     ),
                     "weight_series": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
                         semantic=schema_lib.FeatureSemantic.NUMERICAL,
                         is_timeseries=True,
-                        timestamps="ts",
+                        group="e1_g",
                     ),
                 },
             )
@@ -193,6 +197,70 @@ class TemporalTest(absltest.TestCase):
     expanded_4d = temporal.expand_mask_dims(mask, target_4d)
     self.assertEqual(expanded_4d.shape, (5, 10, 1, 1))
     np.testing.assert_array_equal(expanded_4d[:, :, 0, 0], mask)
+
+  def test_timeseries_group(self):
+    schemas = {
+        "time": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.INTEGER_64,
+            semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+            is_timeseries=True,
+            is_creation_time=True,
+            group="group",
+        ),
+        "feature": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            is_timeseries=True,
+            group="group",
+        ),
+    }
+
+    self.assertEqual(schemas["feature"].group, "group")
+
+  def test_get_group_creation_time_feature_name(self):
+    schemas = {
+        "explicit_time": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.INTEGER_64,
+            semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+            is_timeseries=True,
+            is_creation_time=True,
+            group="explicit_group",
+        ),
+    }
+
+    self.assertEqual(
+        temporal.get_group_creation_time_feature_name(
+            "explicit_group", schemas
+        ),
+        "explicit_time",
+    )
+
+  def test_get_edgeset_creation_time_feature_name_heterogeneous(self):
+    node_ts = lambda: schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_creation_time=True,
+    )
+    edge_ts = lambda: schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_creation_time=False,
+    )
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(features={"t1": node_ts()}),
+            "n2": schema_lib.NodeSchema(features={"t2": node_ts()}),
+        },
+        edge_sets={},
+    )
+    es = lambda f: schema_lib.EdgeSchema(
+        source="n1", target="n2", features={f: edge_ts()}
+    )
+    self.assertEqual(
+        temporal.get_edgeset_creation_time_feature_name(es("t1"), schema), "t1"
+    )
+    self.assertEqual(
+        temporal.get_edgeset_creation_time_feature_name(es("t2"), schema), "t2"
+    )
 
 
 if __name__ == "__main__":

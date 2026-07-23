@@ -73,6 +73,7 @@ def _gen_graph_real_looking(
     edge_features["timestamp"] = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.INTEGER_64,
         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_creation_time=True,
     )
 
   schema = schema_lib.GraphSchema(
@@ -95,6 +96,7 @@ def _gen_graph_real_looking(
                   "created_at": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.INTEGER_64,
                       semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                      is_creation_time=True,
                   ),
                   "categorical_label": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.BYTES,
@@ -112,6 +114,7 @@ def _gen_graph_real_looking(
                   "date": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.INTEGER_64,
                       semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                      is_creation_time=True,
                   ),
                   "amount": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.INTEGER_64,

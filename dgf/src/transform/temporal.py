@@ -14,9 +14,10 @@
 
 """Temporal transformations for graphs."""
 
-from typing import Dict, List, Optional, Union
+from typing import List, Optional
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
+from dgf.src.util import temporal as temporal_util
 import numpy as np
 
 
@@ -24,7 +25,6 @@ def propagate_timestamp_to_edges(
     graph: in_memory_graph.InMemoryGraph,
     schema: schema_lib.GraphSchema,
     target_edgesets: Optional[List[str]] = None,
-    node_timestamps: Union[str, Dict[str, str]] = "timestamps",
     target_feature: str = "timestamps",
 ) -> tuple[in_memory_graph.InMemoryGraph, schema_lib.GraphSchema]:
   """Propagates timestamps from nodes to edges.
@@ -39,7 +39,6 @@ def propagate_timestamp_to_edges(
       graph=graph,
       schema=schema,
       target_edgesets=["e1"],
-      node_timestamps={"n1": "time", "n2": "timestamp"},
       target_feature="ts",
   )
   ```
@@ -49,9 +48,6 @@ def propagate_timestamp_to_edges(
     schema: The graph schema.
     target_edgesets: Edgesets to populate with a timestamp. If None, process all
       edgesets.
-    node_timestamps: The feature name for node timestamps. Can be a string if
-      it's the same for all nodesets, or a dictionary mapping nodeset name to
-      feature name.
     target_feature: The name of the new edge feature. Defaults to "timestamps".
 
   Returns:
@@ -60,16 +56,13 @@ def propagate_timestamp_to_edges(
   new_edge_sets = dict(graph.edge_sets)
   new_edge_set_schemas = dict(schema.edge_sets)
 
-  def get_node_ts(nodeset_name):
-    feat_name = (
-        node_timestamps
-        if isinstance(node_timestamps, str)
-        else node_timestamps.get(nodeset_name)
+  def get_node_ts(nodeset_name: str):
+    feat_name = temporal_util.get_creation_time_feature_name(
+        schema.node_sets[nodeset_name].features
     )
     if (
         feat_name
-        and nodeset_name in schema.node_sets
-        and feat_name in schema.node_sets[nodeset_name].features
+        and feat_name in graph.node_sets[nodeset_name].features
     ):
       return (
           graph.node_sets[nodeset_name].features[feat_name],
@@ -121,7 +114,9 @@ def propagate_timestamp_to_edges(
         features={
             **edgeset_schema.features,
             target_feature: schema_lib.FeatureSchema(
-                format=ts_format, semantic=schema_lib.FeatureSemantic.TIMESTAMP
+                format=ts_format,
+                semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                is_creation_time=True,
             ),
         },
     )

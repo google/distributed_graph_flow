@@ -71,10 +71,18 @@ absl::StatusOr<GraphSchema::Feature> ParseFeatureSchema(
     }
   }
 
-  if (nb::hasattr(py_feature_schema, "timestamps")) {
-    nb::object py_timestamps = py_feature_schema.attr("timestamps");
-    if (!py_timestamps.is_none() && nb::isinstance<nb::str>(py_timestamps)) {
-      feature.timestamps = nb::cast<std::string>(py_timestamps);
+  if (nb::hasattr(py_feature_schema, "is_creation_time")) {
+    nb::object py_is_creation_time = py_feature_schema.attr("is_creation_time");
+    if (!py_is_creation_time.is_none() &&
+        nb::isinstance<nb::bool_>(py_is_creation_time)) {
+      feature.is_creation_time = nb::cast<bool>(py_is_creation_time);
+    }
+  }
+
+  if (nb::hasattr(py_feature_schema, "group")) {
+    nb::object py_group = py_feature_schema.attr("group");
+    if (!py_group.is_none() && nb::isinstance<nb::str>(py_group)) {
+      feature.group = nb::cast<std::string>(py_group);
     }
   }
 

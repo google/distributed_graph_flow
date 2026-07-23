@@ -42,6 +42,7 @@ from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
 from dgf.src.util import log
+from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 import jax
 from jax.experimental import jax2tf
@@ -422,9 +423,13 @@ class NodePredictionModel(common.Model):
       # TODO(gbm): The sampler should consume np array directly.
       if self._data.temporal_sampling:
         target_nodeset = self._data.task.target_nodeset
-        ts_feature = self._data.nodeset_timestamp_features[target_nodeset]
-        timestamps = graph.node_sets[target_nodeset].features[ts_feature]
-        seed_timestamps = timestamps[batch_seed_node_idxs]
+        ts_feature = temporal_util.get_creation_time_feature_name(
+            self._data.schema.node_sets[target_nodeset].features
+        )
+        seed_timestamps = None
+        if ts_feature is not None:
+          timestamps = graph.node_sets[target_nodeset].features[ts_feature]
+          seed_timestamps = timestamps[batch_seed_node_idxs]
         graph_samples = sampler.sample(
             batch_seed_node_idxs, seed_timestamps=seed_timestamps
         )
