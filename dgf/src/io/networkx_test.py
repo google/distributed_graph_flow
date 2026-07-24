@@ -14,13 +14,17 @@
 
 """Tests for io.networkx."""
 
+import os
 from absl.testing import absltest
+from absl.testing import parameterized
 from dgf.src.io import networkx as networkx_io_lib
 from dgf.src.util import gen_test_graph
 from dgf.src.util import test_util
+import networkx as nx
+import numpy as np
 
 
-class NetworkXTest(absltest.TestCase):
+class NetworkXTest(parameterized.TestCase):
 
   def test_graph_to_networkx_and_back(self):
     in_memory_graph = gen_test_graph.generate_in_memory_graph(
@@ -40,6 +44,68 @@ class NetworkXTest(absltest.TestCase):
     test_util.assert_are_equal(self, in_memory_graph, recovered_graph)
     self.assertIn("n1", recovered_schema.node_sets)
     self.assertIn("e1", recovered_schema.edge_sets)
+
+  def test_graph_to_networkx_for_graphml(self):
+    """Verifies graph generation behavior when for_graphml is True."""
+    in_memory_graph = gen_test_graph.generate_in_memory_graph(
+        variable_length=False
+    )
+    schema = gen_test_graph.generate_schema(variable_length=False)
+
+    nx_graph = networkx_io_lib.graph_to_networkx(
+        in_memory_graph=in_memory_graph,
+        schema=schema,
+        for_graphml=True,
+    )
+
+    # Verify specific nodes exist and their types are cleaned
+    self.assertIn("n1_0", nx_graph.nodes)
+    self.assertIsInstance(nx_graph.nodes["n1_0"]["f1"], str)
+
+    self.assertIn("n2_0", nx_graph.nodes)
+    self.assertIn("f3", nx_graph.nodes["n2_0"])
+    self.assertIsInstance(nx_graph.nodes["n2_0"]["f3"], int)
+
+    # Verify specific edges explicitly set their own multigraph keys
+    self.assertIn("e2_0", nx_graph.get_edge_data("n1_0", "n2_0"))
+
+    # Implicitly verifies all properties are safe for graphml, and edge keys
+    # do not collide during graph serialization.
+    temp_dir = self.create_tempdir().full_path
+    temp_path = os.path.join(temp_dir, "test.graphml")
+    nx.write_graphml(nx_graph, temp_path)
+
+    self.assertTrue(
+        os.path.exists(temp_path), "Failed to generate the GraphML file."
+    )
+
+  @parameterized.named_parameters(
+      ("not_for_graphml", "n1", 0, False, ("n1", 0)),
+      ("for_graphml", "n1", 0, True, "n1_0"),
+  )
+  def test_get_element_id(self, set_name, index, for_graphml, expected):
+    self.assertEqual(
+        networkx_io_lib._get_element_id(
+            set_name, index, for_graphml=for_graphml
+        ),
+        expected,
+    )
+
+  @parameterized.named_parameters(
+      ("bytes_not_graphml", b"test", False, b"test"),
+      ("bytes_for_graphml", b"test", True, "test"),
+      ("np_bytes_for_graphml", np.bytes_(b"test"), True, "test"),
+      ("list_for_graphml", [1, 2, 3], True, "1,2,3"),
+      ("ndarray_for_graphml", np.array([1, 2, 3]), True, "1,2,3"),
+      ("np_generic_for_graphml", np.int32(10), True, 10),
+  )
+  def test_get_feature_value(self, feature_val, for_graphml, expected):
+    result = networkx_io_lib._get_feature_value(
+        feature_val, for_graphml=for_graphml
+    )
+    self.assertEqual(result, expected)
+    if isinstance(expected, int) and not isinstance(expected, bool):
+      self.assertIsInstance(result, int)
 
 
 if __name__ == "__main__":

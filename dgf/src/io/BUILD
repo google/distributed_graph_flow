@@ -595,8 +595,11 @@ py_test(
     deps = [
         ":networkx",
         # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
+        # networkx dep,
+        # numpy dep,
     ],
 )
 
