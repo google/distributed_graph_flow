@@ -37,6 +37,7 @@ class Sampler:
       schema: Optional[schema_lib.GraphSchema] = None,
       slice_timeseries_by_seed: bool = True,
       max_timeseries_len: Optional[int] = None,
+      has_temporal_edgesets: bool = False,
   ):
     self._cc_sampler = cc_sampler
     self._full_graph = full_graph
@@ -45,6 +46,7 @@ class Sampler:
     self._schema = schema
     self._slice_timeseries_by_seed = slice_timeseries_by_seed
     self._max_timeseries_len = max_timeseries_len
+    self._has_temporal_edgesets = has_temporal_edgesets
     self._timeseries_schema_cache = (
         temporal_util.extract_timeseries_schema_cache(self._schema)
         if self._schema is not None and self._slice_timeseries_by_seed
@@ -159,7 +161,9 @@ class Sampler:
 
     # Sample a graph structure.
     graphs = self._cc_sampler.Sample(
-        seed_node_idxs, seed_timestamps, masked_edge_idxs
+        seed_node_idxs,
+        seed_timestamps if self._has_temporal_edgesets else None,
+        masked_edge_idxs,
     )
 
     self._add_finalize_graphs(graphs, seed_timestamps=seed_timestamps)
@@ -354,7 +358,7 @@ def create_sampler(
     num_threads: Optional[int] = None,
     seed: Optional[int] = None,
     edgeset_to_mask: Optional[str] = None,
-    slice_timeseries_by_seed: bool = True,
+    slice_timeseries_by_seed: Optional[bool] = None,
     max_timeseries_len: Optional[int] = None,
 ) -> Sampler:
   """Creates an in-memory sampler.
@@ -381,7 +385,8 @@ def create_sampler(
       tests,using debug_sampling=True is better.
     edgeset_to_mask: Optional edgeset name to mask during sampling.
     slice_timeseries_by_seed: Whether to causally slice `is_timeseries=True`
-      sequence features by the seed node timestamp.
+      sequence features by the seed node timestamp. Defaults to
+      `plan.temporal_sampling`.
     max_timeseries_len: Optional cap on the number of historical causal sequence
       steps retained for each timeseries feature.
 
@@ -392,14 +397,19 @@ def create_sampler(
     A `Sampler` instance.
   """
 
-  if plan.edgeset_timestamp_features and edgeset_to_mask is not None:
+  if isinstance(plan, config_lib.SimpleSamplingConfig):
+    plan = config_lib.simple_sampling_config_to_sampling_plan(plan, schema)
+
+  if slice_timeseries_by_seed is None:
+    slice_timeseries_by_seed = plan.temporal_sampling
+
+  edgeset_timestamp_features = plan.edgeset_timestamp_features
+
+  if edgeset_timestamp_features and edgeset_to_mask is not None:
     raise ValueError(
         "Temporal filtering and edge masking cannot be used at the same time"
         " (yet)."
     )
-
-  if isinstance(plan, config_lib.SimpleSamplingConfig):
-    plan = config_lib.simple_sampling_config_to_sampling_plan(plan, schema)
 
   if seed is None:
     seed = -1
@@ -414,7 +424,14 @@ def create_sampler(
     num_threads = min(batch_size, os.cpu_count())  # pyrefly: ignore[bad-specialization]
 
   cc_sampler = _in_memory_sampler_ext.CreateSampler(
-      graph, plan, debug_sampling, num_threads, seed, schema, edgeset_to_mask
+      graph,
+      plan,
+      debug_sampling,
+      num_threads,
+      seed,
+      schema,
+      edgeset_to_mask,
+      edgeset_timestamp_features,
   )
   return Sampler(
       cc_sampler,
@@ -424,4 +441,5 @@ def create_sampler(
       schema=schema,
       slice_timeseries_by_seed=slice_timeseries_by_seed,
       max_timeseries_len=max_timeseries_len,
+      has_temporal_edgesets=bool(edgeset_timestamp_features),
   )

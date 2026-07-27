@@ -21,7 +21,9 @@ py_library(
     srcs = ["config.py"],
     deps = [
         # dataclasses_json dep,
+        "//dgf/src/analyse:schema",
         "//dgf/src/data:schema",
+        "//dgf/src/util:temporal",
     ],
 )
 
@@ -42,6 +44,7 @@ py_library(
         ":_in_memory_sampler_ext",
         ":config",
         ":temporal",
+        "//dgf/src/analyse:schema",
         "//dgf/src/data:in_memory_graph",  # buildcleaner: keep
         "//dgf/src/data:schema",
         "//dgf/src/util:temporal",

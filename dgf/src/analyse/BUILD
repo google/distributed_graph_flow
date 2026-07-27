@@ -21,6 +21,7 @@ py_library(
         "//dgf/src/data:distributed_graph",
         "//dgf/src/data:schema",
         "//dgf/src/data:statistics",
+        "//dgf/src/util:temporal",
         # numpy dep,
     ],
 )
@@ -125,6 +126,7 @@ py_library(
     deps = [
         "//dgf/src/data:schema",
         "//dgf/src/util:log",
+        "//dgf/src/util:temporal",
     ],
 )
 
@@ -241,5 +243,6 @@ py_test(
         ":schema",
         # absl/testing:absltest dep,
         "//dgf/src/data:schema",
+        "//dgf/src/util:gen_test_graph",
     ],
 )

@@ -168,38 +168,104 @@ class InMemoryGraphTest(absltest.TestCase):
         ],
     )
 
-  def test_timestamps_missing_reference(self):
+  def test_is_creation_time_not_timestamp_semantic(self):
     graph, schema = valid_graph()
-    schema.node_sets["n1"].features["f1"].is_timeseries = True
-    schema.node_sets["n1"].features["f1"].timestamps = "missing_time"
+    schema.node_sets["n1"].features["f1"].is_creation_time = True
+    schema.node_sets["n1"].features["f1"].semantic = schema_lib.FeatureSemantic.NUMERICAL
     issues = in_memory_graph_validate_lib.issues(graph, schema)
-    self.assertEqual(
+    self.assertIn(
+        Issue.error(
+            "The feature 'f1' in nodeset 'n1' has is_creation_time=True, but"
+            " its semantic is <FeatureSemantic.NUMERICAL: 'NUMERICAL'>. Features"
+            " with is_creation_time=True must have semantic=TIMESTAMP."
+        ),
         issues,
-        [
-            Issue.error(
-                "The feature 'f1' in nodeset 'n1' references timestamps feature"
-                " 'missing_time' which is not defined in the schema."
-            )
-        ],
     )
 
-  def test_timestamps_not_timeseries(self):
+  def test_timestamp_semantic_not_integer_64(self):
     graph, schema = valid_graph()
-    schema.node_sets["n1"].features["f1"].is_timeseries = False
-    schema.node_sets["n1"].features["f1"].timestamps = "time"
+    f1 = schema.node_sets["n1"].features["f1"]
+    f1.semantic = schema_lib.FeatureSemantic.TIMESTAMP
+    f1.format = schema_lib.FeatureFormat.FLOAT_32
     issues = in_memory_graph_validate_lib.issues(graph, schema)
-    self.assertEqual(
+    self.assertIn(
+        Issue.error(
+            "The feature 'f1' in nodeset 'n1' has semantic=TIMESTAMP, but its"
+            " format is <FeatureFormat.FLOAT_32: 'FLOAT_32'>. Features with"
+            " semantic=TIMESTAMP must have format=INTEGER_64."
+        ),
         issues,
-        [
-            Issue.error(
-                "The feature 'f1' in nodeset 'n1' has timestamps set to 'time',"
-                " but is_timeseries is False."
-            ),
-            Issue.error(
-                "The feature 'f1' in nodeset 'n1' references timestamps feature"
-                " 'time' which is not defined in the schema."
-            ),
-        ],
+    )
+
+  def test_non_timeseries_feature_has_group(self):
+    graph, schema = valid_graph()
+    schema.node_sets["n1"].features["f1"].group = "g1"
+    schema.node_sets["n1"].features["f1"].is_timeseries = False
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertIn(
+        Issue.error(
+            "The feature 'f1' in nodeset 'n1' has group='g1', but"
+            " is_timeseries=False. Non-timeseries features cannot have a group."
+        ),
+        issues,
+    )
+
+  def test_multiple_creation_time_sequences_in_group(self):
+    graph, schema = valid_graph()
+    schema.node_sets["n1"].features["time1"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_timeseries=True,
+        is_creation_time=True,
+        group="my_group",
+        shape=(None,),
+    )
+    schema.node_sets["n1"].features["time2"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_timeseries=True,
+        is_creation_time=True,
+        group="my_group",
+        shape=(None,),
+    )
+    arr = np.array([[10, 20], [10, 20]], dtype=object)
+    graph.node_sets["n1"].features["time1"] = arr
+    graph.node_sets["n1"].features["time2"] = arr
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertTrue(
+        any(
+            "Multiple creation time sequence features found for group"
+            " 'my_group' in nodeset 'n1'"
+            in issue.text
+            for issue in issues
+        ),
+        f"Expected issue not found in: {issues}",
+    )
+
+  def test_multiple_entity_creation_time_features(self):
+    graph, schema = valid_graph()
+    schema.node_sets["n1"].features["ct1"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_timeseries=False,
+        is_creation_time=True,
+    )
+    schema.node_sets["n1"].features["ct2"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_timeseries=False,
+        is_creation_time=True,
+    )
+    graph.node_sets["n1"].features["ct1"] = np.array([10, 20], dtype=np.int64)
+    graph.node_sets["n1"].features["ct2"] = np.array([10, 20], dtype=np.int64)
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertTrue(
+        any(
+            "Multiple entity creation time features found in nodeset 'n1'"
+            in issue.text
+            for issue in issues
+        ),
+        f"Expected issue not found in: {issues}",
     )
 
   def test_timeseries_length_mismatch(self):
@@ -210,13 +276,15 @@ class InMemoryGraphTest(absltest.TestCase):
         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
         shape=(None,),
         is_timeseries=True,
+        is_creation_time=True,
+        group="time",
     )
     schema.node_sets["n1"].features["val"] = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.FLOAT_32,
         semantic=schema_lib.FeatureSemantic.NUMERICAL,
         shape=(None,),
         is_timeseries=True,
-        timestamps="time",
+        group="time",
     )
     graph.node_sets["n1"].features["time"] = np.array(
         [[10, 20]] + [[10]] * (num_nodes - 1), dtype=object
@@ -231,7 +299,7 @@ class InMemoryGraphTest(absltest.TestCase):
             Issue.error(
                 "The feature 'val' in nodeset 'n1' has a variable-length"
                 " timeseries at index 0 of length 1, which does not match the"
-                " timestamps sequence 'time' of length 2."
+                " creation time sequence 'time' of length 2."
             )
         ],
     )
@@ -244,13 +312,15 @@ class InMemoryGraphTest(absltest.TestCase):
         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
         shape=(None,),
         is_timeseries=True,
+        is_creation_time=True,
+        group="time",
     )
     schema.node_sets["n1"].features["val"] = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.FLOAT_32,
         semantic=schema_lib.FeatureSemantic.NUMERICAL,
         shape=(None,),
         is_timeseries=True,
-        timestamps="time",
+        group="time",
     )
     graph.node_sets["n1"].features["time"] = np.array(
         [[10, 20]] + [[30]] * (num_nodes - 1), dtype=object
@@ -268,22 +338,15 @@ class InMemoryGraphTest(absltest.TestCase):
         format=schema_lib.FeatureFormat.INTEGER_64,
         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
         is_timeseries=False,
+        is_creation_time=True,
     )
     graph.node_sets["n1"].features["time"] = np.zeros(
         num_nodes, dtype=np.int64
     )
     schema.node_sets["n1"].features["f1"].is_timeseries = True
-    schema.node_sets["n1"].features["f1"].timestamps = "time"
+    schema.node_sets["n1"].features["f1"].group = "time"
     issues = in_memory_graph_validate_lib.issues(graph, schema)
-    self.assertEqual(
-        issues,
-        [
-            Issue.error(
-                "The feature 'f1' in nodeset 'n1' references timestamps feature"
-                " 'time', but 'time' does not have is_timeseries=True."
-            )
-        ],
-    )
+    self.assertEqual(issues, [])
 
   def test_timestamps_target_wrong_semantic(self):
     graph, schema = valid_graph()
@@ -293,21 +356,23 @@ class InMemoryGraphTest(absltest.TestCase):
         semantic=schema_lib.FeatureSemantic.NUMERICAL,
         shape=(None,),
         is_timeseries=True,
+        is_creation_time=True,
+        group="time",
     )
     graph.node_sets["n1"].features["time"] = np.array(
         [[10]] * num_nodes, dtype=object
     )
     schema.node_sets["n1"].features["f1"].is_timeseries = True
-    schema.node_sets["n1"].features["f1"].timestamps = "time"
+    schema.node_sets["n1"].features["f1"].group = "time"
     issues = in_memory_graph_validate_lib.issues(graph, schema)
-    self.assertEqual(
+    self.assertIn(
+        Issue.error(
+            "The feature 'time' in nodeset 'n1' has is_creation_time=True,"
+            " but its semantic is <FeatureSemantic.NUMERICAL: 'NUMERICAL'>."
+            " Features with is_creation_time=True must have"
+            " semantic=TIMESTAMP."
+        ),
         issues,
-        [
-            Issue.error(
-                "The feature 'f1' in nodeset 'n1' references timestamps feature"
-                " 'time', but 'time' does not have semantic=TIMESTAMP."
-            )
-        ],
     )
 
   def test_timeseries_ndarray_length_mismatch(self):
@@ -318,13 +383,15 @@ class InMemoryGraphTest(absltest.TestCase):
         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
         shape=(5,),
         is_timeseries=True,
+        is_creation_time=True,
+        group="time",
     )
     schema.node_sets["n1"].features["val"] = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.FLOAT_32,
         semantic=schema_lib.FeatureSemantic.NUMERICAL,
         shape=(3,),
         is_timeseries=True,
-        timestamps="time",
+        group="time",
     )
     graph.node_sets["n1"].features["time"] = np.zeros(
         (num_nodes, 5), dtype=np.int64
@@ -338,7 +405,7 @@ class InMemoryGraphTest(absltest.TestCase):
         [
             Issue.error(
                 "The feature 'val' in nodeset 'n1' has schema shape (3,) whose"
-                " 0th dimension (3) does not match timestamps feature 'time'"
+                " 0th dimension (3) does not match creation time feature 'time'"
                 " schema shape 0th dimension (5)."
             )
         ],
@@ -352,13 +419,15 @@ class InMemoryGraphTest(absltest.TestCase):
         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
         shape=(10, 2),
         is_timeseries=True,
+        is_creation_time=True,
+        group="time",
     )
     schema.node_sets["n1"].features["val"] = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.FLOAT_32,
         semantic=schema_lib.FeatureSemantic.NUMERICAL,
         shape=(),
         is_timeseries=True,
-        timestamps="time",
+        group="time",
     )
     graph.node_sets["n1"].features["time"] = np.zeros(
         (num_nodes, 10, 2), dtype=np.int64
@@ -371,14 +440,13 @@ class InMemoryGraphTest(absltest.TestCase):
         issues,
         [
             Issue.error(
-                "The feature 'val' in nodeset 'n1' references timestamps"
-                " feature 'time', but 'time' must have exactly 1 sequence"
-                " dimension in schema shape."
+                "The creation time feature 'time' in nodeset 'n1' must have"
+                " exactly 1 sequence dimension in schema shape."
             ),
             Issue.error(
-                "The feature 'val' in nodeset 'n1' references timestamps"
-                " feature 'time', but 'val' must have at least 1 sequence"
-                " dimension in schema shape."
+                "The feature 'val' in nodeset 'n1' belongs to group 'time',"
+                " but must have at least 1 sequence dimension in schema"
+                " shape."
             ),
         ],
     )
@@ -391,13 +459,15 @@ class InMemoryGraphTest(absltest.TestCase):
         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
         shape=(5,),
         is_timeseries=True,
+        is_creation_time=True,
+        group="time",
     )
     schema.node_sets["n1"].features["val"] = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.FLOAT_32,
         semantic=schema_lib.FeatureSemantic.NUMERICAL,
         shape=(5,),
         is_timeseries=True,
-        timestamps="time",
+        group="time",
     )
     graph.node_sets["n1"].features["time"] = np.zeros(
         (num_nodes, 5), dtype=np.int64
@@ -437,6 +507,74 @@ class InMemoryGraphTest(absltest.TestCase):
         issues,
     )
 
+  def test_mask_missing_timeseries_group(self):
+    graph, schema = valid_graph()
+    num_nodes = graph.node_sets["n1"].num_nodes
+    schema.node_sets["n1"].features["bad_mask"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.BOOL,
+        semantic=schema_lib.FeatureSemantic.MASK,
+        shape=(5,),
+        is_timeseries=True,
+    )
+    graph.node_sets["n1"].features["bad_mask"] = np.zeros(
+        (num_nodes, 5), dtype=np.bool_
+    )
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertIn(
+        Issue.error(
+            "The mask feature 'bad_mask' in nodeset 'n1' must have a group to"
+            " associate it with the features it masks."
+        ),
+        issues,
+    )
+
+  def test_multiple_masks_in_group(self):
+    graph, schema = valid_graph()
+    num_nodes = graph.node_sets["n1"].num_nodes
+    schema.node_sets["n1"].features["mask1"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.BOOL,
+        semantic=schema_lib.FeatureSemantic.MASK,
+        shape=(5,),
+        is_timeseries=True,
+        group="my_group",
+    )
+    schema.node_sets["n1"].features["mask2"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.BOOL,
+        semantic=schema_lib.FeatureSemantic.MASK,
+        shape=(5,),
+        is_timeseries=True,
+        group="my_group",
+    )
+
+    # Test identical masks yield warning
+    mask_data = np.zeros((num_nodes, 5), dtype=np.bool_)
+    graph.node_sets["n1"].features["mask1"] = mask_data
+    graph.node_sets["n1"].features["mask2"] = mask_data
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertTrue(
+        any(
+            "Since they are identical, consider consolidating them into a"
+            " single mask"
+            in issue.text
+            for issue in issues
+        ),
+        f"Expected identical masks warning not found in: {issues}",
+    )
+
+    # Test differing masks yield error
+    graph.node_sets["n1"].features["mask2"] = np.ones(
+        (num_nodes, 5), dtype=np.bool_
+    )
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertTrue(
+        any(
+            "Multiple features with semantic=MASK found for timeseries group"
+            " 'my_group' in nodeset 'n1' with differing or unavailable values"
+            in issue.text
+            for issue in issues
+        ),
+        f"Expected differing masks error not found in: {issues}",
+    )
 
 
 if __name__ == "__main__":

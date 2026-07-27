@@ -175,26 +175,6 @@ class GNNDatasetPreparator:
   def __post_init__(self):
     if self.batch_size <= 0:
       raise ValueError(f"batch_size must be positive, got {self.batch_size}")
-    if not self.temporal_sampling:
-      if self.edgeset_timestamp_features:
-        raise ValueError(
-            "`edgeset_timestamp_features` must be empty when "
-            "`temporal_sampling` is False."
-        )
-      if self.nodeset_timestamp_features:
-        raise ValueError(
-            "`nodeset_timestamp_features` must be empty when "
-            "`temporal_sampling` is False."
-        )
-    elif (
-        not self.edgeset_timestamp_features
-        and not self.nodeset_timestamp_features
-    ):
-      raise ValueError(
-          "At least one of `edgeset_timestamp_features` or "
-          "`nodeset_timestamp_features` must be provided when "
-          "`temporal_sampling` is True."
-      )
 
   def get_live(self) -> LiveData:
     if self.live is None:

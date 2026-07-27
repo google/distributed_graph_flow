@@ -48,12 +48,14 @@ def _make_sample_graph_and_schema():
                       format=schema_lib.FeatureFormat.INTEGER_64,
                       semantic=schema_lib.FeatureSemantic.TIMESTAMP,
                       is_timeseries=True,
+                      is_creation_time=True,
+                      group="time",
                   ),
                   "signal": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.FLOAT_32,
                       semantic=schema_lib.FeatureSemantic.NUMERICAL,
                       is_timeseries=True,
-                      timestamps="time",
+                      group="time",
                   ),
               }
           )
@@ -100,12 +102,14 @@ class TemporalTest(absltest.TestCase):
                         format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
                         is_timeseries=True,
+                        is_creation_time=True,
+                        group="time",
                     ),
                     "signal": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
                         semantic=schema_lib.FeatureSemantic.NUMERICAL,
                         is_timeseries=True,
-                        timestamps="time",
+                        group="time",
                     ),
                 }
             )
@@ -155,12 +159,14 @@ class TemporalTest(absltest.TestCase):
                         format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
                         is_timeseries=True,
+                        is_creation_time=True,
+                        group="time",
                     ),
                     "signal": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
                         semantic=schema_lib.FeatureSemantic.NUMERICAL,
                         is_timeseries=True,
-                        timestamps="time",
+                        group="time",
                     ),
                     "waveform": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
@@ -222,12 +228,14 @@ class TemporalTest(absltest.TestCase):
                         format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
                         is_timeseries=True,
+                        is_creation_time=True,
+                        group="timestamps",
                     ),
                     "edge_sig": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
                         semantic=schema_lib.FeatureSemantic.NUMERICAL,
                         is_timeseries=True,
-                        timestamps="timestamps",
+                        group="timestamps",
                     ),
                 },
             )

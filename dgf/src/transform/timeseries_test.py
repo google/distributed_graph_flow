@@ -63,14 +63,16 @@ def _make_graph_and_schema(
 def _ts_schema(
     fmt: schema_lib.FeatureFormat = schema_lib.FeatureFormat.FLOAT_32,
     sem: schema_lib.FeatureSemantic = schema_lib.FeatureSemantic.NUMERICAL,
-    timestamps: str | None = None,
+    group: str | None = None,
+    is_creation_time: bool = False,
     shape: schema_lib.Shape = (None,),
 ) -> schema_lib.FeatureSchema:
   return schema_lib.FeatureSchema(
       format=fmt,
       semantic=sem,
       is_timeseries=True,
-      timestamps=timestamps,
+      group=group,
+      is_creation_time=is_creation_time,
       shape=shape,
   )
 
@@ -98,8 +100,10 @@ class TimeseriesTest(absltest.TestCase):
             "time": _ts_schema(
                 fmt=schema_lib.FeatureFormat.INTEGER_64,
                 sem=schema_lib.FeatureSemantic.TIMESTAMP,
+                is_creation_time=True,
+                group="time",
             ),
-            "signal": _ts_schema(timestamps="time"),
+            "signal": _ts_schema(group="time"),
             "id": schema_lib.FeatureSchema(
                 format=schema_lib.FeatureFormat.INTEGER_64,
                 semantic=schema_lib.FeatureSemantic.NUMERICAL,
@@ -120,7 +124,6 @@ class TimeseriesTest(absltest.TestCase):
         "signal": np.array(
             [[3.0, 4.0, 5.0], [0.0, 0.5, 1.5]], dtype=np.float32
         ),
-        "signal_mask": np.array([[True, True, True], [False, True, True]]),
         "time_mask": np.array([[True, True, True], [False, True, True]]),
         "id": np.array([101, 102]),
     }
@@ -172,6 +175,7 @@ class TimeseriesTest(absltest.TestCase):
                     "time": _ts_schema(
                         fmt=schema_lib.FeatureFormat.INTEGER_64,
                         sem=schema_lib.FeatureSemantic.TIMESTAMP,
+                        group="time",
                     )
                 },
             ),
@@ -214,6 +218,7 @@ class TimeseriesTest(absltest.TestCase):
         schemas={
             "emb": _ts_schema(
                 sem=schema_lib.FeatureSemantic.EMBEDDING,
+                group="emb",
                 shape=(None, 2),
             )
         },
@@ -239,6 +244,121 @@ class TimeseriesTest(absltest.TestCase):
         hw_sch.features["emb_mask"].semantic, schema_lib.FeatureSemantic.MASK
     )
 
+  def test_custom_mask_name_is_reused(self):
+    graph, schema = _make_graph_and_schema(
+        values={
+            "emb": np.array(
+                [np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)],
+                dtype=np.object_,
+            ),
+            "my_custom_mask": np.array(
+                [np.array([True, True], dtype=bool)],
+                dtype=np.object_,
+            ),
+        },
+        schemas={
+            "emb": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.FLOAT_32,
+                semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                is_timeseries=True,
+                shape=(None, 2),
+                group="emb_group",
+            ),
+            "my_custom_mask": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.BOOL,
+                semantic=schema_lib.FeatureSemantic.MASK,
+                is_timeseries=True,
+                shape=(None,),
+                group="emb_group",
+            ),
+        },
+    )
+    new_graph, new_schema = timeseries.pad_and_cap_timeseries_features(
+        graph,
+        schema,
+        timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
+    )
+    hw_val = new_graph.node_sets["hardware"]
+    hw_sch = new_schema.node_sets["hardware"]
+
+    expected_features = {
+        "emb": np.array(
+            [[[0.0, 0.0], [1.0, 2.0], [3.0, 4.0]]], dtype=np.float32
+        ),
+        "my_custom_mask": np.array([[False, True, True]]),
+    }
+    test_util.assert_are_equal(self, hw_val.features, expected_features)
+    self.assertEqual(hw_sch.features["emb"].shape, (3, 2))
+    self.assertEqual(hw_sch.features["my_custom_mask"].shape, (3,))
+    self.assertNotIn("emb_mask", hw_sch.features)
+
+  def test_clashing_mask_name_raises(self):
+    graph, schema = _make_graph_and_schema(
+        values={
+            "emb": np.array(
+                [np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)],
+                dtype=np.object_,
+            ),
+            "emb_mask": np.array(
+                [np.array([42.0], dtype=np.float32)],
+                dtype=np.object_,
+            ),
+        },
+        schemas={
+            "emb": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.FLOAT_32,
+                semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                is_timeseries=True,
+                shape=(None, 2),
+                group="emb",
+            ),
+            # This feature is named "emb_mask", which is the fallback mask name
+            # for the group "emb", but its semantic is not MASK.
+            "emb_mask": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.FLOAT_32,
+                semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                is_timeseries=True,
+                shape=(None, 1),
+                group="emb",
+            ),
+        },
+    )
+    with self.assertRaisesRegex(
+        ValueError, "clashes with an existing feature"
+    ):
+      timeseries.pad_and_cap_timeseries_features(
+          graph,
+          schema,
+          timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
+      )
+
+  def test_pad_and_cap_timeseries_features_auto_assigns_group_when_none(self):
+    graph, schema = _make_graph_and_schema(
+        values={
+            "signal": np.array(
+                [np.array([1.0, 2.0], dtype=np.float32)], dtype=object
+            )
+        },
+        schemas={
+            "signal": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.FLOAT_32,
+                semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                is_timeseries=True,
+                shape=(None,),
+                group=None,
+            ),
+        },
+        num_nodes=1,
+    )
+    new_graph, new_schema = timeseries.pad_and_cap_timeseries_features(
+        graph,
+        schema,
+        timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
+    )
+    hw_sch = new_schema.node_sets["hardware"]
+    self.assertEqual(hw_sch.features["signal"].group, "signal")
+    self.assertIn("signal_mask", new_graph.node_sets["hardware"].features)
+
   def test_empty_sequence(self):
     graph, schema = _make_graph_and_schema(
         values={"time": np.array([np.array([])], dtype=np.object_)},
@@ -246,6 +366,7 @@ class TimeseriesTest(absltest.TestCase):
             "time": _ts_schema(
                 fmt=schema_lib.FeatureFormat.INTEGER_64,
                 sem=schema_lib.FeatureSemantic.TIMESTAMP,
+                group="time",
             )
         },
     )
@@ -290,6 +411,7 @@ class TimeseriesTest(absltest.TestCase):
                     "time": _ts_schema(
                         fmt=schema_lib.FeatureFormat.INTEGER_64,
                         sem=schema_lib.FeatureSemantic.TIMESTAMP,
+                        group="time",
                     )
                 }
             ),
@@ -364,8 +486,9 @@ class TimeseriesTest(absltest.TestCase):
             "time": _ts_schema(
                 fmt=schema_lib.FeatureFormat.INTEGER_64,
                 sem=schema_lib.FeatureSemantic.TIMESTAMP,
+                group="time",
             ),
-            "signal": _ts_schema(timestamps="time"),
+            "signal": _ts_schema(group="time"),
         },
         num_nodes=1,
     )
@@ -380,7 +503,6 @@ class TimeseriesTest(absltest.TestCase):
     expected_features = {
         "time": np.array([[-1, -1, 10]], dtype=np.int64),
         "signal": np.array([[-1.0, -1.0, 2.0]], dtype=np.float32),
-        "signal_mask": np.array([[False, False, True]]),
         "time_mask": np.array([[False, False, True]]),
     }
     test_util.assert_are_equal(self, hw_val.features, expected_features)
@@ -398,6 +520,7 @@ class TimeseriesTest(absltest.TestCase):
             "time": _ts_schema(
                 fmt=schema_lib.FeatureFormat.INTEGER_64,
                 sem=schema_lib.FeatureSemantic.TIMESTAMP,
+                group="time",
                 shape=(5,),
             ),
         },
@@ -431,6 +554,7 @@ class TimeseriesTest(absltest.TestCase):
         schemas={
             "emb": _ts_schema(
                 sem=schema_lib.FeatureSemantic.EMBEDDING,
+                group="emb",
                 shape=(2, 2),
             ),
         },
@@ -498,6 +622,7 @@ class TimeseriesTest(absltest.TestCase):
             "time": _ts_schema(
                 fmt=schema_lib.FeatureFormat.INTEGER_64,
                 sem=schema_lib.FeatureSemantic.TIMESTAMP,
+                group="time",
             )
         },
     )
@@ -530,7 +655,7 @@ class TimeseriesTest(absltest.TestCase):
       )
       self.assertEqual(fschema.shape, (2,))
       self.assertTrue(fschema.is_timeseries)
-      self.assertEqual(fschema.timestamps, "time")
+      self.assertEqual(fschema.group, "time")
 
     # 65 -> 1970-01-01 00:01:05 UTC (Thursday=3)
     expected_features = {
@@ -637,13 +762,13 @@ class TimeseriesTest(absltest.TestCase):
     self.assertIn("created_at_hour", hw_val.features)
     fschema = hw_sch.features["created_at_hour"]
     self.assertFalse(fschema.is_timeseries)
-    self.assertIsNone(fschema.timestamps)
+    self.assertIsNone(fschema.group)
     np.testing.assert_array_equal(
         hw_val.features["created_at_hour"], [0.0, 10.0]
     )
 
   def test_extract_calendar_features_parent_timestamp(self):
-    # Timestamp feature that references other timestamp feature.
+    # Timestamp feature with group.
     graph, schema = _make_graph_and_schema(
         values={
             "event_time": np.array([[65, 3665]], dtype=np.int64),
@@ -653,25 +778,25 @@ class TimeseriesTest(absltest.TestCase):
             "event_time": _ts_schema(
                 fmt=schema_lib.FeatureFormat.INTEGER_64,
                 sem=schema_lib.FeatureSemantic.TIMESTAMP,
-                timestamps="master_time",
+                group="master_time",
                 shape=(2,),
             ),
             "master_time": _ts_schema(
                 fmt=schema_lib.FeatureFormat.INTEGER_64,
                 sem=schema_lib.FeatureSemantic.TIMESTAMP,
+                is_creation_time=True,
+                group="master_time",
                 shape=(2,),
             ),
         },
     )
     _, cal_schema = timeseries.extract_calendar_features(graph, schema)
     hw_sch = cal_schema.node_sets["hardware"]
-    # Calendar feature derived from event_time inherits timestamps="master_time"
     self.assertEqual(
-        hw_sch.features["event_time_hour"].timestamps, "master_time"
+        hw_sch.features["event_time_hour"].group, "master_time"
     )
-    # Calendar feature derived from master_time references master_time
     self.assertEqual(
-        hw_sch.features["master_time_hour"].timestamps, "master_time"
+        hw_sch.features["master_time_hour"].group, "master_time"
     )
 
 

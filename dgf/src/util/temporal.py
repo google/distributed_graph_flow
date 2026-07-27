@@ -45,6 +45,89 @@ class TimeseriesSchemaCache:
   has_timeseries: bool
 
 
+def creation_time_feature_name(
+    schemas: schema_lib.FeatureSetSchema,
+) -> Optional[str]:
+  """Infers the feature name for entity creation time."""
+  ts_features = []
+  for feat_name, feat in schemas.items():
+    if feat.is_creation_time and not feat.is_timeseries and feat.group is None:
+      if feat.format != schema_lib.FeatureFormat.INTEGER_64:
+        raise ValueError(
+            f"Creation time feature '{feat_name}' must"
+            f" have format INTEGER_64. Got {feat.format}."
+        )
+      ts_features.append(feat_name)
+  if len(ts_features) > 1:
+    raise ValueError(
+        "Multiple creation time features found:"
+        f" {ts_features}. Please only provide one."
+    )
+  return ts_features[0] if ts_features else None
+
+
+def edgeset_creation_time_feature_name(
+    es_schema: schema_lib.EdgeSchema,
+    schema: schema_lib.GraphSchema,
+) -> Optional[str]:
+  """Infers creation timestamp feature for an edgeset, falling back to connected node creation times."""
+  feat_name = creation_time_feature_name(es_schema.features)
+  if feat_name is not None:
+    return feat_name
+
+  if es_schema.source in schema.node_sets:
+    src_ts = creation_time_feature_name(
+        schema.node_sets[es_schema.source].features
+    )
+    if src_ts in es_schema.features:
+      return src_ts
+
+  if es_schema.target in schema.node_sets:
+    tgt_ts = creation_time_feature_name(
+        schema.node_sets[es_schema.target].features
+    )
+    if tgt_ts in es_schema.features:
+      return tgt_ts
+
+  return None
+
+
+def group_creation_time_feature_name(
+    group_name: str, schemas: schema_lib.FeatureSetSchema
+) -> Optional[str]:
+  """Infers the creation time sequence feature name for a group."""
+  for name, sch in schemas.items():
+    if sch.is_creation_time and sch.is_timeseries:
+      sch_group = sch.group or name
+      if sch_group == group_name:
+        return name
+  return None
+
+
+def nodeset_timestamp_features(
+    schema: schema_lib.GraphSchema,
+) -> Dict[str, str]:
+  """Infers nodeset creation timestamp feature names from schema."""
+  result = {}
+  for name, ns in schema.node_sets.items():
+    ts = creation_time_feature_name(ns.features)
+    if ts is not None:
+      result[name] = ts
+  return result
+
+
+def edgeset_timestamp_features(
+    schema: schema_lib.GraphSchema,
+) -> Dict[str, str]:
+  """Infers edgeset creation timestamp feature names from schema."""
+  result = {}
+  for name, es in schema.edge_sets.items():
+    ts = edgeset_creation_time_feature_name(es, schema)
+    if ts is not None:
+      result[name] = ts
+  return result
+
+
 def _extract_entity_set_timeseries_specs(
     features: Dict[str, schema_lib.FeatureSchema],
 ) -> List[TimeseriesGroupSpec]:
@@ -53,18 +136,49 @@ def _extract_entity_set_timeseries_specs(
   for fname, fschema in features.items():
     if not fschema.is_timeseries:
       continue
-    # Extract timeseries features associated with a timestamp feature.
-    if fschema.timestamps is not None:
-      ts_groups[fschema.timestamps].append(fname)
-    elif fschema.semantic == schema_lib.FeatureSemantic.TIMESTAMP:
-      ts_groups[fname].append(fname)
-    else:
-      ts_groups[None].append(fname)
+    grp = fschema.group or (fname if fschema.is_creation_time else None)
+    ts_groups[grp].append(fname)
 
-  return [
-      TimeseriesGroupSpec(timestamp_feature_name=ts_fname, feature_names=fnames)
-      for ts_fname, fnames in ts_groups.items()
-  ]
+  specs = []
+  for grp_name, fnames in ts_groups.items():
+    ts_feat_name = None
+    if grp_name is not None:
+      ts_feat_name = group_creation_time_feature_name(grp_name, features)
+    specs.append(
+        TimeseriesGroupSpec(
+            timestamp_feature_name=ts_feat_name, feature_names=fnames
+        )
+    )
+  return specs
+
+
+def get_mask_feature_name(
+    feature_name: str, schemas: schema_lib.FeatureSetSchema
+) -> Optional[str]:
+  """Gets the authoritative mask feature name associated with a given feature.
+
+  A mask feature has `semantic=FeatureSemantic.MASK` and explicitly shares the
+  same `group` as the feature being masked.
+
+  Args:
+    feature_name: Name of the feature to find the mask for.
+    schemas: The feature set schema (`Dict[str, FeatureSchema]`).
+
+  Returns:
+    The name of the mask feature if found, or None if the feature has no
+    associated sequence group or mask in the schema.
+  """
+  feature_schema = schemas[feature_name]
+  ts_group = feature_schema.group
+  if ts_group is None:
+    return None
+  for name, sch in schemas.items():
+    if (
+        sch.semantic == schema_lib.FeatureSemantic.MASK
+        and sch.group == ts_group
+    ):
+      return name
+  return None
 
 
 def extract_timeseries_schema_cache(

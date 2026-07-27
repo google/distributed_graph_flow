@@ -26,7 +26,7 @@ Graph Topology & Schema:
     * `signal`: 1D array of noisy sinusoidal telemetry values sampled at `time`.
   * Node Set `alerts`:
     * `#id`: Primary ID (`alert_0`, `alert_1`, ...).
-    * `#creation_time`: Timestamp when the alert was triggered.
+    * `creation_time`: Timestamp when the alert was triggered.
     * `signal_regression`: Target continuous regression label.
   * Edge Set `hardware_to_alert`:
     * Directed edges linking hardware nodes to alert nodes. The number of
@@ -96,13 +96,15 @@ def generate_signal_regression_schema() -> schema_lib.GraphSchema:
                       semantic=schema_lib.FeatureSemantic.TIMESTAMP,
                       shape=(None,),
                       is_timeseries=True,
+                      is_creation_time=True,
+                      group="time",
                   ),
                   "signal": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.FLOAT_32,
                       semantic=schema_lib.FeatureSemantic.NUMERICAL,
                       shape=(None,),
                       is_timeseries=True,
-                      timestamps="time",
+                      group="time",
                   ),
               }
           ),
@@ -112,9 +114,10 @@ def generate_signal_regression_schema() -> schema_lib.GraphSchema:
                       format=schema_lib.FeatureFormat.BYTES,
                       semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
                   ),
-                  "#creation_time": schema_lib.FeatureSchema(
+                  "creation_time": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.INTEGER_64,
                       semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                      is_creation_time=True,
                   ),
                   "signal_regression": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.FLOAT_32,
@@ -271,7 +274,7 @@ def generate_signal_regression_in_memory_graph(
           "alerts": in_memory_graph_lib.InMemoryNodeSet(
               features={
                   "#id": alert_id_array,
-                  "#creation_time": alert_time_array,
+                  "creation_time": alert_time_array,
                   "signal_regression": alert_reg_array,
               },
               num_nodes=config.num_alerts,

@@ -29,7 +29,8 @@ struct GraphSchema {
     std::vector<int> shape;
     eFormat format;
     bool is_timeseries = false;
-    std::string timestamps;
+    bool is_creation_time = false;
+    std::string group;
 
     std::string to_string(int indent) const;
 

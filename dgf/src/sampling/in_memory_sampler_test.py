@@ -418,26 +418,26 @@ Node(nodeset_idx=0, children=[
     np.testing.assert_array_equal(n2_idxs, np.array([0, 2]))
 
   def test_create_sampler_temporal_and_masking_error(self):
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
+        include_e2=True
+    )
     sampling_config = config_lib.SimpleSamplingConfig(
         seed_nodeset="n1",
         num_hops=1,
         hop_width=2,
-        edgeset_timestamp_features={"e12": "timestamp"},
-    )
-    plan = config_lib.simple_sampling_config_to_sampling_plan(
-        sampling_config, self.schema
+        temporal_sampling=True,
     )
     with self.assertRaisesRegex(
         ValueError,
         "Temporal filtering and edge masking cannot be used at the same time.",
     ):
       in_memory_sampler_lib.create_sampler(
-          self.graph,
-          plan,
-          self.schema,
+          graph,
+          sampling_config,
+          schema,
+          edgeset_to_mask="e1",
           debug_sampling=True,
           batch_size=5,
-          edgeset_to_mask="e12",
       )
 
   def test_sample_with_edge_masking_reverse(self):
@@ -991,7 +991,7 @@ Node(nodeset_idx=0, children=[
             num_hops=2,
             hop_width=2,
             reverse=False,
-            edgeset_timestamp_features={"e1": "timestamp"},
+            temporal_sampling=True,
         ),
         schema,
         return_features=True,
@@ -1085,44 +1085,6 @@ Node(nodeset_idx=0, children=[
     )
     test_util.assert_are_equal(self, expected_graph, sample[0])
 
-  def test_temporal_sampling_wrong_edgeset(self):
-    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
-        include_e2=True
-    )
-    with self.assertRaisesRegex(
-        ValueError, "Edgeset 'do_not_exist1' does not exist in schema"
-    ):
-      in_memory_sampler_lib.create_sampler(
-          graph,
-          config_lib.SimpleSamplingConfig(
-              seed_nodeset="n1",
-              num_hops=2,
-              hop_width=2,
-              reverse=False,
-              edgeset_timestamp_features={"do_not_exist1": "feature"},
-          ),
-          schema,
-          batch_size=5,
-      )
-
-  def test_temporal_sampling_wrong_feature(self):
-    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
-        include_e2=True
-    )
-    with self.assertRaisesRegex(ValueError, 'Key ".*" not found in map'):
-      _ = in_memory_sampler_lib.create_sampler(
-          graph,
-          config_lib.SimpleSamplingConfig(
-              seed_nodeset="n1",
-              num_hops=2,
-              hop_width=2,
-              reverse=False,
-              edgeset_timestamp_features={"e1": "do_not_exist"},
-          ),
-          schema,
-          batch_size=5,
-      )
-
   def test_temporal_sampling_missing_seed_timestamp(self):
     graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
         include_e2=True
@@ -1135,7 +1097,7 @@ Node(nodeset_idx=0, children=[
             num_hops=2,
             hop_width=2,
             reverse=False,
-            edgeset_timestamp_features={"e1": "timestamp"},
+            temporal_sampling=True,
         ),
         schema,
         batch_size=5,
@@ -1147,10 +1109,9 @@ Node(nodeset_idx=0, children=[
     ):
       _ = sampler.sample([0])
 
-  def test_temporal_sampling_unexpected_seed_timestamp(self):
-    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
-        include_e2=True
-    )
+  def test_temporal_sampling_no_temporal_edgesets_succeeds(self):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
     sampler = in_memory_sampler_lib.create_sampler(
         graph,
         config_lib.SimpleSamplingConfig(
@@ -1163,11 +1124,8 @@ Node(nodeset_idx=0, children=[
         batch_size=5,
     )
 
-    with self.assertRaisesRegex(
-        ValueError,
-        "seed_timestamps provided but no temporal edgesets configured",
-    ):
-      _ = sampler.sample([0], seed_timestamps=[5])
+    res = sampler.sample([0], seed_timestamps=[5])
+    self.assertLen(res, 1)
 
   def test_sample_numpy_array_input(self):
     graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
@@ -1180,7 +1138,7 @@ Node(nodeset_idx=0, children=[
             num_hops=2,
             hop_width=2,
             reverse=False,
-            edgeset_timestamp_features={"e1": "timestamp"},
+            temporal_sampling=True,
         ),
         schema,
         return_features=True,
@@ -1318,7 +1276,7 @@ Node(nodeset_idx=0, children=[
     for n in sampled:
       self.assertIn(n, [0, 1, 2, 3, 4, 5])
 
-  def test_causal_timeseries_filtering_in_sample(self):
+  def _create_causal_timeseries_test_graph(self):
     graph = in_memory_graph_lib.InMemoryGraph(
         node_sets={
             "alerts": in_memory_graph_lib.InMemoryNodeSet(
@@ -1360,6 +1318,7 @@ Node(nodeset_idx=0, children=[
                     "#creation_time": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_creation_time=True,
                     )
                 }
             ),
@@ -1369,12 +1328,14 @@ Node(nodeset_idx=0, children=[
                         format=schema_lib.FeatureFormat.INTEGER_64,
                         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
                         is_timeseries=True,
+                        is_creation_time=True,
+                        group="time",
                     ),
                     "signal": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
                         semantic=schema_lib.FeatureSemantic.NUMERICAL,
                         is_timeseries=True,
-                        timestamps="time",
+                        group="time",
                     ),
                 }
             ),
@@ -1386,15 +1347,16 @@ Node(nodeset_idx=0, children=[
         },
     )
     # Propagate timestamps to edges so temporal sampling works.
-    graph, schema = temporal_lib.propagate_timestamp_to_edges(
-        graph, schema, node_timestamps={"alerts": "#creation_time"}
-    )
+    return temporal_lib.propagate_timestamp_to_edges(graph, schema)
+
+  def test_causal_timeseries_filtering_in_sample(self):
+    graph, schema = self._create_causal_timeseries_test_graph()
     plan = config_lib.SimpleSamplingConfig(
         seed_nodeset="alerts",
         num_hops=1,
         hop_width=10,
         reverse=True,
-        edgeset_timestamp_features={"hardware_to_alert": "timestamps"},
+        temporal_sampling=True,
     )
     sampler = in_memory_sampler_lib.create_sampler(
         graph,
@@ -1431,6 +1393,74 @@ Node(nodeset_idx=0, children=[
         samples[1].node_sets["hardware"].features["signal"][0], [4.0, 5.0, 6.0]
     )
 
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="default_from_plan",
+          temporal_sampling=True,
+          slice_timeseries_by_seed=None,
+          expected_slice=True,
+          expected_time=[10, 20, 30],
+          expected_signal=[1.0, 2.0, 3.0],
+      ),
+      dict(
+          testcase_name="override_plan_to_false",
+          temporal_sampling=True,
+          slice_timeseries_by_seed=False,
+          expected_slice=False,
+          expected_time=[10, 20, 30, 40, 50, 60, 70],
+          expected_signal=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0],
+      ),
+      dict(
+          testcase_name="override_plan_to_true",
+          temporal_sampling=False,
+          slice_timeseries_by_seed=True,
+          expected_slice=True,
+          expected_time=None,
+          expected_signal=None,
+      ),
+  )
+  def test_slice_timeseries_by_seed(
+      self,
+      temporal_sampling,
+      slice_timeseries_by_seed,
+      expected_slice,
+      expected_time,
+      expected_signal,
+  ):
+    graph, schema = self._create_causal_timeseries_test_graph()
+    plan = config_lib.SimpleSamplingConfig(
+        seed_nodeset="alerts",
+        num_hops=1,
+        hop_width=10,
+        reverse=True,
+        temporal_sampling=temporal_sampling,
+    )
+    kwargs = {}
+    if slice_timeseries_by_seed is not None:
+      kwargs["slice_timeseries_by_seed"] = slice_timeseries_by_seed
+
+    sampler = in_memory_sampler_lib.create_sampler(
+        graph,
+        plan,
+        schema,
+        batch_size=2,
+        return_features=True,
+        max_timeseries_len=3,
+        **kwargs,
+    )
+    self.assertEqual(sampler._slice_timeseries_by_seed, expected_slice)
+    if expected_time is not None:
+      samples = sampler.sample(
+          [0], seed_timestamps=np.array([30], dtype=np.int64)
+      )
+      np.testing.assert_array_equal(
+          samples[0].node_sets["hardware"].features["time"][0], expected_time
+      )
+      np.testing.assert_array_equal(
+          samples[0].node_sets["hardware"].features["signal"][0],
+          expected_signal,
+      )
+
   def test_slice_timeseries_by_seed_validation_errors(self):
     empty_graph = in_memory_graph_lib.InMemoryGraph(node_sets={}, edge_sets={})
 
@@ -1454,7 +1484,7 @@ Node(nodeset_idx=0, children=[
       )
 
     # 2. Missing seed_timestamps when schema contains is_timeseries=True
-    # features
+    # featuresh
     ts_schema = schema_lib.GraphSchema(
         node_sets={
             "n1": schema_lib.NodeSchema(

@@ -46,7 +46,8 @@ std::string GraphSchema::Feature::to_string(int indent) const {
       absl::StrJoin(shape, ", ", shape_formatter),
       "], format=", FormatToString(format),
       is_timeseries ? ", is_timeseries=true" : "",
-      timestamps.empty() ? "" : absl::StrCat(", timestamps='", timestamps, "'"),
+      is_creation_time ? ", is_creation_time=true" : "",
+      group.empty() ? "" : absl::StrCat(", group='", group, "'"),
       ")");
 }
 

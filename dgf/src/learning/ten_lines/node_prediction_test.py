@@ -73,6 +73,7 @@ def _gen_graph_real_looking(
     edge_features["timestamp"] = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.INTEGER_64,
         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_creation_time=True,
     )
 
   schema = schema_lib.GraphSchema(
@@ -95,6 +96,7 @@ def _gen_graph_real_looking(
                   "created_at": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.INTEGER_64,
                       semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                      is_creation_time=True,
                   ),
                   "categorical_label": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.BYTES,
@@ -112,6 +114,7 @@ def _gen_graph_real_looking(
                   "date": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.INTEGER_64,
                       semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                      is_creation_time=True,
                   ),
                   "amount": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.INTEGER_64,
@@ -841,6 +844,52 @@ class NodePredictionPredictibleModelTest(absltest.TestCase):
         expected_predictions,
         abs_tol=0.001,
     )
+
+
+class NodePredictionTemporalValidationTest(absltest.TestCase):
+
+  def test_temporal_training_no_target_nodeset_timestamp_raises(self):
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
+        include_e2=False
+    )
+    schema.node_sets["n1"].features["timestamp"].is_creation_time = False
+
+    with self.assertRaisesRegex(
+        ValueError,
+        "The target nodeset 'n1' must have a creation time feature",
+    ):
+      node_prediction_lib.train_node_model(
+          graph=graph,
+          schema=schema,
+          target_nodeset="n1",
+          target_column="timestamp",
+          time_aware=True,
+      )
+
+  def test_temporal_training_no_edgeset_timestamp_plan_is_temporal(self):
+    graph, schema = _gen_graph_real_looking(has_timestamp_feature=True)
+    for es_schema in schema.edge_sets.values():
+      for feat in es_schema.features.values():
+        feat.is_creation_time = False
+
+    model = node_prediction_lib.train_node_model(
+        graph=graph,
+        schema=schema,
+        target_nodeset="client",
+        target_column="categorical_label",
+        time_aware=True,
+        num_train_steps=2,
+        valid_every_n_steps=1,
+        batch_size=1,
+        sampling_width=1,
+        num_sampling_hops=1,
+        node_embedding_dim=1,
+        num_layers=1,
+        verbose=0,
+    )
+    self.assertTrue(model.data().temporal_sampling)
+    self.assertTrue(model.data().sampling_plan.temporal_sampling)
+    self.assertEmpty(model.data().sampling_plan.edgeset_timestamp_features)
 
 
 if __name__ == "__main__":

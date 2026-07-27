@@ -2073,6 +2073,7 @@ def generate_temporal_in_memory_graph(
               "timestamp": schema_lib.FeatureSchema(
                   format=schema_lib.FeatureFormat.INTEGER_64,
                   semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                  is_creation_time=True,
               )
           },
       ),
@@ -2091,6 +2092,7 @@ def generate_temporal_in_memory_graph(
                   "timestamp": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.INTEGER_64,
                       semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                      is_creation_time=True,
                   ),
                   "feat": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.FLOAT_32,
