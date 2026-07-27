@@ -14,6 +14,10 @@
 
 """Padding and capping for timeseries sequence features in graphs."""
 
+# TODO(simonmeierhans): Split output schema computation (done once at
+# preparation) and output value computation (done per node/execution) for
+# all functions.
+
 # pytype: disable=module-attr
 import dataclasses
 import enum
@@ -138,6 +142,18 @@ class CalendarFeatureConfig:
   """
 
   features: Tuple[CalendarFeature, ...] = _SUPPORTED_CALENDAR_FEATURES
+
+
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass
+class TimestampFeatureConfig:
+  """Configuration for extracting time delta features.
+
+  Attributes:
+    fill_value: Value used for masked time steps and missing boundary deltas.
+  """
+
+  fill_value: Any = 0
 
 
 def _compute_calendar_feature(
@@ -450,6 +466,150 @@ def extract_calendar_features(
         values=es_val.features,
         schemas=es_schema.features,
         config=config,
+    )
+    new_edge_sets[es_name] = in_memory_graph.InMemoryEdgeSet(
+        adjacency=es_val.adjacency, features=new_vals
+    )
+    new_es_schemas[es_name] = schema_lib.EdgeSchema(
+        source=es_schema.source,
+        target=es_schema.target,
+        features=new_schemas,
+    )
+
+  return (
+      in_memory_graph.InMemoryGraph(
+          node_sets=new_node_sets, edge_sets=new_edge_sets
+      ),
+      schema_lib.GraphSchema(
+          node_sets=new_ns_schemas, edge_sets=new_es_schemas
+      ),
+  )
+
+
+def _compute_seed_deltas(
+    raw_val: np.ndarray,
+    mask: Optional[np.ndarray],
+    seed_timestamp: int,
+    fill_value: Any,
+) -> np.ndarray:
+  """Computes seed_timestamp - t_i."""
+  deltas = seed_timestamp - raw_val
+  if mask is not None:
+    mask_for_where = temporal_util.expand_mask_dims(mask, raw_val)
+    deltas = np.where(mask_for_where, deltas, fill_value)
+  return deltas
+
+
+def _extract_feature_set_timestamp_features(
+    values: in_memory_graph.Features,
+    schemas: schema_lib.FeatureSetSchema,
+    config: TimestampFeatureConfig,
+    seed_timestamp: int,
+) -> Tuple[in_memory_graph.Features, schema_lib.FeatureSetSchema]:
+  """Extracts time delta features for a single feature set.
+
+  Args:
+    values: Feature values.
+    schemas: Feature schemas.
+    config: Configuration for time delta feature extraction.
+    seed_timestamp: The seed timestamp for computing seed deltas.
+
+  Returns:
+    A tuple of the new feature values and new schemas.
+  """
+  new_values: in_memory_graph.Features = {}
+  new_schemas: schema_lib.FeatureSetSchema = {}
+
+  for fname, schema in schemas.items():
+    raw_val = values[fname]
+    new_values[fname] = raw_val
+    new_schemas[fname] = schema
+
+    if schema.semantic != schema_lib.FeatureSemantic.TIMESTAMP:
+      continue
+
+    if not schema.is_static_shape() or raw_val.dtype == np.object_:
+      raise ValueError(
+          "extract_timestamp_features requires fixed-length timestamp tensors,"
+          f" but feature '{fname}' is a variable-length object array or has a"
+          f" dynamic shape ({schema.shape}). Please run"
+          " pad_and_cap_timeseries_features first."
+      )
+
+    mask = None
+    ts_group = schema.group or (
+        fname if schema.is_timeseries and schema.is_creation_time else None
+    )
+    if ts_group is not None:
+      mask_name = temporal_util.get_mask_feature_name(fname, schemas)
+      if mask_name is not None and mask_name in values:
+        mask = values[mask_name]
+
+    if seed_timestamp is None:
+      raise ValueError(
+          "seed_timestamp must be provided to extract seed deltas."
+      )
+    out_fname = f"{fname}_seed_delta"
+    new_values[out_fname] = _compute_seed_deltas(
+        raw_val, mask, seed_timestamp, config.fill_value
+    )
+    new_schemas[out_fname] = schema_lib.FeatureSchema(
+        format=schema.format,
+        semantic=schema_lib.FeatureSemantic.TIMEDELTA,
+        shape=schema.shape,
+        is_timeseries=schema.is_timeseries,
+        group=ts_group,
+    )
+
+  return new_values, new_schemas
+
+
+def extract_timestamp_features(
+    graph: in_memory_graph.InMemoryGraph,
+    schema: schema_lib.GraphSchema,
+    seed_timestamp: int,
+    config: Optional[TimestampFeatureConfig] = None,
+) -> Tuple[in_memory_graph.InMemoryGraph, schema_lib.GraphSchema]:
+  """Extracts time delta features from timestamp features.
+
+  Args:
+    graph: The input in-memory graph.
+    schema: The graph schema containing timestamp features.
+    seed_timestamp: Seed timestamp for calculating seed deltas.
+    config: Optional `TimestampFeatureConfig`.
+
+  Returns:
+    Tuple `(new_graph, new_schema)`.
+  """
+  if config is None:
+    config = TimestampFeatureConfig()
+
+  new_node_sets = {}
+  new_ns_schemas = {}
+
+  for ns_name, ns_schema in schema.node_sets.items():
+    ns_val = graph.node_sets[ns_name]
+    new_vals, new_schemas = _extract_feature_set_timestamp_features(
+        values=ns_val.features,
+        schemas=ns_schema.features,
+        config=config,
+        seed_timestamp=seed_timestamp,
+    )
+    new_node_sets[ns_name] = in_memory_graph.InMemoryNodeSet(
+        num_nodes=ns_val.num_nodes, features=new_vals
+    )
+    new_ns_schemas[ns_name] = schema_lib.NodeSchema(features=new_schemas)
+
+  new_edge_sets = {}
+  new_es_schemas = {}
+
+  for es_name, es_schema in schema.edge_sets.items():
+    es_val = graph.edge_sets[es_name]
+    new_vals, new_schemas = _extract_feature_set_timestamp_features(
+        values=es_val.features,
+        schemas=es_schema.features,
+        config=config,
+        seed_timestamp=seed_timestamp,
     )
     new_edge_sets[es_name] = in_memory_graph.InMemoryEdgeSet(
         adjacency=es_val.adjacency, features=new_vals

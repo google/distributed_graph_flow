@@ -54,4 +54,6 @@ from dgf.src.transform.timeseries import pad_and_cap_timeseries_features
 from dgf.src.transform.timeseries import PadAndCapTimeseriesConfig
 from dgf.src.transform.timeseries import extract_calendar_features
 from dgf.src.transform.timeseries import CalendarFeatureConfig
+from dgf.src.transform.timeseries import extract_timestamp_features
+from dgf.src.transform.timeseries import TimestampFeatureConfig
 
