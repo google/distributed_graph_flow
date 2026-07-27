@@ -2,10 +2,7 @@ load("@rules_python//python:py_library.bzl", "py_library")
 
 package(
     
-    default_visibility = [
-        "//:internal_users",
-        "//dgf/src:__subpackages__",
-    ],
+    default_visibility = ["//dgf/src:__subpackages__"],
 )
 
 py_library(
