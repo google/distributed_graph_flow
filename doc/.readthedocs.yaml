@@ -9,7 +9,7 @@ build:
     python: "3.13"
   jobs:
     post_install:
-      - pip install --no-deps .
+      - pip install --no-deps dgf
 
 mkdocs:
    configuration: doc/mkdocs.yml
