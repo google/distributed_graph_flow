@@ -139,6 +139,8 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
   out_of_vocab_value: int
   output_shape: Tuple[Optional[int], ...]
   output_feature_name: str
+  is_timeseries: bool = False
+  group: Optional[str] = None
   type: str = dataclasses.field(default="DictionaryIndexNormalizer", init=False)
   tf_table: Any = dataclasses.field(
       default=None,
@@ -174,12 +176,15 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
       dictionary_map = {
           key: item.index for key, item in input_stats.dictionary.items()
       }
+
     return DictionaryIndexNormalizer(
         input_feature=feature_name,
         dictionary_map=dictionary_map,
         out_of_vocab_value=len(input_stats.dictionary),
         output_shape=input_schema.shape or (),
         output_feature_name=f"{feature_name}_INDEX",
+        is_timeseries=input_schema.is_timeseries or False,
+        group=input_schema.group,
     )
 
   def output_schema(self) -> schema_lib.FeatureSetSchema:
@@ -189,6 +194,8 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
             semantic=schema_lib.FeatureSemantic.CATEGORICAL,
             shape=self.output_shape,
             num_categorical_values=len(self.dictionary_map) + 1,
+            is_timeseries=self.is_timeseries,
+            group=self.group,
         )
     }
 
@@ -307,8 +314,6 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
     }
 
   def normalize_numpy(self, value: np.ndarray) -> Dict[str, np.ndarray]:
-    # TODO(gbm): Add support for multi-dim features.
-
     value = value.astype(np.float32)
     quantiles = self.quantiles
     num_buckets = len(quantiles) - 1
@@ -371,6 +376,8 @@ class HashStringNormalizer(AbstractFeatureNormalizer):
   num_buckets: int
   output_shape: Tuple[Optional[int], ...]
   output_feature_name: str
+  is_timeseries: bool = False
+  group: Optional[str] = None
   type: str = dataclasses.field(default="HashStringNormalizer", init=False)
 
   @classmethod
@@ -385,11 +392,14 @@ class HashStringNormalizer(AbstractFeatureNormalizer):
           f"Feature '{feature_name}' has format '{input_schema.format}', but "
           "HashStringNormalizer only supports BYTES features."
       )
+
     return HashStringNormalizer(  # pyrefly: ignore[bad-return]
         input_feature=feature_name,
         num_buckets=num_buckets,
         output_shape=input_schema.shape or (),
         output_feature_name=f"{feature_name}_HASH",
+        is_timeseries=input_schema.is_timeseries or False,
+        group=input_schema.group,
     )
 
   def output_schema(self) -> schema_lib.FeatureSetSchema:
@@ -399,6 +409,8 @@ class HashStringNormalizer(AbstractFeatureNormalizer):
             semantic=schema_lib.FeatureSemantic.CATEGORICAL,
             shape=self.output_shape,
             num_categorical_values=self.num_buckets,
+            is_timeseries=self.is_timeseries,
+            group=self.group,
         )
     }
 

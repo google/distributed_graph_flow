@@ -105,6 +105,37 @@ class DictionaryIndexNormalizerTest(absltest.TestCase):
           "test_feature", input_schema, input_stats
       )
 
+  def test_timeseries(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.BYTES,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        is_timeseries=True,
+        group="ts_group",
+        shape=(2,),
+    )
+    input_stats = statistics_lib.FeatureStatistics(
+        count=3,
+        dictionary={
+            "red": statistics_lib.DictionaryItem(index=0, count=2),
+            "green": statistics_lib.DictionaryItem(index=1, count=1),
+        },
+    )
+    normalizer = normalize_lib.DictionaryIndexNormalizer.create(
+        "test_feature", input_schema, input_stats
+    )
+
+    output_schema = normalizer.output_schema()["test_feature_INDEX"]
+    self.assertTrue(output_schema.is_timeseries)
+    self.assertEqual(output_schema.group, "ts_group")
+    self.assertEqual(output_schema.shape, (2,))
+
+    input_values = np.array([[b"red", b"blue"], [b"green", b"red"]])
+    output_features = normalizer.normalize_numpy(input_values)
+    expected_output_features = {
+        "test_feature_INDEX": np.array([[0, 2], [1, 0]], dtype=np.int64)
+    }
+    test_util.assert_are_equal(self, output_features, expected_output_features)
+
 
 class SoftQuantileNormalizerTest(absltest.TestCase):
 
