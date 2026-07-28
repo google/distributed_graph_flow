@@ -65,16 +65,14 @@ absl::StatusOr<GraphSchema::Feature> ParseFeatureSchema(
 
   if (nb::hasattr(py_feature_schema, "is_timeseries")) {
     nb::object py_is_timeseries = py_feature_schema.attr("is_timeseries");
-    if (!py_is_timeseries.is_none() &&
-        nb::isinstance<nb::bool_>(py_is_timeseries)) {
+    if (nb::isinstance<nb::bool_>(py_is_timeseries)) {
       feature.is_timeseries = nb::cast<bool>(py_is_timeseries);
     }
   }
 
   if (nb::hasattr(py_feature_schema, "is_creation_time")) {
     nb::object py_is_creation_time = py_feature_schema.attr("is_creation_time");
-    if (!py_is_creation_time.is_none() &&
-        nb::isinstance<nb::bool_>(py_is_creation_time)) {
+    if (nb::isinstance<nb::bool_>(py_is_creation_time)) {
       feature.is_creation_time = nb::cast<bool>(py_is_creation_time);
     }
   }

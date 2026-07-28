@@ -115,8 +115,8 @@ class FeatureSchema:
   shape: Shape = None
   num_categorical_values: Optional[int] = None
   is_utf8_string: Optional[bool] = False
-  is_timeseries: Optional[bool] = False
-  is_creation_time: Optional[bool] = False
+  is_timeseries: bool = False
+  is_creation_time: bool = False
   group: Optional[str] = None
 
   def is_static_shape(self) -> bool:

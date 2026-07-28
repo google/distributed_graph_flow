@@ -251,6 +251,65 @@ class SoftQuantileNormalizerTest(absltest.TestCase):
           "test_feature", input_schema, input_stats
       )
 
+  def test_timeseries_feature_2d(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        is_timeseries=True,
+        group="ts_group",
+        shape=(3,),
+    )
+    input_stats = statistics_lib.FeatureStatistics(
+        count=12,
+        minimum=0.0,
+        maximum=4.0,
+        quantiles=[0.0, 2.0, 2.5, 3.0],
+    )
+    normalizer = normalize_lib.SoftQuantileNormalizer.create(
+        "test_ts_feature", input_schema, input_stats
+    )
+
+    output_schema = normalizer.output_schema()
+    expected_output_schema = {
+        "test_ts_feature_SOFT_QUANTILE": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=(3,),
+            is_timeseries=True,
+            group="ts_group",
+        )
+    }
+    self.assertEqual(output_schema, expected_output_schema)
+
+    # 2 entities, sequence length 3
+    input_values = np.array(
+        [[0.0, 2.0, 3.0], [1.0, 2.25, 4.0]], dtype=np.float32
+    )
+    output_features = normalizer.normalize_numpy(input_values)
+
+    expected_output_features = {
+        "test_ts_feature_SOFT_QUANTILE": np.array(
+            [
+                [0.0 - 0.5, 1.0 / 3.0 - 0.5, 1.0 - 0.5],
+                [0.5 / 3.0 - 0.5, 1.5 / 3.0 - 0.5, 5.0 / 3.0 - 0.5],
+            ],
+            dtype=np.float32,
+        )
+    }
+    test_util.assert_are_equal(
+        self, output_features, expected_output_features, abs_tol=1e-6
+    )
+
+    tf_output_features = normalizer.normalize_tensorflow(
+        tf.constant(input_values)
+    )
+    test_util.assert_are_equal(
+        self,
+        {k: v.numpy() for k, v in tf_output_features.items()},
+        expected_output_features,
+        abs_tol=1e-6,
+    )
+
 
 class HashStringNormalizerTest(absltest.TestCase):
 

@@ -183,7 +183,7 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
         out_of_vocab_value=len(input_stats.dictionary),
         output_shape=input_schema.shape or (),
         output_feature_name=f"{feature_name}_INDEX",
-        is_timeseries=input_schema.is_timeseries or False,
+        is_timeseries=input_schema.is_timeseries,
         group=input_schema.group,
     )
 
@@ -246,6 +246,12 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
   This normalizer is suitable for numerical features where the quantiles are
   available in the statistics. The output is a float between -0.5-eps and
   0.5+eps, where eps is the extrapolation (generally ~ 1/num quantiles).
+
+  Note:
+    For timeseries features, this normalizer will perform some amount of
+    lookahead, i.e. the normalization depends on future feature statistics and
+    leaks some of that information. This can lead to worse-than-expected 
+    performance on the validation and test set.
   """
 
   output_feature_name: str
@@ -256,6 +262,8 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
           decoder=lambda x: np.asarray(x, dtype=np.float32),
       )
   )
+  is_timeseries: bool = False
+  group: Optional[str] = None
   type: str = dataclasses.field(default="SoftQuantileNormalizer", init=False)
 
   @classmethod
@@ -302,6 +310,8 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
         quantiles=quantiles,
         output_shape=input_schema.shape or (),
         output_feature_name=f"{feature_name}_SOFT_QUANTILE",
+        is_timeseries=input_schema.is_timeseries,
+        group=input_schema.group,
     )
 
   def output_schema(self) -> schema_lib.FeatureSetSchema:
@@ -310,6 +320,8 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
             format=schema_lib.FeatureFormat.FLOAT_32,
             semantic=schema_lib.FeatureSemantic.EMBEDDING,
             shape=self.output_shape,
+            is_timeseries=self.is_timeseries,
+            group=self.group,
         )
     }
 
@@ -317,9 +329,6 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
     value = value.astype(np.float32)
     quantiles = self.quantiles
     num_buckets = len(quantiles) - 1
-
-    # Handle NaN values
-    nan_mask = np.isnan(value)
 
     # Find the index of the quantile bucket for each value.
     # indices will range from 0 to len(quantiles)-2.
@@ -346,7 +355,6 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
 
     # Note: This is not really a quantile.
     soft_quantile = smooth_bucket_idx / num_buckets
-    soft_quantile[nan_mask] = 0
     return {self.output_feature_name: soft_quantile - 0.5}
 
   def normalize_tensorflow(self, value: tf.Tensor) -> Dict[str, tf.Tensor]:
@@ -354,8 +362,11 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
     quantiles = tf.constant(self.quantiles, dtype=tf.float32)
     num_buckets = len(self.quantiles) - 1
 
-    bucket_idx = tf.searchsorted(quantiles, value, side="right") - 1
+    orig_shape = tf.shape(value)
+    flat_value = tf.reshape(value, [-1])
+    bucket_idx = tf.searchsorted(quantiles, flat_value, side="right") - 1
     bucket_idx = tf.clip_by_value(bucket_idx, 0, len(self.quantiles) - 2)
+    bucket_idx = tf.reshape(bucket_idx, orig_shape)
 
     lower = tf.gather(quantiles, bucket_idx)
     upper = tf.gather(quantiles, bucket_idx + 1)
@@ -364,8 +375,8 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
         upper - lower
     )
 
-    soft_quantile = smooth_bucket_idx / num_buckets - 0.5
-    return {self.output_feature_name: soft_quantile}
+    soft_quantile = smooth_bucket_idx / num_buckets
+    return {self.output_feature_name: soft_quantile - 0.5}
 
 
 @normalizer_registry.register
@@ -398,7 +409,7 @@ class HashStringNormalizer(AbstractFeatureNormalizer):
         num_buckets=num_buckets,
         output_shape=input_schema.shape or (),
         output_feature_name=f"{feature_name}_HASH",
-        is_timeseries=input_schema.is_timeseries or False,
+        is_timeseries=input_schema.is_timeseries,
         group=input_schema.group,
     )
 
