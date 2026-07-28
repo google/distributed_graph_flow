@@ -18,6 +18,7 @@ FILENAME_SCHEMA = "schema.json"
 FILENAME_METADATA = "metadata.json"
 FILENAME_NODE_FEATURE = "nodesets"
 FILENAME_EDGES_ADJACENCIES = "edgesets"
+DIRNAME_SNAPSHOTS = "snapshots"
 
 PARQUET_EXTENSION = ".parquet"
 

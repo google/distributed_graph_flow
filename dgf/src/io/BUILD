@@ -167,6 +167,46 @@ py_test(
 )
 
 py_library(
+    name = "graph_snapshots",
+    srcs = ["graph_snapshots.py"],
+    deps = [
+        ":graph_constants",
+        ":graph_in_memory",
+        ":schema",
+        "//dgf/src/data:gf_metadata",
+        "//dgf/src/data:graph_snapshots",
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/transform:combine_graph_snapshots",
+        "//dgf/src/util:filesystem",
+        "//dgf/src/util:log",
+        "//dgf/src/validate:graph_snapshots",
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "graph_snapshots_test",
+    srcs = ["graph_snapshots_test.py"],
+    deps = [
+        ":graph_constants",
+        ":graph_in_memory",
+        ":graph_snapshots",
+        ":graph_snapshots_metadata",
+        ":schema",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:graph_snapshots",
+        "//dgf/src/data:graph_snapshots_metadata",
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/transform:combine_graph_snapshots",
+        "//dgf/src/util:filesystem",
+        "//dgf/src/util:test_util",
+        # numpy dep,
+    ],
+)
+
+py_library(
     name = "schema",
     srcs = ["schema.py"],
     deps = [

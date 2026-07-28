@@ -132,6 +132,21 @@ py_library(
     ],
 )
 
+py_library(
+    name = "combine_graph_snapshots",
+    srcs = ["combine_graph_snapshots.py"],
+    deps = [
+        "//dgf/src/analyse:schema",
+        "//dgf/src/data:graph_snapshots",
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/io:feature_format",
+        "//dgf/src/util:log",
+        "//dgf/src/util:temporal",
+        # numpy dep,
+    ],
+)
+
 # Tests
 # =====
 
@@ -263,6 +278,29 @@ py_test(
         "//dgf/src/data:padding",
         "//dgf/src/data:schema",
         "//dgf/src/util:test_util",
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "combine_graph_snapshots_test",
+    srcs = ["combine_graph_snapshots_test.py"],
+    deps = [
+        ":combine_graph_snapshots",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/data:graph_snapshots_metadata",
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/io:graph_constants",
+        "//dgf/src/io:graph_in_memory",
+        "//dgf/src/io:graph_snapshots",
+        "//dgf/src/io:graph_snapshots_metadata",
+        "//dgf/src/io:schema",
+        "//dgf/src/util:filesystem",
+        "//dgf/src/util:log",
+        "//dgf/src/util:test_util",
+        "//dgf/src/validate:in_memory_graph",
         # numpy dep,
     ],
 )

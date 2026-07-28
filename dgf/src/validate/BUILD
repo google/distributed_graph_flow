@@ -42,7 +42,6 @@ py_library(
         "//dgf/src/io:graph_snapshots_metadata",
         "//dgf/src/io:schema",
         "//dgf/src/util:filesystem",
-        # etils/epath dep,
     ],
 )
 

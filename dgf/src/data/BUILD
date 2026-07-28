@@ -142,6 +142,16 @@ py_library(
 )
 
 py_library(
+    name = "graph_snapshots",
+    srcs = ["graph_snapshots.py"],
+    deps = [
+        ":in_memory_graph",
+        ":schema",
+        # numpy dep,
+    ],
+)
+
+py_library(
     name = "beam_coders",
     srcs = ["beam_coders.py"],
     deps = [
