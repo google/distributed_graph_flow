@@ -19,7 +19,8 @@ import dataclasses
 import os
 import tempfile
 from typing import Tuple
-import unittest.mock
+import unittest
+from unittest import mock
 from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized

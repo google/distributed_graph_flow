@@ -18,11 +18,12 @@ from typing import Any, Dict, List, Union
 from dgf.src.data import evaluation as evaluation_data_lib
 from dgf.src.learning.ten_lines import evaluation_ext
 
-Evaluation = evaluation_data_lib.Evaluation
-PerClass = evaluation_data_lib.PerClass
 import jax
 import jax.numpy as jnp
 import numpy as np
+
+Evaluation = evaluation_data_lib.Evaluation
+PerClass = evaluation_data_lib.PerClass
 
 
 class ClassificationEvaluationAccumulator:

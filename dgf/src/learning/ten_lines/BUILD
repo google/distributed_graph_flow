@@ -19,11 +19,11 @@ py_library(
     deps = [
         ":dataset",
         # dataclasses_json dep,
-        "//dgf/src/data:schema",
         "//dgf/src/learning/jax:common",
         "//dgf/src/learning/jax/layers:hetero_gnn",
         "//dgf/src/learning/jax/layers:hetero_graph_attention_network",
         "//dgf/src/util:filesystem",
+        "//dgf/src/util:temporal",
         "//dgf/src/util:util_py",
         # jax dep,
     ],
@@ -254,6 +254,7 @@ py_library(
     name = "node_prediction_dataset",
     srcs = ["node_prediction_dataset.py"],
     deps = [
+        ":common",
         ":dataset",
         "//dgf/src/analyse:in_process_feature_statistics",
         "//dgf/src/analyse:padding",
@@ -268,6 +269,7 @@ py_library(
         "//dgf/src/sampling:in_memory_sampler",
         "//dgf/src/transform:normalize",
         "//dgf/src/util:log",
+        "//dgf/src/util:util_py",
         # jax dep,
         # numpy dep,
     ],
