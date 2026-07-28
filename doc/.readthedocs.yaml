@@ -10,10 +10,6 @@ build:
   jobs:
     post_install:
       - pip install --no-deps .
-    build:
-      html:
-        # Wrap mkdocs in a timeout with SIGABRT and faulthandler to get a python traceback if it hangs
-        - timeout -s SIGABRT 120s python3 -X faulthandler -m mkdocs build --verbose --clean --site-dir $READTHEDOCS_OUTPUT/html --config-file doc/mkdocs.yml
 
 mkdocs:
    configuration: doc/mkdocs.yml

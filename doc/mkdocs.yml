@@ -44,6 +44,7 @@ plugins:
   - mkdocs-jupyter:
       include_source: true   # Shows the "Download Notebook" button
       execute: false         # Set to 'true' if you want MkDocs to run the cells during build
+      ignore: ["*.md"]
   - gen-files:
       scripts:
         - copy_external.py
