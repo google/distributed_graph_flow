@@ -287,6 +287,7 @@ Transforms graph data into other graph structures or formats.
 *   [`dgf.transform.GraphNormalizerConfig`](api/dgf-transform.md#section-graphnormalizerconfig): Raw information of a GraphNormalizer for easy serialization.
 *   [`dgf.transform.IdentityNormalizer`](api/dgf-transform.md#section-identitynormalizer): A normalizer that simply pass a feature without changing it.
 *   [`dgf.transform.NumNodesPredicate`](api/dgf-transform.md#section-numnodespredicate): Predicate for filtering by number of nodes.
+*   [`dgf.transform.SinusoidTimedeltaNormalizer`](api/dgf-transform.md#section-sinusoidtimedeltanormalizer): Normalizes a time delta feature by applying sinusoidal embeddings.
 *   [`dgf.transform.SoftQuantileNormalizer`](api/dgf-transform.md#section-softquantilenormalizer): Normalizes a numerical feature by replacing it with its soft quantile -0.5.
 *   [`dgf.transform.apply_feature`](api/dgf-transform.md#section-apply-feature): Applies feature processors to the node and edge sets of a graph.
 *   [`dgf.transform.auto_normalize`](api/dgf-transform.md#section-auto-normalize): Create a generally good GraphNormalizer from feature statistics.

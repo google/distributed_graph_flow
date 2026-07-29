@@ -14,7 +14,6 @@ py_library(
     deps = [
         ":layers",
         "//dgf/src/learning/jax:common",
-        "//dgf/src/learning/jax:flax_gnn",
         "//dgf/src/learning/jax:flax_train",
     ],
 )

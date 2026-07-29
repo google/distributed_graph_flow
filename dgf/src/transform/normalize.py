@@ -139,8 +139,6 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
   out_of_vocab_value: int
   output_shape: Tuple[Optional[int], ...]
   output_feature_name: str
-  is_timeseries: bool = False
-  group: Optional[str] = None
   type: str = dataclasses.field(default="DictionaryIndexNormalizer", init=False)
   tf_table: Any = dataclasses.field(
       default=None,
@@ -176,15 +174,12 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
       dictionary_map = {
           key: item.index for key, item in input_stats.dictionary.items()
       }
-
     return DictionaryIndexNormalizer(
         input_feature=feature_name,
         dictionary_map=dictionary_map,
         out_of_vocab_value=len(input_stats.dictionary),
         output_shape=input_schema.shape or (),
         output_feature_name=f"{feature_name}_INDEX",
-        is_timeseries=input_schema.is_timeseries,
-        group=input_schema.group,
     )
 
   def output_schema(self) -> schema_lib.FeatureSetSchema:
@@ -194,8 +189,6 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
             semantic=schema_lib.FeatureSemantic.CATEGORICAL,
             shape=self.output_shape,
             num_categorical_values=len(self.dictionary_map) + 1,
-            is_timeseries=self.is_timeseries,
-            group=self.group,
         )
     }
 
@@ -326,6 +319,8 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
     }
 
   def normalize_numpy(self, value: np.ndarray) -> Dict[str, np.ndarray]:
+    # TODO(gbm): Add support for multi-dim features.
+
     value = value.astype(np.float32)
     quantiles = self.quantiles
     num_buckets = len(quantiles) - 1
@@ -387,8 +382,6 @@ class HashStringNormalizer(AbstractFeatureNormalizer):
   num_buckets: int
   output_shape: Tuple[Optional[int], ...]
   output_feature_name: str
-  is_timeseries: bool = False
-  group: Optional[str] = None
   type: str = dataclasses.field(default="HashStringNormalizer", init=False)
 
   @classmethod
@@ -403,14 +396,11 @@ class HashStringNormalizer(AbstractFeatureNormalizer):
           f"Feature '{feature_name}' has format '{input_schema.format}', but "
           "HashStringNormalizer only supports BYTES features."
       )
-
     return HashStringNormalizer(  # pyrefly: ignore[bad-return]
         input_feature=feature_name,
         num_buckets=num_buckets,
         output_shape=input_schema.shape or (),
         output_feature_name=f"{feature_name}_HASH",
-        is_timeseries=input_schema.is_timeseries,
-        group=input_schema.group,
     )
 
   def output_schema(self) -> schema_lib.FeatureSetSchema:
@@ -420,8 +410,6 @@ class HashStringNormalizer(AbstractFeatureNormalizer):
             semantic=schema_lib.FeatureSemantic.CATEGORICAL,
             shape=self.output_shape,
             num_categorical_values=self.num_buckets,
-            is_timeseries=self.is_timeseries,
-            group=self.group,
         )
     }
 
@@ -438,6 +426,127 @@ class HashStringNormalizer(AbstractFeatureNormalizer):
             value, self.num_buckets
         )
     }
+
+
+@normalizer_registry.register
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass(kw_only=True)
+class SinusoidTimedeltaNormalizer(AbstractFeatureNormalizer):
+  """Normalizes a time delta feature by applying sinusoidal embeddings.
+
+  The input is expected to be a time delta (semantic=TIMEDELTA).
+  This normalizer projects the scalar time delta into a multi-dimensional
+  embedding using sine and cosine functions of different frequencies.
+  """
+
+  output_feature_name: str
+  output_shape: Tuple[Optional[int], ...]
+  embedding_dim: int = 32
+  min_period: float = 2.0
+  max_period: float = 31536000.0  # one year in seconds
+  is_timeseries: bool = False
+  group: Optional[str] = None
+  frequencies: np.ndarray = dataclasses.field(
+      default_factory=lambda: np.array([], dtype=np.float32),
+      metadata=dataclasses_json.config(
+          encoder=lambda x: x.tolist(),
+          decoder=lambda x: np.asarray(x, dtype=np.float32),
+      ),
+  )
+  type: str = dataclasses.field(
+      default="SinusoidTimedeltaNormalizer", init=False
+  )
+
+  def __post_init__(self):
+    if self.frequencies.size == 0:
+      half_dim = self.embedding_dim // 2
+      if half_dim == 1:
+        periods = np.array([self.max_period], dtype=np.float32)
+      else:
+        periods = np.exp(
+            np.linspace(
+                np.log(self.min_period),
+                np.log(self.max_period),
+                half_dim,
+                dtype=np.float32,
+            )
+        )
+      self.frequencies = (2 * np.pi) / periods
+
+  @classmethod
+  def create(
+      cls,
+      feature_name: str,
+      input_schema: schema_lib.FeatureSchema,
+      embedding_dim: int = 32,
+  ) -> "SinusoidTimedeltaNormalizer":
+    if embedding_dim <= 0 or embedding_dim % 2 != 0:
+      raise ValueError(
+          f"embedding_dim must be a positive even integer, got {embedding_dim}."
+      )
+
+    if input_schema.semantic != schema_lib.FeatureSemantic.TIMEDELTA:
+      raise ValueError(
+          f"Feature '{feature_name}' has semantic '{input_schema.semantic}',"
+          " but SinusoidTimedeltaNormalizer only supports TIMEDELTA features."
+      )
+
+    if not input_schema.is_static_shape():
+      raise ValueError(
+          "SinusoidTimedeltaNormalizer requires fixed-length feature tensors,"
+          f" but feature '{feature_name}' has a dynamic shape"
+          f" ({input_schema.shape}). Please run pad_and_cap_timeseries_features"
+          " first."
+      )
+
+    input_shape = input_schema.shape or ()
+    # Output shape appends the embedding dimension
+    output_shape = tuple(list(input_shape) + [embedding_dim])
+
+    return SinusoidTimedeltaNormalizer(
+        input_feature=feature_name,
+        embedding_dim=embedding_dim,
+        output_shape=output_shape,
+        output_feature_name=f"{feature_name}_SINUSOID",
+        is_timeseries=input_schema.is_timeseries,
+        group=input_schema.group,
+    )
+
+  def output_schema(self) -> schema_lib.FeatureSetSchema:
+    return {
+        self.output_feature_name: schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=self.output_shape,
+            is_timeseries=self.is_timeseries,
+            group=self.group,
+        )
+    }
+
+  def normalize_numpy(self, value: np.ndarray) -> Dict[str, np.ndarray]:
+    if value.dtype == np.object_:
+      raise ValueError(
+          "SinusoidTimedeltaNormalizer requires fixed-length feature tensors,"
+          f" but feature '{self.input_feature}' is a variable-length object"
+          " array. Please run pad_and_cap_timeseries_features first."
+      )
+
+    value = value.astype(np.float32)
+    arg = np.expand_dims(value, -1) * self.frequencies
+    sin_emb = np.sin(arg)
+    cos_emb = np.cos(arg)
+    emb = np.concatenate([sin_emb, cos_emb], axis=-1)
+    return {self.output_feature_name: emb}
+
+  def normalize_tensorflow(self, value: tf.Tensor) -> Dict[str, tf.Tensor]:
+    value = tf.cast(value, tf.float32)
+    freqs = tf.constant(self.frequencies, dtype=tf.float32)
+
+    arg = tf.expand_dims(value, -1) * freqs
+    sin_emb = tf.sin(arg)
+    cos_emb = tf.cos(arg)
+    emb = tf.concat([sin_emb, cos_emb], axis=-1)
+    return {self.output_feature_name: emb}
 
 
 @dataclasses_json.dataclass_json
@@ -461,6 +570,10 @@ class AutoNormalizeConfig:
       normalized. If false, primary key features are skipped.
     primary_keys_num_hash_buckets: Number of hash buckets to use when
       normalizing primary key features.
+    timedelta_sinusoid: If True, features with TIMEDELTA semantic will be
+      normalized using `SinusoidTimedeltaNormalizer`.
+    timedelta_embedding_dim: Embedding dimension to use when normalizing
+      TIMEDELTA features with `SinusoidTimedeltaNormalizer`.
   """
 
   categorical_bytes_to_index: bool = True
@@ -471,6 +584,8 @@ class AutoNormalizeConfig:
   ignore_features_without_stats: bool = False
   consume_primary_keys: bool = False
   primary_keys_num_hash_buckets: int = 256
+  timedelta_sinusoid: bool = True
+  timedelta_embedding_dim: int = 32
 
 
 def auto_normalize(
@@ -615,6 +730,20 @@ def auto_normalize(
         nodeset_normalizers.append(
             SoftQuantileNormalizer.create(
                 feature_name, feature_schema, feature_stats
+            )
+        )
+        feature_has_normalized = True
+
+      # Timedelta
+      if (
+          config.timedelta_sinusoid
+          and feature_schema.semantic == schema_lib.FeatureSemantic.TIMEDELTA
+      ):
+        nodeset_normalizers.append(
+            SinusoidTimedeltaNormalizer.create(
+                feature_name,
+                feature_schema,
+                embedding_dim=config.timedelta_embedding_dim,
             )
         )
         feature_has_normalized = True

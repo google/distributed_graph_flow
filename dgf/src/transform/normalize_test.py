@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from absl.testing import absltest
+from absl.testing import parameterized
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.data import statistics as statistics_lib
@@ -125,8 +126,8 @@ class DictionaryIndexNormalizerTest(absltest.TestCase):
     )
 
     output_schema = normalizer.output_schema()["test_feature_INDEX"]
-    self.assertTrue(output_schema.is_timeseries)
-    self.assertEqual(output_schema.group, "ts_group")
+    self.assertFalse(output_schema.is_timeseries)
+    self.assertIsNone(output_schema.group)
     self.assertEqual(output_schema.shape, (2,))
 
     input_values = np.array([[b"red", b"blue"], [b"green", b"red"]])
@@ -374,6 +375,163 @@ class HashStringNormalizerTest(absltest.TestCase):
       normalize_lib.HashStringNormalizer.create(
           "test_feature", input_schema, num_buckets=10
       )
+
+
+class SinusoidTimedeltaNormalizerTest(parameterized.TestCase):
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="scalar",
+          schema_kwargs=dict(shape=()),
+          embedding_dim=4,
+          expected_shape=(4,),
+          expected_group=None,
+          expected_is_ts=False,
+      ),
+      dict(
+          testcase_name="timeseries_creation_time",
+          schema_kwargs=dict(
+              is_timeseries=True, is_creation_time=True, shape=(2,)
+          ),
+          embedding_dim=4,
+          expected_shape=(2, 4),
+          expected_group=None,
+          expected_is_ts=True,
+      ),
+      dict(
+          testcase_name="timeseries_group",
+          schema_kwargs=dict(
+              is_timeseries=True,
+              is_creation_time=False,
+              group="custom_group",
+              shape=(2,),
+          ),
+          embedding_dim=4,
+          expected_shape=(2, 4),
+          expected_group="custom_group",
+          expected_is_ts=True,
+      ),
+  )
+  def test_output_schema(
+      self,
+      schema_kwargs,
+      embedding_dim,
+      expected_shape,
+      expected_group,
+      expected_is_ts,
+  ):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.TIMEDELTA,
+        **schema_kwargs,
+    )
+    normalizer = normalize_lib.SinusoidTimedeltaNormalizer.create(
+        "timestamp_feature", schema, embedding_dim=embedding_dim
+    )
+    out_schema = normalizer.output_schema()["timestamp_feature_SINUSOID"]
+    self.assertEqual(
+        out_schema.semantic, schema_lib.FeatureSemantic.EMBEDDING
+    )
+    self.assertEqual(out_schema.format, schema_lib.FeatureFormat.FLOAT_32)
+    self.assertEqual(out_schema.is_timeseries, expected_is_ts)
+    self.assertEqual(out_schema.shape, expected_shape)
+    self.assertEqual(out_schema.group, expected_group)
+
+  @parameterized.product(
+      embedding_dim=[2, 4],
+      use_tf=[False, True],
+      is_timeseries=[False, True],
+  )
+  def test_normalization(self, embedding_dim, use_tf, is_timeseries):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.TIMEDELTA,
+        is_timeseries=is_timeseries,
+        shape=(2,) if is_timeseries else (),
+    )
+    normalizer = normalize_lib.SinusoidTimedeltaNormalizer.create(
+        "timestamp_feature", schema, embedding_dim=embedding_dim
+    )
+
+    if is_timeseries:
+      input_values = [[0.0, 1.0], [2.0, 0.0], [1.0, 2.0]]
+    else:
+      input_values = [0.0, 1.0, 2.0]
+
+    if use_tf:
+      res = normalizer.normalize_tensorflow(
+          tf.constant(input_values, dtype=tf.float32)
+      )
+      out = {k: v.numpy() for k, v in res.items()}
+    else:
+      out = normalizer.normalize_numpy(
+          np.array(input_values, dtype=np.float32)
+      )
+
+    if embedding_dim == 2:
+      freqs = np.array([2 * np.pi / 31536000.0], dtype=np.float32)
+    elif embedding_dim == 4:
+      freqs = np.array([np.pi, 2 * np.pi / 31536000.0], dtype=np.float32)
+    else:
+      raise ValueError(f"Unsupported embedding_dim in test: {embedding_dim}")
+
+    vals = np.array(input_values, dtype=np.float32)[..., None] * freqs
+    expected = np.concatenate([np.sin(vals), np.cos(vals)], axis=-1)
+
+    expected_out = {"timestamp_feature_SINUSOID": expected}
+    test_util.assert_are_equal(self, out, expected_out, abs_tol=1e-5)
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="invalid_semantic",
+          schema_kwargs=dict(semantic=schema_lib.FeatureSemantic.NUMERICAL),
+          expected_regex="only supports TIMEDELTA features",
+      ),
+      dict(
+          testcase_name="dynamic_shape",
+          schema_kwargs=dict(
+              semantic=schema_lib.FeatureSemantic.TIMEDELTA, shape=(None,)
+          ),
+          expected_regex="requires fixed-length feature tensors",
+      ),
+      dict(
+          testcase_name="odd_embedding_dim",
+          schema_kwargs=dict(semantic=schema_lib.FeatureSemantic.TIMEDELTA),
+          embedding_dim=5,
+          expected_regex="embedding_dim must be a positive even integer",
+      ),
+      dict(
+          testcase_name="zero_embedding_dim",
+          schema_kwargs=dict(semantic=schema_lib.FeatureSemantic.TIMEDELTA),
+          embedding_dim=0,
+          expected_regex="embedding_dim must be a positive even integer",
+      ),
+  )
+  def test_create_raises(self, schema_kwargs, expected_regex, embedding_dim=4):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32, **schema_kwargs
+    )
+    with self.assertRaisesRegex(ValueError, expected_regex):
+      normalize_lib.SinusoidTimedeltaNormalizer.create(
+          "timestamp_feature", schema, embedding_dim=embedding_dim
+      )
+
+  def test_normalize_numpy_object_array_raises(self):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.TIMEDELTA,
+        shape=(2,),
+    )
+    normalizer = normalize_lib.SinusoidTimedeltaNormalizer.create(
+        "timestamp_feature", schema, embedding_dim=4
+    )
+    input_np = np.array(
+        [np.array([0.0, 1.0]), np.array([2.0])], dtype=object
+    )
+    with self.assertRaisesRegex(
+        ValueError, "requires fixed-length feature tensors"
+    ):
+      normalizer.normalize_numpy(input_np)
 
 
 class AutoNormalierTest(absltest.TestCase):
@@ -660,6 +818,36 @@ Edge Sets:
     (No normalizers)
 """
     self.assertEqual(output, expected_output)
+
+  def test_auto_normalize_timedelta(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "nodes": schema_lib.NodeSchema(
+                features={
+                    "ts_delta": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.TIMEDELTA,
+                        shape=(),
+                    )
+                }
+            )
+        },
+        edge_sets={},
+    )
+    stats = statistics_lib.GraphFeatureStatistics(
+        node_sets={
+            "nodes": statistics_lib.FeatureSetStatistics(
+                features={
+                    "ts_delta": statistics_lib.FeatureStatistics(
+                        count=10, minimum=0.0, maximum=100.0
+                    )
+                },
+            )
+        }
+    )
+    normalizer = normalize_lib.auto_normalize(schema, stats)
+    out_schema = normalizer.output_schema()
+    self.assertIn("ts_delta_SINUSOID", out_schema.node_sets["nodes"].features)
 
 
 if __name__ == "__main__":

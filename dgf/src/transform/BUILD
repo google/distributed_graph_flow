@@ -51,7 +51,6 @@ py_library(
         "//dgf/src/util:log",
         # jax dep,
         # numpy dep,
-        # scipy dep,
         # tensorflow dep,
     ],
 )
@@ -156,7 +155,6 @@ py_test(
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:padding",
         "//dgf/src/data:tf_in_memory_graph",
-        "//dgf/src/io:tf",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
         # numpy dep,
@@ -170,6 +168,7 @@ py_test(
     deps = [
         ":normalize",
         # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/data:statistics",

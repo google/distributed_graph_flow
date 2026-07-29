@@ -29,6 +29,9 @@ hide:
 ## dgf.transform.NumNodesPredicate  # {: #section-numnodespredicate}
 ::: dgf.transform.NumNodesPredicate
 
+## dgf.transform.SinusoidTimedeltaNormalizer  # {: #section-sinusoidtimedeltanormalizer}
+::: dgf.transform.SinusoidTimedeltaNormalizer
+
 ## dgf.transform.SoftQuantileNormalizer  # {: #section-softquantilenormalizer}
 ::: dgf.transform.SoftQuantileNormalizer
 
