@@ -157,12 +157,14 @@ class TrainResult:
     opt_state: The final optimizer state.
     train_logs: A list of LogItem objects containing the training metrics.
     valid_logs: A list of LogItem objects containing the validation metrics.
+    num_train_step: Number of training steps.
   """
 
   model_params: optax.Params
   opt_state: optax.OptState
   train_logs: List[LogItem]
   valid_logs: List[LogItem]
+  num_train_step: int
 
 
 # TODO(bmayer): Support user-defined best_step fns?
@@ -464,6 +466,7 @@ def train(
       disable=disable_progress_bar,
       desc="Training",
   )
+  effective_num_train_steps = 0
   for step in pbar:
     with jax.profiler.StepTraceAnnotation("train", step_num=step):
       if max_training_time_seconds is not None:
@@ -521,25 +524,30 @@ def train(
       if step > 0 and step % valid_every_n_steps == 0:
         run_valid_logs()
         if es_monitor is not None and "loss" in last_valid_metrics:
-          es_monitor.add_loss(last_valid_metrics["loss"], model_params)
+          es_monitor.add_loss(step, last_valid_metrics["loss"], model_params)
           if es_monitor.should_stop():
             log.info("Early stopping triggered at step %s.", step)
             break
+      effective_num_train_steps += 1
   # Final logging
   if es_monitor is None or not es_monitor.should_stop():
     step = num_train_steps
     run_valid_logs()
     if es_monitor is not None and "loss" in last_valid_metrics:
-      es_monitor.add_loss(last_valid_metrics["loss"], model_params)
+      es_monitor.add_loss(step, last_valid_metrics["loss"], model_params)
 
   # Restore best parameters if enabled and early stopping was requested
   if es_monitor is not None and early_stopping_keep_best_param:
     if es_monitor.best_params is not None:
       log.info(
-          "Restoring best model parameters with validation loss %f",
+          "Restoring best model parameters with validation loss %f from"
+          " step %d",
           es_monitor.best_loss,
+          es_monitor.best_step,
       )
       model_params = es_monitor.best_params
+      assert es_monitor.best_step is not None
+      effective_num_train_steps = es_monitor.best_step
 
   # Final checkpoing
   if checkpoint_manager is not None:
@@ -559,4 +567,5 @@ def train(
       opt_state=opt_state,
       train_logs=train_logs,
       valid_logs=valid_logs,
+      num_train_step=effective_num_train_steps,
   )

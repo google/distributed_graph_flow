@@ -24,6 +24,7 @@ from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.generate import edge_neighbor_generator as edge_neighbor_generator_lib
 from dgf.src.io import jax as jax_lib
+from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import flax_train
 from dgf.src.learning.jax.layers import preprocess
 from dgf.src.learning.jax.layers import standard
@@ -323,6 +324,7 @@ def train_link_model(
     architecture: Union[common.Architecture, str] = common.DEFAULT_ARCHITECTURE,
     source_sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None,
     target_sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None,
+    early_stopping: Union[bool, int] = True,
 ) -> LinkPredictionModel:
   """Trains a supervised Graph Neural Network model for edge prediction.
 
@@ -403,6 +405,9 @@ def train_link_model(
       sampler of the target node. When you use this option, the sampler ignores
       standard graph sampling arguments and validation checks e.g.,
       num_sampling_hops, sampling_width.
+    early_stopping: If True, use early stopping with default parameters
+      (patience=5). If an integer, use early stopping with the given patience.
+      If False, do not use early stopping.
 
   Returns:
     A LinkPredictionModel instance.
@@ -452,6 +457,9 @@ def train_link_model(
       random_walk_num_walks_per_negative=random_walk_num_walks_per_negative,
       message_pooling=message_pooling,
       architecture=architecture,
+      early_stopping=early_stopping_monitor.normalize_early_stopping_config(
+          early_stopping
+      ),
   )
 
   task = LinkPredictionTask(target_edgeset=target_edgeset)
@@ -733,6 +741,7 @@ def train_link_model(
         print_logs=verbose >= 2,
         max_training_time_seconds=max_training_time_seconds,
         export_metrics_to_xm=export_metrics_to_xm,
+        early_stopping=hparams.early_stopping,
         **train_kwargs,
     )
 
@@ -767,6 +776,7 @@ def train_link_model(
   model.metadata.trainig_logs = common.TrainingLogs(
       train=train_results.train_logs,
       valid=train_results.valid_logs,
+      num_train_step=train_results.num_train_step,
   )
   return model
 

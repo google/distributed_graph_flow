@@ -208,6 +208,7 @@ def get_common_tabs(
         "Train logs",
         f"""
 {training_stats_summary or ""}
+Number of training steps (final model): {training_logs.num_train_step}</br>
 <div style="width: 100%;">{train_log_plots}</div>
 """,
     ))

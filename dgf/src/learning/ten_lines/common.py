@@ -20,6 +20,7 @@ import enum
 import os
 from typing import Any, Dict, List, Literal, Optional, Type, Union
 import dataclasses_json
+from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import common as jax_common
 from dgf.src.learning.jax.layers import hetero_gnn
 from dgf.src.learning.jax.layers import hetero_graph_attention_network
@@ -88,10 +89,14 @@ class TrainingLogs:
   Attributes:
     train: A list of log items for the training dataset.
     valid: A list of log items for the validation dataset.
+    num_train_step: The number of training steps of the final model. Note that
+      the training logs might contain more steps if early stopping was used and
+      the model was reverted to a previous version.
   """
 
   train: List[LogItem]
   valid: List[LogItem]
+  num_train_step: int
 
 
 class Model(abc.ABC):
@@ -235,6 +240,8 @@ class HParam:
     message_pooling: The pooling method used for aggregating messages in GNNs.
       Supported methods are "sum", "mean", and "max".
     architecture: The architecture of the GNN model.
+    early_stopping: The configuration for early stopping. If None, early
+      stopping is disabled.
   """
 
   num_sampling_hops: int = 1
@@ -250,6 +257,9 @@ class HParam:
   dropout: float = 0.1
   message_pooling: str = "sum"
   architecture: Architecture = DEFAULT_ARCHITECTURE
+  early_stopping: Optional[
+      early_stopping_monitor.EarlyStoppingMonitorConfig
+  ] = None
 
 
 def save_model(model: Model, path: str) -> None:
@@ -335,12 +345,10 @@ def build_gnn_config(hparams: HParam) -> jax_common.GenericLayer:
   elif (
       hparams.architecture == Architecture.HETEROGENEOUS_GRAPH_ATTENTION_NETWORK
   ):
-    return (
-        hetero_graph_attention_network.HeterogeneousGraphAttentionNetworkConfig(  # pyrefly: ignore[bad-return]
-            dims=hparams.node_embedding_dim,
-            dropout_rate=hparams.dropout,
-            message_pooling=hparams.message_pooling,
-        )
+    return hetero_graph_attention_network.HeterogeneousGraphAttentionNetworkConfig(  # pyrefly: ignore[bad-return]
+        dims=hparams.node_embedding_dim,
+        dropout_rate=hparams.dropout,
+        message_pooling=hparams.message_pooling,
     )
 
   else:

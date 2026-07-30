@@ -229,7 +229,15 @@ def split_train_valid(
     num_valid = max(batch_size, num_valid)
 
   if max_num_valid_examples is not None:
-    num_valid = min(num_valid, max_num_valid_examples)
+    if num_valid > max_num_valid_examples:
+      log.warning(
+          "Validation set truncated from %d to %d nodes due to caching limits."
+          " To use more validation nodes, either increase `num_valid_steps` or"
+          " set `cache_valid_dataset=False`.",
+          num_valid,
+          max_num_valid_examples,
+      )
+      num_valid = max_num_valid_examples
 
   valid_idxs = all_idxs[:num_valid]
   train_idxs = all_idxs[num_valid:]

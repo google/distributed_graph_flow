@@ -24,10 +24,10 @@ import time
 from typing import Callable, Dict, Literal, Optional, Tuple, Union
 from dgf.src.analyse import print_schema as print_schema_lib
 from dgf.src.data import in_memory_graph
-from dgf.src.util import temporal as temporal_util
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import jax as jax_lib
+from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import flax_train
 from dgf.src.learning.jax.layers import classification as classification_lib
 from dgf.src.learning.jax.layers import preprocess
@@ -44,6 +44,7 @@ from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
 from dgf.src.util import filesystem as fs
 from dgf.src.util import log
+from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 import jax
 import jax.numpy as jnp
@@ -171,6 +172,7 @@ def train_node_model(
     architecture: Union[common.Architecture, str] = common.DEFAULT_ARCHITECTURE,
     sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None,
     diagnostic_dir: Optional[str] = None,
+    early_stopping: Union[bool, int] = True,
 ) -> NodePredictionModel:
   """Trains a supervised Graph Neural Network model for node-level prediction.
 
@@ -244,6 +246,9 @@ def train_node_model(
       arguments and validation checks e.g., num_sampling_hops, sampling_width.
     diagnostic_dir: If provided, creates this directory and export to it
       artefacts that can be useful to understand and debug the model training.
+    early_stopping: If True, use early stopping with default parameters
+      (patience=5). If an integer, use early stopping with the given patience.
+      If False, do not use early stopping.
 
   Returns:
     A trained `NodePredictionModel` instance.
@@ -308,6 +313,9 @@ def train_node_model(
       num_layers=num_layers,
       message_pooling=message_pooling,
       architecture=architecture,
+      early_stopping=early_stopping_monitor.normalize_early_stopping_config(
+          early_stopping
+      ),
   )
 
   task = NodePredictionTask(
@@ -639,6 +647,7 @@ def train_node_model(
           print_logs=verbose >= 2,
           max_training_time_seconds=max_training_time_seconds,
           export_metrics_to_xm=export_metrics_to_xm,
+          early_stopping=hparams.early_stopping,
           **train_kwargs,
       )
 
@@ -671,6 +680,7 @@ def train_node_model(
   model.metadata.trainig_logs = common.TrainingLogs(
       train=train_results.train_logs,
       valid=train_results.valid_logs,
+      num_train_step=train_results.num_train_step,
   )
 
   return model

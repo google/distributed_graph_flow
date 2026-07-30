@@ -15,7 +15,7 @@
 """Utility to handle early stopping of model training."""
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional, Union
 
 
 @dataclass
@@ -40,9 +40,10 @@ class EarlyStoppingMonitor:
     self._should_stop = False
     self.best_loss = None
     self.best_params = None
+    self.best_step = None
 
-  def add_loss(self, value: float, params: Any = None) -> None:
-    """Registers a loss value and optionally the associated parameters."""
+  def add_loss(self, step: int, value: float, params: Any = None) -> None:
+    """Registers a loss value and optionally the associated parameters and step."""
 
     if self._should_stop:
       # We should already stop.
@@ -56,6 +57,7 @@ class EarlyStoppingMonitor:
       self.best_loss = value
       self._patience_counter = 0
       self.best_params = params
+      self.best_step = step
     else:
       # Not a better model
       self._patience_counter += 1
@@ -66,3 +68,15 @@ class EarlyStoppingMonitor:
   def should_stop(self) -> bool:
     """Returns True if training should stop."""
     return self._should_stop
+
+
+def normalize_early_stopping_config(
+    value: Union[bool, int],
+) -> Optional[EarlyStoppingMonitorConfig]:
+  if isinstance(value, bool):
+    if value:
+      return EarlyStoppingMonitorConfig()
+    else:
+      return None
+  else:
+    return EarlyStoppingMonitorConfig(patience=value)
