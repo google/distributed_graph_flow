@@ -64,3 +64,17 @@ py_test(
         # absl/testing:absltest dep,
     ],
 )
+
+py_library(
+    name = "early_stopping_monitor",
+    srcs = ["early_stopping_monitor.py"],
+)
+
+py_test(
+    name = "early_stopping_monitor_test",
+    srcs = ["early_stopping_monitor_test.py"],
+    deps = [
+        ":early_stopping_monitor",
+        # absl/testing:absltest dep,
+    ],
+)
