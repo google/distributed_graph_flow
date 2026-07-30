@@ -113,7 +113,7 @@ def filter_timeseries_by_timestamp(
           ns_val,
           ts_specs,
           ns_val.num_nodes,
-          target_timestamp=target_timestamp,
+          target_timestamp=target_timestamp,  # pyrefly: ignore[bad-argument-type]
           max_timeseries_len=max_timeseries_len,
       )
 
@@ -125,6 +125,6 @@ def filter_timeseries_by_timestamp(
           es_val,
           ts_specs,
           es_val.num_edges(),
-          target_timestamp=target_timestamp,
+          target_timestamp=target_timestamp,  # pyrefly: ignore[bad-argument-type]
           max_timeseries_len=max_timeseries_len,
       )

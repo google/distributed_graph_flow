@@ -361,7 +361,7 @@ def train(
 
   if opt_state is None:
     model_params_without_batch_stats = {
-        k: v for k, v in model_params.items() if k != "batch_stats"
+        k: v for k, v in model_params.items() if k != "batch_stats"  # pyrefly: ignore[missing-attribute]
     }
     opt_state = opt.init(model_params_without_batch_stats)
 

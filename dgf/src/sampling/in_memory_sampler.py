@@ -304,7 +304,7 @@ class Sampler:
         for i, sample in enumerate(graphs):
           sampling_temporal_lib.filter_timeseries_by_timestamp(
               graph=sample,
-              schema_cache=self._timeseries_schema_cache,
+              schema_cache=self._timeseries_schema_cache,  # pyrefly: ignore[bad-argument-type]
               target_timestamp=int(seed_timestamps[i]),
               max_timeseries_len=self._max_timeseries_len,
           )

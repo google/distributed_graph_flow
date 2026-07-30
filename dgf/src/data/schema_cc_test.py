@@ -156,7 +156,7 @@ GraphSchema(nodesets=[
       features = {"f1": CustomFeatureSchema()}
 
     schema = schema_lib.GraphSchema(
-        node_sets={"n1": CustomNodeSchema()},
+        node_sets={"n1": CustomNodeSchema()},  # pyrefly: ignore[bad-argument-type]
         edge_sets={},
     )
     res = lib.ParseAndDebugPrintSchema(schema)

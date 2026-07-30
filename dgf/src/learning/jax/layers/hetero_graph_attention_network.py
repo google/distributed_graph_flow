@@ -94,12 +94,12 @@ class HeterogeneousGraphAttentionNetworkConfig(common.ArchitectureProvider):
         f"HeterogeneousGraphAttentionNetwork (heads={self.num_heads}):"
     )
     parts.append("  Message/Value:")
-    parts.append(textwrap.indent(self.message.architecture(), prefix="    "))
+    parts.append(textwrap.indent(self.message.architecture(), prefix="    "))  # pyrefly: ignore[missing-attribute]
     parts.append("  Update:")
-    parts.append(textwrap.indent(self.update.architecture(), prefix="    "))
+    parts.append(textwrap.indent(self.update.architecture(), prefix="    "))  # pyrefly: ignore[missing-attribute]
     parts.append("Residual(X)")
     parts.append("# Post Attention FFN")
-    parts.append(self.post.architecture())
+    parts.append(self.post.architecture())  # pyrefly: ignore[missing-attribute]
     return "\n".join(parts)
 
 

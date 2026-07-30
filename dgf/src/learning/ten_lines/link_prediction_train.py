@@ -596,7 +596,7 @@ def train_link_model(
       new_model_state = {}
 
     # Ranking metrics
-    neg_logits_reshaped = neg_logits.reshape(pos_logits.shape[0], -1)
+    neg_logits_reshaped = neg_logits.reshape(pos_logits.shape[0], -1)  # pyrefly: ignore[missing-attribute]
     num_positives = neg_logits_reshaped.shape[0]
     num_negatives = neg_logits_reshaped.shape[1]
 
