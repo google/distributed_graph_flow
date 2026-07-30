@@ -18,7 +18,6 @@ from collections.abc import Mapping
 import enum
 import os
 from typing import Dict, Generator, List, Optional, Sequence
-import apache_beam as beam
 import bagz
 from bagz.beam import bagzio as bag_io
 from dgf.src.data import distributed_graph as distributed_graph_lib
@@ -27,8 +26,9 @@ from dgf.src.data import schema as schema_lib
 from dgf.src.io import feature_format as feature_format_lib
 from dgf.src.io import tf_graph_sample_ext
 from dgf.src.util import shard as shard_lib
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import numpy as np
-import tensorflow as tf
 
 
 class TFGraphSampleContainerType(enum.Enum):

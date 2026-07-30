@@ -36,13 +36,13 @@ from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
 from dgf.src.util import util
 from dgf.src.util import util_ext
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import jax
 from jax.experimental import jax2tf
 import jax.numpy as jnp
 import jaxtyping
 import numpy as np
 import orbax.checkpoint as ocp
-import tensorflow as tf
 import tqdm
 
 Batch = link_prediction_core_model.Batch

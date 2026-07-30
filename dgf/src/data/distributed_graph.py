@@ -18,7 +18,7 @@ import dataclasses
 import enum
 from typing import Dict, List, NamedTuple, Optional, Union
 
-import apache_beam as beam
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 from apache_beam import coders
 
 from dgf.src.data import beam_coders as _  # pylint: disable=unused-import

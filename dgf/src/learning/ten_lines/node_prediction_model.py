@@ -44,13 +44,13 @@ from dgf.src.transform import normalize as normalize_lib
 from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import jax
 from jax.experimental import jax2tf
 import jax.numpy as jnp
 import jaxtyping
 import numpy as np
 import orbax.checkpoint as ocp
-import tensorflow as tf
 import tqdm
 
 Batch = node_prediction_core_model.Batch

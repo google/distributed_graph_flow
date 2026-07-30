@@ -20,7 +20,7 @@ from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.data import tf_in_memory_graph as tf_in_memory_graph_lib
 from dgf.src.io import feature_format as feature_format_lib
-import tensorflow as tf
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 
 BEGIN_CODE = "begincode"
 END_CODE = "endcode"

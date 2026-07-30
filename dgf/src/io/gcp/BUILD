@@ -73,6 +73,7 @@ py_library(
         # apache_beam dep,
         "//dgf/src/data:distributed_graph",
         "//dgf/src/io:graph_in_beam",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
     ],
 )
 
@@ -151,6 +152,7 @@ py_library(
         # apache_beam dep,
         "//dgf/src/data:distributed_graph",
         "//dgf/src/util:log",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
         # google/cloud/spanner dep,
     ],
 )

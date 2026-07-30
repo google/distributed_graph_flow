@@ -70,6 +70,7 @@ py_library(
         "//dgf/src/util:log",
         "//dgf/src/util:temporal",
         "//dgf/src/util:util_py",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # flax:core dep,
         # jax dep,
         # jax/experimental/jax2tf dep,
@@ -77,7 +78,6 @@ py_library(
         # numpy dep,
         # optax dep,
         # orbax/checkpoint dep,
-        # tensorflow dep,
         # tqdm dep,
     ],
 )
@@ -135,7 +135,6 @@ py_library(
         "//dgf/src/data:schema",
         "//dgf/src/data:statistics",
         "//dgf/src/sampling:config",
-        "//dgf/src/util:util_py",
         # pandas dep,
     ],
 )
@@ -214,12 +213,12 @@ py_library(
         "//dgf/src/transform:normalize",
         "//dgf/src/util:util_ext",
         "//dgf/src/util:util_py",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # jax dep,
         # jax/experimental/jax2tf dep,
         # jaxtyping dep,
         # numpy dep,
         # orbax/checkpoint dep,
-        # tensorflow dep,
         # tqdm dep,
     ],
 )
@@ -284,8 +283,6 @@ py_test(
         ":common",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
-        "//dgf/src/data:schema",
-        "//dgf/src/util:gen_test_graph",
         # numpy dep,
     ],
 )
@@ -312,7 +309,6 @@ py_test(
         "//dgf/src/io:tf",
         "//dgf/src/io:tf_graph_sample",
         "//dgf/src/learning/jax/layers:standard",
-        "//dgf/src/sampling:config",
         "//dgf/src/sampling:in_memory_sampler",
         "//dgf/src/util:filesystem",
         "//dgf/src/util:gen_test_graph",
@@ -329,7 +325,6 @@ py_test(
     deps = [
         ":evaluation",
         # absl/testing:absltest dep,
-        # dataclasses_json dep,
         # jax dep,
         # numpy dep,
         # sklearn dep,
@@ -345,7 +340,6 @@ py_test(
         "//dgf/src/io:tf_graph_sample",
         "//dgf/src/sampling:config",
         "//dgf/src/util:gen_test_graph",
-        "//dgf/src/util:test_util",
         "//dgf/src/validate:in_memory_graph",
     ],
 )
@@ -416,7 +410,6 @@ py_test(
         ":node_prediction_dataset",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
-        "//dgf/src/data:schema",
         "//dgf/src/io:jax",
         "//dgf/src/io:tf_graph_sample",
         "//dgf/src/sampling:config",

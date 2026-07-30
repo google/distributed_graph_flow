@@ -61,6 +61,9 @@ setup(
     cmdclass={"install": InstallPlatlib},
     python_requires=">=3.11",
     install_requires=[str(r) for r in open("requirements.txt").readlines()],
+    extras_require={
+        "all": ["tensorflow", "apache-beam[gcp]", "tensorflow_gnn", "ogb"],
+    },
     classifiers=[
         "Intended Audience :: Developers",
         "Intended Audience :: Science/Research",

@@ -18,7 +18,7 @@ See in_memory_graph.py for the actual documentation.
 """
 
 from typing import Dict, Mapping, Union
-import tensorflow as tf
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 
 Array = Union[
     tf.Tensor, tf.RaggedTensor, tf.SparseTensor

@@ -16,7 +16,6 @@
 
 from typing import Any, Dict
 
-import apache_beam as beam
 import apache_beam.io.gcp.bigquery as beam_bigquery_io
 from dgf.src.data import distributed_graph as distributed_graph_lib
 from dgf.src.io import graph_in_beam as gf_graph_in_beam_lib
@@ -24,6 +23,7 @@ from dgf.src.io.gcp import bigquery_graph
 from dgf.src.io.gcp import common as gcp_common_lib
 from dgf.src.io.gcp import common_beam as gcp_common_beam_lib
 from dgf.src.io.gcp import parquet_export as parquet_export_lib
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 
 
 def _wrap_in_graph_element(record: Dict[str, Any]) -> Dict[str, Any]:

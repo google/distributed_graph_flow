@@ -14,12 +14,12 @@
 
 """Compute feature stats, in beam, on InMemoryGraph."""
 
-import apache_beam as beam
 from dgf.src.analyse import feature_statistics as feature_statistics_lib
 from dgf.src.data import distributed_graph
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.data import statistics as statistics_lib
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 
 
 def _extract_nodeset_features(

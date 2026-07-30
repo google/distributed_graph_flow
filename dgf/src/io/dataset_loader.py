@@ -30,8 +30,8 @@ from dgf.src.io import cache as cache_lib
 from dgf.src.io import feature_format as feature_format_lib
 from dgf.src.io import graph_in_memory as gf_graph_in_memory
 from dgf.src.util import log
-from dgf.src.util import weak_dep
 import dgf.src.util.filesystem as fs
+from dgf.src.util.weak_dep.weak_dep_ogb import ogb_nodeproppred
 import numpy as np
 import pandas as pd
 import yaml
@@ -74,7 +74,7 @@ def download_ogb_graph(name: str) -> Tuple[Any, Any, Any]:
     A tuple containing the graph data, labels, and index splits.
   """
 
-  nodeproppred = weak_dep.import_ogb_nodeproppred()
+  nodeproppred = ogb_nodeproppred
 
   # Download dataset using OGB's Library-Agnostic Loader.
   # TODO: b/449224186 - Temporarily, always clean up the cache directory

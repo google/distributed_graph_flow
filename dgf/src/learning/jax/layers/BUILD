@@ -24,7 +24,6 @@ py_library(
         ":preprocess",
         ":regression",
         ":residual_mlp",
-        ":standard",
     ],
 )
 
@@ -93,7 +92,6 @@ py_library(
     srcs = ["hetero_gnn.py"],
     deps = [
         ":registry",
-        ":residual_mlp",
         ":standard",
         # dataclasses_json dep,
         "//dgf/src/data:jax_in_memory_graph",

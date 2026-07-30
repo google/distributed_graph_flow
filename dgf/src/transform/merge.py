@@ -20,8 +20,8 @@ from dgf.src.data import in_memory_graph
 from dgf.src.data import padding as padding_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.data import tf_in_memory_graph
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import numpy as np
-import tensorflow as tf
 
 
 class InsufficientPaddingError(ValueError):

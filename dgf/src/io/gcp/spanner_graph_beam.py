@@ -17,7 +17,6 @@
 import json
 from typing import Any, Dict, Iterator, List, NamedTuple, Tuple
 
-import apache_beam as beam
 import apache_beam.io.gcp.spanner as beam_spanner_io
 from dgf.src.data import distributed_graph as distributed_graph_lib
 from dgf.src.io.gcp import common as gcp_common_lib
@@ -25,6 +24,7 @@ from dgf.src.io.gcp import common_beam as gcp_common_beam_lib
 from dgf.src.io.gcp import spanner_graph
 from dgf.src.io.gcp import spanner_graph_metadata as spanner_graph_metadata_lib
 from dgf.src.util import log
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 from google.cloud import spanner as gcp_spanner
 
 

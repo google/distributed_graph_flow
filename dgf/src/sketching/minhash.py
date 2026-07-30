@@ -15,8 +15,8 @@
 """Utilities for computing minhash sketches.
 """
 
-import apache_beam as beam
 import datasketch.minhash as ds_minhash
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 
 MinHash = ds_minhash.MinHash
 

@@ -47,9 +47,9 @@ py_library(
         "//dgf/src/util:proto",
         "//dgf/src/util:shard",
         "//dgf/src/util:util_py",
-        "//dgf/src/util:weak_dep",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow_gnn",
         # numpy dep,
-        # tensorflow dep,
     ],
 )
 
@@ -64,9 +64,10 @@ py_library(
         "//dgf/src/util:filesystem",
         "//dgf/src/util:proto",
         "//dgf/src/util:shard",
-        "//dgf/src/util:weak_dep",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow_gnn",
         # numpy dep,
-        # tensorflow dep,
     ],
 )
 
@@ -104,8 +105,9 @@ py_library(
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/util:shard",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # numpy dep,
-        # tensorflow dep,
     ],
 )
 
@@ -130,6 +132,7 @@ py_library(
         # dacite dep,
         "//dgf/src/data:statistics",
         "//dgf/src/util:json",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
     ],
 )
 
@@ -170,6 +173,7 @@ py_library(
         "//dgf/src/analyse:schema",
         "//dgf/src/data:distributed_graph",
         "//dgf/src/data:schema",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
         # google/cloud/spanner dep,
         # numpy dep,
     ],
@@ -187,8 +191,8 @@ py_library(
     name = "tfexample",
     srcs = ["tfexample.py"],
     deps = [
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # numpy dep,
-        # tensorflow dep,
         # tqdm dep,
     ],
 )
@@ -227,7 +231,7 @@ py_library(
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/data:tf_in_memory_graph",
-        # tensorflow:tensorflow_no_contrib dep,
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
     ],
 )
 
@@ -241,9 +245,9 @@ py_library(
         # absl/logging dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
+        "//dgf/src/util/weak_dep:weak_dep_ogb",
         "//dgf/src/util:filesystem",
         "//dgf/src/util:log",
-        "//dgf/src/util:weak_dep",
         # numpy dep,
         # pandas dep,
         # yaml dep,
@@ -266,7 +270,6 @@ py_library(
         ":feature_format",
         ":graph_constants",
         ":schema",
-        # apache_beam dep,
         "//dgf/src/analyse:schema",
         "//dgf/src/data:distributed_graph",
         "//dgf/src/data:gf_metadata",
@@ -274,6 +277,7 @@ py_library(
         "//dgf/src/transform:schema",
         "//dgf/src/util:filesystem",
         "//dgf/src/util:shard",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
         # numpy dep,
         # pyarrow:pyarrow_modules dep,
     ],
@@ -284,9 +288,9 @@ py_library(
     srcs = ["feature_format.py"],
     deps = [
         "//dgf/src/data:schema",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # numpy dep,
         # pyarrow:pyarrow_modules dep,
-        # tensorflow:tensorflow_no_contrib dep,
     ],
 )
 

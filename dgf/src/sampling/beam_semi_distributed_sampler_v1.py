@@ -26,12 +26,12 @@ import dataclasses
 import logging
 import time
 from typing import Dict, Sequence, Tuple
-import apache_beam as beam
 from dgf.src.data import distributed_graph
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.sampling import config as config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 import numpy as np
 
 

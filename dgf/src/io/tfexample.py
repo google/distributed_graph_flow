@@ -17,8 +17,8 @@
 import datetime
 from typing import Callable, Dict, List, Optional, Tuple
 
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import numpy as np
-import tensorflow as tf
 import tqdm
 
 

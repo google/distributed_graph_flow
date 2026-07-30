@@ -1,9 +1,6 @@
-load(
-    "//devtools/python/blaze:pytype.bzl",
-    "py_binary",
-    "py_test",
-    "py_library",
-)
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
+load("@rules_python//python:py_binary.bzl", "py_binary")
 
 package(
     
@@ -78,7 +75,6 @@ py_test(
         "//dgf/src/io:tf_graph_sample",
         "//dgf/src/sampling:config",
         "//dgf/src/util:gen_test_graph",
-        "//dgf/src/util:test_util",
         "//dgf/src/validate:in_memory_graph",
     ],
 )

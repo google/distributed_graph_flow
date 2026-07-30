@@ -16,7 +16,7 @@
 
 import re
 from typing import List, Optional, Tuple
-import tensorflow as tf
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 
 NUM_NODES_PER_SHARD = 1000
 NUM_EDGES_PER_SHARD = 1000

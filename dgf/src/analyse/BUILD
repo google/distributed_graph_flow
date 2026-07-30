@@ -21,7 +21,7 @@ py_library(
         "//dgf/src/data:distributed_graph",
         "//dgf/src/data:schema",
         "//dgf/src/data:statistics",
-        "//dgf/src/util:temporal",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
         # numpy dep,
     ],
 )
@@ -45,6 +45,7 @@ py_library(
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/data:statistics",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
     ],
 )
 
@@ -126,7 +127,6 @@ py_library(
     deps = [
         "//dgf/src/data:schema",
         "//dgf/src/util:log",
-        "//dgf/src/util:temporal",
     ],
 )
 
@@ -222,7 +222,6 @@ py_test(
         "//dgf/src/data:statistics",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
-        # numpy dep,
     ],
 )
 
@@ -243,6 +242,5 @@ py_test(
         ":schema",
         # absl/testing:absltest dep,
         "//dgf/src/data:schema",
-        "//dgf/src/util:gen_test_graph",
     ],
 )

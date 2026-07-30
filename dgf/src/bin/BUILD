@@ -1,4 +1,6 @@
-load("//devtools/python/blaze:pytype.bzl", "py_binary", "py_test")
+load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
+load("@rules_python//python:py_binary.bzl", "py_binary")
 
 package(
     
@@ -8,14 +10,21 @@ package(
 # Binary
 # =========
 
-py_binary(
-    name = "validate_graph",
+py_library(
+    name = "validate_graph_lib",
     srcs = ["validate_graph.py"],
-    test_lib = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,
         "//dgf",
+    ],
+)
+
+py_binary(
+    name = "validate_graph",
+    srcs = ["validate_graph.py"],
+    deps = [
+        ":validate_graph_lib",
     ],
 )
 
@@ -26,7 +35,7 @@ py_test(
     name = "validate_graph_test",
     srcs = ["validate_graph_test.py"],
     deps = [
-        ":validate_graph.testonly_lib",
+        ":validate_graph_lib",
         # absl/flags dep,
         # absl/testing:absltest dep,
         # absl/testing:flagsaver dep,

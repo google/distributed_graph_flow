@@ -1,7 +1,5 @@
 numpy
 absl-py
-tensorflow
-apache-beam[gcp]
 graphviz
 jax
 flax

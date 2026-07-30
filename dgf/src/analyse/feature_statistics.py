@@ -17,11 +17,11 @@
 import dataclasses
 import math
 from typing import Tuple
-import apache_beam as beam
 from dgf.src.analyse import reservoir_sampling
 from dgf.src.data import distributed_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.data import statistics as statistics_lib
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 import numpy as np
 
 

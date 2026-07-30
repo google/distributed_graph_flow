@@ -16,7 +16,6 @@
 
 import logging
 from typing import Iterator, Optional, Sequence, Tuple
-import apache_beam as beam
 from apache_beam.utils import shared as beam_shared
 from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import distributed_graph
@@ -26,6 +25,7 @@ from dgf.src.learning.ten_lines import common as ten_lines_common
 from dgf.src.learning.ten_lines import node_prediction_model as node_prediction_lib
 from dgf.src.sampling import beam_semi_distributed_sampler
 from dgf.src.sampling import beam_semi_distributed_sampler_v2
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 import numpy as np
 
 # An individual model prediction. The semantic depends on the model. For

@@ -14,9 +14,9 @@
 
 """Reverses the direction of edges."""
 
-import apache_beam as beam
 from dgf.src.data import distributed_graph
 from dgf.src.data import schema as schema_lib
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 
 
 # TODO(bmayer): Rename this to reverse_flat_edges. The reverse of the adjacency

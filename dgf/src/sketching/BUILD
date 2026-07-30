@@ -15,6 +15,7 @@ py_library(
     deps = [
         # apache_beam dep,
         # datasketch dep,
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
     ],
 )
 

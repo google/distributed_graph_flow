@@ -32,8 +32,8 @@ py_library(
         "//dgf/src/data:padding",
         "//dgf/src/data:schema",
         "//dgf/src/data:tf_in_memory_graph",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # numpy dep,
-        # tensorflow:tensorflow_no_contrib dep,
     ],
 )
 
@@ -49,9 +49,9 @@ py_library(
         "//dgf/src/data:tf_in_memory_graph",
         "//dgf/src/util:dataclass_registry",
         "//dgf/src/util:log",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # jax dep,
         # numpy dep,
-        # tensorflow dep,
     ],
 )
 

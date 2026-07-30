@@ -14,9 +14,9 @@
 
 """Efficient serialization of numpy arrays in beam."""
 
-import apache_beam as beam
 from apache_beam.coders import typecoders
 from apache_beam.typehints import typehints
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 import numpy as np
 
 

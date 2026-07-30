@@ -21,7 +21,6 @@ py_library(
     srcs = ["config.py"],
     deps = [
         # dataclasses_json dep,
-        "//dgf/src/analyse:schema",
         "//dgf/src/data:schema",
         "//dgf/src/util:temporal",
     ],
@@ -44,7 +43,6 @@ py_library(
         ":_in_memory_sampler_ext",
         ":config",
         ":temporal",
-        "//dgf/src/analyse:schema",
         "//dgf/src/data:in_memory_graph",  # buildcleaner: keep
         "//dgf/src/data:schema",
         "//dgf/src/util:temporal",
@@ -74,6 +72,7 @@ py_library(
     deps = [
         # apache_beam dep,
         "//dgf/src/data:distributed_graph",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
     ],
 )
 
@@ -87,6 +86,7 @@ py_library(
         "//dgf/src/data:distributed_graph",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
         # numpy dep,
     ],
 )
@@ -107,6 +107,7 @@ py_library(
         "//dgf/src/io:graph_in_memory",
         "//dgf/src/io:schema",
         "//dgf/src/transform:schema",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
         # numpy dep,
     ],
 )
@@ -117,9 +118,7 @@ nanobind_library(
     hdrs = ["in_memory_sampler_nb.h"],
     deps = [
         ":in_memory_sampler_cc",
-        "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/log",
-        "@abseil-cpp//absl/status",
         "@abseil-cpp//absl/status:statusor",
         "@abseil-cpp//absl/strings",
         "//dgf/src/data:schema_cc",
@@ -197,7 +196,6 @@ py_test(
         # absl/testing:absltest dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
-        "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:temporal",
         # numpy dep,
     ],

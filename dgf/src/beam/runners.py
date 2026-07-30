@@ -18,7 +18,7 @@
 import abc
 import dataclasses
 from typing import Any, Dict, Optional
-import apache_beam as beam
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 
 
 def runner_from_options(options: Dict[str, Any]) -> beam.runners.PipelineRunner:

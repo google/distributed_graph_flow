@@ -25,8 +25,8 @@ Design doc:
 https://docs.google.com/document/d/1LlWgXaUMuoP4UqDTbMpFgoGxjkX3RGFPEz_6qGfDzV4/edit?tab=t.0#bookmark=id.22c1qdyeeoky
 """
 
-import apache_beam as beam
 from dgf.src.data import distributed_graph
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 
 
 def extract_beam_nodes_ids(

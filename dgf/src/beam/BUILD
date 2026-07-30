@@ -17,6 +17,7 @@ py_library(
     srcs = ["runners.py"],
     deps = [
         # apache_beam dep,
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
     ],
 )
 
@@ -27,6 +28,7 @@ py_library(
         # absl/logging dep,
         # apache_beam dep,
         "//dgf/src/data:distributed_graph",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
     ],
 )
 
@@ -37,6 +39,7 @@ py_library(
         # apache_beam dep,
         "//dgf/src/data:distributed_graph",
         "//dgf/src/data:schema",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
     ],
 )
 

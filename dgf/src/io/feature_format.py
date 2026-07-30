@@ -17,29 +17,43 @@
 from typing import Any, Dict
 
 from dgf.src.data import schema as schema_lib
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import numpy as np
 import pyarrow as pa
-import tensorflow as tf
+
+
+class _LazyFeatureFormatToTfDtype:
+
+  def __getitem__(self, key):
+    return {
+        schema_lib.FeatureFormat.INTEGER_64: tf.int64,
+        schema_lib.FeatureFormat.INTEGER_32: tf.int32,
+        schema_lib.FeatureFormat.FLOAT_32: tf.float32,
+        schema_lib.FeatureFormat.FLOAT_64: tf.float64,
+        schema_lib.FeatureFormat.BYTES: tf.string,
+        schema_lib.FeatureFormat.BOOL: tf.bool,
+    }[key]
+
 
 # Mapping from FeatureFormat to TensorFlow dtypes.
-FEATURE_FORMAT_TO_TF_DTYPE: Dict[schema_lib.FeatureFormat, tf.DType] = {
-    schema_lib.FeatureFormat.INTEGER_64: tf.int64,
-    schema_lib.FeatureFormat.INTEGER_32: tf.int32,
-    schema_lib.FeatureFormat.FLOAT_32: tf.float32,
-    schema_lib.FeatureFormat.FLOAT_64: tf.float64,
-    schema_lib.FeatureFormat.BYTES: tf.string,
-    schema_lib.FeatureFormat.BOOL: tf.bool,
-}
+FEATURE_FORMAT_TO_TF_DTYPE = _LazyFeatureFormatToTfDtype()
+
+
+class _LazyTfDtypeToFeatureFormat:
+
+  def __getitem__(self, key):
+    return {
+        tf.int64: schema_lib.FeatureFormat.INTEGER_64,
+        tf.int32: schema_lib.FeatureFormat.INTEGER_32,
+        tf.float32: schema_lib.FeatureFormat.FLOAT_32,
+        tf.float64: schema_lib.FeatureFormat.FLOAT_64,
+        tf.string: schema_lib.FeatureFormat.BYTES,
+        tf.bool: schema_lib.FeatureFormat.BOOL,
+    }[key]
+
 
 # Mapping from TensorFlow dtypes to FeatureFormat.
-TF_DTYPE_TO_FEATURE_FORMAT: Dict[tf.DType, schema_lib.FeatureFormat] = {
-    tf.int64: schema_lib.FeatureFormat.INTEGER_64,
-    tf.int32: schema_lib.FeatureFormat.INTEGER_32,
-    tf.float32: schema_lib.FeatureFormat.FLOAT_32,
-    tf.float64: schema_lib.FeatureFormat.FLOAT_64,
-    tf.string: schema_lib.FeatureFormat.BYTES,
-    tf.bool: schema_lib.FeatureFormat.BOOL,
-}
+TF_DTYPE_TO_FEATURE_FORMAT = _LazyTfDtypeToFeatureFormat()
 
 # Mapping from NumPy dtypes to FeatureFormat.
 NP_DTYPE_TO_FEATURE_FORMAT: Dict[Any, schema_lib.FeatureFormat] = {

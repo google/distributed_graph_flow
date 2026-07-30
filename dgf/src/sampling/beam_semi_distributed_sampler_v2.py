@@ -19,7 +19,6 @@ import os
 import threading
 import time
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
-import apache_beam as beam
 from apache_beam.utils import shared as beam_shared
 from dgf.src.data import distributed_graph
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -31,6 +30,7 @@ from dgf.src.io import schema as schema_io_lib
 from dgf.src.sampling import config as config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import schema as schema_filter_lib
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 import numpy as np
 
 NodeId = distributed_graph.NodeId

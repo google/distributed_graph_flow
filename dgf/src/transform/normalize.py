@@ -26,9 +26,9 @@ from dgf.src.data import statistics as statistics_lib
 from dgf.src.data import tf_in_memory_graph
 from dgf.src.util import dataclass_registry
 from dgf.src.util import log
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import jax.numpy as jnp
 import numpy as np
-import tensorflow as tf
 
 normalizer_registry = dataclass_registry.create_registry("normalizers")
 
@@ -243,7 +243,7 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
   Note:
     For timeseries features, this normalizer will perform some amount of
     lookahead, i.e. the normalization depends on future feature statistics and
-    leaks some of that information. This can lead to worse-than-expected 
+    leaks some of that information. This can lead to worse-than-expected
     performance on the validation and test set.
   """
 

@@ -26,6 +26,7 @@ py_library(
         "//dgf/src/learning/ten_lines:node_prediction",
         "//dgf/src/sampling:beam_semi_distributed_sampler",
         "//dgf/src/sampling:beam_semi_distributed_sampler_v2",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
         # numpy dep,
     ],
 )

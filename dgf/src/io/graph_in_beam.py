@@ -17,8 +17,6 @@
 import functools
 import os
 from typing import Any, Dict, List, Optional
-import apache_beam as beam
-from apache_beam.io import parquetio
 from dgf.src.analyse import schema as schema_analyse_lib
 from dgf.src.data import distributed_graph as distributed_graph_lib
 from dgf.src.data import gf_metadata as gf_metadata_lib
@@ -29,6 +27,7 @@ from dgf.src.io import schema as schema_io_lib
 from dgf.src.transform import schema as schema_filter_lib
 from dgf.src.util import filesystem
 from dgf.src.util import shard as shard_lib
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 import numpy as np
 import pyarrow
 
@@ -188,7 +187,7 @@ def read_node_set_features(
   primary_key = schema_analyse_lib.primary_feature(nodeset_name, schema)
   return (
       pbegin
-      | "Read Parquet file" >> parquetio.ReadFromParquet(file_pattern)
+      | "Read Parquet file" >> beam.io.parquetio.ReadFromParquet(file_pattern)
       | "Convert to Node"
       >> beam.Map(
           functools.partial(
@@ -238,7 +237,7 @@ def read_edge_set_features(
   primary_key = schema_analyse_lib.primary_feature_or_none(edgeset_name, schema)
   return (
       pbegin
-      | "Read Parquet file" >> parquetio.ReadFromParquet(file_pattern)
+      | "Read Parquet file" >> beam.io.parquetio.ReadFromParquet(file_pattern)
       | "Convert to Edge"
       >> beam.Map(
           functools.partial(
@@ -304,7 +303,7 @@ def write_graph(
         | f"{beam_namespace}NodeToRaw_{nodeset_name}"
         >> beam.Map(_node_to_raw, schema=nodeset_schema)
         | f"{beam_namespace}WriteNodeset_{nodeset_name}"
-        >> parquetio.WriteToParquet(
+        >> beam.io.parquetio.WriteToParquet(
             file_path_prefix=file_path_prefix,
             file_name_suffix=PARQUET_EXTENSION,
             schema=_node_schema_to_parquet_schema(nodeset_schema),
@@ -325,7 +324,7 @@ def write_graph(
         | f"{beam_namespace}EdgeToRaw_{edgeset_name}"
         >> beam.Map(_edge_to_raw, schema=edgeset_schema)
         | f"{beam_namespace}WriteEdgeset_{edgeset_name}"
-        >> parquetio.WriteToParquet(
+        >> beam.io.parquetio.WriteToParquet(
             file_path_prefix=file_path_prefix,
             file_name_suffix=PARQUET_EXTENSION,
             schema=_edge_schema_to_parquet_schema(edgeset_schema, graph.schema),
@@ -397,7 +396,9 @@ def _edge_schema_to_parquet_schema(
       pyarrow.field(
           KEY_TARGET, FEATURE_FORMAT_TO_PY_ARROW_DTYPE[target_node_format]
       ),
-  ] + _feature_schema_to_parquet_fields(edge_schema.features)  # pyrefly: ignore[bad-argument-type]
+  ] + _feature_schema_to_parquet_fields(
+      edge_schema.features  # pyrefly: ignore[bad-argument-type]
+  )
   return pyarrow.schema(fields)
 
 

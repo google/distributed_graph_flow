@@ -31,9 +31,9 @@ from dgf.src.util import log
 from dgf.src.util import proto as proto_lib
 from dgf.src.util import shard as shard_lib
 from dgf.src.util import util as util_lib
-from dgf.src.util import weak_dep
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
+from dgf.src.util.weak_dep.weak_dep_tensorflow_gnn import tf_gnn_proto
 import numpy as np
-import tensorflow as tf
 
 if TYPE_CHECKING:
   from tensorflow_gnn import proto as tf_gnn_proto
@@ -132,7 +132,6 @@ def schema_to_tfgnn_schema(
     A TF-GNN schema proto.
   """
 
-  tf_gnn_proto = weak_dep.import_tf_gnn_proto()
 
   def convert_feature_schema(feature: schema_lib.FeatureSchema):
     feature_type = feature_format_lib.FEATURE_FORMAT_TO_TF_DTYPE[
@@ -262,7 +261,6 @@ def read_graphai_hgraph(
   if override_schema is None:
     if verbose:
       log.info("Reading schema from %s", path)
-    tf_gnn_proto = weak_dep.import_tf_gnn_proto()
     tfgnn_schema = proto_lib.read_text_proto(
         os.path.join(path, PATH_GRAPH_SCHEMA),
         tf_gnn_proto.GraphSchema,

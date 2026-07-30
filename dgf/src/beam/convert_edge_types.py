@@ -18,8 +18,8 @@ import dataclasses
 from typing import Iterable
 
 from absl import logging
-import apache_beam as beam
 from dgf.src.data import distributed_graph
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 
 AdjacencyList = distributed_graph.AdjacencyList
 EdgeFormat = distributed_graph.EdgeFormat

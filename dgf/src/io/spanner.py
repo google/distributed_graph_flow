@@ -20,12 +20,12 @@ import re
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple, Type, TypeVar
 
 from absl import logging
-import apache_beam as beam
 from apache_beam import coders
 import apache_beam.io.gcp.spanner as beam_spanner_io
 from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import distributed_graph
 from dgf.src.data import schema as schema_lib
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 from google.api_core import exceptions
 from google.cloud import spanner as gcp_spanner
 import numpy as np

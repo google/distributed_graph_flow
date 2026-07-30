@@ -63,10 +63,8 @@ py_test(
         # absl/testing:parameterized dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
-        "//dgf/src/plot:network",
         "//dgf/src/sampling:config",
         "//dgf/src/util:test_util",
-        "//dgf/src/validate:in_memory_graph",
         # numpy dep,
     ],
 )

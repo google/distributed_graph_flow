@@ -16,7 +16,6 @@ py_binary(
         # absl/flags dep,
         # apache_beam dep,
         "//dgf",
-        "//dgf:dgf_beam",
     ],
 )
 
@@ -28,7 +27,6 @@ py_binary(
         # absl/flags dep,
         # apache_beam dep,
         "//dgf",
-        "//dgf:dgf_beam",
     ],
 )
 
@@ -40,7 +38,6 @@ py_binary(
         # absl/flags dep,
         # apache_beam dep,
         "//dgf",
-        "//dgf:dgf_beam",
         # tensorflow_gnn/proto dep,
     ],
 )
@@ -54,7 +51,6 @@ py_binary(
         # absl/flags dep,
         # apache_beam dep,
         "//dgf",
-        "//dgf:dgf_beam",
     ],
 )
 
@@ -80,7 +76,6 @@ py_binary(
         # absl/flags dep,
         # apache_beam dep,
         "//dgf",
-        "//dgf:dgf_beam",
     ],
 )
 
@@ -93,7 +88,6 @@ py_binary(
         # absl/flags dep,
         # apache_beam dep,
         "//dgf",
-        "//dgf:dgf_beam",
     ],
 )
 

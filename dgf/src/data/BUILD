@@ -26,6 +26,7 @@ py_library(
         ":numpy_coder",
         ":schema",
         # apache_beam dep,
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
     ],
 )
 
@@ -42,6 +43,7 @@ py_library(
     srcs = ["numpy_coder.py"],
     deps = [
         # apache_beam dep,
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
         # numpy dep,
     ],
 )
@@ -49,9 +51,6 @@ py_library(
 py_library(
     name = "histogram",
     srcs = ["histogram.py"],
-    deps = [
-        # dataclasses_json dep,
-    ],
 )
 
 py_library(
@@ -106,16 +105,13 @@ py_library(
     name = "tf_in_memory_graph",
     srcs = ["tf_in_memory_graph.py"],
     deps = [
-        # tensorflow dep,
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
     ],
 )
 
 py_library(
     name = "padding",
     srcs = ["padding.py"],
-    deps = [
-        # numpy dep,
-    ],
 )
 
 py_library(
@@ -148,9 +144,6 @@ py_library(
     name = "beam_coders",
     srcs = ["beam_coders.py"],
     deps = [
-        ":in_memory_graph",
-        ":schema",
-        ":statistics",
         # apache_beam dep,
     ],
 )
@@ -215,10 +208,10 @@ nanobind_extension(
     name = "schema_ext",
     srcs = ["schema_ext.cc"],
     deps = [
+        ":schema_cc",
+        ":schema_nb",
         "@abseil-cpp//absl/status",
         "@abseil-cpp//absl/status:statusor",
-        "//dgf/src/data:schema_cc",
-        "//dgf/src/data:schema_nb",
         "//dgf/src/util",
         "//dgf/src/util:nanobind_util",
         "//dgf/src/util:status_caster",
@@ -283,7 +276,6 @@ py_test(
     deps = [
         ":evaluation",
         # absl/testing:absltest dep,
-        # dataclasses_json dep,
         # numpy dep,
     ],
 )

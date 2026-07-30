@@ -18,16 +18,16 @@ import logging
 import os
 from typing import Iterator, Optional, Tuple
 
-import apache_beam as beam
 from dgf.src.data import distributed_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import hgraph_in_memory
 from dgf.src.util import filesystem
 from dgf.src.util import proto as proto_lib
 from dgf.src.util import shard as shard_lib
-from dgf.src.util import weak_dep
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
+from dgf.src.util.weak_dep.weak_dep_tensorflow_gnn import tf_gnn_proto
 import numpy as np
-import tensorflow as tf
 
 
 def read_graphai_hgraph(
@@ -117,7 +117,6 @@ class ReadFromHGraph(beam.PTransform):
 
     # Import TF-GNN schema proto
     if self.schema is None:
-      tf_gnn_proto = weak_dep.import_tf_gnn_proto()
       tfgnn_schema = proto_lib.read_text_proto(
           os.path.join(self.path, hgraph_in_memory.PATH_GRAPH_SCHEMA),
           tf_gnn_proto.GraphSchema,

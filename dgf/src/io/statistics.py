@@ -15,10 +15,10 @@
 """IO of feature statistics."""
 
 import dataclasses
-import apache_beam as beam
 import dacite
 from dgf.src.data import statistics as statistics_lib
 from dgf.src.util import json as json_lib
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 
 
 def read_feature_statistics(path: str) -> statistics_lib.GraphFeatureStatistics:

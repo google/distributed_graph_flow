@@ -19,7 +19,7 @@ import os
 from typing import Any, Dict, List, Literal, Optional, TYPE_CHECKING, Tuple
 from unittest import mock
 
-from dgf.src.util import weak_dep
+from dgf.src.util.weak_dep.weak_dep_tensorflow_gnn import tf_gnn_proto
 
 if TYPE_CHECKING:
   from tensorflow_gnn import proto as tf_gnn_proto
@@ -41,7 +41,7 @@ import fastavro
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
-import tensorflow as tf
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 
 
 parse_schema = fastavro.parse_schema
@@ -317,7 +317,6 @@ def generate_tf_gnn_graph_schema(
   """
   )
 
-  tf_gnn_proto = weak_dep.import_tf_gnn_proto()
   graph_schema = proto_lib.parse_text_proto(
       graph_schema_pbtxt, tf_gnn_proto.GraphSchema
   )

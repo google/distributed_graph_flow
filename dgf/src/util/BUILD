@@ -25,7 +25,6 @@ py_library(
         ":filesystem",
         ":proto",
         ":shard",
-        ":weak_dep",
         # bagz dep,
         "//dgf/src/data:distributed_graph",
         "//dgf/src/data:gf_metadata",
@@ -36,10 +35,11 @@ py_library(
         "//dgf/src/io:schema",
         "//dgf/src/io/gcp:common",
         "//dgf/src/io/gcp:spanner_graph_metadata",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow_gnn",
         # fastavro dep,
         # numpy dep,
         # pyarrow:pyarrow_modules dep,
-        # tensorflow dep,
         # tensorflow_gnn/proto dep,  # buildcleaner: keep
     ],
 )
@@ -66,7 +66,7 @@ py_library(
     name = "shard",
     srcs = ["shard.py"],
     deps = [
-        # tensorflow:tensorflow_no_contrib dep,
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
     ],
 )
 
@@ -181,13 +181,6 @@ cc_library(
     testonly = True,
     hdrs = ["test_util.h"],
     deps = ["@googletest//:gtest"],
-)
-
-py_library(
-    name = "weak_dep",
-    srcs = ["weak_dep.py"],
-    deps = [
-    ],
 )
 
 # Nanobind
@@ -352,10 +345,10 @@ py_test(
     srcs = ["dataclass_registry_test.py"],
     deps = [
         ":dataclass_registry",
+        ":test_util",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         # dataclasses_json dep,
-        "//dgf/src/util:test_util",
     ],
 )
 
@@ -375,18 +368,6 @@ py_test(
     srcs = ["log_test.py"],
     deps = [
         ":log",
-        # absl/flags dep,
-        # absl/logging dep,
-        # absl/testing:absltest dep,
-        # absl/testing:flagsaver dep,
-    ],
-)
-
-py_test(
-    name = "weak_dep_test",
-    srcs = ["weak_dep_test.py"],
-    deps = [
-        ":weak_dep",
         # absl/testing:absltest dep,
     ],
 )
