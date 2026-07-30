@@ -50,7 +50,6 @@ py_library(
         "//dgf/src/util:weak_dep",
         # numpy dep,
         # tensorflow dep,
-        # tqdm dep,
     ],
 )
 
@@ -68,7 +67,6 @@ py_library(
         "//dgf/src/util:weak_dep",
         # numpy dep,
         # tensorflow dep,
-        # tensorflow_gnn/proto dep,
     ],
 )
 
@@ -132,6 +130,25 @@ py_library(
         # dacite dep,
         "//dgf/src/data:statistics",
         "//dgf/src/util:json",
+    ],
+)
+
+py_library(
+    name = "graph_snapshots_metadata",
+    srcs = ["graph_snapshots_metadata.py"],
+    deps = [
+        "//dgf/src/data:graph_snapshots_metadata",
+        "//dgf/src/util:filesystem",
+    ],
+)
+
+py_test(
+    name = "graph_snapshots_metadata_test",
+    srcs = ["graph_snapshots_metadata_test.py"],
+    deps = [
+        ":graph_snapshots_metadata",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:graph_snapshots_metadata",
     ],
 )
 
@@ -208,10 +225,8 @@ py_library(
     deps = [
         ":feature_format",
         "//dgf/src/data:in_memory_graph",
-        "//dgf/src/data:padding",
         "//dgf/src/data:schema",
         "//dgf/src/data:tf_in_memory_graph",
-        # numpy dep,
         # tensorflow:tensorflow_no_contrib dep,
     ],
 )
@@ -444,6 +459,7 @@ py_test(
         # absl/testing:parameterized dep,
         # apache_beam dep,
         "//dgf/src/util:gen_test_graph",
+        # google/cloud/spanner dep,
         # google/cloud/spanner_v1 dep,
     ],
 )

@@ -33,6 +33,9 @@ from dgf.src.io.statistics import write_topology_statistics
 from dgf.src.io.schema import read_schema
 from dgf.src.io.schema import write_schema
 
+from dgf.src.io.graph_snapshots_metadata import read_metadata as read_snapshot_metadata
+from dgf.src.io.graph_snapshots_metadata import write_metadata as write_snapshot_metadata
+
 from dgf.src.io.gcp.spanner_graph import read_spanner_graph
 from dgf.src.io.gcp.spanner_graph import read_spanner_graph_schema
 from dgf.src.io.gcp.bigquery_graph import read_bigquery_graph_schema

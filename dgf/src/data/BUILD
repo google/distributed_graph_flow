@@ -136,6 +136,15 @@ py_library(
 )
 
 py_library(
+    name = "graph_snapshots_metadata",
+    srcs = ["graph_snapshots_metadata.py"],
+    deps = [
+        # dataclasses_json dep,
+        "//dgf/src/io:graph_constants",
+    ],
+)
+
+py_library(
     name = "beam_coders",
     srcs = ["beam_coders.py"],
     deps = [

@@ -50,3 +50,6 @@ from dgf.src.data.histogram import Histogram
 from dgf.src.data.padding import Padding
 from dgf.src.data.padding import EdgeSetPadding
 from dgf.src.data.padding import NodeSetPadding
+
+from dgf.src.data.graph_snapshots_metadata import GraphSnapshotsFormat
+from dgf.src.data.graph_snapshots_metadata import GraphSnapshotsMetadata

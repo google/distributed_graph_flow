@@ -332,7 +332,9 @@ def read_graph(
   )
 
   graph = in_memory_graph_lib.InMemoryGraph(
-      node_sets=node_sets, edge_sets=edge_sets
+      node_sets=node_sets,
+      edge_sets=edge_sets,
+      timestamp=metadata.timestamp,
   )
   return graph, schema
 
@@ -359,6 +361,7 @@ def write_graph(
     verbose: If True, print progress information.
     max_num_shards: If provided, limits the maximum number of shards used when
       writing the Parquet files for each node and edge set.
+    compression: Compression algorithm for Parquet files.
   """
   start_time = time.monotonic()
 
@@ -371,7 +374,9 @@ def write_graph(
   schema_io_lib.write_schema(schema, schema_path)
 
   # Write Metadata
-  metadata = gf_metadata_lib.GFGraphMetadata(version=MAX_SUPPORTED_GF_VERSION)
+  metadata = gf_metadata_lib.GFGraphMetadata(
+      version=MAX_SUPPORTED_GF_VERSION, timestamp=graph.timestamp
+  )
   metadata_path = os.path.join(path, FILENAME_METADATA)
   if verbose:
     log.info("Writing metadata to %s", metadata_path)

@@ -38,6 +38,7 @@ py_library(
         "//dgf/src/io:cache",
         "//dgf/src/io:dataset_loader",
         "//dgf/src/io:graph_in_memory",
+        "//dgf/src/io:graph_snapshots_metadata",
         "//dgf/src/io:hgraph_in_memory",
         "//dgf/src/io:schema",
         "//dgf/src/io:spanner",
@@ -54,6 +55,7 @@ py_library(
     name = "data",
     srcs = ["data.py"],
     deps = [
+        "//dgf/src/data:graph_snapshots_metadata",
         "//dgf/src/data:histogram",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:jax_in_memory_graph",
@@ -68,6 +70,7 @@ py_library(
     name = "validate",
     srcs = ["validate.py"],
     deps = [
+        "//dgf/src/validate:graph_snapshots",
         "//dgf/src/validate:in_memory_graph",
     ],
 )

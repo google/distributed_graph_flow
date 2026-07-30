@@ -61,7 +61,10 @@ class InMemoryGraph:
   Attributes:
     node_sets: Dictionary of node set name and node set features.
     edge_sets: Dictionary of edge set name and edge set features.
+    timestamp: Optional integer timestamp of this graph snapshot.
   """
 
   node_sets: Dict[str, InMemoryNodeSet]
   edge_sets: Dict[str, InMemoryEdgeSet]
+  timestamp: Optional[int] = None
+

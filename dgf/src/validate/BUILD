@@ -31,6 +31,21 @@ py_library(
     ],
 )
 
+py_library(
+    name = "graph_snapshots",
+    srcs = ["graph_snapshots.py"],
+    deps = [
+        ":in_memory_graph",
+        ":validate",
+        "//dgf/src/data:graph_snapshots_metadata",
+        "//dgf/src/io:graph_in_memory",
+        "//dgf/src/io:graph_snapshots_metadata",
+        "//dgf/src/io:schema",
+        "//dgf/src/util:filesystem",
+        # etils/epath dep,
+    ],
+)
+
 # Test
 # =========
 
@@ -41,6 +56,24 @@ py_test(
         ":validate",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
+    ],
+)
+
+py_test(
+    name = "graph_snapshots_test",
+    srcs = ["graph_snapshots_test.py"],
+    deps = [
+        ":graph_snapshots",
+        ":validate",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:graph_snapshots_metadata",
+        "//dgf/src/data:schema",
+        "//dgf/src/io:graph_in_memory",
+        "//dgf/src/io:graph_snapshots_metadata",
+        "//dgf/src/io:schema",
+        "//dgf/src/util:filesystem",
+        "//dgf/src/util:gen_test_graph",
+        "//dgf/src/util:test_util",
     ],
 )
 

@@ -24,3 +24,6 @@ PARQUET_EXTENSION = ".parquet"
 KEY_SOURCE = "#source"
 KEY_TARGET = "#target"
 MAX_SUPPORTED_GF_VERSION = 0
+
+FORMAT_GRAPH_SNAPSHOTS = "graph_snapshots"
+

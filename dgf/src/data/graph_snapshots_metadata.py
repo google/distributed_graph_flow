@@ -12,30 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Metadata for the GF Graph file format."""
+"""Dataclasses for representing DGF Graph Snapshots metadata.
+
+Graph Snapshots metadata (`metadata.json`) marks a root directory as a DGF
+Graph Snapshots dataset and specifies the format and version.
+"""
 
 import dataclasses
-from typing import Optional
+import enum
+
 import dataclasses_json
+from dgf.src.io import graph_constants
 
 
-# Version
-# =======
-# In this section, explain the changes at each version.
-#
-# 0: First version.
+class GraphSnapshotsFormat(str, enum.Enum):
+  """Format options for snapshots datasets."""
+
+  GRAPH_SNAPSHOTS = graph_constants.FORMAT_GRAPH_SNAPSHOTS
 
 
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass
-class GFGraphMetadata:
-  """Metadata for a GF graph file.
+class GraphSnapshotsMetadata:
+  """Root metadata for a DGF Graph Snapshots dataset."""
 
-  Attributes:
-    version: Format version integer.
-    timestamp: Optional integer creation timestamp of this graph snapshot.
-  """
-
+  format: GraphSnapshotsFormat | str
   version: int
-  timestamp: Optional[int] = None
-

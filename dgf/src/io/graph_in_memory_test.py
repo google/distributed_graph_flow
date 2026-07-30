@@ -145,6 +145,33 @@ class ReadGfGraphTest(parameterized.TestCase):
           )
       self.assertSameElements(sorted(actual_files), sorted(expected_files))
 
+  def test_write_and_read_graph_timestamp(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      output_path = os.path.join(tmpdir, "timestamped_gf_graph")
+      in_memory_graph = gen_test_graph.generate_in_memory_graph(
+          node_ids=True, edge_ids=True
+      )
+      schema = gen_test_graph.generate_schema(
+          node_ids=True, edge_ids=True, semantic=True
+      )
+
+      # 1. Write graph with timestamp set on InMemoryGraph object
+      timestamped_graph = in_memory_graph_lib.InMemoryGraph(
+          node_sets=in_memory_graph.node_sets,
+          edge_sets=in_memory_graph.edge_sets,
+          timestamp=123456,
+      )
+      gf_graph_in_memory.write_graph(timestamped_graph, schema, output_path)
+      loaded_graph, _ = gf_graph_in_memory.read_graph(output_path)
+      self.assertEqual(loaded_graph.timestamp, 123456)
+
+      # 2. Write un-timestamped graph (graph.timestamp is None)
+      output_path2 = os.path.join(tmpdir, "untimestamped_gf_graph")
+      gf_graph_in_memory.write_graph(in_memory_graph, schema, output_path2)
+      loaded_graph2, _ = gf_graph_in_memory.read_graph(output_path2)
+      self.assertIsNone(loaded_graph2.timestamp)
+
 
 if __name__ == "__main__":
   absltest.main()
+
