@@ -30,6 +30,7 @@ import os
 import time
 from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, Tuple
 from clu import metric_writers
+from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import common
 from dgf.src.learning.ten_lines import common as ten_lines_common
 from dgf.src.util import log
@@ -165,7 +166,6 @@ class TrainResult:
 
 
 # TODO(bmayer): Support user-defined best_step fns?
-# TODO(gbm): Support early stopping.
 def train(
     model: nn.Module,
     opt: optax.GradientTransformation,
@@ -192,6 +192,10 @@ def train(
     print_initial_model_params: bool = False,
     max_training_time_seconds: Optional[int] = None,
     export_metrics_to_xm: bool = False,
+    early_stopping: Optional[
+        early_stopping_monitor.EarlyStoppingMonitorConfig
+    ] = None,
+    early_stopping_keep_best_param: bool = True,
 ) -> TrainResult:
   """Trains a Flax module with a flexible and feature-rich training loop.
 
@@ -252,6 +256,11 @@ def train(
       logging interval.
     print_initial_model_params: If `True`, the shapes of the initial model
       parameters and optimizer state will be logged.
+    early_stopping: If specified, enables early stopping using the "loss" metric
+      of the validation dataset.
+    early_stopping_keep_best_param: If true, and if early stopping is enabled,
+      returns the lowest loss. This option leads to better quality model but
+      consumes more memory.
 
   Returns:
     A `TrainResult` dataclass containing:
@@ -367,6 +376,11 @@ def train(
 
     if print_initial_model_params:
       common.log_info_shape("Initial opt parameters", opt_state)
+
+  if early_stopping is not None:
+    es_monitor = early_stopping_monitor.EarlyStoppingMonitor(early_stopping)
+  else:
+    es_monitor = None
 
   # Accumulate training metrics until the next log.
   train_metric_accumulator = MetricAccumulator()
@@ -506,10 +520,26 @@ def train(
       # Note: We skip the validation at step 0.
       if step > 0 and step % valid_every_n_steps == 0:
         run_valid_logs()
-
+        if es_monitor is not None and "loss" in last_valid_metrics:
+          es_monitor.add_loss(last_valid_metrics["loss"], model_params)
+          if es_monitor.should_stop():
+            log.info("Early stopping triggered at step %s.", step)
+            break
   # Final logging
-  step = num_train_steps
-  run_valid_logs()
+  if es_monitor is None or not es_monitor.should_stop():
+    step = num_train_steps
+    run_valid_logs()
+    if es_monitor is not None and "loss" in last_valid_metrics:
+      es_monitor.add_loss(last_valid_metrics["loss"], model_params)
+
+  # Restore best parameters if enabled and early stopping was requested
+  if es_monitor is not None and early_stopping_keep_best_param:
+    if es_monitor.best_params is not None:
+      log.info(
+          "Restoring best model parameters with validation loss %f",
+          es_monitor.best_loss,
+      )
+      model_params = es_monitor.best_params
 
   # Final checkpoing
   if checkpoint_manager is not None:

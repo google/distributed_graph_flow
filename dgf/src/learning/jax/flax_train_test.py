@@ -18,6 +18,7 @@ import os
 from typing import Optional
 from absl.testing import absltest
 from absl.testing import parameterized
+from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import flax_train
 import flax.linen as nn
 import jax
@@ -116,6 +117,37 @@ class FlaxTrainTest(parameterized.TestCase):
     self.assertEqual(
         set(result.valid_logs[-1].metrics.keys()), set(["accuracy", "loss"])
     )
+
+  def test_early_stopping(self):
+    def train_step(params, opt_state, batch, rng_key):
+      return params, opt_state, {"loss": jnp.array(1.0)}
+
+    def valid_step(params, opt_state, batch):
+      return {"loss": jnp.array(0.5)}
+
+    model = SimpleModel(hidden_dim=8)
+    opt = optax.adam(1e-3)
+
+    es_config = early_stopping_monitor.EarlyStoppingMonitorConfig(
+        patience=1, min_improvement=0.1
+    )
+
+    result = flax_train.train(
+        model=model,
+        opt=opt,
+        train_step=train_step,
+        dataset_iterator=dataset_iterator(num_steps=None),
+        dummy_data_fn=lambda x: x["data"],
+        num_train_steps=100,
+        rng_key=jax.random.PRNGKey(42),
+        valid_every_n_steps=10,
+        valid_step=valid_step,
+        valid_dataset_iterator_fn=lambda: dataset_iterator(num_steps=2),
+        early_stopping=es_config,
+    )
+
+    # Should validate at 10, then 20 and break out.
+    self.assertEqual([l.step for l in result.valid_logs], [10, 20])
 
 
 if __name__ == "__main__":

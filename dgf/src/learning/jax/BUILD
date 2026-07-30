@@ -58,6 +58,7 @@ py_library(
     deps = [
         ":common",
         # clu/metric_writers dep,
+        "//dgf/src/learning:early_stopping_monitor",
         "//dgf/src/learning/ten_lines:common",
         "//dgf/src/util:log",
         "//dgf/src/util:util_py",
@@ -121,6 +122,7 @@ py_test(
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         # clu dep,
+        "//dgf/src/learning:early_stopping_monitor",
         # flax:core dep,
         # jax dep,
         # numpy dep,
