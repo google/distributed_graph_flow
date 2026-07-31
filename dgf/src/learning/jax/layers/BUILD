@@ -24,6 +24,7 @@ py_library(
         ":preprocess",
         ":regression",
         ":residual_mlp",
+        ":timeseries_cnn",
     ],
 )
 
@@ -33,6 +34,21 @@ py_library(
     deps = [
         # absl/logging dep,
         # chex dep,
+        "//dgf/src/learning/jax:common",
+        # flax:core dep,
+        # jax dep,
+        # jaxtyping dep,
+    ],
+)
+
+py_library(
+    name = "timeseries_cnn",
+    srcs = ["timeseries_cnn.py"],
+    deps = [
+        ":registry",
+        ":standard",
+        # dataclasses_json dep,
+        "//dgf/src/data:schema",
         "//dgf/src/learning/jax:common",
         # flax:core dep,
         # jax dep,
@@ -271,5 +287,18 @@ py_test(
         ":all",
         ":registry",
         # absl/testing:absltest dep,
+    ],
+)
+
+py_test(
+    name = "timeseries_cnn_test",
+    srcs = ["timeseries_cnn_test.py"],
+    deps = [
+        ":registry",
+        ":timeseries_cnn",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/data:schema",
+        # jax dep,
     ],
 )

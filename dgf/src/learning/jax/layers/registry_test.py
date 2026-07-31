@@ -32,6 +32,7 @@ class RegistryTest(absltest.TestCase):
             "layers.HeterogeneousGraphConvolutionConfig",
             "layers.RegressionHeadConfig",
             "layers.ResidualMLPV2Config",
+            "layers.TimeseriesCNNEncoderConfig",
         ],
     )
 

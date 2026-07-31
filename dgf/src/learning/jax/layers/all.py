@@ -21,5 +21,6 @@ from dgf.src.learning.jax.layers import homo_gnn_sparse_deferred
 from dgf.src.learning.jax.layers import mlp
 from dgf.src.learning.jax.layers import preprocess
 from dgf.src.learning.jax.layers import residual_mlp
+from dgf.src.learning.jax.layers import timeseries_cnn
 
 # pylint: enable=unused-import
