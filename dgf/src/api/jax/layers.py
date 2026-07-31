@@ -24,6 +24,9 @@ from dgf.src.learning.jax.layers.preprocess import EmbedAndHomogenizeGraph
 from dgf.src.learning.jax.layers.preprocess import EmbedFeatureSetConfig
 from dgf.src.learning.jax.layers.preprocess import EmbedFeatureSet
 
+from dgf.src.learning.jax.layers.preprocess import EmbedFeatureGroupsConfig
+from dgf.src.learning.jax.layers.preprocess import EmbedFeatureGroups
+
 from dgf.src.learning.jax.layers.preprocess import EmbedGraphConfig
 from dgf.src.learning.jax.layers.preprocess import EmbedGraph
 

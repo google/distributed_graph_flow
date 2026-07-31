@@ -18,9 +18,11 @@ This module provides layers for embedding and transforming graph features,
 preparing them for input into graph neural networks.
 
 The main layers are:
-  - EmbedFeatureSet: Embeds a set of features (e.g., for a node set) into a
-    single dense embedding vector. It handles categorical and pre-embedded
-    features.
+  - EmbedFeatureSet: Embeds a set of static features for a node or edge set into
+    a single dense embedding vector. It handles categorical and pre-embedded
+    features while ignoring timeseries features.
+  - EmbedFeatureGroups: Embeds static features and timeseries sequence groups,
+    producing named embedding and mask feature arrays alongside their schemas.
   - EmbedGraph: Applies EmbedFeatureSet to all node sets within a graph,
     producing a graph with embedded node features.
   - EmbedAndHomogenizeGraph: Embeds features for all node sets and then
@@ -36,6 +38,7 @@ All the layers follow the 3 steps:
   - The output schema of the layer e.g. config.output_schema
 """
 
+import collections
 import dataclasses
 from typing import List, Optional
 import dataclasses_json
@@ -45,10 +48,417 @@ from dgf.src.learning.jax import common
 from dgf.src.learning.jax.layers import standard
 from dgf.src.learning.jax.layers.registry import registry as layer_registry
 from dgf.src.transform import homogenize as homogenize_lib
+from dgf.src.util import log
 import flax.linen as nn
 import jax.numpy as jnp
 
 JaxBaseConfig = common.JaxBaseConfig
+
+
+def _is_non_mask_timeseries(
+    feature_schema: schema_lib.FeatureSchema,
+) -> bool:
+  """Returns True if the feature is a timeseries sequence (excluding masks)."""
+  return (
+      feature_schema.is_timeseries
+      and feature_schema.semantic != schema_lib.FeatureSemantic.MASK
+  )
+
+
+def _has_defined_timeseries_dimension(
+    shape: Optional[schema_lib.Shape],
+) -> bool:
+  """Returns True if shape is non-empty and has a defined sequence length (shape[0] is not None)."""
+  return shape is not None and len(shape) > 0 and shape[0] is not None
+
+
+@dataclasses.dataclass
+class EmbedFeatureGroupsConfig:
+  """Configuration for the EmbedFeatureGroups layer.
+
+  Attributes:
+    categorical_feature_embedding_dim: The dimension of the embedding for
+      categorical features.
+  """
+
+  categorical_feature_embedding_dim: int = 64
+
+  def make(
+      self, schema: schema_lib.FeatureSetSchema, name: Optional[str] = None
+  ) -> "EmbedFeatureGroups":
+    return EmbedFeatureGroups(config=self, schema=schema, name=name)
+
+  def output_schema(
+      self, schema: schema_lib.FeatureSetSchema
+  ) -> schema_lib.FeatureSetSchema:
+    """Computes output schemas for static features and timeseries groups."""
+    output_schemas = {}
+
+    # 1. Static features
+    num_static_dims = 0
+    for feature_name, feature_schema in schema.items():
+      if feature_schema.is_timeseries:
+        continue
+      if feature_schema.semantic == schema_lib.FeatureSemantic.EMBEDDING:
+        shape = feature_schema.shape
+        if shape is not None and len(shape) > 0 and shape[0] is not None:
+          num_static_dims += shape[0]
+        else:
+          num_static_dims += 1
+      elif feature_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL:
+        num_static_dims += self.categorical_feature_embedding_dim
+      else:
+        log.warning(
+            f"Feature {feature_name!r} with semantic {feature_schema.semantic}"
+            " is unexpected/unsupported for embedding and will be ignored in"
+            " output schema calculation."
+        )
+
+    if num_static_dims > 0:
+      output_schemas["embedding"] = schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.FLOAT_32,
+          semantic=schema_lib.FeatureSemantic.EMBEDDING,
+          shape=(num_static_dims,),
+      )
+
+    # 2. Timeseries features grouped by group
+    ts_groups = collections.defaultdict(list)
+    for feature_name, feature_schema in schema.items():
+      if _is_non_mask_timeseries(feature_schema):
+        grp = (
+            feature_schema.group
+            if feature_schema.group is not None
+            else feature_name
+        )
+        ts_groups[grp].append((feature_name, feature_schema))
+
+    for grp_name in sorted(ts_groups.keys()):
+      group_features = ts_groups[grp_name]
+      seq_len = None
+      total_dim = 0
+
+      # Features in the sequence group may have different channel dimensions
+      # (e.g. [T, 2] and [T, 1] or univariate [T]). They are merged by
+      # concatenating along the last axis, yielding total dimension [T, sum(D)].
+      for feature_name, feature_schema in group_features:
+        shape = feature_schema.shape
+        # Timeseries features must have a non-empty shape with a defined
+        # sequence length at shape[0].
+        if not _has_defined_timeseries_dimension(shape):
+          raise ValueError(
+              f"Timeseries feature '{feature_name}' in sequence group"
+              f" '{grp_name}' must have a defined sequence length (shape[0]"
+              f" cannot be None), but got shape={shape}."
+          )
+        if len(shape) > 2:
+          raise ValueError(
+              f"Timeseries feature '{feature_name}' in sequence group"
+              f" '{grp_name}' has unsupported shape={shape} with {len(shape)}"
+              " dimensions. Only 1D (sequence length only, e.g. [T]) or 2D"
+              " (sequence length and feature dimension, e.g. [T, D]) shapes are"
+              " supported."
+          )
+
+        # Validate matching sequence length across all features in the group.
+        if seq_len is None:
+          seq_len = shape[0]
+        elif shape[0] != seq_len:
+          raise ValueError(
+              f"All timeseries features in sequence group '{grp_name}' must"
+              " have matching sequence lengths, but got conflicting lengths:"
+              f" feature '{feature_name}' has length {shape[0]}, expected"
+              f" {seq_len}."
+          )
+
+        if feature_schema.semantic == schema_lib.FeatureSemantic.EMBEDDING:
+          if len(shape) == 2:
+            if shape[1] is None or shape[1] <= 0:
+              raise ValueError(
+                  f"Timeseries feature '{feature_name}' in sequence group"
+                  f" '{grp_name}' has invalid feature dimension shape[1]="
+                  f"{shape[1]}. Must be a positive integer."
+              )
+            total_dim += shape[1]
+          else:
+            total_dim += 1
+        elif feature_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL:
+          if len(shape) > 1:
+            raise ValueError(
+                f"Categorical timeseries feature '{feature_name}' in sequence"
+                f" group '{grp_name}' must be 1D with shape (sequence_length,),"
+                f" but got shape={shape}."
+            )
+          total_dim += self.categorical_feature_embedding_dim
+        else:
+          log.warning(
+              f"Timeseries feature {feature_name!r} in sequence group"
+              f" {grp_name!r} with semantic {feature_schema.semantic} is"
+              " unexpected/unsupported for embedding and will be ignored in"
+              " output schema calculation."
+          )
+
+      if total_dim > 0:
+        output_schemas[f"embedding_{grp_name}"] = schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=(seq_len, total_dim),
+            is_timeseries=True,
+            group=grp_name,
+        )
+        output_schemas[f"mask_{grp_name}"] = schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.BOOL,
+            semantic=schema_lib.FeatureSemantic.MASK,
+            shape=(seq_len,),
+            is_timeseries=True,
+            group=grp_name,
+        )
+
+    return output_schemas
+
+
+class EmbedFeatureGroups(nn.Module):
+  """Computes embeddings for static features and timeseries sequence groups.
+
+  For static features:
+    Embeds categorical features and direct numeric embeddings into a single
+    2D dense embedding `embedding` of shape `(batch_size, static_embed_dim)`.
+
+  For each timeseries group `g`:
+    1. Embeds categorical and numeric features, concatenating along axis=-1
+       into `embedding_{g}` of shape `(batch_size, seq_len, total_embed_dim)`.
+       All features in the group must share the same sequence length `T`.
+       Features may have different channel dimensions (e.g., shape `(T, 2)` and
+       `(T, 1)` or univariate `(T,)`), which are concatenated along axis=-1
+       to produce `(batch_size, T, total_embed_dim)`.
+    2. Extracts or generates a boolean mask `mask_{g}` of shape
+       `(batch_size, seq_len)`.
+    3. Applies masking to zero-out invalid timesteps in `embedding_{g}`.
+
+  Attributes:
+    config: The configuration for this layer.
+    schema: A `schema_lib.FeatureSetSchema` object defining the expected
+      features and their semantic types.
+
+  Usage example:
+
+  ```python
+  # Define a schema with static features, timeseries features, and masks
+  feature_schema = {
+      "static_cat": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.INTEGER_64,
+          semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+          num_categorical_values=10,
+      ),
+      "static_embed": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.FLOAT_32,
+          semantic=schema_lib.FeatureSemantic.EMBEDDING,
+          shape=(16,),
+      ),
+      "events_cat": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.INTEGER_32,
+          semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+          num_categorical_values=50,
+          shape=(8,),
+          is_timeseries=True,
+          group="events",
+      ),
+      "events_embed": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.FLOAT_32,
+          semantic=schema_lib.FeatureSemantic.EMBEDDING,
+          shape=(8, 4),
+          is_timeseries=True,
+          group="events",
+      ),
+      "events_mask": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.BOOL,
+          semantic=schema_lib.FeatureSemantic.MASK,
+          shape=(8,),
+          is_timeseries=True,
+          group="events",
+      ),
+  }
+
+  # Instantiate the module via config
+  config = EmbedFeatureGroupsConfig(categorical_feature_embedding_dim=32)
+  embedder = config.make(schema=feature_schema)
+
+  # Example input data for batch_size=2, seq_len=8
+  input_data = {
+      "static_cat": jnp.array([1, 4], dtype=jnp.int64),
+      "static_embed": jnp.ones((2, 16), dtype=jnp.float32),
+      "events_cat": jnp.ones((2, 8), dtype=jnp.int32),
+      "events_embed": jnp.ones((2, 8, 4), dtype=jnp.float32),
+      "events_mask": jnp.ones((2, 8), dtype=jnp.bool_),
+  }
+
+  # Initialize and apply the module
+  variables = embedder.init(jax.random.PRNGKey(0), input_data, training=False)
+  outputs = embedder.apply(variables, input_data, training=False)
+
+  # outputs contains:
+  # - "embedding": shape (2, 32 + 16) = (2, 48)
+  # - "embedding_events": shape (2, 8, 32 + 4) = (2, 8, 36)
+  # - "mask_events": shape (2, 8)
+  ```
+  """
+
+  config: EmbedFeatureGroupsConfig
+  schema: schema_lib.FeatureSetSchema
+
+  @nn.compact
+  def __call__(
+      self,
+      features: jax_in_memory_graph.Features,
+      training: bool,
+  ) -> jax_in_memory_graph.Features:
+    outputs: jax_in_memory_graph.Features = {}
+
+    # 1. Process static features
+    static_embedding_list = []
+    for feature_name in sorted(self.schema.keys()):
+      feature_schema = self.schema[feature_name]
+      if (
+          feature_schema.is_timeseries
+          or feature_schema.semantic == schema_lib.FeatureSemantic.MASK
+      ):
+        continue
+      raw_value = features[feature_name]
+      if feature_schema.semantic == schema_lib.FeatureSemantic.EMBEDDING:
+        if raw_value.dtype != jnp.float32:
+          raise TypeError(
+              f"Feature {feature_name!r} with EMBEDDING semantic must have"
+              f" dtype jnp.float32, but got {raw_value.dtype}."
+          )
+        if raw_value.ndim == 1:
+          raw_value = jnp.expand_dims(raw_value, axis=1)
+        if raw_value.ndim != 2:
+          raise ValueError(
+              f"Feature {feature_name!r} with EMBEDDING semantic must have"
+              f" ndim 1 or 2, but got {raw_value.ndim}."
+          )
+        static_embedding_list.append(raw_value)
+      elif feature_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL:
+        if feature_schema.num_categorical_values is None:
+          raise ValueError(
+              f"Feature {feature_name!r} with CATEGORICAL semantic must have"
+              " num_categorical_values specified in its schema."
+          )
+        if raw_value.dtype not in [jnp.int64, jnp.int32]:
+          raise TypeError(
+              f"Feature {feature_name!r} with CATEGORICAL semantic must have"
+              f" dtype jnp.int64 or jnp.int32, but got {raw_value.dtype}."
+          )
+        if raw_value.ndim != 1:
+          raise ValueError(
+              f"Feature {feature_name!r} with CATEGORICAL semantic must have"
+              f" ndim == 1, but got {raw_value.ndim}."
+          )
+        embedding = nn.Embed(
+            num_embeddings=feature_schema.num_categorical_values,
+            features=self.config.categorical_feature_embedding_dim,
+            name=f"embed_{feature_name}",
+        )
+        static_embedding_list.append(embedding(raw_value))
+      else:
+        log.warning(
+            f"Feature {feature_name!r} with semantic"
+            f" {feature_schema.semantic} is unexpected/unsupported for"
+            " embedding and will be ignored."
+        )
+
+    if static_embedding_list:
+      outputs["embedding"] = jnp.concatenate(static_embedding_list, axis=1)
+
+    # 2. Process timeseries features per sequence group
+    ts_groups = collections.defaultdict(list)
+    mask_features = {}
+    for feature_name, feature_schema in self.schema.items():
+      grp = (
+          feature_schema.group
+          if feature_schema.group is not None
+          else feature_name
+      )
+      if feature_schema.semantic == schema_lib.FeatureSemantic.MASK:
+        mask_features[grp] = feature_name
+      elif _is_non_mask_timeseries(feature_schema):
+        ts_groups[grp].append(feature_name)
+
+    for grp_name in sorted(ts_groups.keys()):
+      feature_names = sorted(ts_groups[grp_name])
+      group_embedding_list = []
+
+      for feature_name in feature_names:
+        feature_schema = self.schema[feature_name]
+        raw_value = features[feature_name]
+
+        if feature_schema.semantic == schema_lib.FeatureSemantic.EMBEDDING:
+          if raw_value.dtype != jnp.float32:
+            raise TypeError(
+                f"Feature {feature_name!r} with EMBEDDING semantic must have"
+                f" dtype jnp.float32, but got {raw_value.dtype}."
+            )
+          if raw_value.ndim == 2:
+            raw_value = jnp.expand_dims(raw_value, axis=-1)
+          if raw_value.ndim != 3:
+            raise ValueError(
+                f"Feature {feature_name!r} with EMBEDDING semantic and"
+                f" is_timeseries=True must have ndim 2 or 3, but got"
+                f" {raw_value.ndim}."
+            )
+          group_embedding_list.append(raw_value)
+
+        elif feature_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL:
+          if feature_schema.num_categorical_values is None:
+            raise ValueError(
+                f"Feature {feature_name!r} with CATEGORICAL semantic and"
+                " is_timeseries=True must have num_categorical_values specified"
+                " in its schema."
+            )
+          if raw_value.dtype not in [jnp.int64, jnp.int32]:
+            raise TypeError(
+                f"Feature {feature_name!r} with CATEGORICAL semantic must have"
+                f" dtype jnp.int64 or jnp.int32, but got {raw_value.dtype}."
+            )
+          if raw_value.ndim != 2:
+            raise ValueError(
+                f"Feature {feature_name!r} with CATEGORICAL semantic and"
+                f" is_timeseries=True must have ndim == 2, but got"
+                f" {raw_value.ndim}."
+            )
+          embedding = nn.Embed(
+              num_embeddings=feature_schema.num_categorical_values,
+              features=self.config.categorical_feature_embedding_dim,
+              name=f"embed_{feature_name}",
+          )
+          group_embedding_list.append(embedding(raw_value))
+        else:
+          log.warning(
+              f"Timeseries feature {feature_name!r} in sequence group"
+              f" {grp_name!r} with semantic {feature_schema.semantic} is"
+              " unexpected/unsupported for embedding and will be ignored."
+          )
+
+      if group_embedding_list:
+        ts_embedding = jnp.concatenate(group_embedding_list, axis=-1)
+        # Find or generate mask for this group
+        mask_name = mask_features.get(grp_name)
+
+        if mask_name is not None and mask_name in features:
+          mask = features[mask_name]
+          if mask.dtype != jnp.bool_:
+            mask = mask.astype(jnp.bool_)
+        else:
+          mask = jnp.ones(ts_embedding.shape[:2], dtype=jnp.bool_)
+
+        # Zero-out masked timesteps in the embedding
+        ts_embedding = jnp.where(
+            jnp.expand_dims(mask, axis=-1), ts_embedding, 0.0
+        )
+
+        outputs[f"embedding_{grp_name}"] = ts_embedding
+        outputs[f"mask_{grp_name}"] = mask
+
+    return outputs
 
 
 @dataclasses.dataclass
@@ -70,33 +480,30 @@ class EmbedFeatureSetConfig:
   def output_schema(
       self, schema: schema_lib.FeatureSetSchema
   ) -> Optional[schema_lib.FeatureSchema]:
-    num_output_dims = 0
-    for _, feature_schema in schema.items():
-      if feature_schema.semantic == schema_lib.FeatureSemantic.EMBEDDING:
-        shape = feature_schema.shape
-        num_output_dims += (  # pyrefly: ignore[unsupported-operation]
-            feature_schema.shape[0]  # pyrefly: ignore[unsupported-operation]
-            if shape is not None and shape is not tuple()
-            else 1
+    for feature_name, feature_schema in schema.items():
+      if feature_schema.is_timeseries:
+        log.warning(
+            f"Timeseries feature {feature_name!r} is ignored in output schema"
+            " calculation for EmbedFeatureSet."
         )
-      elif feature_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL:
-        num_output_dims += self.categorical_feature_embedding_dim
-
-    if num_output_dims == 0:
-      return None
-    return schema_lib.FeatureSchema(
-        format=schema_lib.FeatureFormat.FLOAT_32,
-        semantic=schema_lib.FeatureSemantic.EMBEDDING,
-        shape=(num_output_dims,),
+    static_schema = {
+        feature_name: feature_schema
+        for feature_name, feature_schema in schema.items()
+        if not feature_schema.is_timeseries
+        and feature_schema.semantic != schema_lib.FeatureSemantic.MASK
+    }
+    groups_config = EmbedFeatureGroupsConfig(
+        categorical_feature_embedding_dim=self.categorical_feature_embedding_dim
     )
+    return groups_config.output_schema(static_schema).get("embedding", None)
 
 
 class EmbedFeatureSet(nn.Module):
-  """Computes a fixed sized dense embedding for a set of feature values.
+  """Computes a fixed sized dense embedding for static feature values.
 
-  This module takes a dictionary of features and converts them into a single
-  concatenated dense embedding. Categorical features are embedded using
-  `nn.Embed`, while pre-embedded features are used directly.
+  This module delegates to `EmbedFeatureGroups` to embed static features into
+  a single concatenated dense embedding of shape `(batch_size, static_dim)`,
+  while ignoring any timeseries sequence features and masks.
 
   Attributes:
     config: The configuration for this layer.
@@ -112,7 +519,7 @@ class EmbedFeatureSet(nn.Module):
       "embedding_feature": schema_lib.FeatureSchema(
           format=schema_lib.FeatureFormat.FLOAT_32,
           semantic=schema_lib.FeatureSemantic.EMBEDDING,
-          shape=(16,)
+          shape=(16,),
       ),
       "categorical_feature": schema_lib.FeatureSchema(
           format=schema_lib.FeatureFormat.INTEGER_64,
@@ -131,7 +538,7 @@ class EmbedFeatureSet(nn.Module):
   }
 
   # Initialize and apply the module
-  variables = embedder.init(jax.random.PRNGKey(0), features, training=False)
+  variables = embedder.init(jax.random.PRNGKey(0), input, training=False)
   output = embedder.apply(variables, input, training=False)
   ```
   """
@@ -145,50 +552,23 @@ class EmbedFeatureSet(nn.Module):
       features: jax_in_memory_graph.Features,
       training: bool,
   ) -> Optional[jnp.ndarray]:
-
-    embedding_list = []
-    for feature_name in sorted(self.schema.keys()):
-      feature_schema = self.schema[feature_name]
-      raw_value = features[feature_name]
-      if feature_schema.semantic == schema_lib.FeatureSemantic.EMBEDDING:
-        if raw_value.dtype != jnp.float32:
-          raise TypeError(
-              f"Feature {feature_name!r} with EMBEDDING semantic must have"
-              f" dtype jnp.float32, but got {raw_value.dtype}."
-          )
-        if raw_value.ndim == 1:
-          raw_value = jnp.expand_dims(raw_value, axis=1)
-        # Directly add the value
-        embedding_list.append(raw_value)
-      elif feature_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL:
-        if raw_value.dtype not in [jnp.int64, jnp.int32]:
-          raise TypeError(
-              f"Feature {feature_name!r} with CATEGORICAL semantic must have"
-              f" dtype jnp.int64 or jnp.int32, but got {raw_value.dtype}."
-          )
-        if raw_value.ndim != 1:
-          raise ValueError(
-              f"Feature {feature_name!r} with CATEGORICAL semantic must have"
-              f" ndim == 1, but got {raw_value.ndim}."
-          )
-        # Create an embedding table
-        embedding = nn.Embed(
-            num_embeddings=feature_schema.num_categorical_values,  # pyrefly: ignore[bad-argument-type]
-            features=self.config.categorical_feature_embedding_dim,
-            name=f"embed_{feature_name}",
+    for feature_name, feature_schema in self.schema.items():
+      if feature_schema.is_timeseries:
+        log.warning(
+            f"Timeseries feature {feature_name!r} is ignored in"
+            " EmbedFeatureSet."
         )
-        embedding_list.append(embedding(raw_value))
-      else:
-        raise NotImplementedError(
-            f"Unsupported feature semantic {feature_schema!r} for feature"
-            f" {feature_name!r}"
-        )
-
-    # Concatenate the fixed size embeddings.
-    if not embedding_list:
-      return None
-    else:
-      return jnp.concatenate(embedding_list, axis=1)
+    static_schema = {
+        feature_name: feature_schema
+        for feature_name, feature_schema in self.schema.items()
+        if not feature_schema.is_timeseries
+        and feature_schema.semantic != schema_lib.FeatureSemantic.MASK
+    }
+    groups_embedder = EmbedFeatureGroupsConfig(
+        categorical_feature_embedding_dim=self.config.categorical_feature_embedding_dim
+    ).make(schema=static_schema)
+    outputs = groups_embedder(features, training=training)
+    return outputs.get("embedding", None)
 
 
 @layer_registry.register
@@ -333,7 +713,8 @@ class EmbedAndHomogenizeGraph(nn.Module):
 
   Operations:
     - For each nodeset, all its features are first processed into a dense
-      embedding using `EmbedFeatureSet`.
+      embedding using `EmbedFeatureSet` (note: timeseries sequence features are
+      ignored; only static features are homogenized).
     - The combined embedding is then projected to a fixed size
       `node_embedding_dim` using a dense layer.
     - A learned, nodeset-specific type encoding is added to the
@@ -435,9 +816,9 @@ class EmbedAndHomogenizeGraph(nn.Module):
       if nodeset_name == self.config.target_nodeset:
         # Filter ignored features.
         featureset_schema = {
-            k: v
-            for k, v in featureset_schema.items()
-            if k not in self.config.ignore_target_nodeset_features
+            feature_name: feature_schema
+            for feature_name, feature_schema in featureset_schema.items()
+            if feature_name not in self.config.ignore_target_nodeset_features
         }
 
       # Project all the feature values into a dense embedding.

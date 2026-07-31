@@ -51,6 +51,7 @@ py_library(
         "//dgf/src/data:schema",
         "//dgf/src/learning/jax:common",
         "//dgf/src/transform:homogenize",
+        "//dgf/src/util:log",
         # flax:core dep,
         # jax dep,
     ],
