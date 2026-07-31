@@ -93,7 +93,9 @@ def create_core_model_config(
           num_classes=label_spec.num_categorical_values,  # pyrefly: ignore[bad-argument-type]
       )
       if task.task_type == node_prediction_model.TaskType.NODE_CLASSIFICATION
-      else regression_lib.RegressionHeadConfig(),
+      else regression_lib.RegressionHeadConfig(
+          num_outputs=label_spec.static_size()
+      ),
       target_nodeset=task.target_nodeset,
       num_layers=hparams.num_layers,
       dropout=hparams.dropout,

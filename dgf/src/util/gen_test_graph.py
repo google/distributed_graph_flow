@@ -1918,6 +1918,7 @@ def gen_toy_regression_dataset(
     random_seed: int = 0,
     max_num_edges_per_n1_nodes: int = 20,
     label_dtype: Literal["float32", "int64"] = "float32",
+    label_dim: int = 1,
 ) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Generates a toy regression dataset with a learnable pattern.
 
@@ -1951,6 +1952,7 @@ def gen_toy_regression_dataset(
                   "label": schema_lib.FeatureSchema(
                       format=schema_label_format,
                       semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                      shape=() if label_dim == 1 else (label_dim,),
                   ),
                   "f1": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.INTEGER_64,
@@ -1987,7 +1989,8 @@ def gen_toy_regression_dataset(
   n1_f1 = rng.integers(0, 5, size=num_n1_nodes)
   n1_f3 = rng.random(size=num_n1_nodes).astype(np.float32)
   np_label_dtype = np.float32 if label_dtype == "float32" else np.int64
-  n1_labels = np.zeros(shape=num_n1_nodes, dtype=np_label_dtype)
+  shape = (num_n1_nodes, label_dim) if label_dim > 1 else (num_n1_nodes,)
+  n1_labels = np.zeros(shape=shape, dtype=np_label_dtype)
   n1_node_set = in_memory_graph_lib.InMemoryNodeSet(
       num_nodes=num_n1_nodes,
       features={
@@ -2026,8 +2029,11 @@ def gen_toy_regression_dataset(
       label_val = n1_f1[i] * 2.0 + np.sum(connected_n2_f2) + rng.random()
     else:
       label_val = n1_f1[i] * 2.0 + rng.random()
+      
+    if label_dim > 1:
+      label_val = [label_val + j * 0.5 for j in range(label_dim)]
 
-    n1_labels[i] = np_label_dtype(label_val)
+    n1_labels[i] = label_val
 
   n1_node_set.features["label"] = n1_labels
 

@@ -680,13 +680,14 @@ class NodePredictionClassificationToy(absltest.TestCase):
 
 class NodePredictionRegressionToy(parameterized.TestCase):
 
-  @parameterized.parameters(("float32",), ("int64",))
-  def test_evaluate(self, label_dtype):
+  @parameterized.parameters(("float32", 1), ("int64", 1), ("float32", 3))
+  def test_evaluate(self, label_dtype, label_dim):
 
     # Generate data
     graph_kwargs = {
         "num_n1_nodes": 1000,
         "num_n2_nodes": 500,
+        "label_dim": label_dim,
     }
     graph_train, schema = gen_test_graph.gen_toy_regression_dataset(
         **graph_kwargs, random_seed=0, label_dtype=label_dtype

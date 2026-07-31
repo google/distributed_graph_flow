@@ -30,8 +30,8 @@ class RegressionHeadConfig(common.ArchitectureProvider):
   """Configuration for a regression head.
 
   This head consists of a single dense layer, mapping an input embedding to
-  logits of shape [batch, 1]. It does not apply any normalization,
-  dropout, or activation function.
+  logits of shape [batch, 1] (or [batch, num_outputs]). It does not apply any
+  normalization, dropout, or activation function.
 
   To convert the output logits to predictions, use the
   `RegressionHead.logits_to_predictions` static method.
@@ -46,12 +46,13 @@ class RegressionHeadConfig(common.ArchitectureProvider):
     predictions = RegressionHead.logits_to_predictions(logits)
     ```
   """
+  num_outputs: int = 1
 
   def make(self, name: Optional[str] = None) -> "RegressionHead":
     return RegressionHead(config=self, name=name)
 
   def architecture(self) -> str:
-    return "Dense(1) # Regression head"
+    return f"Dense({self.num_outputs}) # Regression head"
 
 
 class RegressionHead(nn.Module):
@@ -61,17 +62,19 @@ class RegressionHead(nn.Module):
 
   @nn.compact
   def __call__(self, x: jnp.ndarray, training: bool) -> jnp.ndarray:
-    logits = nn.Dense(1)(x)
+    logits = nn.Dense(self.config.num_outputs)(x)
     return logits
 
   @staticmethod
   def logits_to_predictions(logits: jnp.ndarray) -> jnp.ndarray:
-    """Converts logits to predictions (squeezes the last unit dim).
+    """Converts logits to predictions (squeezes the last unit dim if size 1).
 
     Args:
-      logits: A jnp.Array of shape [batch, 1].
+      logits: A jnp.Array of shape [batch, num_outputs].
 
     Returns:
-      A jnp.Array of shape [batch] with predictions.
+      A jnp.Array of shape [batch] (if num_outputs==1) or [batch, num_outputs].
     """
-    return jnp.squeeze(logits, axis=-1)
+    if logits.shape[-1] == 1:
+      return jnp.squeeze(logits, axis=-1)
+    return logits

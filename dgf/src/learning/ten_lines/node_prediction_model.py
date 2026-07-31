@@ -518,6 +518,7 @@ class NodePredictionModel(common.Model):
     total_squared_error = jnp.array(0.0)
     sum_labels = jnp.array(0.0)
     sum_squared_labels = jnp.array(0.0)
+    num_elements = 0
 
     if seed_node_idxs is None:
       # Consider all the seed nodes
@@ -550,6 +551,7 @@ class NodePredictionModel(common.Model):
         total_squared_error += jnp.sum(jnp.square(labels - batch.predictions))
         sum_labels += jnp.sum(labels)
         sum_squared_labels += jnp.sum(jnp.square(labels))
+        num_elements += labels.size
       else:
         predictions = jnp.argmax(batch.predictions, axis=-1)
         num_good_predictions += jnp.sum(labels == predictions)
@@ -560,14 +562,14 @@ class NodePredictionModel(common.Model):
         )
 
     if self._data.task.task_type == TaskType.NODE_REGRESSION:
-      mean_labels = sum_labels / num_examples
-      total_sum_squares = sum_squared_labels - num_examples * jnp.square(
+      mean_labels = sum_labels / num_elements
+      total_sum_squares = sum_squared_labels - num_elements * jnp.square(
           mean_labels
       )
       r2 = 1 - total_squared_error / total_sum_squares
 
       return evaluation.Evaluation(
-          rmse=np.sqrt(total_squared_error.item() / num_examples),
+          rmse=np.sqrt(total_squared_error.item() / num_elements),
           r2=r2.item(),
           num_examples=num_examples,
       )
