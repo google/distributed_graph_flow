@@ -1,6 +1,10 @@
 #!/bin/bash
 # This script runs in the exported directory to prepare the build and run Docker.
 # This script IS exported by copybara.
+
+# Warning: Make sure to update the DGF version before creating a new pip:
+# - third_party/py/dgf/setup.py
+
 set -vex
 
 sudo apt-get install -y patchelf
