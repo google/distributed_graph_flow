@@ -62,6 +62,7 @@ py_library(
     deps = [
         ":registry",
         ":standard",
+        ":timeseries_cnn",
         # dataclasses_json dep,
         "//dgf/src/data:jax_in_memory_graph",
         "//dgf/src/data:schema",

@@ -301,12 +301,13 @@ class LayersTest(parameterized.TestCase):
     node_embs = homo_graph.node_sets["nodes"].features["initial_state"]
     self.assertFalse(jnp.allclose(node_embs[0], node_embs[1]))
 
-
-  def test_embed_feature_set_ignores_timeseries(self):
-    batch_size = 4
-    seq_len = 10
-    embedding_dim = 16
-    categorical_embed_dim = 32
+  def test_embed_feature_set_static_and_timeseries(self):
+    batch_size = 2
+    seq_len = 4
+    static_feature_dim = 4
+    ts_feature_dim = 2
+    categorical_embed_dim = 8
+    timeseries_embedding_dim = 8
 
     input_schema = {
         "cat_static": schema_lib.FeatureSchema(
@@ -315,17 +316,24 @@ class LayersTest(parameterized.TestCase):
             num_categorical_values=5,
             is_timeseries=False,
         ),
+        "embed_static": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=(static_feature_dim,),
+            is_timeseries=False,
+        ),
         "cat_ts": schema_lib.FeatureSchema(
             format=schema_lib.FeatureFormat.INTEGER_32,
             semantic=schema_lib.FeatureSemantic.CATEGORICAL,
             num_categorical_values=10,
+            shape=(seq_len,),
             is_timeseries=True,
             group="events",
         ),
         "embed_ts": schema_lib.FeatureSchema(
             format=schema_lib.FeatureFormat.FLOAT_32,
             semantic=schema_lib.FeatureSemantic.EMBEDDING,
-            shape=(seq_len, embedding_dim),
+            shape=(seq_len, ts_feature_dim),
             is_timeseries=True,
             group="events",
         ),
@@ -335,47 +343,188 @@ class LayersTest(parameterized.TestCase):
         "cat_static": jax.random.randint(
             jax.random.PRNGKey(1), (batch_size,), 0, 5, dtype=jnp.int32
         ),
+        "embed_static": jnp.ones(
+            (batch_size, static_feature_dim), dtype=jnp.float32
+        ),
         "cat_ts": jax.random.randint(
             jax.random.PRNGKey(2), (batch_size, seq_len), 0, 10, dtype=jnp.int32
         ),
         "embed_ts": jnp.ones(
-            (batch_size, seq_len, embedding_dim), dtype=jnp.float32
+            (batch_size, seq_len, ts_feature_dim), dtype=jnp.float32
         ),
     }
 
     config = lib.EmbedFeatureSetConfig(
-        categorical_feature_embedding_dim=categorical_embed_dim
+        categorical_feature_embedding_dim=categorical_embed_dim,
+        timeseries_embedding_dim=timeseries_embedding_dim,
     )
     embedder = config.make(schema=input_schema)
 
-    with mock.patch.object(lib.log, "warning") as mock_warn:
-      variables = embedder.init(
-          jax.random.PRNGKey(0), input_data, training=False
-      )
-      self.assertEqual(mock_warn.call_count, 2)
-      self.assertEqual(
-          list(variables["params"]["EmbedFeatureGroups_0"].keys()),
-          ["embed_cat_static"],
-      )
-      output = embedder.apply(variables, input_data, training=False)
-      self.assertEqual(mock_warn.call_count, 4)
+    variables = embedder.init(jax.random.PRNGKey(0), input_data, training=False)
+    output = embedder.apply(variables, input_data, training=False)
 
+    expected_dim = (
+        categorical_embed_dim + static_feature_dim + timeseries_embedding_dim
+    )
     self.assertIsNotNone(output)
-    self.assertEqual(output.shape, (batch_size, categorical_embed_dim))
+    self.assertEqual(output.shape, (batch_size, expected_dim))
 
-    with mock.patch.object(lib.log, "warning") as mock_warn:
-      out_schema = config.output_schema(input_schema)
-      self.assertEqual(mock_warn.call_count, 2)
+    params = variables["params"]
+    self.assertIn("EmbedFeatureGroups_0", params)
+    self.assertIn("timeseries_encoder_events", params)
 
+    out_schema = config.output_schema(input_schema)
     test_util.assert_are_equal(
         self,
         out_schema,
         schema_lib.FeatureSchema(
             format=schema_lib.FeatureFormat.FLOAT_32,
             semantic=schema_lib.FeatureSemantic.EMBEDDING,
-            shape=(categorical_embed_dim,),
+            shape=(expected_dim,),
         ),
     )
+
+  def test_embed_feature_set_timeseries_only_multiple_groups(self):
+    batch_size = 2
+    seq_len_a = 4
+    seq_len_b = 5
+    dim_a = 2
+    dim_b = 3
+    timeseries_embedding_dim = 8
+
+    input_schema = {
+        "feat_a": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=(seq_len_a, dim_a),
+            is_timeseries=True,
+            group="group_a",
+        ),
+        "feat_b": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=(seq_len_b, dim_b),
+            is_timeseries=True,
+            group="group_b",
+        ),
+    }
+
+    input_data = {
+        "feat_a": jnp.ones((batch_size, seq_len_a, dim_a), dtype=jnp.float32),
+        "feat_b": (
+            jnp.ones((batch_size, seq_len_b, dim_b), dtype=jnp.float32) * 2.0
+        ),
+    }
+
+    config = lib.EmbedFeatureSetConfig(
+        timeseries_embedding_dim=timeseries_embedding_dim
+    )
+    embedder = config.make(schema=input_schema)
+
+    variables = embedder.init(jax.random.PRNGKey(0), input_data, training=False)
+    output = embedder.apply(variables, input_data, training=False)
+
+    expected_dim = timeseries_embedding_dim * 2
+    self.assertIsNotNone(output)
+    self.assertEqual(output.shape, (batch_size, expected_dim))
+
+    params = variables["params"]
+    self.assertIn("timeseries_encoder_group_a", params)
+    self.assertIn("timeseries_encoder_group_b", params)
+
+    out_schema = config.output_schema(input_schema)
+    test_util.assert_are_equal(
+        self,
+        out_schema,
+        schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=(expected_dim,),
+        ),
+    )
+
+  def test_embed_feature_set_timeseries_with_mask(self):
+    batch_size = 2
+    seq_len = 4
+    dim_a = 3
+    timeseries_embedding_dim = 8
+
+    input_schema = {
+        "feat_a": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=(seq_len, dim_a),
+            is_timeseries=True,
+            group="group_a",
+        ),
+        "feat_a_mask": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.BOOL,
+            semantic=schema_lib.FeatureSemantic.MASK,
+            shape=(seq_len,),
+            is_timeseries=True,
+            group="group_a",
+        ),
+    }
+
+    mask = jnp.array(
+        [[True, True, False, False], [True, False, False, False]],
+        dtype=jnp.bool_,
+    )
+    x_clean = jax.random.normal(
+        jax.random.PRNGKey(7), (batch_size, seq_len, dim_a)
+    )
+    corruption = jnp.where(~mask[:, :, None], 999.0, 0.0)
+    x_corrupted = x_clean + corruption
+
+    input_clean = {"feat_a": x_clean, "feat_a_mask": mask}
+    input_corrupted = {"feat_a": x_corrupted, "feat_a_mask": mask}
+
+    config = lib.EmbedFeatureSetConfig(
+        timeseries_embedding_dim=timeseries_embedding_dim
+    )
+    embedder = config.make(schema=input_schema)
+
+    variables = embedder.init(
+        jax.random.PRNGKey(0), input_clean, training=False
+    )
+    out_clean = embedder.apply(variables, input_clean, training=False)
+    out_corrupted = embedder.apply(variables, input_corrupted, training=False)
+
+    self.assertEqual(out_clean.shape, (batch_size, timeseries_embedding_dim))
+    self.assertTrue(jnp.allclose(out_clean, out_corrupted, atol=1e-5))
+
+  def test_embed_feature_set_empty_schema(self):
+    config = lib.EmbedFeatureSetConfig()
+    embedder = config.make(schema={})
+    variables = embedder.init(jax.random.PRNGKey(0), {}, training=False)
+    output = embedder.apply(variables, {}, training=False)
+    self.assertIsNone(output)
+    self.assertIsNone(config.output_schema({}))
+
+  @parameterized.named_parameters(
+      ("none_shape", None),
+      ("empty_shape", ()),
+      ("none_dimension", (None,)),
+  )
+  def test_embed_feature_set_invalid_static_embedding_shape(self, shape):
+    config = lib.EmbedFeatureSetConfig()
+    bad_groups_schema = {
+        "embedding": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=shape,
+        )
+    }
+    with mock.patch.object(
+        lib.EmbedFeatureGroupsConfig,
+        "output_schema",
+        return_value=bad_groups_schema,
+    ):
+      with self.assertRaisesRegex(
+          ValueError,
+          r"Static embedding 'embedding' in groups_schema has invalid shape:",
+      ):
+        config.output_schema({})
 
   def test_embed_feature_groups_static_and_timeseries(self):
     batch_size = 4

@@ -18,9 +18,10 @@ This module provides layers for embedding and transforming graph features,
 preparing them for input into graph neural networks.
 
 The main layers are:
-  - EmbedFeatureSet: Embeds a set of static features for a node or edge set into
-    a single dense embedding vector. It handles categorical and pre-embedded
-    features while ignoring timeseries features.
+  - EmbedFeatureSet: Embeds static and timeseries sequence features for a node
+    or edge set into a single dense embedding vector. Static features are
+    embedded and concatenated, and timeseries groups are encoded via
+    TimeseriesCNNEncoder and concatenated into the final representation.
   - EmbedFeatureGroups: Embeds static features and timeseries sequence groups,
     producing named embedding and mask feature arrays alongside their schemas.
   - EmbedGraph: Applies EmbedFeatureSet to all node sets within a graph,
@@ -40,12 +41,13 @@ All the layers follow the 3 steps:
 
 import collections
 import dataclasses
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import dataclasses_json
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.learning.jax import common
 from dgf.src.learning.jax.layers import standard
+from dgf.src.learning.jax.layers import timeseries_cnn
 from dgf.src.learning.jax.layers.registry import registry as layer_registry
 from dgf.src.transform import homogenize as homogenize_lib
 from dgf.src.util import log
@@ -468,9 +470,12 @@ class EmbedFeatureSetConfig:
   Attributes:
     categorical_feature_embedding_dim: The dimension of the embedding for
       categorical features.
+    timeseries_embedding_dim: The dimension of the embedding for each timeseries
+      sequence group.
   """
 
   categorical_feature_embedding_dim: int = 64
+  timeseries_embedding_dim: int = 64
 
   def make(
       self, schema: schema_lib.FeatureSetSchema, name: Optional[str] = None
@@ -480,30 +485,53 @@ class EmbedFeatureSetConfig:
   def output_schema(
       self, schema: schema_lib.FeatureSetSchema
   ) -> Optional[schema_lib.FeatureSchema]:
-    for feature_name, feature_schema in schema.items():
-      if feature_schema.is_timeseries:
-        log.warning(
-            f"Timeseries feature {feature_name!r} is ignored in output schema"
-            " calculation for EmbedFeatureSet."
-        )
-    static_schema = {
-        feature_name: feature_schema
-        for feature_name, feature_schema in schema.items()
-        if not feature_schema.is_timeseries
-        and feature_schema.semantic != schema_lib.FeatureSemantic.MASK
-    }
     groups_config = EmbedFeatureGroupsConfig(
         categorical_feature_embedding_dim=self.categorical_feature_embedding_dim
     )
-    return groups_config.output_schema(static_schema).get("embedding", None)
+    groups_schema = groups_config.output_schema(schema)
+
+    total_dim = 0
+    for feat_name, feat_schema in groups_schema.items():
+      if feat_schema.semantic != schema_lib.FeatureSemantic.EMBEDDING:
+        # Skip masks
+        assert feat_schema.semantic == schema_lib.FeatureSemantic.MASK
+        continue
+      if feat_schema.is_timeseries:
+        total_dim += self.timeseries_embedding_dim
+      else:
+        static_shape = feat_schema.shape
+        if (
+            static_shape is None
+            or len(static_shape) == 0
+            or static_shape[0] is None
+        ):
+          raise ValueError(
+              f"Static embedding {feat_name!r} in groups_schema has invalid"
+              f" shape: {static_shape}."
+          )
+        total_dim += static_shape[0]
+
+    if total_dim == 0:
+      return None
+
+    return schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.EMBEDDING,
+        shape=(total_dim,),
+    )
 
 
 class EmbedFeatureSet(nn.Module):
-  """Computes a fixed sized dense embedding for static feature values.
+  """Computes a fixed sized dense embedding for static and timeseries feature values.
 
   This module delegates to `EmbedFeatureGroups` to embed static features into
   a single concatenated dense embedding of shape `(batch_size, static_dim)`,
-  while ignoring any timeseries sequence features and masks.
+  and to embed each timeseries sequence group `g` into `(batch_size, seq_len,
+  ts_dim)` with mask `(batch_size, seq_len)`. Each sequence group is then
+  encoded into a `(batch_size, timeseries_embedding_dim)` embedding via
+  `TimeseriesCNNEncoder`. Finally, all static and timeseries group embeddings
+  are concatenated along the last axis to produce a single dense embedding of
+  shape `(batch_size, total_dim)`.
 
   Attributes:
     config: The configuration for this layer.
@@ -514,7 +542,7 @@ class EmbedFeatureSet(nn.Module):
 
   ```python
 
-  # Define a schema
+  # Define a schema with static and timeseries features
   feature_schema = {
       "embedding_feature": schema_lib.FeatureSchema(
           format=schema_lib.FeatureFormat.FLOAT_32,
@@ -526,6 +554,13 @@ class EmbedFeatureSet(nn.Module):
           semantic=schema_lib.FeatureSemantic.CATEGORICAL,
           num_categorical_values=10,
       ),
+      "events_embed": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.FLOAT_32,
+          semantic=schema_lib.FeatureSemantic.EMBEDDING,
+          shape=(8, 4),
+          is_timeseries=True,
+          group="events",
+      ),
   }
 
   # Instantiate the module
@@ -535,6 +570,7 @@ class EmbedFeatureSet(nn.Module):
   input = {
       "embedding_feature": jnp.ones((1, 16), dtype=jnp.float32),
       "categorical_feature": jnp.array([3], dtype=jnp.int64),
+      "events_embed": jnp.ones((1, 8, 4), dtype=jnp.float32),
   }
 
   # Initialize and apply the module
@@ -552,23 +588,47 @@ class EmbedFeatureSet(nn.Module):
       features: jax_in_memory_graph.Features,
       training: bool,
   ) -> Optional[jnp.ndarray]:
-    for feature_name, feature_schema in self.schema.items():
-      if feature_schema.is_timeseries:
-        log.warning(
-            f"Timeseries feature {feature_name!r} is ignored in"
-            " EmbedFeatureSet."
-        )
-    static_schema = {
-        feature_name: feature_schema
-        for feature_name, feature_schema in self.schema.items()
-        if not feature_schema.is_timeseries
-        and feature_schema.semantic != schema_lib.FeatureSemantic.MASK
-    }
-    groups_embedder = EmbedFeatureGroupsConfig(
+    groups_config = EmbedFeatureGroupsConfig(
         categorical_feature_embedding_dim=self.config.categorical_feature_embedding_dim
-    ).make(schema=static_schema)
-    outputs = groups_embedder(features, training=training)
-    return outputs.get("embedding", None)
+    )
+    groups_embedder = groups_config.make(schema=self.schema)
+    groups_outputs = groups_embedder(features, training=training)
+    groups_schemas = groups_config.output_schema(self.schema)
+
+    ts_encoder_config = timeseries_cnn.TimeseriesCNNEncoderConfig(
+        out_dim=self.config.timeseries_embedding_dim
+    )
+    embeddings_to_concat = []
+    for feat_name, feat_schema in groups_schemas.items():
+      if feat_schema.semantic != schema_lib.FeatureSemantic.EMBEDDING:
+        # Skip masks
+        assert feat_schema.semantic == schema_lib.FeatureSemantic.MASK
+        continue
+      if feat_schema.is_timeseries:
+        group_name = feat_schema.group
+        mask_key = f"mask_{group_name}"
+        encoder = ts_encoder_config.make(
+            feature_schema=feat_schema,
+            mask_schema=groups_schemas.get(mask_key),
+            name=f"timeseries_encoder_{group_name}",
+        )
+        embedding = encoder(
+            groups_outputs[feat_name],
+            mask=groups_outputs.get(mask_key),
+            training=training,
+        )
+      else:
+        embedding = groups_outputs[feat_name]
+      embeddings_to_concat.append(embedding)
+
+    # No features to embed
+    if not embeddings_to_concat:
+      return None
+
+    if len(embeddings_to_concat) == 1:
+      return embeddings_to_concat[0]
+
+    return jnp.concatenate(embeddings_to_concat, axis=-1)
 
 
 @layer_registry.register
@@ -712,9 +772,8 @@ class EmbedAndHomogenizeGraph(nn.Module):
   graphs.
 
   Operations:
-    - For each nodeset, all its features are first processed into a dense
-      embedding using `EmbedFeatureSet` (note: timeseries sequence features are
-      ignored; only static features are homogenized).
+    - For each nodeset, all its static and timeseries sequence features are
+      first processed into a dense embedding using `EmbedFeatureSet`.
     - The combined embedding is then projected to a fixed size
       `node_embedding_dim` using a dense layer.
     - A learned, nodeset-specific type encoding is added to the
