@@ -291,6 +291,15 @@ class NodePredictionRealLooking(parameterized.TestCase):
     # Check the model class
     assert isinstance(restored_model, node_prediction_lib.NodePredictionModel)
 
+    # Check the model UUID
+    self.assertIsNotNone(self.model.metadata.uuid)
+    # The UUID is restored.
+    self.assertEqual(self.model.metadata.uuid, restored_model.metadata.uuid)
+    # The UUID is different than one for a new model.
+    self.assertNotEqual(
+        self.model.metadata.uuid, common_lib.Metadata(name="test").uuid
+    )
+
     # Check the model data
     test_util.assert_are_equal(self, self.model.data(), restored_model.data())  # pylint: disable=protected-access
 

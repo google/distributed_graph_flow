@@ -19,6 +19,7 @@ import dataclasses
 import enum
 import os
 from typing import Any, Dict, List, Literal, Optional, Type, Union
+import uuid
 import dataclasses_json
 from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import common as jax_common
@@ -212,11 +213,15 @@ class Metadata:
     version: The format version of the saved model metadata.
     name: The registered name of the model. Used to identify the model class.
     trainig_logs: The logs generated during model training.
+    uuid: A unique identifier for the model, generated at initialization.
   """
 
   name: str
   version: int = 1  # NOTE: Keep the last version as a default.
   trainig_logs: Optional[TrainingLogs] = None
+  uuid: Optional[str] = dataclasses.field(
+      default_factory=lambda: uuid.uuid4().hex
+  )
 
 
 # TODO(gbm): Structure / organize / populate
