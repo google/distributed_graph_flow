@@ -112,11 +112,12 @@ class TimeseriesTest(parameterized.TestCase):
         },
         num_nodes=2,
     )
-    new_graph, new_schema = timeseries.pad_and_cap_timeseries_features(
-        graph,
+    pad_and_cap = timeseries.PadAndCapTimeseries(
         schema,
         timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
     )
+    new_graph = pad_and_cap(graph)
+    new_schema = pad_and_cap.output_schema()
     hw_val = new_graph.node_sets["hardware"]
     hw_sch = new_schema.node_sets["hardware"]
 
@@ -192,11 +193,12 @@ class TimeseriesTest(parameterized.TestCase):
             ),
         },
     )
-    new_graph, new_schema = timeseries.pad_and_cap_timeseries_features(
-        graph,
+    pad_and_cap = timeseries.PadAndCapTimeseries(
         schema,
         timeseries.PadAndCapTimeseriesConfig(sequence_length=2),
     )
+    new_graph = pad_and_cap(graph)
+    new_schema = pad_and_cap.output_schema()
 
     np.testing.assert_array_equal(
         new_graph.node_sets["user"].features["age"], [30]
@@ -224,11 +226,12 @@ class TimeseriesTest(parameterized.TestCase):
             )
         },
     )
-    new_graph, new_schema = timeseries.pad_and_cap_timeseries_features(
-        graph,
+    pad_and_cap = timeseries.PadAndCapTimeseries(
         schema,
         timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
     )
+    new_graph = pad_and_cap(graph)
+    new_schema = pad_and_cap.output_schema()
     hw_val = new_graph.node_sets["hardware"]
     hw_sch = new_schema.node_sets["hardware"]
 
@@ -274,11 +277,12 @@ class TimeseriesTest(parameterized.TestCase):
             ),
         },
     )
-    new_graph, new_schema = timeseries.pad_and_cap_timeseries_features(
-        graph,
+    pad_and_cap = timeseries.PadAndCapTimeseries(
         schema,
         timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
     )
+    new_graph = pad_and_cap(graph)
+    new_schema = pad_and_cap.output_schema()
     hw_val = new_graph.node_sets["hardware"]
     hw_sch = new_schema.node_sets["hardware"]
 
@@ -294,7 +298,7 @@ class TimeseriesTest(parameterized.TestCase):
     self.assertNotIn("emb_mask", hw_sch.features)
 
   def test_clashing_mask_name_raises(self):
-    graph, schema = _make_graph_and_schema(
+    _, schema = _make_graph_and_schema(
         values={
             "emb": np.array(
                 [np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)],
@@ -324,14 +328,14 @@ class TimeseriesTest(parameterized.TestCase):
             ),
         },
     )
+    pad_and_cap = timeseries.PadAndCapTimeseries(
+        schema,
+        timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
+    )
     with self.assertRaisesRegex(
         ValueError, "clashes with an existing feature"
     ):
-      timeseries.pad_and_cap_timeseries_features(
-          graph,
-          schema,
-          timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
-      )
+      pad_and_cap.output_schema()
 
   def test_pad_and_cap_timeseries_features_auto_assigns_group_when_none(self):
     graph, schema = _make_graph_and_schema(
@@ -351,11 +355,12 @@ class TimeseriesTest(parameterized.TestCase):
         },
         num_nodes=1,
     )
-    new_graph, new_schema = timeseries.pad_and_cap_timeseries_features(
-        graph,
+    pad_and_cap = timeseries.PadAndCapTimeseries(
         schema,
         timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
     )
+    new_graph = pad_and_cap(graph)
+    new_schema = pad_and_cap.output_schema()
     hw_sch = new_schema.node_sets["hardware"]
     self.assertEqual(hw_sch.features["signal"].group, "signal")
     self.assertIn("signal_mask", new_graph.node_sets["hardware"].features)
@@ -371,11 +376,11 @@ class TimeseriesTest(parameterized.TestCase):
             )
         },
     )
-    new_graph, _ = timeseries.pad_and_cap_timeseries_features(
-        graph,
+    pad_and_cap = timeseries.PadAndCapTimeseries(
         schema,
         timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
     )
+    new_graph = pad_and_cap(graph)
     hw_val = new_graph.node_sets["hardware"]
     np.testing.assert_array_equal(hw_val.features["time"][0], [0, 0, 0])
     np.testing.assert_array_equal(hw_val.features["time_mask"][0], [0, 0, 0])
@@ -390,9 +395,10 @@ class TimeseriesTest(parameterized.TestCase):
             )
         },
     )
-    new_graph, _ = timeseries.pad_and_cap_timeseries_features(
-        graph, schema, timeseries.PadAndCapTimeseriesConfig()
+    pad_and_cap = timeseries.PadAndCapTimeseries(
+        schema, timeseries.PadAndCapTimeseriesConfig()
     )
+    new_graph = pad_and_cap(graph)
     self.assertEqual(new_graph.node_sets["hardware"].features["age"][0], 30)
     self.assertNotIn("age_mask", new_graph.node_sets["hardware"].features)
 
@@ -419,9 +425,11 @@ class TimeseriesTest(parameterized.TestCase):
         },
         edge_sets={},
     )
-    new_graph, new_schema = timeseries.pad_and_cap_timeseries_features(
-        graph, schema, timeseries.PadAndCapTimeseriesConfig(sequence_length=3)
+    pad_and_cap = timeseries.PadAndCapTimeseries(
+        schema, timeseries.PadAndCapTimeseriesConfig(sequence_length=3)
     )
+    new_graph = pad_and_cap(graph)
+    new_schema = pad_and_cap.output_schema()
     user_val = new_graph.node_sets["user"]
     user_sch = new_schema.node_sets["user"]
     self.assertEqual(user_val.num_nodes, 0)
@@ -449,12 +457,14 @@ class TimeseriesTest(parameterized.TestCase):
         },
         edge_sets={},
     )
+    pad_and_cap = timeseries.PadAndCapTimeseries(
+        schema, timeseries.PadAndCapTimeseriesConfig(sequence_length=3)
+    )
     with self.assertRaises(KeyError):
-      timeseries.pad_and_cap_timeseries_features(
-          graph, schema, timeseries.PadAndCapTimeseriesConfig(sequence_length=3)
-      )
+      pad_and_cap(graph)
+    extractor = timeseries.CalendarFeatureExtractor(schema)
     with self.assertRaises(KeyError):
-      timeseries.extract_calendar_features(graph, schema)
+      extractor(graph)
 
   def test_missing_feature_raises(self):
     graph, schema = _make_graph_and_schema(
@@ -466,14 +476,15 @@ class TimeseriesTest(parameterized.TestCase):
             )
         },
     )
+    pad_and_cap = timeseries.PadAndCapTimeseries(
+        schema,
+        timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
+    )
     with self.assertRaises(KeyError):
-      timeseries.pad_and_cap_timeseries_features(
-          graph,
-          schema,
-          timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
-      )
+      pad_and_cap(graph)
+    extractor = timeseries.CalendarFeatureExtractor(schema)
     with self.assertRaises(KeyError):
-      timeseries.extract_calendar_features(graph, schema)
+      extractor(graph)
 
   def test_custom_padding_value(self):
     graph, schema = _make_graph_and_schema(
@@ -493,13 +504,13 @@ class TimeseriesTest(parameterized.TestCase):
         },
         num_nodes=1,
     )
-    new_graph, _ = timeseries.pad_and_cap_timeseries_features(
-        graph,
+    pad_and_cap = timeseries.PadAndCapTimeseries(
         schema,
         timeseries.PadAndCapTimeseriesConfig(
             sequence_length=3, padding_value=-1
         ),
     )
+    new_graph = pad_and_cap(graph)
     hw_val = new_graph.node_sets["hardware"]
     expected_features = {
         "time": np.array([[-1, -1, 10]], dtype=np.int64),
@@ -527,11 +538,11 @@ class TimeseriesTest(parameterized.TestCase):
         },
         num_nodes=2,
     )
-    new_graph, _ = timeseries.pad_and_cap_timeseries_features(
-        graph,
+    pad_and_cap = timeseries.PadAndCapTimeseries(
         schema,
         timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
     )
+    new_graph = pad_and_cap(graph)
     hw_val = new_graph.node_sets["hardware"]
     expected_features = {
         "time": np.array([[30, 40, 50], [300, 400, 500]], dtype=np.int64),
@@ -561,13 +572,13 @@ class TimeseriesTest(parameterized.TestCase):
         },
         num_nodes=2,
     )
-    new_graph, _ = timeseries.pad_and_cap_timeseries_features(
-        graph,
+    pad_and_cap = timeseries.PadAndCapTimeseries(
         schema,
         timeseries.PadAndCapTimeseriesConfig(
             sequence_length=3, padding_value=-1.0
         ),
     )
+    new_graph = pad_and_cap(graph)
     hw_val = new_graph.node_sets["hardware"]
     expected_features = {
         "emb": np.array(
@@ -627,14 +638,16 @@ class TimeseriesTest(parameterized.TestCase):
             )
         },
     )
-    padded_graph, padded_schema = timeseries.pad_and_cap_timeseries_features(
-        graph,
+    pad_and_cap = timeseries.PadAndCapTimeseries(
         schema,
         timeseries.PadAndCapTimeseriesConfig(sequence_length=2),
     )
-    cal_graph, cal_schema = timeseries.extract_calendar_features(
-        padded_graph, padded_schema
-    )
+    padded_graph = pad_and_cap(graph)
+    padded_schema = pad_and_cap.output_schema()
+
+    cal_extractor = timeseries.CalendarFeatureExtractor(padded_schema)
+    cal_graph = cal_extractor(padded_graph)
+    cal_schema = cal_extractor.output_schema()
 
     hw_val = cal_graph.node_sets["hardware"]
     hw_sch = cal_schema.node_sets["hardware"]
@@ -685,11 +698,12 @@ class TimeseriesTest(parameterized.TestCase):
             )
         },
     )
+    extractor = timeseries.CalendarFeatureExtractor(schema)
     with self.assertRaisesRegex(
-        ValueError,
-        "extract_calendar_features requires fixed-length timestamp tensors",
+        AssertionError,
+        "CalendarFeatureExtractor requires fixed-length timestamp tensors",
     ):
-      timeseries.extract_calendar_features(graph, schema)
+      extractor(graph)
 
   def test_extract_calendar_features_non_timeseries(self):
     graph, schema = _make_graph_and_schema(
@@ -710,7 +724,9 @@ class TimeseriesTest(parameterized.TestCase):
         },
         edge_set_name="static_edges",
     )
-    cal_graph, cal_schema = timeseries.extract_calendar_features(graph, schema)
+    extractor = timeseries.CalendarFeatureExtractor(schema)
+    cal_graph = extractor(graph)
+    cal_schema = extractor.output_schema()
     self.assertIn("static_nodes", cal_graph.node_sets)
     self.assertIn("static_edges", cal_graph.edge_sets)
     self.assertEqual(
@@ -735,7 +751,9 @@ class TimeseriesTest(parameterized.TestCase):
         },
         edge_set_name="ts_edges",
     )
-    cal_graph, cal_schema = timeseries.extract_calendar_features(graph, schema)
+    extractor = timeseries.CalendarFeatureExtractor(schema)
+    cal_graph = extractor(graph)
+    cal_schema = extractor.output_schema()
     self.assertIn("time_hour", cal_graph.edge_sets["ts_edges"].features)
     self.assertIn("time_second", cal_graph.edge_sets["ts_edges"].features)
     np.testing.assert_array_equal(
@@ -756,7 +774,9 @@ class TimeseriesTest(parameterized.TestCase):
             )
         },
     )
-    cal_graph, cal_schema = timeseries.extract_calendar_features(graph, schema)
+    extractor = timeseries.CalendarFeatureExtractor(schema)
+    cal_graph = extractor(graph)
+    cal_schema = extractor.output_schema()
     hw_val = cal_graph.node_sets["hardware"]
     hw_sch = cal_schema.node_sets["hardware"]
 
@@ -770,7 +790,7 @@ class TimeseriesTest(parameterized.TestCase):
 
   def test_extract_calendar_features_parent_timestamp(self):
     # Timestamp feature with group.
-    graph, schema = _make_graph_and_schema(
+    _, schema = _make_graph_and_schema(
         values={
             "event_time": np.array([[65, 3665]], dtype=np.int64),
             "master_time": np.array([[65, 3665]], dtype=np.int64),
@@ -791,7 +811,8 @@ class TimeseriesTest(parameterized.TestCase):
             ),
         },
     )
-    _, cal_schema = timeseries.extract_calendar_features(graph, schema)
+    extractor = timeseries.CalendarFeatureExtractor(schema)
+    cal_schema = extractor.output_schema()
     hw_sch = cal_schema.node_sets["hardware"]
     self.assertEqual(
         hw_sch.features["event_time_hour"].group, "master_time"
@@ -814,17 +835,18 @@ class TimeseriesTest(parameterized.TestCase):
             )
         },
     )
-    padded_graph, padded_schema = timeseries.pad_and_cap_timeseries_features(
-        graph,
+    pad_and_cap = timeseries.PadAndCapTimeseries(
         schema,
         timeseries.PadAndCapTimeseriesConfig(sequence_length=4),
     )
-    delta_graph, delta_schema = timeseries.extract_timestamp_features(
-        padded_graph,
-        padded_schema,
-        seed_timestamp=500,
-        config=timeseries.TimestampFeatureConfig(),
+    padded_graph = pad_and_cap(graph)
+    padded_schema = pad_and_cap.output_schema()
+
+    ts_extractor = timeseries.TimestampFeatureExtractor(
+        padded_schema, config=timeseries.TimestampFeatureExtractorConfig()
     )
+    delta_graph = ts_extractor(padded_graph, seed_timestamp=500)
+    delta_schema = ts_extractor.output_schema()
 
     hw_val = delta_graph.node_sets["hardware"]
     hw_sch = delta_schema.node_sets["hardware"]
@@ -873,19 +895,32 @@ class TimeseriesTest(parameterized.TestCase):
             shape=(),
         )
     }
-    new_vals, new_schs = timeseries._extract_feature_set_timestamp_features(
-        values, schemas, timeseries.TimestampFeatureConfig(), seed_timestamp=500
+    graph = in_memory_graph.InMemoryGraph(
+        node_sets={
+            "hardware": in_memory_graph.InMemoryNodeSet(
+                num_nodes=2, features=values
+            )
+        },
+        edge_sets={},
     )
+    schema = schema_lib.GraphSchema(
+        node_sets={"hardware": schema_lib.NodeSchema(features=schemas)},
+        edge_sets={},
+    )
+    extractor = timeseries.TimestampFeatureExtractor(schema)
+    new_graph = extractor(graph, seed_timestamp=500)
+    new_schema = extractor.output_schema()
     np.testing.assert_array_equal(
-        new_vals["created_at_seed_delta"], [435, -1679999515]
+        new_graph.node_sets["hardware"].features["created_at_seed_delta"],
+        [435, -1679999515],
     )
-    self.assertFalse(new_schs["created_at_seed_delta"].is_timeseries)
+    self.assertFalse(
+        new_schema.node_sets["hardware"]
+        .features["created_at_seed_delta"]
+        .is_timeseries
+    )
 
   def test_extract_timestamp_features_parent_timestamp(self):
-    values = {
-        "event_time": np.array([[65, 3665]], dtype=np.int64),
-        "master_time": np.array([[65, 3665]], dtype=np.int64),
-    }
     schemas = {
         "event_time": _ts_schema(
             sem=schema_lib.FeatureSemantic.TIMESTAMP,
@@ -898,17 +933,21 @@ class TimeseriesTest(parameterized.TestCase):
             shape=(2,),
         ),
     }
-    _, new_schs = timeseries._extract_feature_set_timestamp_features(
-        values, schemas, timeseries.TimestampFeatureConfig(), seed_timestamp=500
+    schema = schema_lib.GraphSchema(
+        node_sets={"hardware": schema_lib.NodeSchema(features=schemas)},
+        edge_sets={},
+    )
+    extractor = timeseries.TimestampFeatureExtractor(schema)
+    new_schema = extractor.output_schema()
+    hw_sch = new_schema.node_sets["hardware"]
+    self.assertEqual(
+        hw_sch.features["event_time_seed_delta"].group, "master_time"
     )
     self.assertEqual(
-        new_schs["event_time_seed_delta"].group, "master_time"
+        hw_sch.features["master_time_seed_delta"].group, "master_time"
     )
     self.assertEqual(
-        new_schs["master_time_seed_delta"].group, "master_time"
-    )
-    self.assertEqual(
-        new_schs["event_time_seed_delta"].semantic,
+        hw_sch.features["event_time_seed_delta"].semantic,
         schema_lib.FeatureSemantic.TIMEDELTA,
     )
 
@@ -926,16 +965,14 @@ class TimeseriesTest(parameterized.TestCase):
             )
         },
     )
+    extractor = timeseries.TimestampFeatureExtractor(
+        schema, config=timeseries.TimestampFeatureExtractorConfig()
+    )
     with self.assertRaisesRegex(
-        ValueError,
-        "extract_timestamp_features requires fixed-length timestamp tensors",
+        AssertionError,
+        "TimestampFeatureExtractor requires fixed-length timestamp tensors",
     ):
-      timeseries.extract_timestamp_features(
-          graph,
-          schema,
-          seed_timestamp=500,
-          config=timeseries.TimestampFeatureConfig(),
-      )
+      extractor(graph, seed_timestamp=500)
 
   def test_extract_timestamp_features_edge_sets(self):
     graph, schema = _make_graph_and_schema(
@@ -962,10 +999,11 @@ class TimeseriesTest(parameterized.TestCase):
         shape=(2,),
     )
 
-    delta_graph, delta_schema = timeseries.extract_timestamp_features(
-        graph,
-        schema, seed_timestamp=500, config=timeseries.TimestampFeatureConfig(),
+    extractor = timeseries.TimestampFeatureExtractor(
+        schema, config=timeseries.TimestampFeatureExtractorConfig()
     )
+    delta_graph = extractor(graph, seed_timestamp=500)
+    delta_schema = extractor.output_schema()
     es_val = delta_graph.edge_sets["ts_edges"]
     es_sch = delta_schema.edge_sets["ts_edges"]
 
@@ -984,11 +1022,23 @@ class TimeseriesTest(parameterized.TestCase):
             semantic=schema_lib.FeatureSemantic.NUMERICAL,
         )
     }
-    new_vals, new_schs = timeseries._extract_feature_set_timestamp_features(
-        values, schemas, timeseries.TimestampFeatureConfig(), seed_timestamp=500
+    graph = in_memory_graph.InMemoryGraph(
+        node_sets={
+            "hardware": in_memory_graph.InMemoryNodeSet(
+                num_nodes=1, features=values
+            )
+        },
+        edge_sets={},
     )
-    self.assertEqual(new_vals, values)
-    self.assertEqual(new_schs, schemas)
+    schema = schema_lib.GraphSchema(
+        node_sets={"hardware": schema_lib.NodeSchema(features=schemas)},
+        edge_sets={},
+    )
+    extractor = timeseries.TimestampFeatureExtractor(schema)
+    new_graph = extractor(graph, seed_timestamp=500)
+    new_schema = extractor.output_schema()
+    self.assertEqual(new_graph.node_sets["hardware"].features, values)
+    self.assertEqual(new_schema.node_sets["hardware"].features, schemas)
 
   @parameterized.parameters(
       (np.array([[False, True, True]]), 0, [[0, 400, 250]]),

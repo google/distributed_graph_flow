@@ -506,7 +506,7 @@ class SinusoidTimedeltaNormalizer(AbstractFeatureNormalizer):
       raise ValueError(
           "SinusoidTimedeltaNormalizer requires fixed-length feature tensors,"
           f" but feature '{feature_name}' has a dynamic shape"
-          f" ({input_schema.shape}). Please run pad_and_cap_timeseries_features"
+          f" ({input_schema.shape}). Please run PadAndCapTimeseries"
           " first."
       )
 
@@ -539,7 +539,7 @@ class SinusoidTimedeltaNormalizer(AbstractFeatureNormalizer):
       raise ValueError(
           "SinusoidTimedeltaNormalizer requires fixed-length feature tensors,"
           f" but feature '{self.input_feature}' is a variable-length object"
-          " array. Please run pad_and_cap_timeseries_features first."
+          " array. Please run PadAndCapTimeseries first."
       )
 
     value = value.astype(np.float32)

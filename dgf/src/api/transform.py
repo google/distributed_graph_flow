@@ -51,10 +51,11 @@ from dgf.src.transform.homogenize import apply_feature
 from dgf.src.transform.temporal import propagate_timestamp_to_edges
 from dgf.src.transform.table_2_graph import table2graph
 
-from dgf.src.transform.timeseries import pad_and_cap_timeseries_features
+from dgf.src.transform.timeseries import CalendarFeature
+from dgf.src.transform.timeseries import CalendarFeatureExtractor
+from dgf.src.transform.timeseries import CalendarFeatureExtractorConfig
+from dgf.src.transform.timeseries import PadAndCapTimeseries
 from dgf.src.transform.timeseries import PadAndCapTimeseriesConfig
-from dgf.src.transform.timeseries import extract_calendar_features
-from dgf.src.transform.timeseries import CalendarFeatureConfig
-from dgf.src.transform.timeseries import extract_timestamp_features
-from dgf.src.transform.timeseries import TimestampFeatureConfig
+from dgf.src.transform.timeseries import TimestampFeatureExtractor
+from dgf.src.transform.timeseries import TimestampFeatureExtractorConfig
 
