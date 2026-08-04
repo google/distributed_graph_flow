@@ -14,9 +14,12 @@
 
 """Reader and writer for GF Graphs to/from Beam distributed graphs."""
 
+from __future__ import annotations
+
 import functools
 import os
 from typing import Any, Dict, List, Optional
+
 from dgf.src.analyse import schema as schema_analyse_lib
 from dgf.src.data import distributed_graph as distributed_graph_lib
 from dgf.src.data import gf_metadata as gf_metadata_lib
@@ -30,6 +33,8 @@ from dgf.src.util import shard as shard_lib
 from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 import numpy as np
 import pyarrow
+
+_ptransform_fn = beam.ptransform_fn if beam.is_available() else lambda x: x
 
 FILENAME_SCHEMA = graph_constants.FILENAME_SCHEMA
 FILENAME_METADATA = graph_constants.FILENAME_METADATA
@@ -176,7 +181,7 @@ def _raw_to_node(
   return distributed_graph_lib.Node(id=node_id, features=node_features)
 
 
-@beam.ptransform_fn
+@_ptransform_fn
 def read_node_set_features(
     pbegin: beam.pvalue.PBegin,
     file_pattern: str,
@@ -226,7 +231,7 @@ def _raw_to_edge(
   )
 
 
-@beam.ptransform_fn
+@_ptransform_fn
 def read_edge_set_features(
     pbegin: beam.pvalue.PBegin,
     file_pattern: str,

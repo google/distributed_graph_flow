@@ -14,9 +14,12 @@
 
 """Reading and writing HGraph in Beam."""
 
+from __future__ import annotations
+
 import logging
 import os
 from typing import Iterator, Optional, Tuple
+from typing import TYPE_CHECKING
 
 from dgf.src.data import distributed_graph
 from dgf.src.data import schema as schema_lib
@@ -24,7 +27,7 @@ from dgf.src.io import hgraph_in_memory
 from dgf.src.util import filesystem
 from dgf.src.util import proto as proto_lib
 from dgf.src.util import shard as shard_lib
-from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
+from dgf.src.util.weak_dep.weak_dep_apache_beam import PTransform, beam
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 from dgf.src.util.weak_dep.weak_dep_tensorflow_gnn import tf_gnn_proto
 import numpy as np
@@ -87,7 +90,7 @@ def read_graphai_hgraph(
   )
 
 
-class ReadFromHGraph(beam.PTransform):
+class ReadFromHGraph(PTransform):
   """Reads a distributed HGraph using Beam."""
 
   def __init__(
@@ -252,7 +255,7 @@ class ReadFromHGraph(beam.PTransform):
     )
 
 
-class ReadTfExampleContainer(beam.PTransform):
+class ReadTfExampleContainer(PTransform):
   """Reads a container of tf.train.Example."""
 
   def __init__(
@@ -281,7 +284,7 @@ class ReadTfExampleContainer(beam.PTransform):
       raise ValueError(f"Unsupported container type: {self.container_type}")
 
 
-class ReadNodeSet(beam.PTransform):
+class ReadNodeSet(PTransform):
   """Reads a container of nodes."""
 
   def __init__(
@@ -466,7 +469,7 @@ def tf_example_to_edge(
   )
 
 
-class ReadEdgeSet(beam.PTransform):
+class ReadEdgeSet(PTransform):
   """Reads flat edge sets from various formats."""
 
   def __init__(
@@ -502,7 +505,7 @@ class ReadEdgeSet(beam.PTransform):
       raise ValueError(f"Unsupported container type: {self.container_type}")
 
 
-class WriteTfExampleContainer(beam.PTransform):
+class WriteTfExampleContainer(PTransform):
   """Writes a container of tf.train.Example."""
 
   def __init__(

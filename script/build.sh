@@ -39,3 +39,22 @@ ${PYBIN} -m pip uninstall dgf -y
 ${PYBIN} -m pip install dist/dgf-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
 # export TF_USE_LEGACY_KERAS=1 # TF_USE_LEGACY_KERAS=1 is not needed for this toy example.
 ${PYBIN} script/toy.py
+
+echo "Setting up virtual environment at /tmp/venv_serving for testing serving..."
+deactivate || true
+
+if [ ! -f /tmp/venv_serving/bin/activate ]; then
+  ${PYBIN} -m venv /tmp/venv_serving
+else
+  VENV_SERVING_PYVER=$(/tmp/venv_serving/bin/python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || true)
+  if [ "$VENV_SERVING_PYVER" != "$PYVERSION" ]; then
+    echo "ERROR: venv_serving version mismatch (found $VENV_SERVING_PYVER, expected $PYVERSION). Exiting."
+    exit 1
+  fi
+fi
+
+source /tmp/venv_serving/bin/activate
+${PYBIN} -m pip uninstall dgf -y
+${PYBIN} -m pip install -r requirements.txt
+${PYBIN} -m pip install dist/dgf-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+${PYBIN} script/toy.py

@@ -14,9 +14,12 @@
 
 """The edge prediction model."""
 
+from __future__ import annotations
+
 import dataclasses
 import os
 from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Tuple
+
 import dataclasses_json
 from dgf.src.data import in_memory_graph
 from dgf.src.data import padding as padding_data_lib
@@ -38,7 +41,9 @@ from dgf.src.util import util
 from dgf.src.util import util_ext
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import jax
-from jax.experimental import jax2tf
+
+if getattr(tf, "is_available", lambda: True)():
+  from jax.experimental import jax2tf
 import jax.numpy as jnp
 import jaxtyping
 import numpy as np

@@ -15,14 +15,18 @@
 """Utilities for computing minhash sketches.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import datasketch.minhash as ds_minhash
-from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
+from dgf.src.util.weak_dep.weak_dep_apache_beam import CombineFn, beam
 
 MinHash = ds_minhash.MinHash
 
 
 # TODO(bmayer): Allow user to specify the datasketch.LeanMinHash to save mem.
-class DatasSketchMinHashCombiner(beam.CombineFn):
+class DatasSketchMinHashCombiner(CombineFn):
   """CombineFn that computes a minhash on a stream of strings.
 
   Quick/Simple implementation of a distributed minhash combiner using the

@@ -14,6 +14,8 @@
 
 """Batching of graphs for training."""
 
+from __future__ import annotations
+
 from typing import Dict, List, Optional, Tuple
 
 from dgf.src.data import in_memory_graph

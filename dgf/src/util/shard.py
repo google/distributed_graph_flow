@@ -14,8 +14,11 @@
 
 """Utilities to handle shards."""
 
+from __future__ import annotations
+
 import re
 from typing import List, Optional, Tuple
+
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 
 NUM_NODES_PER_SHARD = 1000

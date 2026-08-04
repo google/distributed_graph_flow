@@ -14,8 +14,11 @@
 
 """Conversion to TF related graph objects."""
 
+from __future__ import annotations
+
 import re
 from typing import List, Optional
+
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.data import tf_in_memory_graph as tf_in_memory_graph_lib
@@ -224,7 +227,7 @@ def tf_graph_to_tf_graph_dict(
 
   ```python
   tf_graph = ...  # A TFInMemoryGraph instance
-  graph_dict = dgf.api.convert.tf_graph_to_tf_graph_dict(tf_graph)
+  graph_dict = dgf.convert.tf_graph_to_tf_graph_dict(tf_graph)
   ```
 
   See the "Graph formats" documentation page for details about the tf graph dict
@@ -272,7 +275,7 @@ def tf_graph_dict_to_tf_graph(
       "edges_e1_reserved_adjacency": tf.constant([[0, 0], [0, 1]],
       dtype=tf.int64),
   }
-  tf_graph = dgf.api.convert.tf_graph_dict_to_tf_graph(graph_dict)
+  tf_graph = dgf.convert.tf_graph_dict_to_tf_graph(graph_dict)
   ```
 
   See the "Graph formats" documentation page for details about the tf graph dict

@@ -14,6 +14,8 @@
 
 """Compute feature stats, in beam, on InMemoryGraph."""
 
+from __future__ import annotations
+
 from dgf.src.analyse import feature_statistics as feature_statistics_lib
 from dgf.src.data import distributed_graph
 from dgf.src.data import in_memory_graph

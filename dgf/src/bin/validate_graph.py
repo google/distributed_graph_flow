@@ -22,7 +22,8 @@ dgf-validate-graph --path=...
 
 from absl import app
 from absl import flags
-import dgf
+from dgf.src.io import graph_in_memory as dgf_io
+from dgf.src.validate.in_memory_graph import validate_graph as dgf_validate_graph
 
 FLAGS = flags.FLAGS
 
@@ -41,10 +42,10 @@ def main(argv):
     raise app.UsageError("Too many command-line arguments.")
 
   print(f"Loading graph from {FLAGS.path}...")
-  graph, schema = dgf.io.read_graph(FLAGS.path, verbose=FLAGS.verbose)
+  graph, schema = dgf_io.read_graph(FLAGS.path, verbose=FLAGS.verbose)
 
   print("Validating graph...")
-  dgf.validate.validate_graph(
+  dgf_validate_graph(
       graph,
       schema,
       raise_on_warning=FLAGS.raise_on_warning,

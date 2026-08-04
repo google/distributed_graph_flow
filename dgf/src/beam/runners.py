@@ -15,9 +15,12 @@
 """Common utilities for supporting differnt types of Apache Beam Runners.
 """
 
+from __future__ import annotations
+
 import abc
 import dataclasses
 from typing import Any, Dict, Optional
+
 from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 
 

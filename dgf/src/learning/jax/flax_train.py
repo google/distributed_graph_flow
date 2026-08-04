@@ -25,12 +25,24 @@ handling common tasks such as:
   - Progress Bar: Displaying training progress and metrics using `tqdm`.
 """
 
+from __future__ import annotations
+
 import dataclasses
 import math
 import os
 import time
-from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, Tuple
-from clu import metric_writers
+from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, TYPE_CHECKING, Tuple
+
+if TYPE_CHECKING:
+  from clu import metric_writers
+else:
+  # metric_writers transitively imports tensorflow, which is a weak dependency.
+  # So we only import it if it's actually used or if TYPE_CHECKING is True.
+  try:
+    from clu import metric_writers
+  except ImportError:
+    pass
+
 from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import common
 from dgf.src.learning.ten_lines import common as ten_lines_common

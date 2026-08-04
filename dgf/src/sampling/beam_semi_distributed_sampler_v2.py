@@ -14,12 +14,13 @@
 
 """Semi-distributed sampler where data is loaded with in-mem IO instead of beam."""
 
+from __future__ import annotations
 import logging
 import os
 import threading
 import time
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
-from apache_beam.utils import shared as beam_shared
+from typing import TYPE_CHECKING
 from dgf.src.data import distributed_graph
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
@@ -30,7 +31,7 @@ from dgf.src.io import schema as schema_io_lib
 from dgf.src.sampling import config as config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import schema as schema_filter_lib
-from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
+from dgf.src.util.weak_dep.weak_dep_apache_beam import DoFn, beam
 import numpy as np
 
 NodeId = distributed_graph.NodeId
@@ -165,10 +166,19 @@ class SharedSampler:
     self.mapper = mapper
 
 
-class RawSamplerV2(beam.DoFn):
+class RawSamplerV2(DoFn):
 
   # All the sampler in this process.
-  shared_in_memory_samplers = beam_shared.Shared()
+  if TYPE_CHECKING:
+    import apache_beam as _apache_beam
+
+    shared_in_memory_samplers: _apache_beam.utils.shared.Shared
+  else:
+    shared_in_memory_samplers = (
+        beam.utils.shared.Shared()
+        if getattr(beam, "is_available", lambda: True)()
+        else None
+    )
 
   def __init__(
       self,
@@ -377,7 +387,7 @@ def add_features_to_graph_samples(
   return augmented_samples
 
 
-class Stage3ExpandRawSamples(beam.DoFn):
+class Stage3ExpandRawSamples(DoFn):
   """Expands individual nodes in a raw sample.
 
   See "add_features_to_graph_samples"'s documentation for the definition.

@@ -14,18 +14,19 @@
 
 """Library for working with Cloud Spanner (Graph) databases."""
 
+from __future__ import annotations
+
 import enum
 import functools
 import re
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple, Type, TypeVar
+from typing import TYPE_CHECKING
 
 from absl import logging
-from apache_beam import coders
-import apache_beam.io.gcp.spanner as beam_spanner_io
 from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import distributed_graph
 from dgf.src.data import schema as schema_lib
-from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
+from dgf.src.util.weak_dep.weak_dep_apache_beam import DoFn, beam
 from google.api_core import exceptions
 from google.cloud import spanner as gcp_spanner
 import numpy as np
@@ -448,7 +449,7 @@ def write_node_set_to_spanner(
           )
       ).with_output_types(node_row_type)
       | f"WriteNodesToSpanner_{node_set_name}"
-      >> beam_spanner_io.SpannerInsertOrUpdate(
+      >> beam.io.gcp.spanner.SpannerInsertOrUpdate(
           table=table_id,
           project_id=project_id,
           instance_id=instance_id,
@@ -528,7 +529,7 @@ def write_edge_set_to_spanner(
           )
       ).with_output_types(edge_row_type)
       | f"WriteEdgesToSpanner_{edge_set_name}"
-      >> beam_spanner_io.SpannerInsertOrUpdate(
+      >> beam.io.gcp.spanner.SpannerInsertOrUpdate(
           table=table_id,
           project_id=project_id,
           instance_id=instance_id,
@@ -538,7 +539,7 @@ def write_edge_set_to_spanner(
   )
 
 
-class CreateSpannerTables(beam.DoFn):
+class CreateSpannerTables(DoFn):
   """Creates Spanner tables for a graph schema.
 
   This is meant to be used similarly to a `source` transform run on a
@@ -706,7 +707,7 @@ def create_spanner_row_types_from_schema(
 
   if register_row_coders:
     for row_type in row_types.values():
-      coders.registry.register_coder(row_type, coders.RowCoder)
+      beam.coders.registry.register_coder(row_type, beam.coders.RowCoder)
 
   return row_types
 

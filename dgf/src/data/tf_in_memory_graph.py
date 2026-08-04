@@ -17,12 +17,18 @@
 See in_memory_graph.py for the actual documentation.
 """
 
-from typing import Dict, Mapping, Union
-from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
+from __future__ import annotations
 
-Array = Union[
-    tf.Tensor, tf.RaggedTensor, tf.SparseTensor
-]  # Can be dense, sparse or ragged.
+from typing import Any, Dict, Mapping, TYPE_CHECKING, Union
+
+from dgf.src.util.weak_dep.weak_dep_tensorflow import ExtensionType, tf
+
+if TYPE_CHECKING or getattr(tf, 'is_available', lambda: True)():
+  Array = Union[tf.Tensor, tf.RaggedTensor, tf.SparseTensor]
+else:
+  Array = Any
+
+
 Features = Mapping[str, Array]
 
 
@@ -32,7 +38,7 @@ Features = Mapping[str, Array]
 TFInMemoryGraphDict = Dict[str, Array]
 
 
-class TFInMemoryNodeSet(tf.experimental.ExtensionType):
+class TFInMemoryNodeSet(ExtensionType):
   """A Node Set.
 
   Attributes:
@@ -47,7 +53,7 @@ class TFInMemoryNodeSet(tf.experimental.ExtensionType):
   features: Features = {}
 
 
-class TFInMemoryEdgeSet(tf.experimental.ExtensionType):
+class TFInMemoryEdgeSet(ExtensionType):
   """An Edge Set.
 
   Attributes:
@@ -62,7 +68,7 @@ class TFInMemoryEdgeSet(tf.experimental.ExtensionType):
   features: Features = {}
 
 
-class TFInMemoryGraph(tf.experimental.ExtensionType):
+class TFInMemoryGraph(ExtensionType):
   """An in-memory generic graph.
 
   Attributes:

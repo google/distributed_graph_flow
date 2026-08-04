@@ -14,14 +14,16 @@
 
 """Compute feature stats, in process, on Graph."""
 
+from __future__ import annotations
 import dataclasses
 import math
 from typing import Tuple
+from typing import TYPE_CHECKING
 from dgf.src.analyse import reservoir_sampling
 from dgf.src.data import distributed_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.data import statistics as statistics_lib
-from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
+from dgf.src.util.weak_dep.weak_dep_apache_beam import CombineFn, beam
 import numpy as np
 
 
@@ -318,7 +320,7 @@ def add_to_accumulator(
   return accumulator
 
 
-class CombineFeatureSetStatistics(beam.CombineFn):
+class CombineFeatureSetStatistics(CombineFn):
   """Combines statistics for a set of features."""
 
   schema: schema_lib.FeatureSetSchema

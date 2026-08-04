@@ -16,7 +16,7 @@
 
 import dataclasses
 from typing import List, Tuple
-from apache_beam import coders
+from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 import numpy as np
 
 
@@ -90,4 +90,7 @@ class BatchReservoirSampling:
     return quantiles.tolist(), thresholds.tolist()
 
 
-coders.registry.register_coder(BatchReservoirSampling, coders.RowCoder)
+if getattr(beam, "is_available", lambda: True)():
+  beam.coders.registry.register_coder(
+      BatchReservoirSampling, beam.coders.RowCoder
+  )

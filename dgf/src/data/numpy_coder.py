@@ -14,13 +14,20 @@
 
 """Efficient serialization of numpy arrays in beam."""
 
-from apache_beam.coders import typecoders
-from apache_beam.typehints import typehints
-from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from dgf.src.util.weak_dep.weak_dep_apache_beam import CoderBase, beam
+import numpy as np
+
+if getattr(beam, 'is_available', lambda: True)():
+  from apache_beam.coders import typecoders
+  from apache_beam.typehints import typehints
 import numpy as np
 
 
-class NDArrayCoder(beam.coders.Coder):
+class NDArrayCoder(CoderBase):
   """Beam coder for Numpy N-dimensional array of TF-compatible data types.
 
   Supports all numeric data types and bytes (represented as `np.object_`).
@@ -91,4 +98,5 @@ class NDArrayCoder(beam.coders.Coder):
     return np.ndarray
 
 
-beam.coders.registry.register_coder(np.ndarray, NDArrayCoder)
+if getattr(beam, 'is_available', lambda: True)():
+  beam.coders.registry.register_coder(np.ndarray, NDArrayCoder)

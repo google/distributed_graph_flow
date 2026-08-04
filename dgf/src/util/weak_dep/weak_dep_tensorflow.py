@@ -12,6 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
+import typing
+
 from dgf.src.util.weak_dep.base import LazyModule
 
 tf = LazyModule(
@@ -21,3 +25,14 @@ tf = LazyModule(
     pip="tensorflow",
     bazel_rule="//third_party/py/tensorflow",
 )
+
+if typing.TYPE_CHECKING:
+  import tensorflow as _tf
+
+  ExtensionType = _tf.experimental.ExtensionType
+else:
+  ExtensionType = (
+      tf.experimental.ExtensionType
+      if getattr(tf, "is_available", lambda: True)()
+      else object
+  )

@@ -751,14 +751,18 @@ class BeamSemiDistributedSamplerV2Test(parameterized.TestCase):
           return_node_idxs=False,
       )
 
-      loaded_samples = list(
-          tf_graph_sample_lib.read_tfgnn_graphs(sample_path, schema)
+      loaded_samples = sorted(
+          tf_graph_sample_lib.read_tfgnn_graphs(sample_path, schema),
+          key=lambda g: g.node_sets["n1"].features["#id"][0],
       )
 
-      expected_samples = [
-          in_memory_sampler.sample(0),
-          in_memory_sampler.sample(1),
-      ]
+      expected_samples = sorted(
+          [
+              in_memory_sampler.sample(0),
+              in_memory_sampler.sample(1),
+          ],
+          key=lambda g: g.node_sets["n1"].features["#id"][0],
+      )
       logging.info("Expected samples:\n%s", expected_samples)
       test_util.assert_are_equal(self, loaded_samples, expected_samples)
 

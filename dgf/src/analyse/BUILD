@@ -31,6 +31,7 @@ py_library(
     srcs = ["reservoir_sampling.py"],
     deps = [
         # apache_beam dep,
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
         # numpy dep,
     ],
 )

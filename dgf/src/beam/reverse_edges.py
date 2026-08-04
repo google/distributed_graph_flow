@@ -14,6 +14,8 @@
 
 """Reverses the direction of edges."""
 
+from __future__ import annotations
+
 from dgf.src.data import distributed_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.util.weak_dep.weak_dep_apache_beam import beam

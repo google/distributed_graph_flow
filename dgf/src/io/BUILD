@@ -106,6 +106,7 @@ py_library(
         "//dgf/src/data:schema",
         "//dgf/src/util:shard",
         "//dgf/src/util/weak_dep:weak_dep_apache_beam",
+        "//dgf/src/util/weak_dep:weak_dep_bagz",
         "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # numpy dep,
     ],

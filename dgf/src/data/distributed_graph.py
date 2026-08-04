@@ -14,12 +14,16 @@
 
 """Distributed graph data structures."""
 
+from __future__ import annotations
+
 import dataclasses
 import enum
 from typing import Dict, List, NamedTuple, Optional, Union
 
 from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
-from apache_beam import coders
+
+if getattr(beam, "is_available", lambda: True)():
+  from apache_beam import coders
 
 from dgf.src.data import beam_coders as _  # pylint: disable=unused-import
 from dgf.src.data import in_memory_graph
@@ -27,7 +31,18 @@ from dgf.src.data import numpy_coder as _  # pylint: disable=unused-import
 from dgf.src.data import schema as schema_lib
 
 
-PCollection = beam.PCollection
+import typing
+
+if getattr(beam, "is_available", lambda: True)():
+  PCollection = beam.PCollection
+else:
+
+  class _DummyPCollection:
+
+    def __getitem__(self, item):
+      return typing.Any
+
+  PCollection = _DummyPCollection()
 
 # TODO(bmayer): Move the non-beam objects to a `graph.py` definition file.
 NodeId = bytes | int
@@ -187,9 +202,15 @@ class KeyedInMemoryGraph(NamedTuple):
   graph: in_memory_graph.InMemoryGraph
 
 
-PKeyedInMemoryGraph = beam.PCollection[KeyedInMemoryGraph]
+if getattr(beam, "is_available", lambda: True)():
+  PKeyedInMemoryGraph = beam.PCollection[KeyedInMemoryGraph]
+else:
+  PKeyedInMemoryGraph = typing.Any
 
 
-coders.registry.register_coder(PEdge, coders.RowCoder)
-coders.registry.register_coder(PNode, coders.RowCoder)
-coders.registry.register_coder(Graph, coders.RowCoder)
+if getattr(beam, "is_available", lambda: True)():
+  from apache_beam import coders
+
+  coders.registry.register_coder(PEdge, coders.RowCoder)
+  coders.registry.register_coder(PNode, coders.RowCoder)
+  coders.registry.register_coder(Graph, coders.RowCoder)

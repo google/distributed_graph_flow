@@ -16,6 +16,7 @@
 
 import concurrent.futures
 import os
+import typing
 from typing import Dict, List, Optional, Tuple, Union
 import uuid
 
@@ -32,7 +33,9 @@ from dgf.src.io.gcp import parquet_export as parquet_export_lib
 from dgf.src.util import filesystem
 from dgf.src.util import log
 from dgf.src.util import util as util_lib
-from google.cloud import bigquery as gcp_bigquery
+
+if typing.TYPE_CHECKING:
+  from google.cloud import bigquery as gcp_bigquery
 
 MAX_SUPPORTED_GF_VERSION = graph_constants.MAX_SUPPORTED_GF_VERSION
 FILENAME_SCHEMA = graph_constants.FILENAME_SCHEMA
@@ -56,8 +59,13 @@ def _infoschema_query(
 
 def _execute_query(
     query: str, quota_project_id: str
-) -> gcp_bigquery.table.RowIterator:
+) -> "gcp_bigquery.table.RowIterator":
   """Executes a bigquery query and retruns an iterator of the result rows."""
+  try:
+    from google.cloud import bigquery as gcp_bigquery
+  except ImportError:
+    raise RuntimeError("google-cloud-bigquery is required")
+
   bq_client = gcp_bigquery.Client(project=quota_project_id)
 
   query_job = bq_client.query(query)

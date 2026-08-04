@@ -14,6 +14,8 @@
 
 """Conversion between feature formats and other similar objects."""
 
+from __future__ import annotations
+
 from typing import Any, Dict
 
 from dgf.src.data import schema as schema_lib

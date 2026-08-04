@@ -14,10 +14,11 @@
 
 """Library for working with Google Cloud Spanner Graphs via Apache Beam."""
 
+from __future__ import annotations
+
 import json
 from typing import Any, Dict, Iterator, List, NamedTuple, Tuple
 
-import apache_beam.io.gcp.spanner as beam_spanner_io
 from dgf.src.data import distributed_graph as distributed_graph_lib
 from dgf.src.io.gcp import common as gcp_common_lib
 from dgf.src.io.gcp import common_beam as gcp_common_beam_lib
@@ -138,7 +139,7 @@ def distributed_read_beam(
     node_pcollection = (
         p
         | f"SpannerGraphRead_{node_table.name}_{node_table.kind}"
-        >> beam_spanner_io.ReadFromSpanner(
+        >> beam.io.gcp.spanner.ReadFromSpanner(
             project=project,
             instance=instance,
             database=database,
@@ -182,7 +183,7 @@ def distributed_read_beam(
     edge_pcollection = (
         p
         | f"SpannerGraphRead_{edge_table.name}_{edge_table.kind}"
-        >> beam_spanner_io.ReadFromSpanner(
+        >> beam.io.gcp.spanner.ReadFromSpanner(
             project=project,
             instance=instance,
             database=database,

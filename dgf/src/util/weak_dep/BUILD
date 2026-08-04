@@ -47,6 +47,14 @@ py_library(
 )
 
 py_library(
+    name = "weak_dep_bagz",
+    srcs = ["weak_dep_bagz.py"],
+    deps = [
+        ":weak_dep_base",
+    ],
+)
+
+py_library(
     name = "weak_dep",
     srcs = ["__init__.py"],
 )

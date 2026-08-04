@@ -14,9 +14,10 @@
 
 """Library for working with Google Cloud BigQuery Graphs via Apache Beam."""
 
+from __future__ import annotations
+
 from typing import Any, Dict
 
-import apache_beam.io.gcp.bigquery as beam_bigquery_io
 from dgf.src.data import distributed_graph as distributed_graph_lib
 from dgf.src.io import graph_in_beam as gf_graph_in_beam_lib
 from dgf.src.io.gcp import bigquery_graph
@@ -92,7 +93,7 @@ def distributed_read_beam(
     node_pcollection = (
         p
         | f"BigQueryGraphRead_{node_table.name}_{gcp_common_lib.GRAPH_ELEMENT_TYPE_NODE}"
-        >> beam_bigquery_io.ReadFromBigQuery(
+        >> beam.io.gcp.bigquery.ReadFromBigQuery(
             query=bq_graph_query_string,
             use_standard_sql=True,
             project=project_id,
@@ -116,7 +117,7 @@ def distributed_read_beam(
     edge_pcollection = (
         p
         | f"BigQueryGraphRead_{edge_table.name}_{gcp_common_lib.GRAPH_ELEMENT_TYPE_EDGE}"
-        >> beam_bigquery_io.ReadFromBigQuery(
+        >> beam.io.gcp.bigquery.ReadFromBigQuery(
             query=bq_graph_query_string,
             use_standard_sql=True,
             project=project_id,

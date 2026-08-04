@@ -14,6 +14,8 @@
 
 """Utilities to read/write TFRecord files efficiently in memory."""
 
+from __future__ import annotations
+
 import datetime
 from typing import Callable, Dict, List, Optional, Tuple
 

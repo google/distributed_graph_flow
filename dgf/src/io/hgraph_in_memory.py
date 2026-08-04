@@ -14,11 +14,14 @@
 
 """Reading and writing HGraph in memory."""
 
+from __future__ import annotations
+
 import enum
 import logging
 import os
 import time
 from typing import Callable, Dict, Optional, TYPE_CHECKING, Tuple
+
 from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib

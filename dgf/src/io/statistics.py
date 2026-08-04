@@ -14,7 +14,10 @@
 
 """IO of feature statistics."""
 
+from __future__ import annotations
+
 import dataclasses
+
 import dacite
 from dgf.src.data import statistics as statistics_lib
 from dgf.src.util import json as json_lib

@@ -17,6 +17,8 @@
 Can be loaded, saved, evaluate, and used to generated predictions.
 """
 
+from __future__ import annotations
+
 import copy
 import dataclasses
 import enum
@@ -46,7 +48,9 @@ from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import jax
-from jax.experimental import jax2tf
+
+if getattr(tf, "is_available", lambda: True)():
+  from jax.experimental import jax2tf
 import jax.numpy as jnp
 import jaxtyping
 import numpy as np

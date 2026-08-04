@@ -22,18 +22,19 @@ This contrasts with sampler v2, which loads graph data using in-memory IO
 primitives for faster and more memory-efficient sampling.
 """
 
+from __future__ import annotations
 import dataclasses
 import logging
 import time
 from typing import Dict, Sequence, Tuple
+from typing import TYPE_CHECKING
 from dgf.src.data import distributed_graph
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.sampling import config as config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
-from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
+from dgf.src.util.weak_dep.weak_dep_apache_beam import CombineFn, DoFn, beam, ptransform_fn
 import numpy as np
-
 
 def sample_with_beam_semi_distributed_sampler(
     graph: distributed_graph.Graph,
@@ -169,7 +170,7 @@ def compute_dense_node_idx_as_side_input(
   # Note: We have to create those sub-ptransform just to avoid collisions in
   # stage names.
   # TODO(gbm): Find a way to create stage names with a context bases system.
-  @beam.ptransform_fn
+  @ptransform_fn
   def _process(
       nodes: distributed_graph.PNode,
   ) -> beam.PCollection[Tuple[bytes, int]]:
@@ -218,7 +219,7 @@ def compute_dense_node_idx_as_side_input(
   )
 
 
-class BatchedNumpyCombineFn(beam.CombineFn):
+class BatchedNumpyCombineFn(CombineFn):
   """Combines pairs of integers into a numpy array of shape [2, num pairs]."""
 
   def create_accumulator(self):
@@ -272,7 +273,7 @@ def compute_dense_adjacencies(
     num_edges] shape).
   """
 
-  @beam.ptransform_fn
+  @ptransform_fn
   def _process(
       edges: distributed_graph.PEdge,
       source_node_id_to_idx: Dict[bytes, int],
@@ -346,7 +347,7 @@ def compute_dense_seeds(
   )
 
 
-class RawSampler(beam.DoFn):
+class RawSampler(DoFn):
   """Generates graph samples without the feature values."""
 
   def __init__(

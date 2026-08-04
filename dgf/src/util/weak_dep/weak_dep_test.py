@@ -14,6 +14,8 @@
 
 """Tests for weak_dep."""
 
+from __future__ import annotations
+
 from absl.testing import absltest
 from dgf.src.util.weak_dep.base import LazyModule
 

@@ -14,19 +14,22 @@
 
 """Import TF GNN Graph Samples."""
 
+from __future__ import annotations
+
 from collections.abc import Mapping
 import enum
 import os
+import typing
 from typing import Dict, Generator, List, Optional, Sequence
-import bagz
-from bagz.beam import bagzio as bag_io
+
 from dgf.src.data import distributed_graph as distributed_graph_lib
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import feature_format as feature_format_lib
 from dgf.src.io import tf_graph_sample_ext
 from dgf.src.util import shard as shard_lib
-from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
+from dgf.src.util.weak_dep.weak_dep_apache_beam import PTransform, beam
+from dgf.src.util.weak_dep.weak_dep_bagz import bag_io, bagz
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import numpy as np
 
@@ -280,7 +283,7 @@ def read_tfgnn_graphs_beam(
   )
 
 
-class ReadFromTFGraphSample(beam.PTransform):
+class ReadFromTFGraphSample(PTransform):
   """Read a collection of TF GNN Graphs."""
 
   def __init__(
@@ -318,6 +321,7 @@ class ReadFromTFGraphSample(beam.PTransform):
           | "Add None Keys" >> beam.Map(lambda x: (None, x))
       )
     elif self.container_type == TFGraphSampleContainerType.BAGZ:
+
       keyed_tf_examples = (
           pbegin
           | f"Read Bagz {self.path}"
@@ -418,6 +422,7 @@ def write_tfgnn_graphs_beam(
         )
     )
   elif container_type == TFGraphSampleContainerType.BAGZ:
+
     return (
         tf_examples
         | "Remove Keys" >> beam.Values()
@@ -493,6 +498,7 @@ def write_tfgnn_graphs(
         for p in paths
     ]
   elif container_type == TFGraphSampleContainerType.BAGZ:
+
     writers = [bagz.Writer(p) for p in paths]
   else:
     raise ValueError("Non supported container type")
@@ -528,6 +534,7 @@ def write_tfgnn_graphs_single_file(
         path, options=tf.io.TFRecordOptions(compression_type=compression)
     )
   elif container_type == TFGraphSampleContainerType.BAGZ:
+
     writer = bagz.Writer(path)
   else:
     raise ValueError("Non supported container type")

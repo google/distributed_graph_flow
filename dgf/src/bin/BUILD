@@ -16,7 +16,8 @@ py_library(
     deps = [
         # absl:app dep,
         # absl/flags dep,
-        "//dgf",
+        "//dgf/src/io:graph_in_memory",
+        "//dgf/src/validate:in_memory_graph",
     ],
 )
 

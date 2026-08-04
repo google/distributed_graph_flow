@@ -14,17 +14,19 @@
 
 """Utility to generate graph data for tests."""
 
+from __future__ import annotations
+
 import json
 import os
 from typing import Any, Dict, List, Literal, Optional, TYPE_CHECKING, Tuple
 from unittest import mock
 
+from dgf.src.util.weak_dep.weak_dep_bagz import bagz
 from dgf.src.util.weak_dep.weak_dep_tensorflow_gnn import tf_gnn_proto
 
 if TYPE_CHECKING:
   from tensorflow_gnn import proto as tf_gnn_proto
 
-import bagz
 from dgf.src.data import distributed_graph as distributed_graph_lib
 from dgf.src.data import gf_metadata as gf_metadata_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib

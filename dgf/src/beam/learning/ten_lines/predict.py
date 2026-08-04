@@ -14,9 +14,10 @@
 
 """Code to compute predictions of a model trained with the 10-lines API."""
 
+from __future__ import annotations
 import logging
 from typing import Iterator, Optional, Sequence, Tuple
-from apache_beam.utils import shared as beam_shared
+from typing import TYPE_CHECKING
 from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import distributed_graph
 from dgf.src.data import schema as schema_lib
@@ -25,7 +26,7 @@ from dgf.src.learning.ten_lines import common as ten_lines_common
 from dgf.src.learning.ten_lines import node_prediction_model as node_prediction_lib
 from dgf.src.sampling import beam_semi_distributed_sampler
 from dgf.src.sampling import beam_semi_distributed_sampler_v2
-from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
+from dgf.src.util.weak_dep.weak_dep_apache_beam import DoFn, beam
 import numpy as np
 
 # An individual model prediction. The semantic depends on the model. For
@@ -43,14 +44,23 @@ class PredictNodePredictionModelCache:
     self.by_path = {}
 
 
-class PredictNodePredictionModel(beam.DoFn):
+class PredictNodePredictionModel(DoFn):
   """Generates prediction of a node prediction model on graph samples.
 
   Operates on batches of graph samples and return individual predictions.
   """
 
   # All the sampler in this process.
-  shared_model = beam_shared.Shared()
+  if TYPE_CHECKING:
+    import apache_beam as _apache_beam
+
+    shared_model: _apache_beam.utils.shared.Shared
+  else:
+    shared_model = (
+        beam.utils.shared.Shared()
+        if getattr(beam, "is_available", lambda: True)()
+        else None
+    )
 
   def __init__(self, model_path: str):
     self.model_path = model_path

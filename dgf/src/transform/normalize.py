@@ -14,10 +14,13 @@
 
 """Normalization of feature values for GNN models."""
 
+from __future__ import annotations
+
 import abc
 import copy
 import dataclasses
 from typing import Any, Dict, List, Optional, Set, Tuple
+
 import dataclasses_json
 from dgf.src.data import in_memory_graph
 from dgf.src.data import jax_in_memory_graph

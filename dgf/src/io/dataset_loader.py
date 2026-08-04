@@ -14,6 +14,8 @@
 
 """IO to load an OGB dataset into an in-memory graph."""
 
+from __future__ import annotations
+
 import contextlib
 import enum
 import functools
@@ -23,6 +25,7 @@ import tempfile
 from typing import Any, Optional, Tuple, Union
 import urllib.request
 import zipfile
+
 from absl import logging
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib

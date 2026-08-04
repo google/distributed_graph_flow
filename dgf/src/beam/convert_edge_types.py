@@ -14,12 +14,14 @@
 
 """Conver between edge types for heterogeneous graphs."""
 
+from __future__ import annotations
+
 import dataclasses
 from typing import Iterable
 
 from absl import logging
 from dgf.src.data import distributed_graph
-from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
+from dgf.src.util.weak_dep.weak_dep_apache_beam import DoFn, beam
 
 AdjacencyList = distributed_graph.AdjacencyList
 EdgeFormat = distributed_graph.EdgeFormat
@@ -31,7 +33,7 @@ PAdjacencyList = distributed_graph.PAdjacencyList
 
 
 # TODO(bmayer): Move this to a common (edge utils?) library.
-class ExplodeAdjacencyList(beam.DoFn):
+class ExplodeAdjacencyList(DoFn):
   """Explodes an adjacency edge set into multiple edge sets."""
 
   def process(self, edges: AdjacencyList) -> Iterable[Edge]:

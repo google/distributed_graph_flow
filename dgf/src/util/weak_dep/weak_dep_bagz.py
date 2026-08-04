@@ -12,22 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from __future__ import annotations
-
+import typing
 from dgf.src.util.weak_dep.base import LazyModule
 
-tfgnn = LazyModule(
-    local_name="tfgnn",
-    import_path="tensorflow_gnn",
-    library_name="TensorFlow GNN",
-    pip="tensorflow-gnn",
-    bazel_rule="//third_party/py/tensorflow_gnn",
+bagz: typing.Any = LazyModule(
+    local_name="bagz",
+    import_path="bagz",
+    library_name="bagz",
+    pip="",
+    bazel_rule="//third_party/py/bagz",
 )
 
-tf_gnn_proto = LazyModule(
-    local_name="tf_gnn_proto",
-    import_path="tensorflow_gnn.proto.graph_schema_pb2",
-    library_name="TensorFlow GNN",
-    pip="tensorflow-gnn",
-    bazel_rule="//third_party/py/tensorflow_gnn/proto",
+bag_io: typing.Any = LazyModule(
+    local_name="bagz.beam.bag_io",
+    import_path="bagz.beam.bag_io",
+    library_name="bagz",
+    pip="",
+    bazel_rule="//third_party/py/bagz/beam:bag_io",
 )
