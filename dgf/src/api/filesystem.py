@@ -23,6 +23,7 @@ from dgf.src.util.filesystem import glob
 from dgf.src.util.filesystem import is_gcs_path
 from dgf.src.util.filesystem import makedirs
 from dgf.src.util.filesystem import open_read
+from dgf.src.util.filesystem import open_write
 from dgf.src.util.filesystem import remove_paths
 from dgf.src.util.filesystem import rename
 from dgf.src.util.filesystem import rmtree

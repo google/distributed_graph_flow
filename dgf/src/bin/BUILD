@@ -29,6 +29,16 @@ py_binary(
     ],
 )
 
+py_binary(
+    name = "create_graph_sampling_plan",
+    srcs = ["create_graph_sampling_plan.py"],
+    deps = [
+        # absl:app dep,
+        # absl/flags dep,
+        "//dgf",
+    ],
+)
+
 # Test
 # =========
 
