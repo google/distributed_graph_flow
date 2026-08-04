@@ -252,6 +252,25 @@ class SoftQuantileNormalizerTest(absltest.TestCase):
           "test_feature", input_schema, input_stats
       )
 
+  def test_nan_input(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+    )
+    input_stats = statistics_lib.FeatureStatistics(
+        count=3,
+        minimum=0,
+        maximum=10,
+        dictionary={},
+        quantiles=[0.0, 5.0, 10.0],
+    )
+    normalizer = normalize_lib.SoftQuantileNormalizer.create(
+        "test_feature", input_schema, input_stats
+    )
+    input_values = np.array([1.0, np.nan, 3.0], dtype=np.float32)
+    with self.assertRaisesRegex(ValueError, "contains NaN values"):
+      normalizer.normalize_numpy(input_values)
+
   def test_timeseries_feature_2d(self):
     input_schema = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.FLOAT_32,

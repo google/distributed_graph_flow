@@ -149,6 +149,53 @@ class FlaxTrainTest(parameterized.TestCase):
     # Should validate at 10, then 20 and break out.
     self.assertEqual([l.step for l in result.valid_logs], [10, 20])
 
+  def test_nan_in_training_metrics(self):
+    def train_step(params, opt_state, batch, rng_key):
+      return params, opt_state, {"loss": jnp.array(jnp.nan)}
+
+    model = SimpleModel(hidden_dim=8)
+    opt = optax.adam(1e-3)
+
+    with self.assertRaisesRegex(
+        ValueError, "Training metric 'loss' became NaN"
+    ):
+      flax_train.train(
+          model=model,
+          opt=opt,
+          train_step=train_step,
+          dataset_iterator=dataset_iterator(num_steps=None),
+          dummy_data_fn=lambda x: x["data"],
+          num_train_steps=10,
+          rng_key=jax.random.PRNGKey(42),
+          train_log_every_n_steps=1,
+      )
+
+  def test_nan_in_valid_metrics(self):
+    def train_step(params, opt_state, batch, rng_key):
+      return params, opt_state, {"loss": jnp.array(1.0)}
+
+    def valid_step(params, opt_state, batch):
+      return {"loss": jnp.array(jnp.nan)}
+
+    model = SimpleModel(hidden_dim=8)
+    opt = optax.adam(1e-3)
+
+    with self.assertRaisesRegex(
+        ValueError, "Validation metric 'loss' became NaN"
+    ):
+      flax_train.train(
+          model=model,
+          opt=opt,
+          train_step=train_step,
+          dataset_iterator=dataset_iterator(num_steps=None),
+          dummy_data_fn=lambda x: x["data"],
+          num_train_steps=10,
+          rng_key=jax.random.PRNGKey(42),
+          valid_every_n_steps=2,
+          valid_step=valid_step,
+          valid_dataset_iterator_fn=lambda: dataset_iterator(num_steps=2),
+      )
+
 
 if __name__ == "__main__":
   absltest.main()

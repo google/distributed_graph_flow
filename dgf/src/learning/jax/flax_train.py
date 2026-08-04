@@ -26,6 +26,7 @@ handling common tasks such as:
 """
 
 import dataclasses
+import math
 import os
 import time
 from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, Tuple
@@ -41,6 +42,12 @@ import jaxtyping as jt
 import optax
 import orbax.checkpoint as ocp
 import tqdm
+
+_NAN_METRIC_ERROR_MSG = (
+    "{split} metric '{metric_name}' became NaN at step {step}. "
+    "This is often caused by NaNs in the dataset's features or labels, "
+    "or by an unstable model architecture / learning rate."
+)
 
 
 # TODO(gbm): Should the input of the train-step be a dataclass instead of
@@ -440,6 +447,13 @@ def train(
             " sure the validation dataset contains at least one batch of data."
         )
       last_valid_metrics = valid_metric_accumulator.get_and_reset()
+      for metric_name, value in last_valid_metrics.items():
+        if math.isnan(value):
+          raise ValueError(
+              _NAN_METRIC_ERROR_MSG.format(
+                  split="Validation", metric_name=metric_name, step=step
+              )
+          )
       valid_logs.append(LogItem(metrics=last_valid_metrics, step=step))
 
       if metric_writer is not None:
@@ -497,6 +511,13 @@ def train(
       # Training metrics + logging
       if train_log_every_n_steps > 0 and step % train_log_every_n_steps == 0:
         train_metrics = train_metric_accumulator.get_and_reset()
+        for metric_name, value in train_metrics.items():
+          if math.isnan(value):
+            raise ValueError(
+                _NAN_METRIC_ERROR_MSG.format(
+                    split="Training", metric_name=metric_name, step=step
+                )
+            )
         train_logs.append(LogItem(metrics=train_metrics, step=step))
 
         if metric_writer is not None:

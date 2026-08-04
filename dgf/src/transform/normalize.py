@@ -322,6 +322,14 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
     # TODO(gbm): Add support for multi-dim features.
 
     value = value.astype(np.float32)
+    # TODO(gbm): Add support for NaNs.
+    if np.isnan(value).any():
+      raise ValueError(
+          f"Feature '{self.input_feature}' contains NaN values. DGF normalizers"
+          " do not support NaNs in features. Please verify your graph"
+          " extraction pipeline and impute missing values (e.g. median"
+          " imputation) before creating the GF graph."
+      )
     quantiles = self.quantiles
     num_buckets = len(quantiles) - 1
 
