@@ -230,6 +230,95 @@ class SplitTrainValidTest(parameterized.TestCase):
           num_values, validation_ratio, random_seed=42, batch_size=batch_size
       )
 
+  @parameterized.named_parameters(
+      ("basic_split", 10, 0.2, 1, 2, 8),
+      ("zero_ratio", 10, 0.0, 1, 0, 10),
+      ("one_ratio", 10, 1.0, 1, 10, 0),
+      ("ensure_at_least_one", 3, 0.1, 1, 1, 2),
+      ("ensure_at_least_batch_size", 10, 0.1, 2, 2, 8),
+  )
+  def test_split_temporal_ratios(
+      self,
+      num_values,
+      validation_ratio,
+      batch_size,
+      expected_valid,
+      expected_train,
+  ):
+    creation_times = np.arange(num_values) * 10
+    train_idxs, valid_idxs = util.split_train_valid_temporal(
+        creation_times, validation_ratio, batch_size=batch_size
+    )
+    self.assertLen(valid_idxs, expected_valid)
+    self.assertLen(train_idxs, expected_train)
+    all_idxs = np.concatenate([train_idxs, valid_idxs])
+    self.assertCountEqual(all_idxs.tolist(), list(range(num_values)))
+    if expected_train > 0 and expected_valid > 0:
+      self.assertLessEqual(
+          np.max(creation_times[train_idxs]), np.min(creation_times[valid_idxs])
+      )
+
+  def test_split_temporal_ordering(self):
+    creation_times = np.array([100, 10, 50, 20, 80, 40], dtype=np.int64)
+    # Sorted indices by time: [1 (10), 3 (20), 5 (40), 2 (50), 4 (80), 0 (100)]
+    train_idxs, valid_idxs = util.split_train_valid_temporal(
+        creation_times, validation_ratio=2 / 6, batch_size=1
+    )
+    np.testing.assert_array_equal(train_idxs, np.array([1, 3, 5, 2]))
+    np.testing.assert_array_equal(valid_idxs, np.array([4, 0]))
+    self.assertLessEqual(
+        np.max(creation_times[train_idxs]), np.min(creation_times[valid_idxs])
+    )
+
+  def test_split_temporal_stable_sort(self):
+    creation_times = np.array([10, 20, 10, 20], dtype=np.int64)
+    # Indices 0 and 2 have time 10; indices 1 and 3 have time 20.
+    # Stable sort order: [0, 2, 1, 3]
+    train_idxs, valid_idxs = util.split_train_valid_temporal(
+        creation_times, validation_ratio=0.5, batch_size=1
+    )
+    np.testing.assert_array_equal(train_idxs, np.array([0, 2]))
+    np.testing.assert_array_equal(valid_idxs, np.array([1, 3]))
+
+  @parameterized.named_parameters(
+      ("cap_by_max", 10, 0.5, 1, 2, 2, 8),
+      ("not_capped_by_max", 10, 0.2, 1, 5, 2, 8),
+      ("cap_below_batch_size", 10, 0.5, 2, 1, 1, 9),
+  )
+  def test_split_temporal_max_num_valid_examples(
+      self,
+      num_values,
+      validation_ratio,
+      batch_size,
+      max_num_valid_examples,
+      expected_valid,
+      expected_train,
+  ):
+    creation_times = np.arange(num_values)
+    train_idxs, valid_idxs = util.split_train_valid_temporal(
+        creation_times,
+        validation_ratio,
+        batch_size=batch_size,
+        max_num_valid_examples=max_num_valid_examples,
+    )
+    self.assertLen(valid_idxs, expected_valid)
+    self.assertLen(train_idxs, expected_train)
+    all_idxs = np.concatenate([train_idxs, valid_idxs])
+    self.assertCountEqual(all_idxs.tolist(), list(range(num_values)))
+
+  @parameterized.named_parameters(
+      ("too_few_values", 1, 0.5, 1),
+      ("insufficient_for_batch", 3, 0.5, 2),
+  )
+  def test_split_temporal_invalid_inputs(
+      self, num_values, validation_ratio, batch_size
+  ):
+    creation_times = np.arange(num_values)
+    with self.assertRaises(ValueError):
+      util.split_train_valid_temporal(
+          creation_times, validation_ratio, batch_size=batch_size
+      )
+
 
 if __name__ == "__main__":
   absltest.main()

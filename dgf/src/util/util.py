@@ -17,7 +17,7 @@
 import contextlib
 import math
 import time
-from typing import Iterator, Optional, Union
+from typing import Iterator, Optional, Tuple, Union
 from dgf.src.util import log
 import numpy as np
 
@@ -241,6 +241,66 @@ def split_train_valid(
 
   valid_idxs = all_idxs[:num_valid]
   train_idxs = all_idxs[num_valid:]
+  return train_idxs, valid_idxs
+
+
+def split_train_valid_temporal(
+    creation_times: np.ndarray,
+    validation_ratio: float,
+    batch_size: int = 1,
+    max_num_valid_examples: Optional[int] = None,
+) -> Tuple[np.ndarray, np.ndarray]:
+  """Splits indices into training (past) and validation (future) sets chronologically.
+
+  The entities are sorted by `creation_times` in ascending order. The earlier 
+  entities are assigned to the training set, while the later entities are
+  assigned to the validation set.
+
+  Args:
+    creation_times: A 1D array of creation timestamps.
+    validation_ratio: The ratio of values to use for validation.
+    batch_size: Batch size.
+    max_num_valid_examples: Optional maximum number of valid examples.
+
+  Returns:
+    A tuple of (train_idxs, valid_idxs) containing the indices for each set.
+  """
+  num_values = len(creation_times)
+
+  if num_values < batch_size:
+    raise ValueError(
+        f"`num_values` ({num_values}) must be at least `batch_size`"
+        f" ({batch_size})."
+    )
+  if validation_ratio > 0 and num_values < 2 * batch_size:
+    raise ValueError(
+        f"Cannot split {num_values} values with validation ratio"
+        f" {validation_ratio} in two batches of size {batch_size}. At least"
+        f" {2*batch_size} values are required."
+    )
+
+  # Sort indices chronologically by creation_times (stable sorting is used to
+  # ensure that the output is deterministic)
+  sorted_idxs = np.argsort(creation_times, kind="stable")
+
+  num_valid = int(num_values * validation_ratio)
+  if validation_ratio > 0 and num_values >= 2:
+    num_valid = max(batch_size, num_valid)
+
+  if max_num_valid_examples is not None:
+    if num_valid > max_num_valid_examples:
+      log.warning(
+          "Validation set truncated from %d to %d nodes due to caching limits."
+          " To use more validation nodes, either increase `num_valid_steps` or"
+          " set `cache_valid_dataset=False`.",
+          num_valid,
+          max_num_valid_examples,
+      )
+      num_valid = max_num_valid_examples
+
+  train_cutoff = num_values - num_valid
+  train_idxs = sorted_idxs[:train_cutoff]
+  valid_idxs = sorted_idxs[train_cutoff:]
   return train_idxs, valid_idxs
 
 
