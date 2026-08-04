@@ -1,6 +1,5 @@
 load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
-load("@rules_python//python:py_binary.bzl", "py_binary")
 
 package(
     
@@ -49,18 +48,6 @@ py_library(
     ],
 )
 
-py_binary(
-    name = "gen_temporal_alert_graph_main",
-    srcs = ["gen_temporal_alert_graph_main.py"],
-    visibility = ["//dgf:__subpackages__"],
-    deps = [
-        ":gen_temporal_alert_graph",
-        # absl:app dep,
-        # absl/flags dep,
-        # absl/logging dep,
-    ],
-)
-
 # Test
 # =========
 
@@ -92,6 +79,11 @@ py_library(
     ],
 )
 
+py_library(
+    name = "gen_temporal_alert_graph_main",
+    srcs = ["gen_temporal_alert_graph_main.py"],
+)
+
 py_test(
     name = "edge_neighbor_generator_test",
     srcs = ["edge_neighbor_generator_test.py"],
@@ -121,7 +113,9 @@ py_test(
     deps = [
         ":gen_temporal_alert_graph",
         # absl/testing:absltest dep,
+        "//dgf/src/io:graph_in_memory",
         "//dgf/src/util:filesystem",
+        "//dgf/src/validate:in_memory_graph",
         # numpy dep,
     ],
 )

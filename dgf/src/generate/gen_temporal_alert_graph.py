@@ -22,8 +22,10 @@ Graph Neural Network (GNN) regression tasks.
 Graph Topology & Schema:
   * Node Set `hardware`:
     * `#id`: Primary ID (`hw_0`, `hw_1`, ...).
-    * `time`: 1D array of irregularly sampled timestamps.
-    * `signal`: 1D array of noisy sinusoidal telemetry values sampled at `time`.
+    * `creation_time`: Timestamp when the hardware device was initialized.
+    * `time`: 1D array of irregularly sampled timestamps (`group="time"`).
+    * `signal`: 1D array of noisy sinusoidal telemetry values sampled at `time`
+      (`group="time"`).
   * Node Set `alerts`:
     * `#id`: Primary ID (`alert_0`, `alert_1`, ...).
     * `creation_time`: Timestamp when the alert was triggered.
@@ -32,12 +34,13 @@ Graph Topology & Schema:
     * Directed edges linking hardware nodes to alert nodes. The number of
       connected hardware nodes per alert is sampled from a geometric (power
       decay) distribution controlled by `neighbor_decay`.
+    * `creation_time`: Timestamp when the alert edge was established.
 
 Target Formulation (`signal_regression`):
   For each alert triggered at t_create with lookback window W, the target label
-  is computed by linearly interpolating discrete hardware signals over the
-  window [t_create - W, t_create], summing the integrals across connected
-  neighbors, and normalizing by W.
+  is computed by evaluating discrete hardware signals as a step function
+  (zero-order hold) over the window [t_create - W, t_create], averaging the
+  time-integrated signals across connected neighbors, and normalizing by W.
 """
 
 import dataclasses
@@ -58,11 +61,15 @@ class TemporalAlertGraphConfig:
     num_alerts: Number of alert nodes to generate.
     start_time: Unix epoch start time in seconds.
     duration: Total simulation time interval in seconds.
+    signal_period: Period in seconds of the sinusoidal telemetry signal
+      (default: 7200 for 2-hour period).
     sample_interval_mean: Mean interval between hardware timestamps in seconds.
     sample_interval_jitter: Max jitter added to timestamp intervals in seconds.
     window_duration: Lookback window in seconds for the signal integral.
     neighbor_decay: Probability of adding an additional neighbor in each step
       (controls the geometric / power decay of alert in-degrees).
+    max_hardware_per_alert: Optional maximum number of hardware nodes an alert
+      can be connected to (hard limit).
     seed: Random seed for reproducible graph generation.
   """
 
@@ -70,10 +77,12 @@ class TemporalAlertGraphConfig:
   num_alerts: int = 10
   start_time: int = 1700000000
   duration: int = 86400
+  signal_period: int = 7200
   sample_interval_mean: int = 1200
   sample_interval_jitter: int = 300
   window_duration: int = 3600
   neighbor_decay: float = 0.8
+  max_hardware_per_alert: Optional[int] = None
   seed: int = 42
 
 
@@ -90,6 +99,11 @@ def generate_signal_regression_schema() -> schema_lib.GraphSchema:
                   "#id": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.BYTES,
                       semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+                  ),
+                  "creation_time": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.INTEGER_64,
+                      semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                      is_creation_time=True,
                   ),
                   "time": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.INTEGER_64,
@@ -128,7 +142,15 @@ def generate_signal_regression_schema() -> schema_lib.GraphSchema:
       },
       edge_sets={
           "hardware_to_alert": schema_lib.EdgeSchema(
-              source="hardware", target="alerts"
+              source="hardware",
+              target="alerts",
+              features={
+                  "creation_time": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.INTEGER_64,
+                      semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                      is_creation_time=True,
+                  ),
+              },
           ),
       },
   )
@@ -153,9 +175,21 @@ def generate_signal_regression_in_memory_graph(
         f"'window_duration' ({config.window_duration}) must be less than or"
         f" equal to 'duration' ({config.duration})."
     )
+  if config.signal_period <= 0:
+    raise ValueError(
+        f"'signal_period' ({config.signal_period}) must be positive."
+    )
   if not 0.0 <= config.neighbor_decay < 1.0:
     raise ValueError(
         f"'neighbor_decay' ({config.neighbor_decay}) must be in [0.0, 1.0)."
+    )
+  if (
+      config.max_hardware_per_alert is not None
+      and config.max_hardware_per_alert <= 0
+  ):
+    raise ValueError(
+        f"'max_hardware_per_alert' ({config.max_hardware_per_alert}) must be"
+        " positive."
     )
   rng = np.random.RandomState(config.seed)
 
@@ -164,12 +198,16 @@ def generate_signal_regression_in_memory_graph(
   hw_signals_list = []
 
   for _ in range(config.num_hardware):
+    phase_offset = float(rng.uniform(0.0, 2.0 * np.pi))
     t = config.start_time
     times = []
     signals = []
     while t <= config.start_time + config.duration:
       times.append(int(t))
-      phase = 2.0 * np.pi * (t - config.start_time) / float(config.duration)
+      phase = (
+          2.0 * np.pi * (t - config.start_time) / float(config.signal_period)
+          + phase_offset
+      )
       s = float(np.sin(phase) + rng.normal(0, 0.1))
       signals.append(s)
       step = config.sample_interval_mean + rng.randint(
@@ -180,6 +218,9 @@ def generate_signal_regression_in_memory_graph(
     hw_signals_list.append(np.array(signals, dtype=np.float32))
 
   hw_id_array = np.array(hw_ids, dtype=np.bytes_)
+  hw_creation_time_array = np.full(
+      config.num_hardware, config.start_time, dtype=np.int64
+  )
   hw_time_array = np.array(hw_times_list, dtype=np.object_)
   hw_signal_array = np.array(hw_signals_list, dtype=np.object_)
 
@@ -196,8 +237,12 @@ def generate_signal_regression_in_memory_graph(
   # geometric (power decay) distribution controlled by `neighbor_decay`, where
   # each step adds another neighbor with probability `neighbor_decay` and stops
   # with probability `1 - neighbor_decay`.
+  max_k = config.num_hardware
+  if config.max_hardware_per_alert is not None:
+    max_k = min(max_k, config.max_hardware_per_alert)
+
   neighbor_counts = np.minimum(
-      config.num_hardware,
+      max_k,
       rng.geometric(p=1.0 - config.neighbor_decay, size=config.num_alerts),
   )
 
@@ -220,17 +265,12 @@ def generate_signal_regression_in_memory_graph(
         continue
 
       def eval_signal(t_val: float) -> float:
-        if t_val <= hw_t[0]:
+        if t_val < hw_t[0]:
           return float(hw_s[0])
         if t_val >= hw_t[-1]:
           return float(hw_s[-1])
-        idx = int(np.searchsorted(hw_t, t_val))
-        if hw_t[idx] == t_val:
-          return float(hw_s[idx])
-        t0, t1 = hw_t[idx - 1], hw_t[idx]
-        s0, s1 = hw_s[idx - 1], hw_s[idx]
-        frac = (t_val - t0) / (t1 - t0)
-        return float(s0 + frac * (s1 - s0))
+        idx = int(np.searchsorted(hw_t, t_val, side="right")) - 1
+        return float(hw_s[idx])
 
       mask = (hw_t >= t_start) & (hw_t <= t_create)
       window_t = [float(t_start)] + list(hw_t[mask]) + [float(t_create)]
@@ -241,18 +281,21 @@ def generate_signal_regression_in_memory_graph(
         ta = window_t[j]
         tb = window_t[j + 1]
         sa = eval_signal(ta)
-        sb = eval_signal(tb)
-        integral_h += 0.5 * (sa + sb) * (tb - ta)
+        integral_h += sa * (tb - ta)
 
       total_integral += integral_h
 
     # Compute the target regression label (`signal_regression`).
-    # This label represents the sum of the time-averaged telemetry
+    # This label represents the average of the time-averaged telemetry
     # signals across all connected hardware neighbors during the lookback
     # window [t_create - W, t_create]. To predict this target accurately, a
     # temporal GNN must learn both spatial aggregation over neighbor edges and
     # temporal interpolation over irregularly sampled historical signals.
-    val = total_integral / float(config.window_duration)
+    val = (
+        total_integral / (float(config.window_duration) * float(k))
+        if k > 0
+        else 0.0
+    )
     alert_regression.append(val)
 
   alert_id_array = np.array(alert_ids, dtype=np.bytes_)
@@ -260,12 +303,19 @@ def generate_signal_regression_in_memory_graph(
   alert_reg_array = np.array(alert_regression, dtype=np.float32)
 
   adj = np.array([edge_sources, edge_targets], dtype=np.int64)
+  if len(edge_targets) > 0:
+    edge_creation_times_array = np.array(
+        [alert_creation_times[tgt] for tgt in edge_targets], dtype=np.int64
+    )
+  else:
+    edge_creation_times_array = np.zeros(0, dtype=np.int64)
 
   graph = in_memory_graph_lib.InMemoryGraph(
       node_sets={
           "hardware": in_memory_graph_lib.InMemoryNodeSet(
               features={
                   "#id": hw_id_array,
+                  "creation_time": hw_creation_time_array,
                   "time": hw_time_array,
                   "signal": hw_signal_array,
               },
@@ -282,7 +332,10 @@ def generate_signal_regression_in_memory_graph(
       },
       edge_sets={
           "hardware_to_alert": in_memory_graph_lib.InMemoryEdgeSet(
-              adjacency=adj
+              adjacency=adj,
+              features={
+                  "creation_time": edge_creation_times_array,
+              },
           ),
       },
   )
