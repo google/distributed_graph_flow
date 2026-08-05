@@ -112,6 +112,7 @@ py_library(
     deps = [
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
+        "//dgf/src/util:log",
         "//dgf/src/util:temporal",
         # numpy dep,
     ],

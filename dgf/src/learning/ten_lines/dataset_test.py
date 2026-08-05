@@ -278,8 +278,10 @@ class EvaluationTest(absltest.TestCase):
             temporal_sampling=True,
         ),
         temporal=True,
-        timeseries_pad_and_cap=pad_and_cap_config,
-        timedelta_extraction=timeseries_transform.TimestampFeatureExtractorConfig(),
+        per_sample_transforms=timeseries_transform.PerSampleTransformConfig(
+            timeseries_pad_and_cap=pad_and_cap_config,
+            timedelta_extraction=timeseries_transform.TimestampFeatureExtractorConfig(),
+        ),
         drop_remainder=False,
         shuffle=False,
     )
@@ -406,7 +408,9 @@ class EvaluationTest(absltest.TestCase):
               temporal_sampling=True,
           ),
           temporal=True,
-          timeseries_pad_and_cap=timeseries_transform.PadAndCapTimeseriesConfig(),
+          per_sample_transforms=timeseries_transform.PerSampleTransformConfig(
+              timeseries_pad_and_cap=timeseries_transform.PadAndCapTimeseriesConfig()
+          ),
           sampler_returns_node_idxs_only=True,
           drop_remainder=False,
           shuffle=False,
@@ -415,7 +419,7 @@ class EvaluationTest(absltest.TestCase):
   def test_non_in_memory_format_with_transforms_raises(self):
     _, schema = self._create_temporal_test_graph_and_schema()
     with self.assertRaisesRegex(
-        ValueError,
+        NotImplementedError,
         "only supported for GraphFormat.IN_MEMORY_GRAPH",
     ):
       dataset.SampleGeneratorFromAnything(
@@ -446,10 +450,12 @@ class EvaluationTest(absltest.TestCase):
             num_hops=1,
             hop_width=2,
         ),
-        timeseries_pad_and_cap=timeseries_transform.PadAndCapTimeseriesConfig(
-            sequence_length=5
+        per_sample_transforms=timeseries_transform.PerSampleTransformConfig(
+            timeseries_pad_and_cap=timeseries_transform.PadAndCapTimeseriesConfig(
+                sequence_length=5
+            ),
+            timedelta_extraction=timeseries_transform.TimestampFeatureExtractorConfig(),
         ),
-        timedelta_extraction=timeseries_transform.TimestampFeatureExtractorConfig(),
         temporal=False,
         drop_remainder=False,
         shuffle=False,
@@ -484,7 +490,9 @@ class EvaluationTest(absltest.TestCase):
             temporal_sampling=True,
         ),
         temporal=True,
-        timeseries_pad_and_cap=timeseries_transform.PadAndCapTimeseriesConfig(),
+        per_sample_transforms=timeseries_transform.PerSampleTransformConfig(
+            timeseries_pad_and_cap=timeseries_transform.PadAndCapTimeseriesConfig()
+        ),
         drop_remainder=False,
         shuffle=False,
     )
@@ -519,7 +527,9 @@ class EvaluationTest(absltest.TestCase):
               temporal_sampling=True,
           ),
           temporal=True,
-          timedelta_extraction=timeseries_transform.TimestampFeatureExtractorConfig(),
+          per_sample_transforms=timeseries_transform.PerSampleTransformConfig(
+              timedelta_extraction=timeseries_transform.TimestampFeatureExtractorConfig()
+          ),
           drop_remainder=False,
           shuffle=False,
       )

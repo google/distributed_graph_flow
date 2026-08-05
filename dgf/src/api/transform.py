@@ -29,7 +29,7 @@ from dgf.src.transform.normalize import IdentityNormalizer
 from dgf.src.transform.normalize import SoftQuantileNormalizer
 from dgf.src.transform.normalize import SinusoidTimedeltaNormalizer
 
-from dgf.src.transform.extract import filter_schema
+from dgf.src.transform.extract import filter_schema as filter_schema_by_features
 from dgf.src.transform.extract import filter_graph
 from dgf.src.transform.extract import drop_edge_features
 
@@ -56,6 +56,7 @@ from dgf.src.transform.timeseries import CalendarFeatureExtractor
 from dgf.src.transform.timeseries import CalendarFeatureExtractorConfig
 from dgf.src.transform.timeseries import PadAndCapTimeseries
 from dgf.src.transform.timeseries import PadAndCapTimeseriesConfig
+from dgf.src.transform.timeseries import PerSampleTransform
+from dgf.src.transform.timeseries import PerSampleTransformConfig
 from dgf.src.transform.timeseries import TimestampFeatureExtractor
 from dgf.src.transform.timeseries import TimestampFeatureExtractorConfig
-

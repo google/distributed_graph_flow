@@ -332,9 +332,7 @@ class TimeseriesTest(parameterized.TestCase):
         schema,
         timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
     )
-    with self.assertRaisesRegex(
-        ValueError, "clashes with an existing feature"
-    ):
+    with self.assertRaisesRegex(ValueError, "clashes with an existing feature"):
       pad_and_cap.output_schema()
 
   def test_pad_and_cap_timeseries_features_auto_assigns_group_when_none(self):
@@ -814,12 +812,8 @@ class TimeseriesTest(parameterized.TestCase):
     extractor = timeseries.CalendarFeatureExtractor(schema)
     cal_schema = extractor.output_schema()
     hw_sch = cal_schema.node_sets["hardware"]
-    self.assertEqual(
-        hw_sch.features["event_time_hour"].group, "master_time"
-    )
-    self.assertEqual(
-        hw_sch.features["master_time_hour"].group, "master_time"
-    )
+    self.assertEqual(hw_sch.features["event_time_hour"].group, "master_time")
+    self.assertEqual(hw_sch.features["master_time_hour"].group, "master_time")
 
   def test_extract_timestamp_features(self):
     graph, schema = _make_graph_and_schema(
@@ -1049,6 +1043,98 @@ class TimeseriesTest(parameterized.TestCase):
     raw_val = np.array([[0, 100, 250]], dtype=np.int64)
     deltas = timeseries._compute_seed_deltas(raw_val, mask, 500, fill_value)
     np.testing.assert_array_equal(deltas, expected)
+
+  def test_per_sample_transform_config_serialization(self):
+    config = timeseries.PerSampleTransformConfig(
+        timeseries_pad_and_cap=timeseries.PadAndCapTimeseriesConfig(
+            sequence_length=15, padding_value=-1
+        ),
+        timedelta_extraction=timeseries.TimestampFeatureExtractorConfig(
+            fill_value=-999
+        ),
+    )
+    json_str = config.to_json()  # pyrefly: ignore[missing-attribute]
+    restored = timeseries.PerSampleTransformConfig.from_json(json_str)  # pyrefly: ignore[missing-attribute]
+    self.assertEqual(config, restored)
+    self.assertEqual(restored.timeseries_pad_and_cap.sequence_length, 15)
+    self.assertEqual(restored.timeseries_pad_and_cap.padding_value, -1)
+    self.assertEqual(restored.timedelta_extraction.fill_value, -999)
+
+  def test_per_sample_transform_end_to_end(self):
+    graph, schema = _make_graph_and_schema(
+        values={
+            "time": np.array(
+                [np.array([100, 250, 300], dtype=np.int64)], dtype=np.object_
+            ),
+            "signal": np.array(
+                [np.array([1.0, 2.0, 3.0], dtype=np.float32)], dtype=np.object_
+            ),
+        },
+        schemas={
+            "time": _ts_schema(
+                fmt=schema_lib.FeatureFormat.INTEGER_64,
+                sem=schema_lib.FeatureSemantic.TIMESTAMP,
+                is_creation_time=True,
+                group="time",
+            ),
+            "signal": _ts_schema(group="time"),
+        },
+    )
+    config = timeseries.PerSampleTransformConfig(
+        timeseries_pad_and_cap=timeseries.PadAndCapTimeseriesConfig(
+            sequence_length=4
+        ),
+        timedelta_extraction=timeseries.TimestampFeatureExtractorConfig(),
+    )
+    transform = config.make(schema)
+    self.assertTrue(transform.has_transforms())
+
+    out_schema = transform.output_schema()
+    self.assertIn("time_mask", out_schema.node_sets["hardware"].features)
+    self.assertIn("time_seed_delta", out_schema.node_sets["hardware"].features)
+
+    # Test transform single sample
+    transformed_single = transform.transform_sample(graph, seed_timestamp=500)
+    hw_single = transformed_single.node_sets["hardware"]
+    np.testing.assert_array_equal(
+        hw_single.features["time"], [[0, 100, 250, 300]]
+    )
+    np.testing.assert_array_equal(
+        hw_single.features["time_mask"], [[False, True, True, True]]
+    )
+    np.testing.assert_array_equal(
+        hw_single.features["time_seed_delta"], [[0, 400, 250, 200]]
+    )
+
+    # Test transform sample list
+    transformed_list = transform.transform_sample_list(
+        [graph], seed_timestamps=np.array([500])
+    )
+    self.assertLen(transformed_list, 1)
+    hw_list = transformed_list[0].node_sets["hardware"]
+    np.testing.assert_array_equal(
+        hw_list.features["time_seed_delta"], [[0, 400, 250, 200]]
+    )
+
+  def test_per_sample_transform_no_active_transforms(self):
+    graph, schema = _make_graph_and_schema(
+        values={"age": np.array([30])},
+        schemas={
+            "age": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.INTEGER_64,
+                semantic=schema_lib.FeatureSemantic.NUMERICAL,
+            )
+        },
+    )
+    config = timeseries.PerSampleTransformConfig()
+    transform = config.make(schema)
+    self.assertFalse(transform.has_transforms())
+    self.assertEqual(transform.output_schema(), schema)
+
+    transformed = transform.transform_sample(graph)
+    self.assertIs(transformed, graph)
+    transformed_list = transform.transform_sample_list([graph])
+    self.assertIs(transformed_list[0], graph)
 
 
 if __name__ == "__main__":

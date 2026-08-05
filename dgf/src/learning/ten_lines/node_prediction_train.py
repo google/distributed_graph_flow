@@ -163,7 +163,6 @@ def train_node_model(
     node_embedding_dim: int = 128,
     learning_rate: float = 1e-3,
     cache_valid_dataset: bool = True,
-    time_aware: bool = False,
     message_pooling: str = "sum",
     experimental_preprocess_core_model_config: Optional[
         Callable[[CoreModelConfig], CoreModelConfig]
@@ -225,9 +224,6 @@ def train_node_model(
     cache_valid_dataset: Whether to cache the validation dataset in memory. This
       can speed up validation if sample generation and normalization are
       time-consuming, but it will increase memory usage.
-    time_aware: Enables temporal-aware training. If `False` (default), no
-      temporal masking is applied. If `True`, timestamp features are inferred
-      from the schema (via features marked as creation timestamps).
     message_pooling: The pooling method to use for aggregating messages.
     experimental_preprocess_core_model_config: Advanced option. An optional
       callable to modify the `CoreModelConfig` before it is used to build the
@@ -288,20 +284,12 @@ def train_node_model(
             f" {list(schema.node_sets.keys())}"
         )
 
-    # Note: Maybe one day, the timestamp features will be used for something else.
-    if time_aware:
-      nodeset_ts_features = temporal_util.nodeset_timestamp_features(schema)
-      edgeset_ts_features = temporal_util.edgeset_timestamp_features(schema)
-      if target_nodeset not in nodeset_ts_features:
-        raise ValueError(
-            f"The target nodeset '{target_nodeset}' must have a creation time"
-            " feature. Set is_creation_time=True on the creation time feature"
-            " (e.g. `schema.node_sets[<target nodeset>].features[<creation time"
-            " feature>].is_creation_time = True`)."
+    target_has_creation_time = (
+        temporal_util.creation_time_feature_name(
+            schema.node_sets[target_nodeset].features
         )
-    else:
-      nodeset_ts_features = {}
-      edgeset_ts_features = {}
+        is not None
+    )
 
     if verbose >= 2:
       log.info(
@@ -354,9 +342,7 @@ def train_node_model(
             validation_ratio=validation_ratio,
             train_seed_nodes=train_seed_nodes,
             valid_seed_nodes=valid_seed_nodes,
-            temporal_sampling=time_aware,
-            nodeset_timestamp_features=nodeset_ts_features,
-            edgeset_timestamp_features=edgeset_ts_features,
+            temporal_sampling=target_has_creation_time,
             num_valid_steps=num_valid_steps,
             cache_valid_dataset=cache_valid_dataset,
             cache_normalized_features=cache_normalized_features,
@@ -675,9 +661,12 @@ def train_node_model(
             padding=dataset_preparator.padding,
             sampling_plan=dataset_preparator.sampling_plan,
             feature_stats=dataset_preparator.feature_stats,
-            temporal_sampling=time_aware,
-            nodeset_timestamp_features=nodeset_ts_features,
-            edgeset_timestamp_features=edgeset_ts_features,
+            temporal_sampling=dataset_preparator.sampling_plan.temporal_sampling,
+            nodeset_timestamp_features=temporal_util.nodeset_timestamp_features(
+                schema
+            ),
+            edgeset_timestamp_features=dataset_preparator.sampling_plan.edgeset_timestamp_features,
+            per_sample_transforms=train_dataset.per_sample_transforms,
             training_stats=TrainingStats(
                 num_train_seed_nodes=train_dataset.num_nodes_in_seed_nodeset(),
                 num_valid_seed_nodes=valid_dataset.num_nodes_in_seed_nodeset()
@@ -697,7 +686,7 @@ def train_node_model(
       if verbose >= 1:
         log.info("Final model evaluation")
       model.data().final_evaluation = model.evaluate_generator(
-          valid_dataset.get_live().sample_generator.single_iterator()
+          valid_dataset.get_live().sample_generator.single_iterator()  # pyrefly: ignore[missing-attribute]
       )
 
   model.metadata.captured_logs = captured_logs
