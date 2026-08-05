@@ -868,6 +868,36 @@ Edge Sets:
     out_schema = normalizer.output_schema()
     self.assertIn("ts_delta_SINUSOID", out_schema.node_sets["nodes"].features)
 
+  def test_auto_normalize_mask(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "nodes": schema_lib.NodeSchema(
+                features={
+                    "mask": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BOOL,
+                        semantic=schema_lib.FeatureSemantic.MASK,
+                        shape=(),
+                    )
+                }
+            )
+        },
+        edge_sets={},
+    )
+    stats = statistics_lib.GraphFeatureStatistics(
+        node_sets={
+            "nodes": statistics_lib.FeatureSetStatistics(
+                features={},
+            )
+        }
+    )
+    normalizer = normalize_lib.auto_normalize(schema, stats)
+    out_schema = normalizer.output_schema()
+    self.assertIn("mask", out_schema.node_sets["nodes"].features)
+    self.assertEqual(
+        out_schema.node_sets["nodes"].features["mask"].semantic,
+        schema_lib.FeatureSemantic.MASK,
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

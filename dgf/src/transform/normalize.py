@@ -661,7 +661,11 @@ def auto_normalize(
     nodeset_normalizers = []
     nodeset_stats = stats.node_sets[nodeset_name]
     for feature_name, feature_schema in nodeset_schema.features.items():
-      if feature_name in config.keep_raw_features:
+      if (
+          feature_name in config.keep_raw_features
+          # Mask features should be preserved.
+          or feature_schema.semantic == schema_lib.FeatureSemantic.MASK
+      ):
         # Simply pass the values, no questions asked.
         nodeset_normalizers.append(
             IdentityNormalizer(
