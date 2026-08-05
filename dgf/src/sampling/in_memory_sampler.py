@@ -344,6 +344,15 @@ def add_features_to_samples(
           features = full_graph.node_sets[node_set_name].features
           for feature_name, full_feature_value in features.items():
             node_set.features[feature_name] = full_feature_value[node_idxs]
+      for edge_set_name, edge_set in sample.edge_sets.items():
+        if "#idx" in edge_set.features:
+          edge_idxs = edge_set.features["#idx"]
+          if not return_node_idxs:
+            del edge_set.features["#idx"]
+          if return_features:
+            features = full_graph.edge_sets[edge_set_name].features
+            for feature_name, full_feature_value in features.items():
+              edge_set.features[feature_name] = full_feature_value[edge_idxs]
 
 
 def create_sampler(

@@ -20,7 +20,7 @@ import os
 import tempfile
 from typing import Tuple
 import unittest
-from unittest import mock
+
 from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -34,13 +34,17 @@ from dgf.src.learning.ten_lines import common as common_lib
 from dgf.src.learning.ten_lines import node_prediction_model
 from dgf.src.learning.ten_lines import node_prediction_train as node_prediction_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
+from dgf.src.transform import temporal as temporal_transform
+from dgf.src.transform import timeseries as timeseries_transform
 from dgf.src.util import filesystem as fs
 from dgf.src.util import gen_test_graph
+from dgf.src.util import temporal as temporal_util
 from dgf.src.util import test_util
 import jax
 import jax.numpy as jnp
 import numpy as np
 import tensorflow as tf
+
 
 # Arguments to speed up the train method. Model quality will be poor,
 # but training and model inference will run completely.
@@ -320,8 +324,13 @@ class NodePredictionRealLooking(parameterized.TestCase):
     self.assertTrue(np.allclose(np.sum(restored_predictions, axis=1), 1.0))
 
     # Check that predictions on a pre-sampled graph are exactly equal
+    graph_for_sampling = self.graph
+    if getattr(self.model, "target_has_creation_time", False):
+      graph_for_sampling, _ = temporal_transform.propagate_timestamp_to_edges(
+          self.graph, self.schema
+      )
     sampler = in_memory_sampler_lib.create_sampler(
-        graph=self.graph,
+        graph=graph_for_sampling,
         plan=self.model.data().sampling_plan,
         schema=self.model.data().schema,
         batch_size=5,
@@ -344,8 +353,13 @@ class NodePredictionRealLooking(parameterized.TestCase):
   )
   def test_to_tensorflow_function(self, consume_tf_graph_dict: bool):
 
+    graph_for_sampling = self.graph
+    if getattr(self.model, "target_has_creation_time", False):
+      graph_for_sampling, _ = temporal_transform.propagate_timestamp_to_edges(
+          self.graph, self.schema
+      )
     sampler = in_memory_sampler_lib.create_sampler(
-        graph=self.graph,
+        graph=graph_for_sampling,
         plan=self.model.data().sampling_plan,
         schema=self.model.data().schema,
         batch_size=5,
@@ -355,11 +369,35 @@ class NodePredictionRealLooking(parameterized.TestCase):
     sample_1 = sampler.sample(0)
     sample_2 = sampler.sample(1)
 
+    if getattr(self.model, "target_has_creation_time", False):
+      extractor = timeseries_transform.TimestampFeatureExtractor(
+          self.schema,
+          timeseries_transform.TimestampFeatureExtractorConfig(),
+      )
+      target_nodeset = self.model.data().task.target_nodeset
+      ts_name = temporal_util.creation_time_feature_name(
+          self.schema.node_sets[target_nodeset].features
+      )
+      assert ts_name is not None
+      st1 = int(sample_1.node_sets[target_nodeset].features[ts_name][0])
+      sample_1 = extractor(sample_1, seed_timestamp=st1)
+      st2 = int(sample_2.node_sets[target_nodeset].features[ts_name][0])
+      sample_2 = extractor(sample_2, seed_timestamp=st2)
+
+    if temporal_util.schema_has_timeseries_features(self.schema):
+      pad_cap = timeseries_transform.PadAndCapTimeseries(
+          self.schema,
+          timeseries_transform.PadAndCapTimeseriesConfig(),
+      )
+      sample_1 = pad_cap(sample_1)
+      sample_2 = pad_cap(sample_2)
+
+    inference_schema = self.model.inference_schema()
     tf_sample_1 = tf_io.graph_to_tf_graph(
-        sample_1, schema=self.model.data().schema
+        sample_1, schema=inference_schema
     )
     tf_sample_2 = tf_io.graph_to_tf_graph(
-        sample_2, schema=self.model.data().schema
+        sample_2, schema=inference_schema
     )
 
     if consume_tf_graph_dict:
@@ -382,8 +420,12 @@ class NodePredictionRealLooking(parameterized.TestCase):
     prediction_sample_1 = tf_predict_fn(**kwargs_call_1)  # pyrefly: ignore[not-callable]
 
     # Expected prediction
-    expected_prediction_sample_1 = self.model.predict(sample_1, [0])
-    expected_prediction_sample_2 = self.model.predict(sample_2, [0])
+    expected_prediction_sample_1 = self.model.predict_on_graph_sample_batch(
+        [sample_1]
+    )
+    expected_prediction_sample_2 = self.model.predict_on_graph_sample_batch(
+        [sample_2]
+    )
 
     np.testing.assert_allclose(
         prediction_sample_1.numpy(), expected_prediction_sample_1, atol=1e-5
@@ -432,13 +474,22 @@ class NodePredictionRealLooking(parameterized.TestCase):
           (f"nodes_client_categorical{u}label", [None]),
           ("nodes_transaction_reserved_size", ()),
           (f"nodes_transaction_{h}id", [None]),
-          ("nodes_transaction_date", [None]),
           ("nodes_transaction_amount", [None]),
           (
               f"edges_transation{u}to{u}client_reserved_adjacency",
               [2, None],
           ),
       ]
+      if getattr(self.model, "target_has_creation_time", False):
+        expected_keys_and_shapes.extend([
+            (f"nodes_client_created{u}at{u}seed{u}delta", [None]),
+            (f"nodes_transaction_date{u}seed{u}delta", [None]),
+        ])
+      else:
+        expected_keys_and_shapes.extend([
+            (f"nodes_client_created{u}at", [None]),
+            ("nodes_transaction_date", [None]),
+        ])
 
       for key, expected_shape in expected_keys_and_shapes:
         self.assertTrue(
@@ -903,7 +954,10 @@ class NodePredictionTemporalValidationTest(absltest.TestCase):
     )
     self.assertTrue(model.data().temporal_sampling)
     self.assertTrue(model.data().sampling_plan.temporal_sampling)
-    self.assertEmpty(model.data().sampling_plan.edgeset_timestamp_features)
+    self.assertEqual(
+        model.data().sampling_plan.edgeset_timestamp_features,
+        {"transation_to_client": "timestamps"},
+    )
 
 
 if __name__ == "__main__":
