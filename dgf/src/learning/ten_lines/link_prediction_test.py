@@ -360,7 +360,7 @@ class LinkPredictionToyTest(parameterized.TestCase):
     for expected in [
         "Objective",
         "Training",
-        "Schemas",
+        "Schema",
         "Feature statistics",
         "Padding",
     ]:

@@ -70,6 +70,7 @@ py_library(
     deps = [
         # altair dep,
         # dataclasses_json dep,
+        "//dgf/src/util:html_util",
         # numpy dep,
         # pandas dep,
     ],

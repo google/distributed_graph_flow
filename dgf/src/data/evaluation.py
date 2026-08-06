@@ -16,8 +16,10 @@
 
 import dataclasses
 from typing import Dict, List, Optional
+import uuid
 import altair as alt
 import dataclasses_json
+from dgf.src.util import html_util
 import numpy as np
 import pandas as pd
 
@@ -114,11 +116,17 @@ class Evaluation:
   ) -> str:
     """Html representation of the metrics."""
 
-    html_parts = ["<b>Evaluation</b>", "<ul>"]
+    html_parts = [
+        "<style>",
+        html_util.get_table_style(),
+        "</style>",
+        '<table class="dgf-table">',
+        "<tbody>",
+    ]
 
     def _add_metric(name, value):
       if value is not None:
-        html_parts.append(f"<li><b>{name}:</b> {value}</li>")
+        html_parts.append(f"<tr><td><b>{name}</b></td><td>{value}</td></tr>")
 
     _add_metric("Loss", self.loss)
     _add_metric("Accuracy", self.accuracy)
@@ -130,29 +138,52 @@ class Evaluation:
     _add_metric("AUC", self.auc)
 
     if self.per_classes:
+      num_classes = len(self.per_classes)
       html_parts.append(
-          f"<li><b>Per Class Metrics [{len(self.per_classes)}]:</b><ul>"
+          '<tr><td style="vertical-align: top;"><b>Per Class Metrics'
+          f" [{num_classes}]:</b></td><td><ul>"
       )
-      for c, pc in enumerate(self.per_classes):
+
+      def _add_class_metric(c, pc):
         html_parts.append(
             f"<li><em>Class {c}</em>: AUC={pc.auc():.4f},"
             f" PR-AUC={pc.pr_auc():.4f}</li>"
         )
-      html_parts.append("</ul></li>")
+
+      max_num_classes_to_display = 5
+      if num_classes > max_num_classes_to_display:
+        for i in range(3):
+          _add_class_metric(i, self.per_classes[i])
+        html_parts.append(
+            f"<li>... ({num_classes - max_num_classes_to_display} omitted)"
+            " ...</li>"
+        )
+        for i in range(num_classes - 2, num_classes):
+          _add_class_metric(i, self.per_classes[i])
+      else:
+        for c, pc in enumerate(self.per_classes):
+          _add_class_metric(c, pc)
+
+      html_parts.append("</ul></td></tr>")
 
     if self.hit_at:
-      html_parts.append("<li><b>Hit@N:</b><ul>")
+      html_parts.append(
+          '<tr><td style="vertical-align: top;"><b>Hit@N:</b></td><td><ul>'
+      )
       for key, value in self.hit_at.items():
         html_parts.append(f"<li><em>@{key}</em>: {value}</li>")
-      html_parts.append("</ul></li>")
+      html_parts.append("</ul></td></tr>")
 
     if self.user_metrics:
-      html_parts.append("<li><b>User Metrics:</b><ul>")
+      html_parts.append(
+          '<tr><td style="vertical-align: top;"><b>User'
+          " Metrics:</b></td><td><ul>"
+      )
       for key, value in self.user_metrics.items():
         html_parts.append(f"<li><em>{key}</em>: {value}</li>")
-      html_parts.append("</ul></li>")
+      html_parts.append("</ul></td></tr>")
 
-    html_parts.append("</ul>")
+    html_parts.append("</tbody></table>")
 
     # Add plots if we have curves
     if self.per_classes and len(self.per_classes[0].tp) > 0:
@@ -212,7 +243,11 @@ class Evaluation:
       )
 
       combined_chart = alt.hconcat(roc_chart, pr_chart)
-      html_parts.append(combined_chart.to_html())
+      html_parts.append(
+          combined_chart.to_html(
+              fullhtml=False, output_div=f"vis-{uuid.uuid4().hex}"
+          )
+      )
 
     return "\n".join(html_parts)
 

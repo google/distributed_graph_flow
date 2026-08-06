@@ -45,7 +45,7 @@ class EvaluationTest(absltest.TestCase):
     self.assertEqual(generator.num_seed_nodes, 2)
     num_batches = 0
     num_graphs = 0
-    for sample, offsets in generator.iterator():
+    for sample, offsets in generator.batch_iterator():
       in_memory_graph_validate_lib.validate_graph(
           sample, schema, raise_on_warning=False
       )
@@ -74,7 +74,7 @@ class EvaluationTest(absltest.TestCase):
     np.testing.assert_array_equal(generator.seed_node_idxs, np.array([0, 1]))
     num_batches = 0
     num_graphs = 0
-    for sample, offsets in generator.iterator():
+    for sample, offsets in generator.batch_iterator():
       in_memory_graph_validate_lib.validate_graph(
           sample, schema, raise_on_warning=False
       )
@@ -103,7 +103,7 @@ class EvaluationTest(absltest.TestCase):
     num_batches = 0
     num_graphs = 0
     merge_schema = generator._get_merge_schema()
-    for sample, offsets in generator.iterator():
+    for sample, offsets in generator.batch_iterator():
       self.assertEqual(list(sample.node_sets["n1"].features.keys()), ["#idx"])
       num_batches += 1
       num_graphs += len(offsets["n1"]) - 1
@@ -146,7 +146,7 @@ class EvaluationTest(absltest.TestCase):
     self.assertIsNone(generator.num_seed_nodes, 21)
     num_batches = 0
     num_graphs = 0
-    for sample, offsets in generator.iterator():
+    for sample, offsets in generator.batch_iterator():
       in_memory_graph_validate_lib.validate_graph(
           sample, schema, raise_on_warning=False
       )
@@ -297,7 +297,7 @@ class EvaluationTest(absltest.TestCase):
     )
 
     num_batches = 0
-    for sample, _ in generator.iterator():
+    for sample, _ in generator.batch_iterator():
       in_memory_graph_validate_lib.validate_graph(
           sample, generator.output_schema(), raise_on_warning=False
       )
@@ -463,7 +463,7 @@ class EvaluationTest(absltest.TestCase):
         "time_seed_delta",
         generator.output_schema().node_sets["hardware"].features,
     )
-    for sample, _ in generator.iterator():
+    for sample, _ in generator.batch_iterator():
       self.assertIn("time_seed_delta", sample.node_sets["hardware"].features)
       self.assertIn(
           "creation_time_seed_delta", sample.node_sets["alerts"].features

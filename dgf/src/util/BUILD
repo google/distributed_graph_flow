@@ -160,6 +160,11 @@ py_library(
 )
 
 py_library(
+    name = "html_util",
+    srcs = ["html_util.py"],
+)
+
+py_library(
     name = "log",
     srcs = ["log.py"],
     deps = [
