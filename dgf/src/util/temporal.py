@@ -205,6 +205,34 @@ def extract_timeseries_schema_cache(
   )
 
 
+def schema_has_timeseries_features(schema: schema_lib.GraphSchema) -> bool:
+  """Returns True if any feature in the schema is a timeseries feature."""
+  for ns_schema in schema.node_sets.values():
+    for f_schema in ns_schema.features.values():
+      if f_schema.is_timeseries:
+        return True
+  for es_schema in schema.edge_sets.values():
+    for f_schema in es_schema.features.values():
+      if f_schema.is_timeseries:
+        return True
+  return False
+
+
+def schema_has_dynamic_timeseries_features(
+    schema: schema_lib.GraphSchema,
+) -> bool:
+  """Returns True if any feature in the schema is a timeseries feature with dynamic shape."""
+  for ns_schema in schema.node_sets.values():
+    for f_schema in ns_schema.features.values():
+      if f_schema.is_timeseries and not f_schema.is_static_shape():
+        return True
+  for es_schema in schema.edge_sets.values():
+    for f_schema in es_schema.features.values():
+      if f_schema.is_timeseries and not f_schema.is_static_shape():
+        return True
+  return False
+
+
 def get_timeseries_step_shape(
     fschema: schema_lib.FeatureSchema,
 ) -> Tuple[Optional[int], ...]:

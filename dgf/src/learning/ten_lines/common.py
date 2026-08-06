@@ -18,7 +18,7 @@ import abc
 import dataclasses
 import enum
 import os
-from typing import Any, Dict, List, Literal, Optional, Type, Union
+from typing import Any, Dict, List, Literal, Optional, Type, TypeAlias, Union
 import uuid
 import dataclasses_json
 from dgf.src.learning import early_stopping_monitor
@@ -29,12 +29,13 @@ from dgf.src.learning.ten_lines import dataset
 from dgf.src.util import filesystem as fs
 from dgf.src.util import util
 import jax
+import numpy as np
 
 # The types of graphs supported.
 Graph = dataset.Graph
 
-# The type of seed node idxs supported.
-SeedNodeIdxs = dataset.SeedNodeIdxs
+# The type of seed node idxs supported in high-level APIs.
+SeedNodeIdxs: TypeAlias = Union[List[int], np.ndarray]
 
 # Filename in the model saved on disk.
 FILENAME_DONE = "DONE"

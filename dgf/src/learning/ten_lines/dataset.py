@@ -16,7 +16,7 @@
 
 import dataclasses
 import enum
-from typing import Callable, Dict, Iterator, List, Optional, Tuple, TypeAlias, Union
+from typing import Callable, Dict, Iterator, Optional, Tuple, TypeAlias, Union
 from dgf.src.data import in_memory_graph
 from dgf.src.data import padding as padding_lib
 from dgf.src.data import schema as schema_lib
@@ -24,6 +24,7 @@ from dgf.src.io import tf_graph_sample
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import merge as merge_lib
+from dgf.src.transform import timeseries as timeseries_transform
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 import numpy as np
@@ -56,9 +57,6 @@ class GraphFormat(enum.Enum):
   PATH_TF_SAMPLE_TF_RECORD = "PATH_TF_SAMPLE_TF_RECORD"
   # TODO(gbm): Add support for pygrain dataset / iter-dataset.
 
-
-# The type of seed node idxs supported.
-SeedNodeIdxs: TypeAlias = List[int]
 
 SampleGeneratorIteratorFn = Callable[
     [], Iterator[Tuple[in_memory_graph.InMemoryGraph, Dict[str, np.ndarray]]]
@@ -109,15 +107,21 @@ class SampleGeneratorFromAnything:
       containing timestamps. Only used if temporal=true.
     num_seed_nodes: The number of seed nodes in the graph.
     iterator: An iterator yielding batches of graph samples.
+    in_memory_sampler: The in-memory sampler used when sampling from an
+      `InMemoryGraph`.
     sampler_returns_node_idxs_only: If `True`, the sampler returns only node
       indices without feature values. If `False` (default), the sampler returns
       feature values.
+    timeseries_pad_and_cap: Configuration for padding and capping
+      timeseries sequence features per sample before merging.
+    timedelta_extraction: Configuration for time delta extraction per
+      sample before merging.
   """
 
   graph: Graph
   schema: schema_lib.GraphSchema
   batch_size: int
-  seed_node_idxs: Optional[SeedNodeIdxs]
+  seed_node_idxs: Optional[np.ndarray]
   sampling_config: Union[
       sampling_config_lib.SimpleSamplingConfig, sampling_config_lib.SamplingPlan
   ]
@@ -134,17 +138,36 @@ class SampleGeneratorFromAnything:
       default_factory=dict
   )
   sampler_returns_node_idxs_only: bool = False
+  timeseries_pad_and_cap: Optional[
+      timeseries_transform.PadAndCapTimeseriesConfig
+  ] = None
+  timedelta_extraction: Optional[
+      timeseries_transform.TimestampFeatureExtractorConfig
+  ] = None
 
   num_seed_nodes: Optional[int] = dataclasses.field(init=False)
   iterator: SampleGeneratorIteratorFn = dataclasses.field(init=False)
   in_memory_sampler: Optional[in_memory_sampler_lib.Sampler] = None
+  _output_schema: schema_lib.GraphSchema = dataclasses.field(init=False)
   _target_nodeset: Optional[str] = dataclasses.field(init=False, default=None)
   _ts_feature: Optional[str] = dataclasses.field(init=False, default=None)
   _seed_timestamps_all: Optional[np.ndarray] = dataclasses.field(
       init=False, default=None
   )
+  _pad_and_cap_transformer: Optional[
+      timeseries_transform.PadAndCapTimeseries
+  ] = dataclasses.field(init=False, default=None)
+  _timestamp_extractor: Optional[
+      timeseries_transform.TimestampFeatureExtractor
+  ] = dataclasses.field(init=False, default=None)
+  _has_per_sample_transforms: bool = dataclasses.field(
+      init=False, default=False
+  )
 
   def __post_init__(self):
+    if self.seed_node_idxs is not None:
+      self.seed_node_idxs = np.asarray(self.seed_node_idxs, dtype=np.int64)
+
     if isinstance(self.format, str):
       self.format = GraphFormat[self.format.upper()]
 
@@ -160,19 +183,16 @@ class SampleGeneratorFromAnything:
           )
       )
 
-    if self.temporal:
-      self._target_nodeset = self.sampling_config.root.nodeset  # pyrefly: ignore[missing-attribute]
-      self._ts_feature = temporal_util.creation_time_feature_name(
-          self.schema.node_sets[self._target_nodeset].features
+    self._target_nodeset = self.sampling_config.root.nodeset  # pyrefly: ignore[missing-attribute]
+    self._ts_feature = temporal_util.creation_time_feature_name(
+        self.schema.node_sets[self._target_nodeset].features
+    )
+    if self.temporal and self._ts_feature is None:
+      raise ValueError(
+          "Temporal sampling (`temporal=True`) is configured, but no creation"
+          " timestamp feature was found in node set"
+          f" '{self._target_nodeset}'."
       )
-      if (
-          self.format == GraphFormat.IN_MEMORY_GRAPH
-          and self._ts_feature is not None
-      ):
-        assert isinstance(self.graph, in_memory_graph.InMemoryGraph)
-        self._seed_timestamps_all = self.graph.node_sets[
-            self._target_nodeset
-        ].features[self._ts_feature]
 
     if self.format == GraphFormat.IN_MEMORY_GRAPH:
       assert isinstance(self.graph, in_memory_graph.InMemoryGraph)
@@ -180,8 +200,14 @@ class SampleGeneratorFromAnything:
         self.num_seed_nodes = len(self.seed_node_idxs)
       else:
         self.num_seed_nodes = self.graph.node_sets[
-            self.sampling_config.root.nodeset
+            self._target_nodeset
         ].num_nodes
+
+      if self._ts_feature is not None:
+        self._seed_timestamps_all = self.graph.node_sets[
+            self._target_nodeset
+        ].features[self._ts_feature]
+
       # Creating the sampler is expensive.
       self.in_memory_sampler = in_memory_sampler_lib.create_sampler(
           graph=self.graph,
@@ -192,17 +218,87 @@ class SampleGeneratorFromAnything:
           return_node_idxs=self.sampler_returns_node_idxs_only,
       )
     else:
-      if self.seed_node_idxs is not None:
-        self.num_seed_nodes = len(self.seed_node_idxs)
-      else:
-        self.num_seed_nodes = None
+      self.num_seed_nodes = (
+          len(self.seed_node_idxs) if self.seed_node_idxs is not None else None
+      )
+
+    # Initializing per-sample transforms and precomputing the output schema.
+    current_schema = self.schema
+    self._has_per_sample_transforms = (
+        self.timeseries_pad_and_cap is not None
+        or self.timedelta_extraction is not None
+    )
+
+    if (
+        self.temporal or self._has_per_sample_transforms
+    ) and self.format != GraphFormat.IN_MEMORY_GRAPH:
+      raise ValueError(
+          "Temporal sampling (`temporal=True`) and per-sample transformations"
+          " (`timeseries_pad_and_cap`, `timedelta_extraction`) are"
+          " only supported for GraphFormat.IN_MEMORY_GRAPH, but got format:"
+          f" {self.format}"
+      )
+
+    if (
+        self.timeseries_pad_and_cap is not None
+        and temporal_util.schema_has_timeseries_features(current_schema)
+    ):
+      self._pad_and_cap_transformer = timeseries_transform.PadAndCapTimeseries(
+          current_schema, self.timeseries_pad_and_cap
+      )
+      current_schema = self._pad_and_cap_transformer.output_schema()
+
+    if temporal_util.schema_has_dynamic_timeseries_features(current_schema):
+      raise ValueError(
+          "Dynamic shape timeseries features were detected in the schema;"
+          " please configure `timeseries_pad_and_cap` to pad/cap the sequences"
+          " first."
+      )
+
+    if self.timedelta_extraction is not None:
+      if self._ts_feature is None:
+        raise ValueError(
+            "Timedelta extraction is configured, but no creation timestamp"
+            f" feature was found in node set '{self._target_nodeset}'."
+        )
+      self._timestamp_extractor = (
+          timeseries_transform.TimestampFeatureExtractor(
+              current_schema, self.timedelta_extraction
+          )
+      )
+      current_schema = self._timestamp_extractor.output_schema()
+
+    self._output_schema = current_schema
+
+    if (
+        self.sampler_returns_node_idxs_only
+        and self._has_per_sample_transforms
+    ):
+      raise ValueError(
+          "Per-sample transformations (`timeseries_pad_and_cap`,"
+          " `timedelta_extraction`) cannot be used when"
+          " `sampler_returns_node_idxs_only=True`."
+      )
 
     self.iterator = self.iterator_builder()
+
+  def output_schema(self) -> schema_lib.GraphSchema:
+    """Returns the schema of the generated graph samples."""
+    return self._output_schema
 
   def set_sampler_returns_node_idxs_only(
       self, sampler_returns_node_idxs_only: bool
   ):
     """Changes whether the sampler returns only node indices."""
+    if (
+        sampler_returns_node_idxs_only
+        and self._has_per_sample_transforms
+    ):
+      raise ValueError(
+          "Per-sample transformations (`timeseries_pad_and_cap`,"
+          " `timedelta_extraction`) cannot be used when"
+          " `sampler_returns_node_idxs_only=True`."
+      )
     self.sampler_returns_node_idxs_only = sampler_returns_node_idxs_only
     if self.in_memory_sampler is not None:
       self.in_memory_sampler.set_return_options(
@@ -255,30 +351,43 @@ class SampleGeneratorFromAnything:
     merge_schema = (
         self._get_merge_schema()
         if self.sampler_returns_node_idxs_only
-        else self.schema
+        else self.output_schema()
     )
 
     def generator():
       assert self.in_memory_sampler is not None
       for node_idxs in util.batch_indices_generator(
-          self.seed_node_idxs  # pyrefly: ignore[bad-argument-type]
+          self.seed_node_idxs  # pyrefly: ignore[bad-argumet-type]
           if self.seed_node_idxs is not None
           else self.num_seed_nodes,
           batch_size=self.batch_size,
           drop_remainder=self.drop_remainder,
           shuffle=self.shuffle,
       ):
-        if self.temporal:
-          # Get the seed node timestamp
-          seed_timestamps = None
-          if self._seed_timestamps_all is not None:
-            seed_timestamps = self._seed_timestamps_all[node_idxs]
+        seed_timestamps = None
+        if self._seed_timestamps_all is not None:
+          seed_timestamps = self._seed_timestamps_all[node_idxs]
 
+        if self.temporal:
           graph_samples = self.in_memory_sampler.sample(
               node_idxs, seed_timestamps=seed_timestamps
           )
         else:
           graph_samples = self.in_memory_sampler.sample(node_idxs)
+
+        # Check if per-sample transforms are configured for efficiency.
+        if self._has_per_sample_transforms:
+          transformed_samples = []
+          for i, sample in enumerate(graph_samples):
+            curr_sg = sample
+            if self._pad_and_cap_transformer is not None:
+              curr_sg = self._pad_and_cap_transformer(curr_sg)
+            if self._timestamp_extractor is not None:
+              assert seed_timestamps is not None
+              st = int(seed_timestamps[i])
+              curr_sg = self._timestamp_extractor(curr_sg, seed_timestamp=st)
+            transformed_samples.append(curr_sg)
+          graph_samples = transformed_samples
 
         try:
           yield merge_lib.merge_graphs(
@@ -325,12 +434,6 @@ class SampleGeneratorFromAnything:
     return generator
 
   def iterator_builder(self):
-    if self.temporal and self.format != GraphFormat.IN_MEMORY_GRAPH:
-      raise ValueError(
-          "Temporal sampling is only supported for GraphFormat.IN_MEMORY_GRAPH,"
-          f" but got format: {self.format}"
-      )
-
     if self.format == GraphFormat.IN_MEMORY_GRAPH:
       return self._generator_from_in_memory_graph()
 

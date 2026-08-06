@@ -26,6 +26,7 @@ py_library(
         "//dgf/src/util:filesystem",
         "//dgf/src/util:util_py",
         # jax dep,
+        # numpy dep,
     ],
 )
 
@@ -116,6 +117,7 @@ py_library(
         "//dgf/src/sampling:config",
         "//dgf/src/sampling:in_memory_sampler",
         "//dgf/src/transform:merge",
+        "//dgf/src/transform:timeseries",
         "//dgf/src/util:temporal",
         "//dgf/src/util:util_py",
         # numpy dep,
@@ -337,10 +339,14 @@ py_test(
     deps = [
         ":dataset",
         # absl/testing:absltest dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
         "//dgf/src/io:tf_graph_sample",
         "//dgf/src/sampling:config",
+        "//dgf/src/transform:timeseries",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/validate:in_memory_graph",
+        # numpy dep,
     ],
 )
 

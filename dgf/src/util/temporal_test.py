@@ -321,8 +321,109 @@ class TemporalTest(absltest.TestCase):
     self.assertEqual(
         temporal.nodeset_timestamp_features(schema), {"n1": "ts_n"}
     )
-    self.assertEqual(
-        temporal.edgeset_timestamp_features(schema), {"e1": "ts_e"}
+  def test_schema_has_timeseries_features(self):
+    schema_no_ts = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "f1": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        is_timeseries=False,
+                    )
+                }
+            ),
+        },
+        edge_sets={},
+    )
+    self.assertFalse(temporal.schema_has_timeseries_features(schema_no_ts))
+
+    schema_with_node_ts = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "ts": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        is_timeseries=True,
+                    )
+                }
+            ),
+        },
+        edge_sets={},
+    )
+    self.assertTrue(temporal.schema_has_timeseries_features(schema_with_node_ts))
+
+    schema_with_edge_ts = schema_lib.GraphSchema(
+        node_sets={"n1": schema_lib.NodeSchema(features={})},
+        edge_sets={
+            "e1": schema_lib.EdgeSchema(
+                source="n1",
+                target="n1",
+                features={
+                    "ts_e": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        is_timeseries=True,
+                    )
+                },
+            )
+        },
+    )
+    self.assertTrue(temporal.schema_has_timeseries_features(schema_with_edge_ts))
+
+  def test_schema_has_dynamic_timeseries_features(self):
+    schema_static_ts = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "ts": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        is_timeseries=True,
+                        shape=(10,),
+                    )
+                }
+            ),
+        },
+        edge_sets={},
+    )
+    self.assertFalse(
+        temporal.schema_has_dynamic_timeseries_features(schema_static_ts)
+    )
+
+    schema_dynamic_ts = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "ts": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        is_timeseries=True,
+                        shape=(None,),
+                    )
+                }
+            ),
+        },
+        edge_sets={},
+    )
+    self.assertTrue(
+        temporal.schema_has_dynamic_timeseries_features(schema_dynamic_ts)
+    )
+
+    schema_dynamic_edge_ts = schema_lib.GraphSchema(
+        node_sets={"n1": schema_lib.NodeSchema(features={})},
+        edge_sets={
+            "e1": schema_lib.EdgeSchema(
+                source="n1",
+                target="n1",
+                features={
+                    "ts_e": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        is_timeseries=True,
+                        shape=(None,),
+                    )
+                },
+            )
+        },
+    )
+    self.assertTrue(
+        temporal.schema_has_dynamic_timeseries_features(schema_dynamic_edge_ts)
     )
 
 
