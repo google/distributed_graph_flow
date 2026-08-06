@@ -461,7 +461,7 @@ def attach_features_from_jax_graph_and_cast_to_jax(
     if isinstance(graph, jax_in_memory_graph.JaxInMemoryGraph):
       node_idxs = jax.numpy.asarray(node_idxs)
       gathered_features = jax_common_lib.jit_gather_features(
-          features, node_idxs
+          features, node_idxs  # pyrefly: ignore[bad-argument-type]
       )
     else:
       gathered_features = {
