@@ -74,7 +74,7 @@ def plot_html_training_logs(training_logs: common.TrainingLogs) -> str:
       .mark_line()
       .encode(
           x="step:Q",
-          y="value:Q",
+          y=alt.Y("value:Q", scale=alt.Scale(zero=False)),
           color="dataset:N",
       )
       .facet(
@@ -254,6 +254,127 @@ def html_log_messages(log_messages: List[log.Message]) -> str:
 """
 
 
+def _get_training_logs_tab(
+    training_logs: common.TrainingLogs,
+    training_stats_summary: Optional[str],
+) -> Tuple[str, str]:
+  """Generates the Training logs tab."""
+  if len(training_logs.train) >= 10:
+    training_logs = dataclasses.replace(
+        training_logs,
+        train=training_logs.train[1:],
+    )
+    skip_msg = (
+        "<p><i>Note: The logs for the first training step are not"
+        " shown.</i></p>\n"
+    )
+  else:
+    skip_msg = ""
+
+  train_log_plots = plot_html_training_logs(training_logs)
+  content = f"""
+<table class="dgf-table">
+  <tbody>
+{training_stats_summary or ""}
+    <tr><td>Number of training steps (final model)</td><td>{training_logs.num_train_step}</td></tr>
+  </tbody>
+</table>
+<div style="width: 100%; margin-top: 15px;">{train_log_plots}</div>
+{skip_msg}"""
+  return "Training", content
+
+
+def _get_hyper_parameters_tab(hparams: Any) -> Tuple[str, str]:
+  """Generates the Hyper-parameters tab."""
+  if dataclasses.is_dataclass(hparams):
+    hparams_dict = dataclasses.asdict(hparams)
+    table_rows = ""
+    for k, v in hparams_dict.items():
+      table_rows += (
+          f"<tr><td>{html.escape(k)}</td><td>{html.escape(repr(v))}</td></tr>\n"
+      )
+    content = f"""
+<table class="dgf-table">
+  <tbody>
+{table_rows}
+  </tbody>
+</table>
+"""
+  else:
+    # Fallback for non-dataclass hparams.
+    content = f"<pre>{html.escape(pprint.pformat(hparams))}</pre>"
+  return "Hyper-parameters", content
+
+
+def _get_schema_tab(
+    schemas: dict[str, schema_lib.GraphSchema],
+) -> Tuple[str, str]:
+  """Generates the Schema tab."""
+  txt_schemas = ""
+  for name, schema in schemas.items():
+    txt_schemas += f"<b>{name} schema</b>\n<pre>"
+    txt_schemas += print_schema_lib.print_schema(  # pyrefly: ignore[unsupported-operation]
+        schema, return_output=True, header=False
+    )
+    txt_schemas += "</pre>\n"
+  return "Schema", txt_schemas
+
+
+def _get_feature_stats_tab(
+    feature_stats: dict[str, statistics_lib.GraphFeatureStatistics],
+) -> Tuple[str, str]:
+  """Generates the Feature statistics tab."""
+  txt_feature_stats = ""
+  for name, stats in feature_stats.items():
+    txt_feature_stats += f"<b>{name} feature statistics</b>\n"
+    txt_feature_stats += f"<pre>{repr(stats)}</pre>\n"
+  return "Feature statistics", txt_feature_stats
+
+
+def _get_graph_sampling_tab(
+    sampling_plans: dict[str, sampling_config_lib.SamplingPlan],
+) -> Tuple[str, str]:
+  """Generates the Graph sampling tab."""
+  txt_sampling_plan = ""
+  for name, sampling_plan in sampling_plans.items():
+    txt_sampling_plan += f"<b>{name} sampling plan</b>\n<pre>"
+    txt_sampling_plan += analyse_sampling_lib.print_sampling_plan(  # pyrefly: ignore[unsupported-operation]
+        sampling_plan, return_output=True, header=False
+    )
+    txt_sampling_plan += "</pre>\n"
+  return "Graph sampling", txt_sampling_plan
+
+
+def _get_architecture_tab(
+    architecture: str, num_model_weights: Optional[Dict[str, int]] = None
+) -> Tuple[str, str]:
+  """Generates the Architecture tab."""
+  num_weights_str = (
+      pprint.pformat(num_model_weights)
+      if num_model_weights is not None
+      else "Unknown"
+  )
+  content = (
+      f"<b>Model Structure</b>\n<pre>{architecture}</pre>\n"
+      f"<b>Model Weights</b>\n<pre>{num_weights_str}</pre>"
+  )
+  return "Architecture", content
+
+
+def _get_padding_tab(
+    padding: dict[str, padding_data_lib.Padding],
+) -> Tuple[str, str]:
+  """Generates the Padding tab."""
+  txt_padding = ""
+  for name, pad in padding.items():
+    txt_padding += f"<b>{name} padding</b>\n<pre>"
+    txt_padding += analyse_padding_lib.print_padding(  # pyrefly: ignore[unsupported-operation]
+        pad, return_output=True, header=False
+    )
+    txt_padding += "</pre>\n"
+  return "Padding", txt_padding
+
+
 def get_common_tabs(
     hparams: Any,
     schemas: dict[str, schema_lib.GraphSchema],
@@ -283,103 +404,26 @@ def get_common_tabs(
     tabs.append(("Evaluation", final_evaluation.html()))
 
   if training_logs is not None:
-    train_log_plots = plot_html_training_logs(training_logs)
-    tabs.append((
-        "Training",
-        f"""
-<table class="dgf-table">
-  <tbody>
-{training_stats_summary or ""}
-    <tr><td>Number of training steps (final model)</td><td>{training_logs.num_train_step}</td></tr>
-  </tbody>
-</table>
-<div style="width: 100%; margin-top: 15px;">{train_log_plots}</div>
-""",
-    ))
-
-  if dataclasses.is_dataclass(hparams):
-    hparams_dict = dataclasses.asdict(hparams)
-    table_rows = ""
-    for k, v in hparams_dict.items():
-      table_rows += (
-          f"<tr><td>{html.escape(k)}</td><td>{html.escape(repr(v))}</td></tr>\n"
-      )
-    txt_hyper_parameters = f"""
-<table class="dgf-table">
-  <tbody>
-{table_rows}
-  </tbody>
-</table>
-"""
-  else:
-    # Fallback for non-dataclass hparams.
-    txt_hyper_parameters = f"<pre>{html.escape(pprint.pformat(hparams))}</pre>"
-
-  tabs.append((
-      "Hyper-parameters",
-      txt_hyper_parameters,
-  ))
-
-  txt_schemas = ""
-  for name, schema in schemas.items():
-    txt_schemas += f"<b>{name} schema</b>\n<pre>"
-    txt_schemas += print_schema_lib.print_schema(  # pyrefly: ignore[unsupported-operation]
-        schema, return_output=True, header=False
+    tabs.append(
+        _get_training_logs_tab(
+            training_logs=training_logs,
+            training_stats_summary=training_stats_summary,
+        )
     )
-    txt_schemas += "</pre>\n"
 
-  tabs.append((
-      "Schema",
-      txt_schemas,
-  ))
+  tabs.append(_get_hyper_parameters_tab(hparams))
+  tabs.append(_get_schema_tab(schemas))
 
   if feature_stats is not None:
-    txt_feature_stats = ""
-    for name, stats in feature_stats.items():
-      txt_feature_stats += f"<b>{name} feature statistics</b>\n"
-      txt_feature_stats += f"<pre>{repr(stats)}</pre>\n"
-
-    tabs.append((
-        "Feature statistics",
-        txt_feature_stats,
-    ))
+    tabs.append(_get_feature_stats_tab(feature_stats))
 
   if sampling_plans is not None:
-    txt_sampling_plan = ""
-    for name, sampling_plan in sampling_plans.items():
-      txt_sampling_plan += f"<b>{name} sampling plan</b>\n<pre>"
-      txt_sampling_plan += analyse_sampling_lib.print_sampling_plan(  # pyrefly: ignore[unsupported-operation]
-          sampling_plan, return_output=True, header=False
-      )
-      txt_sampling_plan += "</pre>\n"
-    tabs.append(("Graph sampling", txt_sampling_plan))
+    tabs.append(_get_graph_sampling_tab(sampling_plans))
 
   if architecture is not None:
-    num_weights_str = (
-        pprint.pformat(num_model_weights)
-        if num_model_weights is not None
-        else "Unknown"
-    )
-    tabs.append((
-        "Architecture",
-        (
-            f"<b>Model Structure</b>\n<pre>{architecture}</pre>\n"
-            f"<b>Model Weights</b>\n<pre>{num_weights_str}</pre>"
-        ),
-    ))
+    tabs.append(_get_architecture_tab(architecture, num_model_weights))
 
   if padding is not None:
-    txt_padding = ""
-    for name, pad in padding.items():
-      txt_padding += f"<b>{name} padding</b>\n<pre>"
-      txt_padding += analyse_padding_lib.print_padding(  # pyrefly: ignore[unsupported-operation]
-          pad, return_output=True, header=False
-      )
-      txt_padding += "</pre>\n"
-
-    tabs.append((
-        "Padding",
-        txt_padding,
-    ))
+    tabs.append(_get_padding_tab(padding))
 
   return tabs
