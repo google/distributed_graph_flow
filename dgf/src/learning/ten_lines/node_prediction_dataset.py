@@ -292,7 +292,7 @@ class GNNDatasetPreparator:
 
     # A generator of non-normalized graph samples.
     def gen_raw_samples():
-      for sample, _ in sample_generator.iterator():
+      for sample, _ in sample_generator.batch_iterator():
         yield sample
 
     gen_raw_samples_iter = gen_raw_samples()
@@ -320,7 +320,7 @@ class GNNDatasetPreparator:
 
     # A generator of normalized, non-padded graph samples.
     def gen_normalized_samples():
-      for sample, _ in sample_generator.iterator():
+      for sample, _ in sample_generator.batch_iterator():
         normalized_merged = normalizer.normalize_numpy(sample)
         yield normalized_merged
 
@@ -384,7 +384,7 @@ class GNNDatasetPreparator:
     """
 
     live = self.get_live()
-    for sample, merge_offsets in live.sample_generator.iterator():
+    for sample, merge_offsets in live.sample_generator.batch_iterator():
       if self.cache_normalized_features:
         if live.normalized_graph is None:
           raise RuntimeError(
@@ -411,7 +411,7 @@ class GNNDatasetPreparator:
     """
 
     live = self.get_live()
-    for sample, merge_offsets in live.sample_generator.iterator():
+    for sample, merge_offsets in live.sample_generator.batch_iterator():
 
       if self.cache_normalized_features:
         if live.normalized_jax_graph:

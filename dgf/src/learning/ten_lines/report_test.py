@@ -122,8 +122,8 @@ class ReportTest(absltest.TestCase):
     self.assertIn("lr", tabs_dict["Hyper-parameters"])
 
     # schemas
-    self.assertIn("Schemas", tabs_dict)
-    self.assertIn("MySchema", tabs_dict["Schemas"])
+    self.assertIn("Schema", tabs_dict)
+    self.assertIn("MySchema", tabs_dict["Schema"])
 
     # feature_stats
     self.assertIn("Feature statistics", tabs_dict)

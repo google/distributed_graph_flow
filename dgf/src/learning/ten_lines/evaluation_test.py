@@ -199,7 +199,7 @@ class EvaluationTest(absltest.TestCase):
     accumulator.populate_evaluation(evaluation)
     html_output = evaluation.html()
 
-    self.assertIn("<b>Evaluation</b>", html_output)
+    self.assertIn('<table class="dgf-table">', html_output)
     self.assertIn("Per Class Metrics", html_output)
     # Check if Altair chart HTML is present (usually contains vegaEmbed or vg-canvas)
     self.assertIn("vegaEmbed", html_output)

@@ -17,17 +17,19 @@
 import dataclasses
 import html
 import pprint
-import uuid
 from typing import Any, Dict, List, Optional, Tuple
+import uuid
 import altair as alt
 from dgf.src.analyse import padding as analyse_padding_lib
 from dgf.src.analyse import print_schema as print_schema_lib
 from dgf.src.analyse import sampling as analyse_sampling_lib
+from dgf.src.data import evaluation
 from dgf.src.data import padding as padding_data_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.data import statistics as statistics_lib
 from dgf.src.learning.ten_lines import common
 from dgf.src.sampling import config as sampling_config_lib
+from dgf.src.util import html_util
 from dgf.src.util import log
 import pandas as pd
 
@@ -82,7 +84,7 @@ def plot_html_training_logs(training_logs: common.TrainingLogs) -> str:
       .resolve_scale(y="independent")
   )
 
-  return chart.to_html()
+  return chart.to_html(fullhtml=False, output_div=f"vis-{uuid.uuid4().hex}")
 
 
 def html_tabs(items: list[tuple[str, str]]) -> str:
@@ -169,26 +171,7 @@ def html_tabs(items: list[tuple[str, str]]) -> str:
     color: #5f6368;
     font-weight: 600;
   }}
-  #{component_id} .dgf-table {{
-    border-collapse: collapse;
-    width: 100%;
-    margin-bottom: 20px;
-    font-size: inherit;
-    font-family: 'Roboto', sans-serif;
-  }}
-  #{component_id} .dgf-table td {{
-    padding: 4px 8px;
-    text-align: left;
-  }}
-  #{component_id} .dgf-table td:first-child {{
-    white-space: nowrap;
-  }}
-  #{component_id} .dgf-table td:last-child {{
-    width: 100%;
-  }}
-  #{component_id} .dgf-table tr:nth-child(odd) {{
-    background-color: #f8f9fa;
-  }}
+  {html_util.get_table_style(component_id)}
   @keyframes fadeIn {{
     from {{ opacity: 0; }}
     to {{ opacity: 1; }}
@@ -286,6 +269,7 @@ def get_common_tabs(
     architecture: Optional[str] = None,
     num_model_weights: Optional[Dict[str, int]] = None,
     log_messages: Optional[List[log.Message]] = None,
+    final_evaluation: Optional[evaluation.Evaluation] = None,
 ) -> List[Tuple[str, str]]:
   """Generates common tabs for model description."""
   tabs = []
@@ -294,6 +278,9 @@ def get_common_tabs(
     tabs.append(
         (f"Logs ({len(log_messages)})", html_log_messages(log_messages))
     )
+
+  if final_evaluation is not None:
+    tabs.append(("Evaluation", final_evaluation.html()))
 
   if training_logs is not None:
     train_log_plots = plot_html_training_logs(training_logs)
@@ -342,7 +329,7 @@ def get_common_tabs(
     txt_schemas += "</pre>\n"
 
   tabs.append((
-      "Schemas",
+      "Schema",
       txt_schemas,
   ))
 

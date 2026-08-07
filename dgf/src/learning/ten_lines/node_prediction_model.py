@@ -22,6 +22,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import enum
+import itertools
 import os
 from typing import Callable, Dict, Iterator, List, Optional
 
@@ -159,6 +160,7 @@ class ModelData:
   edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
       default_factory=dict
   )
+  final_evaluation: Optional[evaluation.Evaluation] = None
 
   # This field is serialized / deserialized manually.
   model_params: Optional[jaxtyping.PyTree] = dataclasses.field(
@@ -267,6 +269,7 @@ class NodePredictionModel(common.Model):
         architecture=self.data().core_model_config.architecture(),
         num_model_weights=common.num_model_weights(self.data().model_params),
         log_messages=self.metadata.captured_logs,
+        final_evaluation=self.data().final_evaluation,
     )
 
     tabs.extend(common_tabs)
@@ -388,43 +391,6 @@ class NodePredictionModel(common.Model):
           ),
       )
 
-    def predict_sub_batch(
-        sub_seed_idxs: np.ndarray,
-        sub_samples: List[in_memory_graph.InMemoryGraph],
-    ) -> Iterator[BatchPrediction]:
-      try:
-        merged_graph, merge_offsets = merge_lib.merge_graphs(
-            sub_samples,
-            schema,
-            padding=self._data.padding,
-            sentinel_offset=False,
-        )
-      except merge_lib.InsufficientPaddingError:
-        # The graph is too large to fit in the padding. Let's split it in two
-        # and try again.
-        if len(sub_samples) <= 1:
-          raise
-        mid = len(sub_samples) // 2
-        yield from predict_sub_batch(sub_seed_idxs[:mid], sub_samples[:mid])
-        yield from predict_sub_batch(sub_seed_idxs[mid:], sub_samples[mid:])
-        return
-
-      normalized_merged = live.normalizer.normalize_numpy(merged_graph)
-      normalized_merged_jax = jax_lib.graph_to_jax_graph(normalized_merged)
-
-      seed_node_idxs = merge_offsets[self._data.task.target_nodeset]
-      jax_seed_node_idxs = jnp.asarray(seed_node_idxs)
-      probabilities = live.apply_core_model(
-          (normalized_merged_jax, jax_seed_node_idxs)
-      )
-      predictions = np.asarray(probabilities)
-      yield BatchPrediction(
-          batch_seed_node_idxs=sub_seed_idxs,
-          normalized_merged_graph=normalized_merged,
-          merged_seed_node_idxs=seed_node_idxs,
-          predictions=predictions,
-      )
-
     for batch_seed_node_idxs in batch_seed_node_idxs_generator:
 
       # TODO(gbm): The sampler should consume np array directly.
@@ -443,7 +409,53 @@ class NodePredictionModel(common.Model):
       else:
         graph_samples = sampler.sample(batch_seed_node_idxs)
 
-      yield from predict_sub_batch(batch_seed_node_idxs, graph_samples)
+      yield from self._predict_sub_batch(
+          live, schema, batch_seed_node_idxs, graph_samples
+      )
+
+  def _predict_sub_batch(
+      self,
+      live,
+      schema: schema_lib.GraphSchema,
+      sub_seed_idxs: np.ndarray,
+      sub_samples: List[in_memory_graph.InMemoryGraph],
+  ) -> Iterator[BatchPrediction]:
+    try:
+      merged_graph, merge_offsets = merge_lib.merge_graphs(
+          sub_samples,
+          schema,
+          padding=self._data.padding,
+          sentinel_offset=False,
+      )
+    except merge_lib.InsufficientPaddingError:
+      # The graph is too large to fit in the padding. Let's split it in two
+      # and try again.
+      if len(sub_samples) <= 1:
+        raise
+      mid = len(sub_samples) // 2
+      yield from self._predict_sub_batch(
+          live, schema, sub_seed_idxs[:mid], sub_samples[:mid]
+      )
+      yield from self._predict_sub_batch(
+          live, schema, sub_seed_idxs[mid:], sub_samples[mid:]
+      )
+      return
+
+    normalized_merged = live.normalizer.normalize_numpy(merged_graph)
+    normalized_merged_jax = jax_lib.graph_to_jax_graph(normalized_merged)
+
+    seed_node_idxs = merge_offsets[self._data.task.target_nodeset]
+    jax_seed_node_idxs = jnp.asarray(seed_node_idxs)
+    probabilities = live.apply_core_model(
+        (normalized_merged_jax, jax_seed_node_idxs)
+    )
+    predictions = np.asarray(probabilities)
+    yield BatchPrediction(
+        batch_seed_node_idxs=sub_seed_idxs,
+        normalized_merged_graph=normalized_merged,
+        merged_seed_node_idxs=seed_node_idxs,
+        predictions=predictions,
+    )
 
   # TODO(gbm): Factor with predict_batch above.
   def predict_on_graph_sample_batch(
@@ -518,13 +530,7 @@ class NodePredictionModel(common.Model):
     """
 
     target_nodeset = self._data.task.target_nodeset
-    target_normalized_feature = self._normalized_target_columns()
     num_nodes = graph.node_sets[target_nodeset].num_nodes
-    num_good_predictions = jnp.array(0)
-    total_squared_error = jnp.array(0.0)
-    sum_labels = jnp.array(0.0)
-    sum_squared_labels = jnp.array(0.0)
-    num_elements = 0
 
     if seed_node_idxs is None:
       # Consider all the seed nodes
@@ -541,14 +547,92 @@ class NodePredictionModel(common.Model):
     if verbose >= 1:
       log.info("Evaluating model on %d samples", num_examples)
 
+    return self._evaluate_on_batch_iterator(
+        self.predict_batch(
+            graph, seed_node_idxs, verbose=verbose, input_features_only=False  # pyrefly: ignore[bad-argument-type]
+        )
+    )
+
+  def evaluate_generator(
+      self,
+      graph_samples: Iterator[in_memory_graph.InMemoryGraph],
+      num_eval_steps: Optional[int] = 10_000,
+      *,
+      verbose: int = 2,
+  ) -> evaluation.Evaluation:
+    """Evaluates the model on an iterator of graph samples.
+
+    This is useful for running evaluation on datasets where the graph samples
+    are generated on the fly, for instance when reading them from a large bagz
+    file, avoiding the need to load the whole dataset into memory.
+
+    Usage example:
+
+    ```python
+      iterator = dataset.sample_generator.single_iterator()
+      evaluation = model.evaluate_generator(iterator, num_eval_steps=1000)
+    ```
+
+    Args:
+      graph_samples: An iterator of graph samples (e.g. `InMemoryGraph`).
+      num_eval_steps: Maximum number of evaluation steps to run. If None,
+        evaluate all samples in the iterator.
+      verbose: The verbosity level. Higher values provide more detailed logging
+        output during the evaluation process.
+
+    Returns:
+      An `evaluation.Evaluation` object containing the evaluation results,
+      specifically the accuracy/RMSE and the number of examples evaluated.
+    """
+    if num_eval_steps is not None:
+      graph_samples = itertools.islice(graph_samples, num_eval_steps)
+
+    batch_size = max(1, self._data.hparams.batch_size // 2)
+
+    def batch_prediction_generator():
+      live = self._get_live()
+      schema = self._data.schema
+      iterator = graph_samples
+      if verbose >= 2:
+        iterator = tqdm.tqdm(iterator, desc="Evaluation", total=num_eval_steps)
+
+      batch = []
+      for sample in iterator:
+        batch.append(sample)
+        if len(batch) == batch_size:
+          yield from self._predict_sub_batch(
+              live, schema, np.zeros(len(batch), dtype=np.int32), batch
+          )
+          batch = []
+      if batch:
+        yield from self._predict_sub_batch(
+            live, schema, np.zeros(len(batch), dtype=np.int32), batch
+        )
+
+    if verbose >= 1:
+      log.info("Evaluating model on generator")
+    return self._evaluate_on_batch_iterator(batch_prediction_generator())
+
+  def _evaluate_on_batch_iterator(
+      self,
+      batch_iterator: Iterator[BatchPrediction],
+  ) -> evaluation.Evaluation:
+    num_good_predictions = jnp.array(0)
+    total_squared_error = jnp.array(0.0)
+    sum_labels = jnp.array(0.0)
+    sum_squared_labels = jnp.array(0.0)
+    num_examples = 0
+    num_elements = 0
+
+    target_nodeset = self._data.task.target_nodeset
+    target_normalized_feature = self._normalized_target_columns()
+
     accumulator = None
     if self._data.task.task_type == TaskType.NODE_CLASSIFICATION:
       num_classes = self.num_label_classes()
       accumulator = evaluation.ClassificationEvaluationAccumulator(num_classes)
 
-    for batch in self.predict_batch(
-        graph, seed_node_idxs, verbose=verbose, input_features_only=False  # pyrefly: ignore[bad-argument-type]
-    ):
+    for batch in batch_iterator:
       labels = batch.normalized_merged_graph.node_sets[target_nodeset].features[
           target_normalized_feature
       ][batch.merged_seed_node_idxs]
@@ -557,6 +641,7 @@ class NodePredictionModel(common.Model):
         total_squared_error += jnp.sum(jnp.square(labels - batch.predictions))
         sum_labels += jnp.sum(labels)
         sum_squared_labels += jnp.sum(jnp.square(labels))
+        num_examples += labels.shape[0]
         num_elements += labels.size
       else:
         predictions = jnp.argmax(batch.predictions, axis=-1)
@@ -566,6 +651,7 @@ class NodePredictionModel(common.Model):
             np.asarray(batch.predictions, dtype=np.float32),
             np.asarray(labels, dtype=np.int32),
         )
+        num_examples += labels.shape[0]
 
     if self._data.task.task_type == TaskType.NODE_REGRESSION:
       mean_labels = sum_labels / num_elements

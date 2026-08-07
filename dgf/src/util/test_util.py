@@ -111,23 +111,45 @@ def are_equal(obj1: Any, obj2: Any, abs_tol: float | None = None) -> bool:
           and obj1.dtype != np.bytes_
           and obj2.dtype != np.bytes_
       ):
-        return ret(np.allclose(obj1, obj2, atol=abs_tol))
+        try:
+          return ret(np.allclose(obj1, obj2, atol=abs_tol, equal_nan=True))
+        except TypeError:
+          return ret(np.allclose(obj1, obj2, atol=abs_tol))
       else:
-        return ret(np.array_equal(obj1, obj2))
+        try:
+          return ret(np.array_equal(obj1, obj2, equal_nan=True))
+        except TypeError:
+          return ret(np.array_equal(obj1, obj2))
 
     # JAX arrays
     if isinstance(obj1, jnp.ndarray) and isinstance(obj2, jnp.ndarray):
       if abs_tol is not None:
-        return ret(jnp.allclose(obj1, obj2, atol=abs_tol))  # pyrefly: ignore[bad-argument-type]
+        try:
+          return ret(jnp.allclose(obj1, obj2, atol=abs_tol, equal_nan=True))  # pyrefly: ignore[bad-argument-type]
+        except TypeError:
+          return ret(jnp.allclose(obj1, obj2, atol=abs_tol))  # pyrefly: ignore[bad-argument-type]
       else:
-        return ret(jnp.array_equal(obj1, obj2))  # pyrefly: ignore[bad-argument-type]
+        try:
+          return ret(jnp.array_equal(obj1, obj2, equal_nan=True))  # pyrefly: ignore[bad-argument-type]
+        except TypeError:
+          return ret(jnp.array_equal(obj1, obj2))  # pyrefly: ignore[bad-argument-type]
 
     # TensorFlow arrays
     if isinstance(obj1, tf.Tensor) and isinstance(obj2, tf.Tensor):
       if abs_tol is not None:
-        return ret(np.allclose(obj1.numpy(), obj2.numpy(), atol=abs_tol))
+        try:
+          return ret(
+              np.allclose(
+                  obj1.numpy(), obj2.numpy(), atol=abs_tol, equal_nan=True
+              )
+          )
+        except TypeError:
+          return ret(np.allclose(obj1.numpy(), obj2.numpy(), atol=abs_tol))
       else:
-        return ret(np.array_equal(obj1.numpy(), obj2.numpy()))
+        try:
+          return ret(np.array_equal(obj1.numpy(), obj2.numpy(), equal_nan=True))
+        except TypeError:
+          return ret(np.array_equal(obj1.numpy(), obj2.numpy()))
 
     # TensorFlow vs non-Tensor
     if isinstance(obj1, tf.Tensor) and not isinstance(obj2, tf.Tensor):

@@ -29,11 +29,15 @@ class EvaluationTest(absltest.TestCase):
         num_examples_weighted=100.0,
     )
     html_output = eval_obj.html()
-    self.assertIn("<b>Evaluation</b>", html_output)
-    self.assertIn("<li><b>Loss:</b> 0.1</li>", html_output)
-    self.assertIn("<li><b>Accuracy:</b> 0.95</li>", html_output)
-    self.assertIn("<li><b>Num Examples:</b> 100</li>", html_output)
-    self.assertIn("<li><b>Num Examples Weighted:</b> 100.0</li>", html_output)
+    self.assertIn("<tr><td><b>Loss</b></td><td>0.1</td></tr>", html_output)
+    self.assertIn("<tr><td><b>Accuracy</b></td><td>0.95</td></tr>", html_output)
+    self.assertIn(
+        "<tr><td><b>Num Examples</b></td><td>100</td></tr>", html_output
+    )
+    self.assertIn(
+        "<tr><td><b>Num Examples Weighted</b></td><td>100.0</td></tr>",
+        html_output,
+    )
     self.assertNotIn("User Metrics", html_output)
 
     eval_obj_with_user = evaluation.Evaluation(
@@ -41,8 +45,8 @@ class EvaluationTest(absltest.TestCase):
         user_metrics={"precision": 0.8, "recall": 0.7},
     )
     html_output_user = eval_obj_with_user.html()
-    self.assertIn("<li><b>Loss:</b> 0.2</li>", html_output_user)
-    self.assertIn("<li><b>User Metrics:</b><ul>", html_output_user)
+    self.assertIn("<tr><td><b>Loss</b></td><td>0.2</td></tr>", html_output_user)
+    self.assertIn("<b>User Metrics:</b>", html_output_user)
     self.assertIn("<li><em>precision</em>: 0.8</li>", html_output_user)
     self.assertIn("<li><em>recall</em>: 0.7</li>", html_output_user)
 

@@ -175,6 +175,7 @@ def train_node_model(
     sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None,
     diagnostic_dir: Optional[str] = None,
     early_stopping: Union[bool, int] = True,
+    evaluate_final_model: bool = True,
 ) -> NodePredictionModel:
   """Trains a supervised Graph Neural Network model for node-level prediction.
 
@@ -251,6 +252,9 @@ def train_node_model(
     early_stopping: If True, use early stopping with default parameters
       (patience=5). If an integer, use early stopping with the given patience.
       If False, do not use early stopping.
+    evaluate_final_model: If True, performs a full final evaluation of the model
+      on the validation dataset after training completes. This is in addition to
+      the periodic evaluations done during training.
 
   Returns:
     A trained `NodePredictionModel` instance.
@@ -688,6 +692,13 @@ def train_node_model(
         valid=train_results.valid_logs,
         num_train_step=train_results.num_train_step,
     )
+
+    if evaluate_final_model and valid_dataset is not None:
+      if verbose >= 1:
+        log.info("Final model evaluation")
+      model.data().final_evaluation = model.evaluate_generator(
+          valid_dataset.get_live().sample_generator.single_iterator()
+      )
 
   model.metadata.captured_logs = captured_logs
   return model

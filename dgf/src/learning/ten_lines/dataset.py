@@ -58,8 +58,14 @@ class GraphFormat(enum.Enum):
   # TODO(gbm): Add support for pygrain dataset / iter-dataset.
 
 
-SampleGeneratorIteratorFn = Callable[
+# Generator of batched graph samples.
+BatchSampleGeneratorIteratorFn = Callable[
     [], Iterator[Tuple[in_memory_graph.InMemoryGraph, Dict[str, np.ndarray]]]
+]
+
+# Generator of individual graph samples.
+SingleSampleGeneratorIteratorFn = Callable[
+    [], Iterator[in_memory_graph.InMemoryGraph]
 ]
 
 
@@ -106,16 +112,16 @@ class SampleGeneratorFromAnything:
     nodeset_timestamp_features: A mapping from node set name to the feature name
       containing timestamps. Only used if temporal=true.
     num_seed_nodes: The number of seed nodes in the graph.
-    iterator: An iterator yielding batches of graph samples.
+    batch_iterator: An iterator yielding batches of graph samples.
     in_memory_sampler: The in-memory sampler used when sampling from an
       `InMemoryGraph`.
     sampler_returns_node_idxs_only: If `True`, the sampler returns only node
       indices without feature values. If `False` (default), the sampler returns
       feature values.
-    timeseries_pad_and_cap: Configuration for padding and capping
-      timeseries sequence features per sample before merging.
-    timedelta_extraction: Configuration for time delta extraction per
-      sample before merging.
+    timeseries_pad_and_cap: Configuration for padding and capping timeseries
+      sequence features per sample before merging.
+    timedelta_extraction: Configuration for time delta extraction per sample
+      before merging.
   """
 
   graph: Graph
@@ -146,7 +152,10 @@ class SampleGeneratorFromAnything:
   ] = None
 
   num_seed_nodes: Optional[int] = dataclasses.field(init=False)
-  iterator: SampleGeneratorIteratorFn = dataclasses.field(init=False)
+  batch_iterator: BatchSampleGeneratorIteratorFn = dataclasses.field(init=False)
+  single_iterator: SingleSampleGeneratorIteratorFn = dataclasses.field(
+      init=False
+  )
   in_memory_sampler: Optional[in_memory_sampler_lib.Sampler] = None
   _output_schema: schema_lib.GraphSchema = dataclasses.field(init=False)
   _target_nodeset: Optional[str] = dataclasses.field(init=False, default=None)
@@ -270,17 +279,14 @@ class SampleGeneratorFromAnything:
 
     self._output_schema = current_schema
 
-    if (
-        self.sampler_returns_node_idxs_only
-        and self._has_per_sample_transforms
-    ):
+    if self.sampler_returns_node_idxs_only and self._has_per_sample_transforms:
       raise ValueError(
           "Per-sample transformations (`timeseries_pad_and_cap`,"
           " `timedelta_extraction`) cannot be used when"
           " `sampler_returns_node_idxs_only=True`."
       )
 
-    self.iterator = self.iterator_builder()
+    self.batch_iterator, self.single_iterator = self.iterator_builder()
 
   def output_schema(self) -> schema_lib.GraphSchema:
     """Returns the schema of the generated graph samples."""
@@ -290,10 +296,7 @@ class SampleGeneratorFromAnything:
       self, sampler_returns_node_idxs_only: bool
   ):
     """Changes whether the sampler returns only node indices."""
-    if (
-        sampler_returns_node_idxs_only
-        and self._has_per_sample_transforms
-    ):
+    if sampler_returns_node_idxs_only and self._has_per_sample_transforms:
       raise ValueError(
           "Per-sample transformations (`timeseries_pad_and_cap`,"
           " `timedelta_extraction`) cannot be used when"
@@ -305,7 +308,7 @@ class SampleGeneratorFromAnything:
           return_features=not self.sampler_returns_node_idxs_only,
           return_node_idxs=self.sampler_returns_node_idxs_only,
       )
-    self.iterator = self.iterator_builder()
+    self.batch_iterator, self.single_iterator = self.iterator_builder()
 
   def _infer_format(self) -> GraphFormat:
     if isinstance(self.graph, in_memory_graph.InMemoryGraph):
@@ -343,7 +346,9 @@ class SampleGeneratorFromAnything:
 
     return schema_lib.GraphSchema(node_sets=node_sets, edge_sets=edge_sets)
 
-  def _generator_from_in_memory_graph(self) -> SampleGeneratorIteratorFn:
+  def _generator_from_in_memory_graph(
+      self,
+  ) -> Tuple[BatchSampleGeneratorIteratorFn, SingleSampleGeneratorIteratorFn]:
     """Creates a SampleGenerator from an InMemoryGraph."""
     assert isinstance(self.graph, in_memory_graph.InMemoryGraph)
     assert self.num_seed_nodes is not None
@@ -354,7 +359,7 @@ class SampleGeneratorFromAnything:
         else self.output_schema()
     )
 
-    def generator():
+    def batch_generator():
       assert self.in_memory_sampler is not None
       for node_idxs in util.batch_indices_generator(
           self.seed_node_idxs  # pyrefly: ignore[bad-argumet-type]
@@ -397,15 +402,38 @@ class SampleGeneratorFromAnything:
           if not self.skip_overflow_padding_error:
             raise e
 
-    return generator
+    def single_generator():
+      assert self.in_memory_sampler is not None
+      for node_idxs in util.batch_indices_generator(
+          self.seed_node_idxs  # pyrefly: ignore[bad-argument-type]
+          if self.seed_node_idxs is not None
+          else self.num_seed_nodes,
+          batch_size=1,
+          drop_remainder=False,
+          shuffle=self.shuffle,
+      ):
+        node_idx = int(node_idxs[0])
+        if self.temporal:
+          # Get the seed node timestamp
+          seed_timestamp = None
+          if self._seed_timestamps_all is not None:
+            seed_timestamp = int(self._seed_timestamps_all[node_idx])
+
+          yield self.in_memory_sampler.sample(
+              node_idx, seed_timestamps=seed_timestamp
+          )
+        else:
+          yield self.in_memory_sampler.sample(node_idx)
+
+    return batch_generator, single_generator
 
   def _generator_from_path_tf_sample(
       self, container_type
-  ) -> SampleGeneratorIteratorFn:
+  ) -> Tuple[BatchSampleGeneratorIteratorFn, SingleSampleGeneratorIteratorFn]:
     """Creates a SampleGenerator from a path to a bagz file."""
     assert isinstance(self.graph, str)
 
-    def generator():
+    def batch_generator():
       # TODO(gbm): Use pygrain and add shuffling?
       it = tf_graph_sample.read_tfgnn_graphs(
           self.graph, self.schema, container_type=container_type
@@ -431,9 +459,22 @@ class SampleGeneratorFromAnything:
           if not self.skip_overflow_padding_error:
             raise e
 
-    return generator
+    def single_generator():
+      return tf_graph_sample.read_tfgnn_graphs(
+          self.graph, self.schema, container_type=container_type
+      )
 
-  def iterator_builder(self):
+    return batch_generator, single_generator
+
+  def iterator_builder(
+      self,
+  ) -> Tuple[BatchSampleGeneratorIteratorFn, SingleSampleGeneratorIteratorFn]:
+    if self.temporal and self.format != GraphFormat.IN_MEMORY_GRAPH:
+      raise ValueError(
+          "Temporal sampling is only supported for GraphFormat.IN_MEMORY_GRAPH,"
+          f" but got format: {self.format}"
+      )
+
     if self.format == GraphFormat.IN_MEMORY_GRAPH:
       return self._generator_from_in_memory_graph()
 
