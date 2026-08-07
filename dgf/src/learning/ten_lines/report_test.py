@@ -19,6 +19,7 @@ from dgf.src.data import schema as schema_lib
 from dgf.src.learning.ten_lines import common
 from dgf.src.learning.ten_lines import report
 from dgf.src.sampling import config as sampling_config_lib
+from dgf.src.util import log
 
 
 class ReportTest(absltest.TestCase):
@@ -47,6 +48,24 @@ class ReportTest(absltest.TestCase):
     self.assertIn("acc", html)
     self.assertIn("train", html)
     self.assertIn("valid", html)
+
+  def test_html_log_messages(self):
+    self.assertEqual(
+        report.html_log_messages([]), "<i>No logs were captured.</i>"
+    )
+
+    logs = [
+        log.Message.info("A < B"),
+        log.Message.warning("C > D"),
+        log.Message.error("E & F"),
+    ]
+    html = report.html_log_messages(logs)
+    self.assertIn("A &lt; B", html)
+    self.assertIn("blue", html)
+    self.assertIn("C &gt; D", html)
+    self.assertIn("orange", html)
+    self.assertIn("E &amp; F", html)
+    self.assertIn("red", html)
 
   def test_html_tabs(self):
     items = [
@@ -95,8 +114,8 @@ class ReportTest(absltest.TestCase):
     tabs_dict = dict(tabs)
 
     # training_logs & training_stats_summary
-    self.assertIn("Train logs", tabs_dict)
-    self.assertIn("My Summary", tabs_dict["Train logs"])
+    self.assertIn("Training", tabs_dict)
+    self.assertIn("My Summary", tabs_dict["Training"])
 
     # hparams
     self.assertIn("Hyper-parameters", tabs_dict)

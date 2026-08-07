@@ -14,34 +14,12 @@
 
 """Validation utility."""
 
-import dataclasses
-import enum
 import logging
 from typing import Sequence
+from dgf.src.util import log
 
-
-class Severity(enum.Enum):
-  """The severity type of a message."""
-
-  INFO = "INFO"
-  WARNING = "WARNING"
-  ERROR = "ERROR"
-
-
-@dataclasses.dataclass
-class Issue:
-  """A message shown to the user."""
-
-  severity: Severity
-  text: str
-
-  @classmethod
-  def error(cls, text: str) -> "Issue":
-    return Issue(severity=Severity.ERROR, text=text)
-
-  @classmethod
-  def warning(cls, text: str) -> "Issue":
-    return Issue(severity=Severity.WARNING, text=text)
+Severity = log.Severity
+Issue = log.Message
 
 
 def print_and_raise(

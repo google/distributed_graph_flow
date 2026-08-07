@@ -24,6 +24,7 @@ py_library(
         "//dgf/src/learning/jax/layers:hetero_gnn",
         "//dgf/src/learning/jax/layers:hetero_graph_attention_network",
         "//dgf/src/util:filesystem",
+        "//dgf/src/util:log",
         "//dgf/src/util:util_py",
         # jax dep,
         # numpy dep,
@@ -137,6 +138,7 @@ py_library(
         "//dgf/src/data:schema",
         "//dgf/src/data:statistics",
         "//dgf/src/sampling:config",
+        "//dgf/src/util:log",
         # pandas dep,
     ],
 )
@@ -360,6 +362,7 @@ py_test(
         "//dgf/src/data:padding",
         "//dgf/src/data:schema",
         "//dgf/src/sampling:config",
+        "//dgf/src/util:log",
     ],
 )
 

@@ -15,6 +15,7 @@
 """Generation of reports (e.g., html) about models."""
 
 import dataclasses
+import html
 import pprint
 from typing import Any, Dict, List, Optional, Tuple
 import altair as alt
@@ -26,6 +27,7 @@ from dgf.src.data import schema as schema_lib
 from dgf.src.data import statistics as statistics_lib
 from dgf.src.learning.ten_lines import common
 from dgf.src.sampling import config as sampling_config_lib
+from dgf.src.util import log
 import pandas as pd
 
 
@@ -184,6 +186,28 @@ function openTab_{component_id.replace("-", "_")}(evt, tabId) {{
   return "\n".join(html)
 
 
+def html_log_messages(log_messages: List[log.Message]) -> str:
+  """Returns HTML rendering for log messages."""
+  if not log_messages:
+    return "<i>No logs were captured.</i>"
+
+  txt_logs = ""
+  for msg in log_messages:
+    if msg.severity == log.Severity.INFO:
+      color = "blue"
+    elif msg.severity == log.Severity.WARNING:
+      color = "orange"
+    elif msg.severity == log.Severity.ERROR:
+      color = "red"
+    else:
+      assert False
+    txt_logs += (
+        f'<span style="color: {color};">[{msg.severity.value}]</span>'
+        f" {html.escape(msg.text)}\n"
+    )
+  return f"<pre>{txt_logs}</pre>"
+
+
 def get_common_tabs(
     hparams: Any,
     schemas: dict[str, schema_lib.GraphSchema],
@@ -198,14 +222,20 @@ def get_common_tabs(
     padding: Optional[dict[str, padding_data_lib.Padding]] = None,
     architecture: Optional[str] = None,
     num_model_weights: Optional[Dict[str, int]] = None,
+    log_messages: Optional[List[log.Message]] = None,
 ) -> List[Tuple[str, str]]:
   """Generates common tabs for model description."""
   tabs = []
 
+  if log_messages is not None:
+    tabs.append(
+        (f"Logs ({len(log_messages)})", html_log_messages(log_messages))
+    )
+
   if training_logs is not None:
     train_log_plots = plot_html_training_logs(training_logs)
     tabs.append((
-        "Train logs",
+        "Training",
         f"""
 {training_stats_summary or ""}
 Number of training steps (final model): {training_logs.num_train_step}</br>

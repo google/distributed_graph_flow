@@ -417,367 +417,376 @@ def train_link_model(
   # TODO(gbm): Add support for decomposable and non-decomposable decoders.
   # TODO(gbm): Add support for other type of graph inputs.
 
-  architecture = common.parse_architecture(architecture)
-  begin_train_time = time.time()
+  with log.capture_logs() as captured_logs:
 
-  if diagnostic_dir is not None:
-    fs.makedirs(diagnostic_dir)
+    architecture = common.parse_architecture(architecture)
+    begin_train_time = time.time()
 
-  if verbose >= 2:
-    log.info("Using %s JAX backend", jax.default_backend())
+    if diagnostic_dir is not None:
+      fs.makedirs(diagnostic_dir)
 
-  if target_edgeset is None:
-    if len(schema.edge_sets) == 1:
-      target_edgeset = list(schema.edge_sets.keys())[0]
-    else:
-      raise ValueError(
-          "`target_edgeset` must be specified when the schema contains more"
-          " than one edgeset."
+    if verbose >= 2:
+      log.info("Using %s JAX backend", jax.default_backend())
+
+    if target_edgeset is None:
+      if len(schema.edge_sets) == 1:
+        target_edgeset = list(schema.edge_sets.keys())[0]
+      else:
+        raise ValueError(
+            "`target_edgeset` must be specified when the schema contains more"
+            " than one edgeset."
+        )
+
+    if verbose >= 2:
+      log.info(
+          "Graph input schema:\n%s",
+          print_schema_lib.print_schema(
+              schema, return_output=True, header=False
+          ),
       )
 
-  if verbose >= 2:
-    log.info(
-        "Graph input schema:\n%s",
-        print_schema_lib.print_schema(schema, return_output=True, header=False),
-    )
-
-  # TODO(gbm): Parametrize.
-  hparams = HParam(
-      max_training_time_seconds=max_training_time_seconds,
-      num_train_steps=num_train_steps,
-      num_sampling_hops=num_sampling_hops,
-      sampling_width=sampling_width,
-      batch_size=batch_size,
-      node_embedding_dim=node_embedding_dim,
-      learning_rate=learning_rate,
-      num_layers=num_layers,
-      num_negative_nodes=num_negative_nodes,
-      message_passing_on_target_edgeset=message_passing_on_target_edgeset,
-      negative_edges=negative_edges,
-      random_walk_num_walks_per_negative=random_walk_num_walks_per_negative,
-      message_pooling=message_pooling,
-      architecture=architecture,
-      early_stopping=early_stopping_monitor.normalize_early_stopping_config(
-          early_stopping
-      ),
-  )
-
-  task = LinkPredictionTask(target_edgeset=target_edgeset)
-
-  with util.print_timer("Preparing dataset", verbose >= 1):
-    train_dataset, valid_dataset = prepare_datasets(
-        graph=graph,
-        valid_graph=valid_graph,
-        schema=schema,
-        hparams=hparams,
-        task=task,
-        verbose=verbose,
-        validation_ratio=validation_ratio,
-        train_seed_edges=train_seed_edges,
-        valid_seed_edges=valid_seed_edges,
-        num_valid_steps=num_valid_steps,
+    # TODO(gbm): Parametrize.
+    hparams = HParam(
+        max_training_time_seconds=max_training_time_seconds,
+        num_train_steps=num_train_steps,
+        num_sampling_hops=num_sampling_hops,
+        sampling_width=sampling_width,
         batch_size=batch_size,
-        cache_valid_dataset=cache_valid_dataset,
-        cache_normalized_features=cache_normalized_features,
-        cache_normalized_features_device=cache_normalized_features_device,
-        source_sampling_plan=source_sampling_plan,
-        target_sampling_plan=target_sampling_plan,
-    )
-  source_normalized_schema = (
-      train_dataset.get_live().source_normalizer.output_schema()
-  )
-  target_normalized_schema = (
-      train_dataset.get_live().target_normalizer.output_schema()
-  )
-
-  if verbose >= 2:
-    # TODO(gbm): Also print the edge sets normalizer when available.
-    log.info(
-        "Source normalizer:\n%s",
-        train_dataset.get_live().source_normalizer.config.nice_print(
-            return_output=True
-        ),
-    )
-    log.info(
-        "Target normalizer:\n%s",
-        train_dataset.get_live().target_normalizer.config.nice_print(
-            return_output=True
-        ),
-    )
-    log.info(
-        "Source normalized graph schema:\n%s",
-        print_schema_lib.print_schema(
-            source_normalized_schema, return_output=True, header=False
-        ),
-    )
-    log.info(
-        "Target normalized graph schema:\n%s",
-        print_schema_lib.print_schema(
-            target_normalized_schema, return_output=True, header=False
+        node_embedding_dim=node_embedding_dim,
+        learning_rate=learning_rate,
+        num_layers=num_layers,
+        num_negative_nodes=num_negative_nodes,
+        message_passing_on_target_edgeset=message_passing_on_target_edgeset,
+        negative_edges=negative_edges,
+        random_walk_num_walks_per_negative=random_walk_num_walks_per_negative,
+        message_pooling=message_pooling,
+        architecture=architecture,
+        early_stopping=early_stopping_monitor.normalize_early_stopping_config(
+            early_stopping
         ),
     )
 
-  # Optimizer
-  warmup_steps = min(200, 1 + num_train_steps // 5)  # pyrefly: ignore[unsupported-operation]
-  learning_rate_plan = optax.join_schedules(
-      schedules=[
-          optax.linear_schedule(
-              init_value=0.0,
-              end_value=hparams.learning_rate,
-              transition_steps=warmup_steps,
+    task = LinkPredictionTask(target_edgeset=target_edgeset)
+
+    with util.print_timer("Preparing dataset", verbose >= 1):
+      train_dataset, valid_dataset = prepare_datasets(
+          graph=graph,
+          valid_graph=valid_graph,
+          schema=schema,
+          hparams=hparams,
+          task=task,
+          verbose=verbose,
+          validation_ratio=validation_ratio,
+          train_seed_edges=train_seed_edges,
+          valid_seed_edges=valid_seed_edges,
+          num_valid_steps=num_valid_steps,
+          batch_size=batch_size,
+          cache_valid_dataset=cache_valid_dataset,
+          cache_normalized_features=cache_normalized_features,
+          cache_normalized_features_device=cache_normalized_features_device,
+          source_sampling_plan=source_sampling_plan,
+          target_sampling_plan=target_sampling_plan,
+      )
+    source_normalized_schema = (
+        train_dataset.get_live().source_normalizer.output_schema()
+    )
+    target_normalized_schema = (
+        train_dataset.get_live().target_normalizer.output_schema()
+    )
+
+    if verbose >= 2:
+      # TODO(gbm): Also print the edge sets normalizer when available.
+      log.info(
+          "Source normalizer:\n%s",
+          train_dataset.get_live().source_normalizer.config.nice_print(
+              return_output=True
           ),
-          optax.cosine_decay_schedule(
-              init_value=hparams.learning_rate,
-              decay_steps=int((num_train_steps or 100_000) - warmup_steps),
+      )
+      log.info(
+          "Target normalizer:\n%s",
+          train_dataset.get_live().target_normalizer.config.nice_print(
+              return_output=True
           ),
-      ],
-      boundaries=[warmup_steps],
-  )
-  opt = optax.chain(
-      optax.clip_by_global_norm(1.0),
-      optax.adamw(
-          learning_rate=learning_rate_plan,
-          weight_decay=hparams.opt_weight_decay,
-      ),
-  )
+      )
+      log.info(
+          "Source normalized graph schema:\n%s",
+          print_schema_lib.print_schema(
+              source_normalized_schema, return_output=True, header=False
+          ),
+      )
+      log.info(
+          "Target normalized graph schema:\n%s",
+          print_schema_lib.print_schema(
+              target_normalized_schema, return_output=True, header=False
+          ),
+      )
 
-  core_model_config = create_core_model_config(hparams, task, schema)
-  if experimental_preprocess_core_model_config is not None:
-    core_model_config = experimental_preprocess_core_model_config(
-        core_model_config
-    )
-  core_model = core_model_config.make(
-      source_schema=source_normalized_schema,
-      target_schema=target_normalized_schema,
-  )
-
-  source_nodeset = schema.edge_sets[task.target_edgeset].source
-  target_nodeset = schema.edge_sets[task.target_edgeset].target
-
-  def jax_sample_to_batch(
-      batch: link_prediction_dataset.GNNLinkDatasetPreparatorJaxSample,
-  ) -> Batch:
-    return Batch(
-        positive_source_graph=batch.positive_source_graph,
-        positive_target_graph=batch.positive_target_graph,
-        negative_target_graph=batch.negative_target_graph,
-        positive_source_offset=batch.positive_source_offsets[source_nodeset][
-            :-1
+    # Optimizer
+    warmup_steps = min(200, 1 + num_train_steps // 5)  # pyrefly: ignore[unsupported-operation]
+    learning_rate_plan = optax.join_schedules(
+        schedules=[
+            optax.linear_schedule(
+                init_value=0.0,
+                end_value=hparams.learning_rate,
+                transition_steps=warmup_steps,
+            ),
+            optax.cosine_decay_schedule(
+                init_value=hparams.learning_rate,
+                decay_steps=int((num_train_steps or 100_000) - warmup_steps),
+            ),
         ],
-        positive_target_offset=batch.positive_target_offsets[target_nodeset][
-            :-1
-        ],
-        negative_target_offset=batch.negative_target_offsets[target_nodeset][
-            :-1
-        ],
+        boundaries=[warmup_steps],
+    )
+    opt = optax.chain(
+        optax.clip_by_global_norm(1.0),
+        optax.adamw(
+            learning_rate=learning_rate_plan,
+            weight_decay=hparams.opt_weight_decay,
+        ),
     )
 
-  def loss_fn(
-      params: jaxtyping.PyTree,
-      batch_stats: jaxtyping.PyTree,
-      batch: Batch,
-      rng_key: Optional[jax.Array],
-      training: bool,
-  ):
-
-    if rng_key is not None:
-      rngs = {"dropout": rng_key}
-    else:
-      rngs = None
-
-    effective_params = {**params}
-    if batch_stats:
-      effective_params["batch_stats"] = batch_stats
-
-    output = core_model.apply(
-        effective_params,
-        batch,
-        training=training,
-        rngs=rngs,
-        mutable=["batch_stats"] if training and batch_stats else False,
+    core_model_config = create_core_model_config(hparams, task, schema)
+    if experimental_preprocess_core_model_config is not None:
+      core_model_config = experimental_preprocess_core_model_config(
+          core_model_config
+      )
+    core_model = core_model_config.make(
+        source_schema=source_normalized_schema,
+        target_schema=target_normalized_schema,
     )
 
-    if batch_stats:
-      pos_logits, neg_logits, new_model_state = output  # pyrefly: ignore[bad-unpacking]
-    else:
-      pos_logits, neg_logits = output
-      new_model_state = {}
+    source_nodeset = schema.edge_sets[task.target_edgeset].source
+    target_nodeset = schema.edge_sets[task.target_edgeset].target
 
-    # Ranking metrics
-    neg_logits_reshaped = neg_logits.reshape(pos_logits.shape[0], -1)  # pyrefly: ignore[missing-attribute]
-    num_positives = neg_logits_reshaped.shape[0]
-    num_negatives = neg_logits_reshaped.shape[1]
+    def jax_sample_to_batch(
+        batch: link_prediction_dataset.GNNLinkDatasetPreparatorJaxSample,
+    ) -> Batch:
+      return Batch(
+          positive_source_graph=batch.positive_source_graph,
+          positive_target_graph=batch.positive_target_graph,
+          negative_target_graph=batch.negative_target_graph,
+          positive_source_offset=batch.positive_source_offsets[source_nodeset][
+              :-1
+          ],
+          positive_target_offset=batch.positive_target_offsets[target_nodeset][
+              :-1
+          ],
+          negative_target_offset=batch.negative_target_offsets[target_nodeset][
+              :-1
+          ],
+      )
 
-    # Binary classification loss.
-    loss = (
-        jnp.mean(
-            optax.sigmoid_binary_cross_entropy(
-                pos_logits, jnp.ones_like(pos_logits)
-            )
-        )
-        / num_positives
-        + jnp.mean(
-            optax.sigmoid_binary_cross_entropy(
-                neg_logits, jnp.zeros_like(neg_logits)  # pyrefly: ignore[bad-argument-type]
-            )
-        )
-        / num_negatives
-    )
+    def loss_fn(
+        params: jaxtyping.PyTree,
+        batch_stats: jaxtyping.PyTree,
+        batch: Batch,
+        rng_key: Optional[jax.Array],
+        training: bool,
+    ):
 
-    # Ranking metrics
-    ranking_metrics = evaluation.compute_ranking_metrics(pos_logits, neg_logits)  # pyrefly: ignore[bad-argument-type]
-    aux_data = {
-        "metrics": ranking_metrics,
-        "model_state": new_model_state,
-    }
-    return loss, aux_data
+      if rng_key is not None:
+        rngs = {"dropout": rng_key}
+      else:
+        rngs = None
 
-  @jax.jit
-  def train_step(params, opt_state, batch: Batch, rng_key):
-    has_batch_stats = "batch_stats" in params
-    batch_stats = params.get("batch_stats", {})
-    core_params = {"params": params["params"]}
+      effective_params = {**params}
+      if batch_stats:
+        effective_params["batch_stats"] = batch_stats
 
-    (loss, aux_data), grads = jax.value_and_grad(loss_fn, has_aux=True)(
-        core_params, batch_stats, batch, rng_key, training=True
-    )
-    updates, opt_state = opt.update(grads, opt_state, core_params)
-    core_params = optax.apply_updates(core_params, updates)
+      output = core_model.apply(
+          effective_params,
+          batch,
+          training=training,
+          rngs=rngs,
+          mutable=["batch_stats"] if training and batch_stats else False,
+      )
 
-    params = {**core_params}  # pyrefly: ignore[invalid-argument]
-    if has_batch_stats:
-      params["batch_stats"] = batch_stats
-    return params, opt_state, {"loss": loss, **aux_data["metrics"]}
+      if batch_stats:
+        pos_logits, neg_logits, new_model_state = output  # pyrefly: ignore[bad-unpacking]
+      else:
+        pos_logits, neg_logits = output
+        new_model_state = {}
 
-  def infinite_train_iterator() -> Iterator[Batch]:
-    num_diagnostic_plots = 0
-    while True:
-      for batch in train_dataset.generate_jax():
+      # Ranking metrics
+      neg_logits_reshaped = neg_logits.reshape(pos_logits.shape[0], -1)  # pyrefly: ignore[missing-attribute]
+      num_positives = neg_logits_reshaped.shape[0]
+      num_negatives = neg_logits_reshaped.shape[1]
 
-        if diagnostic_dir is not None and num_diagnostic_plots < 5:
-          _diagnose_train_batch(
-              batch,
-              diagnostic_dir,
-              source_normalized_schema,
-              target_normalized_schema,
-              num_diagnostic_plots,
-          )
-          num_diagnostic_plots += 1
-
-        yield jax_sample_to_batch(batch)
-
-  train_kwargs = {}
-  if valid_dataset is not None:
-
-    def valid_dataset_iterator_fn() -> Iterator[Batch]:
-
-      valid_generator = valid_dataset.generate_jax()
-      if num_valid_steps is not None:
-        valid_generator = itertools.islice(valid_generator, num_valid_steps)
-      for batch in valid_generator:
-        yield jax_sample_to_batch(batch)
-
-    if cache_valid_dataset:
-      with util.print_timer("Caching validation dataset", verbose >= 1):
-        if verbose >= 2:
-          num_examples_to_cache = valid_dataset.num_edge_in_seed_edgeset()
-          num_batches_to_cache = (
-              util.num_batches(
-                  num_examples_to_cache,
-                  batch_size=valid_dataset.batch_size,
-                  drop_remainder=valid_dataset.drop_remainder,
-              )
-              if num_examples_to_cache is not None
-              else None
-          )
-          if num_valid_steps is not None:
-            if num_batches_to_cache is None:
-              num_batches_to_cache = num_valid_steps
-            else:
-              num_batches_to_cache = min(num_batches_to_cache, num_valid_steps)
-          valid_dataset_list = list(
-              tqdm.tqdm(
-                  valid_dataset_iterator_fn(),
-                  total=num_batches_to_cache,
-                  desc="Caching validation dataset",
+      # Binary classification loss.
+      loss = (
+          jnp.mean(
+              optax.sigmoid_binary_cross_entropy(
+                  pos_logits, jnp.ones_like(pos_logits)
               )
           )
-        else:
-          valid_dataset_list = list(valid_dataset_iterator_fn())
+          / num_positives
+          + jnp.mean(
+              optax.sigmoid_binary_cross_entropy(
+                  neg_logits, jnp.zeros_like(neg_logits)  # pyrefly: ignore[bad-argument-type]
+              )
+          )
+          / num_negatives
+      )
 
-      if verbose >= 1:
-        log.info(
-            "Number of cache validation batches: %d", len(valid_dataset_list)
-        )
-
-      def cached_valid_dataset_iterator_fn() -> Iterator[Batch]:
-        yield from valid_dataset_list
-
-      valid_dataset_iterator_fn = cached_valid_dataset_iterator_fn
+      # Ranking metrics
+      ranking_metrics = evaluation.compute_ranking_metrics(pos_logits, neg_logits)  # pyrefly: ignore[bad-argument-type]
+      aux_data = {
+          "metrics": ranking_metrics,
+          "model_state": new_model_state,
+      }
+      return loss, aux_data
 
     @jax.jit
-    def valid_step(params, opt_state, batch):
-      del opt_state
-      loss, aux = loss_fn(params, {}, batch, None, training=False)
-      return {"loss": loss, **aux["metrics"]}
+    def train_step(params, opt_state, batch: Batch, rng_key):
+      has_batch_stats = "batch_stats" in params
+      batch_stats = params.get("batch_stats", {})
+      core_params = {"params": params["params"]}
 
-    train_kwargs["valid_dataset_iterator_fn"] = valid_dataset_iterator_fn
-    train_kwargs["valid_step"] = valid_step
-
-  with util.print_timer("Training model", verbose >= 1):
-    checkpoint_dir = os.path.join(work_dir, "checkpoint") if work_dir else None
-    train_results = flax_train.train(
-        model=core_model,
-        opt=opt,
-        train_step=train_step,
-        dataset_iterator=infinite_train_iterator(),
-        num_train_steps=num_train_steps,  # pyrefly: ignore[bad-argument-type]
-        rng_key=jax.random.PRNGKey(hparams.random_seed),
-        working_path=checkpoint_dir,
-        disable_progress_bar=verbose == 0,
-        display_model_structure=verbose >= 3,
-        train_log_every_n_steps=100,
-        valid_every_n_steps=valid_every_n_steps,
-        print_logs=verbose >= 2,
-        max_training_time_seconds=max_training_time_seconds,
-        export_metrics_to_xm=export_metrics_to_xm,
-        early_stopping=hparams.early_stopping,
-        **train_kwargs,
-    )
-
-  end_train_time = time.time()
-  train_duration = end_train_time - begin_train_time
-
-  model = LinkPredictionModel(
-      data=ModelData(
-          model_params=train_results.model_params,
-          core_model_config=core_model_config,
-          task=task,
-          hparams=hparams,
-          schema=schema,
-          source_normalizer_config=train_dataset.get_live().source_normalizer.config,
-          target_normalizer_config=train_dataset.get_live().target_normalizer.config,
-          positive_source_padding=train_dataset.get_live().positive_source_padding,
-          positive_target_padding=train_dataset.get_live().positive_target_padding,
-          negative_target_padding=train_dataset.get_live().negative_target_padding,
-          source_feature_stats=train_dataset.get_live().source_feature_stats,
-          target_feature_stats=train_dataset.get_live().target_feature_stats,
-          source_sampling_plan=train_dataset.get_live().source_sampling_plan,
-          target_sampling_plan=train_dataset.get_live().target_sampling_plan,
-          training_stats=TrainingStats(
-              num_train_seed_edges=train_dataset.num_edge_in_seed_edgeset(),
-              num_valid_seed_edges=valid_dataset.num_edge_in_seed_edgeset()
-              if valid_dataset is not None
-              else None,
-              train_duration_seconds=train_duration,
-          ),
+      (loss, aux_data), grads = jax.value_and_grad(loss_fn, has_aux=True)(
+          core_params, batch_stats, batch, rng_key, training=True
       )
-  )
-  model.metadata.trainig_logs = common.TrainingLogs(
-      train=train_results.train_logs,
-      valid=train_results.valid_logs,
-      num_train_step=train_results.num_train_step,
-  )
+      updates, opt_state = opt.update(grads, opt_state, core_params)
+      core_params = optax.apply_updates(core_params, updates)
+
+      params = {**core_params}  # pyrefly: ignore[invalid-argument]
+      if has_batch_stats:
+        params["batch_stats"] = batch_stats
+      return params, opt_state, {"loss": loss, **aux_data["metrics"]}
+
+    def infinite_train_iterator() -> Iterator[Batch]:
+      num_diagnostic_plots = 0
+      while True:
+        for batch in train_dataset.generate_jax():
+
+          if diagnostic_dir is not None and num_diagnostic_plots < 5:
+            _diagnose_train_batch(
+                batch,
+                diagnostic_dir,
+                source_normalized_schema,
+                target_normalized_schema,
+                num_diagnostic_plots,
+            )
+            num_diagnostic_plots += 1
+
+          yield jax_sample_to_batch(batch)
+
+    train_kwargs = {}
+    if valid_dataset is not None:
+
+      def valid_dataset_iterator_fn() -> Iterator[Batch]:
+
+        valid_generator = valid_dataset.generate_jax()
+        if num_valid_steps is not None:
+          valid_generator = itertools.islice(valid_generator, num_valid_steps)
+        for batch in valid_generator:
+          yield jax_sample_to_batch(batch)
+
+      if cache_valid_dataset:
+        with util.print_timer("Caching validation dataset", verbose >= 1):
+          if verbose >= 2:
+            num_examples_to_cache = valid_dataset.num_edge_in_seed_edgeset()
+            num_batches_to_cache = (
+                util.num_batches(
+                    num_examples_to_cache,
+                    batch_size=valid_dataset.batch_size,
+                    drop_remainder=valid_dataset.drop_remainder,
+                )
+                if num_examples_to_cache is not None
+                else None
+            )
+            if num_valid_steps is not None:
+              if num_batches_to_cache is None:
+                num_batches_to_cache = num_valid_steps
+              else:
+                num_batches_to_cache = min(
+                    num_batches_to_cache, num_valid_steps
+                )
+            valid_dataset_list = list(
+                tqdm.tqdm(
+                    valid_dataset_iterator_fn(),
+                    total=num_batches_to_cache,
+                    desc="Caching validation dataset",
+                )
+            )
+          else:
+            valid_dataset_list = list(valid_dataset_iterator_fn())
+
+        if verbose >= 1:
+          log.info(
+              "Number of cache validation batches: %d", len(valid_dataset_list)
+          )
+
+        def cached_valid_dataset_iterator_fn() -> Iterator[Batch]:
+          yield from valid_dataset_list
+
+        valid_dataset_iterator_fn = cached_valid_dataset_iterator_fn
+
+      @jax.jit
+      def valid_step(params, opt_state, batch):
+        del opt_state
+        loss, aux = loss_fn(params, {}, batch, None, training=False)
+        return {"loss": loss, **aux["metrics"]}
+
+      train_kwargs["valid_dataset_iterator_fn"] = valid_dataset_iterator_fn
+      train_kwargs["valid_step"] = valid_step
+
+    with util.print_timer("Training model", verbose >= 1):
+      checkpoint_dir = (
+          os.path.join(work_dir, "checkpoint") if work_dir else None
+      )
+      train_results = flax_train.train(
+          model=core_model,
+          opt=opt,
+          train_step=train_step,
+          dataset_iterator=infinite_train_iterator(),
+          num_train_steps=num_train_steps,  # pyrefly: ignore[bad-argument-type]
+          rng_key=jax.random.PRNGKey(hparams.random_seed),
+          working_path=checkpoint_dir,
+          disable_progress_bar=verbose == 0,
+          display_model_structure=verbose >= 3,
+          train_log_every_n_steps=100,
+          valid_every_n_steps=valid_every_n_steps,
+          print_logs=verbose >= 2,
+          max_training_time_seconds=max_training_time_seconds,
+          export_metrics_to_xm=export_metrics_to_xm,
+          early_stopping=hparams.early_stopping,
+          **train_kwargs,
+      )
+
+    end_train_time = time.time()
+    train_duration = end_train_time - begin_train_time
+
+    model = LinkPredictionModel(
+        data=ModelData(
+            model_params=train_results.model_params,
+            core_model_config=core_model_config,
+            task=task,
+            hparams=hparams,
+            schema=schema,
+            source_normalizer_config=train_dataset.get_live().source_normalizer.config,
+            target_normalizer_config=train_dataset.get_live().target_normalizer.config,
+            positive_source_padding=train_dataset.get_live().positive_source_padding,
+            positive_target_padding=train_dataset.get_live().positive_target_padding,
+            negative_target_padding=train_dataset.get_live().negative_target_padding,
+            source_feature_stats=train_dataset.get_live().source_feature_stats,
+            target_feature_stats=train_dataset.get_live().target_feature_stats,
+            source_sampling_plan=train_dataset.get_live().source_sampling_plan,
+            target_sampling_plan=train_dataset.get_live().target_sampling_plan,
+            training_stats=TrainingStats(
+                num_train_seed_edges=train_dataset.num_edge_in_seed_edgeset(),
+                num_valid_seed_edges=valid_dataset.num_edge_in_seed_edgeset()
+                if valid_dataset is not None
+                else None,
+                train_duration_seconds=train_duration,
+            ),
+        )
+    )
+    model.metadata.trainig_logs = common.TrainingLogs(
+        train=train_results.train_logs,
+        valid=train_results.valid_logs,
+        num_train_step=train_results.num_train_step,
+    )
+  model.metadata.captured_logs = captured_logs
   return model
 
 

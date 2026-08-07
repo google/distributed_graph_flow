@@ -15,7 +15,7 @@ package(
 py_library(
     name = "validate",
     srcs = ["validate.py"],
-    deps = [],
+    deps = ["//dgf/src/util:log"],
 )
 
 py_library(

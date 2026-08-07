@@ -27,6 +27,7 @@ from dgf.src.learning.jax.layers import hetero_gnn
 from dgf.src.learning.jax.layers import hetero_graph_attention_network
 from dgf.src.learning.ten_lines import dataset
 from dgf.src.util import filesystem as fs
+from dgf.src.util import log
 from dgf.src.util import util
 import jax
 import numpy as np
@@ -215,6 +216,7 @@ class Metadata:
     name: The registered name of the model. Used to identify the model class.
     trainig_logs: The logs generated during model training.
     uuid: A unique identifier for the model, generated at initialization.
+    captured_logs: Info and warning message emited during model's training.
   """
 
   name: str
@@ -223,6 +225,7 @@ class Metadata:
   uuid: Optional[str] = dataclasses.field(
       default_factory=lambda: uuid.uuid4().hex
   )
+  captured_logs: Optional[List[log.Message]] = None
 
 
 # TODO(gbm): Structure / organize / populate

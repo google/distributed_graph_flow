@@ -263,428 +263,433 @@ def train_node_model(
   # TODO(gbm): Add an "auto" logic for "cache_normalized_features" and
   # "cache_normalized_features_device".
 
-  architecture = common.parse_architecture(architecture)
-  begin_train_time = time.time()
+  with log.capture_logs() as captured_logs:
 
-  if diagnostic_dir is not None:
-    fs.makedirs(diagnostic_dir)
+    architecture = common.parse_architecture(architecture)
+    begin_train_time = time.time()
 
-  if verbose >= 2:
-    log.info("Using %s JAX backend", jax.default_backend())
+    if diagnostic_dir is not None:
+      fs.makedirs(diagnostic_dir)
 
-  if target_nodeset is None:
-    if len(schema.node_sets) == 1:
-      target_nodeset = list(schema.node_sets.keys())[0]
-    else:
-      raise ValueError(
-          "`target_nodeset` must be specified when the schema contains more"
-          " than one nodeset. Found nodesets:"
-          f" {list(schema.node_sets.keys())}"
-      )
+    if verbose >= 2:
+      log.info("Using %s JAX backend", jax.default_backend())
 
-  # Note: Maybe one day, the timestamp features will be used for something else.
-  if time_aware:
-    nodeset_ts_features = temporal_util.nodeset_timestamp_features(schema)
-    edgeset_ts_features = temporal_util.edgeset_timestamp_features(schema)
-    if target_nodeset not in nodeset_ts_features:
-      raise ValueError(
-          f"The target nodeset '{target_nodeset}' must have a creation time"
-          " feature. Set is_creation_time=True on the creation time feature"
-          " (e.g. `schema.node_sets[<target nodeset>].features[<creation time"
-          " feature>].is_creation_time = True`)."
-      )
-  else:
-    nodeset_ts_features = {}
-    edgeset_ts_features = {}
-
-  if verbose >= 2:
-    log.info(
-        "Graph input schema:\n%s",
-        print_schema_lib.print_schema(schema, return_output=True, header=False),
-    )
-
-  # TODO(gbm): Parametrize.
-  hparams = HParam(
-      max_training_time_seconds=max_training_time_seconds,
-      num_train_steps=num_train_steps,
-      num_sampling_hops=num_sampling_hops,
-      sampling_width=sampling_width,
-      batch_size=batch_size,
-      node_embedding_dim=node_embedding_dim,
-      learning_rate=learning_rate,
-      num_layers=num_layers,
-      message_pooling=message_pooling,
-      architecture=architecture,
-      early_stopping=early_stopping_monitor.normalize_early_stopping_config(
-          early_stopping
-      ),
-  )
-
-  task = NodePredictionTask(
-      target_nodeset=target_nodeset,
-      target_column=target_column,
-      normalized_target_column=None,
-      task_type=infer_task_type(schema, target_nodeset, target_column),
-  )
-
-  with util.print_timer("Preparing dataset", verbose >= 1):
-    with jax.profiler.TraceAnnotation("prepare dataset"):
-      train_dataset, valid_dataset = node_prediction_dataset.prepare_datasets(
-          graph=graph,
-          valid_graph=valid_graph,  # pyrefly: ignore[bad-argument-type]
-          schema=schema,
-          target_nodeset=task.target_nodeset,
-          random_seed=hparams.random_seed,
-          batch_size=hparams.batch_size,
-          num_sampling_hops=hparams.num_sampling_hops,
-          sampling_width=hparams.sampling_width,
-          keep_raw_features={task.target_column}
-          if task.task_type == node_prediction_model.TaskType.NODE_REGRESSION
-          else set(),
-          verbose=verbose,
-          graph_format=graph_format,
-          validation_ratio=validation_ratio,
-          train_seed_nodes=train_seed_nodes,
-          valid_seed_nodes=valid_seed_nodes,
-          temporal_sampling=time_aware,
-          nodeset_timestamp_features=nodeset_ts_features,
-          edgeset_timestamp_features=edgeset_ts_features,
-          num_valid_steps=num_valid_steps,
-          cache_valid_dataset=cache_valid_dataset,
-          cache_normalized_features=cache_normalized_features,
-          cache_normalized_features_device=cache_normalized_features_device,
-          sampling_plan=sampling_plan,
-      )
-  normalized_schema = train_dataset.generated_schema()
-
-  if verbose >= 2:
-    # TODO(gbm): Also print the edge sets normalizer when available.
-    log.info(
-        "Normalizer:\n%s",
-        train_dataset.get_live().normalizer.config.nice_print(
-            return_output=True
-        ),
-    )
-    log.info(
-        "Normalized graph schema:\n%s",
-        print_schema_lib.print_schema(
-            normalized_schema, return_output=True, header=False
-        ),
-    )
-  dataset_preparator = train_dataset.get_live()
-  normalized_target_columns = (
-      dataset_preparator.normalizer.get_normalized_feature_names(
-          task.target_nodeset, task.target_column
-      )
-  )
-  if len(normalized_target_columns) != 1:
-    raise ValueError(
-        "Expected exactly one normalized feature for target column"
-        f" '{task.target_column}', but got {len(normalized_target_columns)}:"
-        f" {normalized_target_columns}"
-    )
-  task.normalized_target_column = normalized_target_columns[0]
-  label_spec = normalized_schema.node_sets[task.target_nodeset].features[
-      task.normalized_target_column
-  ]
-  if task.task_type == node_prediction_model.TaskType.NODE_CLASSIFICATION:
-    if label_spec.semantic != schema_lib.FeatureSemantic.CATEGORICAL:
-      raise ValueError(
-          f"Target column '{task.target_column}' in nodeset"
-          f" '{task.target_nodeset}' must have a CATEGORICAL semantic, but"
-          f" found {label_spec.semantic.name}."
-      )
-    if not label_spec.format.is_integer():
-      raise ValueError(
-          f"Target column '{task.target_column}' in nodeset"
-          f" '{task.target_nodeset}' must have an integer format, but found"
-          f" {label_spec.format.name}."
-      )
-    if label_spec.num_categorical_values is None:
-      raise ValueError(
-          f"Target column '{task.target_column}' in nodeset"
-          f" '{task.target_nodeset}' must have `num_categorical_values` defined"
-          " for classification tasks."
-      )
-  elif task.task_type == node_prediction_model.TaskType.NODE_REGRESSION:
-    if label_spec.semantic != schema_lib.FeatureSemantic.NUMERICAL:
-      raise ValueError(
-          f"Target column '{task.target_column}' in nodeset"
-          f" '{task.target_nodeset}' must have a NUMERICAL semantic, but"
-          f" found {label_spec.semantic.name}."
-      )
-    if not label_spec.format.is_numerical():
-      raise ValueError(
-          f"Target column '{task.target_column}' in nodeset"
-          f" '{task.target_nodeset}' must have a numerical format, but found"
-          f" {label_spec.format.name}."
-      )
-  else:
-    raise ValueError(f"Unsupported task type: {task.task_type}")
-
-  warmup_steps = min(200, 1 + num_train_steps // 5)  # pyrefly: ignore[unsupported-operation]
-  learning_rate_plan = optax.join_schedules(
-      schedules=[
-          optax.linear_schedule(
-              init_value=0.0,
-              end_value=hparams.learning_rate,
-              transition_steps=warmup_steps,
-          ),
-          optax.cosine_decay_schedule(
-              init_value=hparams.learning_rate,
-              decay_steps=int((num_train_steps or 100_000) - warmup_steps),
-          ),
-      ],
-      boundaries=[warmup_steps],
-  )
-
-  opt = optax.chain(
-      optax.clip_by_global_norm(1.0),
-      optax.adamw(
-          learning_rate=learning_rate_plan,
-          weight_decay=hparams.opt_weight_decay,
-      ),
-  )
-
-  def process_batch(
-      graph: jax_in_memory_graph.JaxInMemoryGraph,
-      merge_offsets: Dict[str, jnp.ndarray],
-  ) -> Batch:
-    return graph, merge_offsets[task.target_nodeset][:-1]
-
-  core_model_config = create_core_model_config(hparams, task, label_spec)
-  if experimental_preprocess_core_model_config is not None:
-    core_model_config = experimental_preprocess_core_model_config(
-        core_model_config
-    )
-
-  if verbose >= 2:
-    log.info(
-        "Core model config:\n%s",
-        textwrap.indent(core_model_config.architecture(), prefix="    "),
-    )
-
-  normalized_input_feature_schema = node_prediction_model.normalized_schema_to_normalized_input_feature_schema(
-      schema=normalized_schema,
-      task=task,
-  )
-  core_model = core_model_config.make(schema=normalized_input_feature_schema)
-
-  if verbose >= 2:
-    log.info(
-        "Normalized input features:\n%s",
-        print_schema_lib.print_schema(
-            normalized_input_feature_schema, return_output=True, header=False
-        ),
-    )
-
-  def loss_fn(
-      core_params: jaxtyping.PyTree,
-      batch_stats: jaxtyping.PyTree,
-      batch: Batch,
-      labels: jax.Array,
-      rng_key: Optional[jax.Array],
-      training: bool,
-  ) -> Tuple[jax.Array, jaxtyping.PyTree]:
-    if rng_key is not None:
-      rngs = {"dropout": rng_key}
-    else:
-      rngs = None
-
-    effective_params = {**core_params}
-    if batch_stats:
-      effective_params["batch_stats"] = batch_stats
-
-    output = core_model.apply(
-        effective_params,
-        batch,
-        training=training,
-        rngs=rngs,
-        mutable=["batch_stats"] if training and batch_stats else False,
-    )
-
-    logits, new_model_state = output if batch_stats else (output, {})
-
-    if task.task_type == node_prediction_model.TaskType.NODE_CLASSIFICATION:
-      loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels)  # pyrefly: ignore[bad-argument-type]
-      accuracy = jnp.argmax(logits, axis=-1) == labels  # pyrefly: ignore[bad-argument-type]
-      metrics = {"accuracy": accuracy.mean()}
-    elif task.task_type == node_prediction_model.TaskType.NODE_REGRESSION:
-      predictions = regression_lib.RegressionHead.logits_to_predictions(logits)  # pyrefly: ignore[bad-argument-type]
-      loss = optax.squared_error(predictions, labels)
-      metrics = {"rmse": jnp.sqrt(loss.mean())}
-    else:
-      raise ValueError(f"Unknown task type: {task.task_type}")
-
-    aux_data = {
-        "metrics": metrics,
-        "model_state": new_model_state,
-    }
-    return jnp.mean(loss), aux_data
-
-  def train_step(params, opt_state, batch: Batch, rng_key):
-    graph, seed_node_idxs = batch
-
-    labels = graph.node_sets[task.target_nodeset].features[
-        task.normalized_target_column  # pyrefly: ignore[bad-index]
-    ][seed_node_idxs]
-
-    has_batch_stats = "batch_stats" in params
-    batch_stats = params.get("batch_stats", {})
-    core_params = {"params": params["params"]}
-
-    (loss, aux_data), grads = jax.value_and_grad(loss_fn, has_aux=True)(
-        core_params, batch_stats, batch, labels, rng_key, True
-    )
-
-    updates, opt_state = opt.update(grads, opt_state, core_params)
-    core_params = optax.apply_updates(core_params, updates)
-
-    params = {**core_params}  # pyrefly: ignore[invalid-argument]
-    if has_batch_stats:
-      params["batch_stats"] = batch_stats
-    return params, opt_state, {"loss": loss, **aux_data["metrics"]}
-
-  # Use for speed.
-  jitted_train_step = jax.jit(train_step)
-
-  def infinite_train_dataset_iterator():
-    num_diagnostic_plots = 0
-    while True:
-      for sample, merge_offset in train_dataset.generate_jax():
-        with jax.profiler.TraceAnnotation("process_batch"):
-
-          if diagnostic_dir is not None and num_diagnostic_plots < 5:
-            _diagnose_train_batch(
-                sample,
-                merge_offset,
-                diagnostic_dir,
-                normalized_schema,
-                num_diagnostic_plots,
-            )
-            num_diagnostic_plots += 1
-
-          yield process_batch(sample, merge_offset)
-
-  train_kwargs = {}
-  if valid_dataset is not None:
-
-    def valid_dataset_iterator_fn():
-      valid_generator = valid_dataset.generate_jax()
-      if num_valid_steps is not None:
-        valid_generator = itertools.islice(valid_generator, num_valid_steps)
-      for sample, merge_offset in valid_generator:
-        # TODO(gbm): Should we store the JAX arrays on device (this version), or
-        # the Numpy array on host?
-        yield process_batch(sample, merge_offset)
-
-    if cache_valid_dataset:
-      num_examples_to_cache = valid_dataset.num_nodes_in_seed_nodeset()
-      num_batches_to_cache = (
-          util.num_batches(
-              num_examples_to_cache,
-              batch_size=valid_dataset.batch_size,
-              drop_remainder=valid_dataset.drop_remainder,
-          )
-          if num_examples_to_cache is not None
-          else None
-      )
-      if num_valid_steps is not None:
-        if num_batches_to_cache is None:
-          num_batches_to_cache = num_valid_steps
-        else:
-          num_batches_to_cache = min(num_batches_to_cache, num_valid_steps)
-      with util.print_timer("Caching validation dataset", verbose >= 1):
-        if verbose >= 2:
-          valid_dataset_list = list(
-              tqdm.tqdm(
-                  valid_dataset_iterator_fn(),
-                  total=num_batches_to_cache,
-                  desc="Caching validation dataset",
-              )
-          )
-        else:
-          valid_dataset_list = list(valid_dataset_iterator_fn())
-
-      if verbose >= 1:
-        log.info(
-            "Number of cache validation batches: %d", len(valid_dataset_list)
+    if target_nodeset is None:
+      if len(schema.node_sets) == 1:
+        target_nodeset = list(schema.node_sets.keys())[0]
+      else:
+        raise ValueError(
+            "`target_nodeset` must be specified when the schema contains more"
+            " than one nodeset. Found nodesets:"
+            f" {list(schema.node_sets.keys())}"
         )
 
-      def cached_valid_dataset_iterator_fn():
-        yield from valid_dataset_list
+    # Note: Maybe one day, the timestamp features will be used for something else.
+    if time_aware:
+      nodeset_ts_features = temporal_util.nodeset_timestamp_features(schema)
+      edgeset_ts_features = temporal_util.edgeset_timestamp_features(schema)
+      if target_nodeset not in nodeset_ts_features:
+        raise ValueError(
+            f"The target nodeset '{target_nodeset}' must have a creation time"
+            " feature. Set is_creation_time=True on the creation time feature"
+            " (e.g. `schema.node_sets[<target nodeset>].features[<creation time"
+            " feature>].is_creation_time = True`)."
+        )
+    else:
+      nodeset_ts_features = {}
+      edgeset_ts_features = {}
 
-      valid_dataset_iterator_fn = cached_valid_dataset_iterator_fn
+    if verbose >= 2:
+      log.info(
+          "Graph input schema:\n%s",
+          print_schema_lib.print_schema(
+              schema, return_output=True, header=False
+          ),
+      )
 
-    def valid_step(params, opt_state, batch: Batch):
+    # TODO(gbm): Parametrize.
+    hparams = HParam(
+        max_training_time_seconds=max_training_time_seconds,
+        num_train_steps=num_train_steps,
+        num_sampling_hops=num_sampling_hops,
+        sampling_width=sampling_width,
+        batch_size=batch_size,
+        node_embedding_dim=node_embedding_dim,
+        learning_rate=learning_rate,
+        num_layers=num_layers,
+        message_pooling=message_pooling,
+        architecture=architecture,
+        early_stopping=early_stopping_monitor.normalize_early_stopping_config(
+            early_stopping
+        ),
+    )
+
+    task = NodePredictionTask(
+        target_nodeset=target_nodeset,
+        target_column=target_column,
+        normalized_target_column=None,
+        task_type=infer_task_type(schema, target_nodeset, target_column),
+    )
+
+    with util.print_timer("Preparing dataset", verbose >= 1):
+      with jax.profiler.TraceAnnotation("prepare dataset"):
+        train_dataset, valid_dataset = node_prediction_dataset.prepare_datasets(
+            graph=graph,
+            valid_graph=valid_graph,  # pyrefly: ignore[bad-argument-type]
+            schema=schema,
+            target_nodeset=task.target_nodeset,
+            random_seed=hparams.random_seed,
+            batch_size=hparams.batch_size,
+            num_sampling_hops=hparams.num_sampling_hops,
+            sampling_width=hparams.sampling_width,
+            keep_raw_features={task.target_column}
+            if task.task_type == node_prediction_model.TaskType.NODE_REGRESSION
+            else set(),
+            verbose=verbose,
+            graph_format=graph_format,
+            validation_ratio=validation_ratio,
+            train_seed_nodes=train_seed_nodes,
+            valid_seed_nodes=valid_seed_nodes,
+            temporal_sampling=time_aware,
+            nodeset_timestamp_features=nodeset_ts_features,
+            edgeset_timestamp_features=edgeset_ts_features,
+            num_valid_steps=num_valid_steps,
+            cache_valid_dataset=cache_valid_dataset,
+            cache_normalized_features=cache_normalized_features,
+            cache_normalized_features_device=cache_normalized_features_device,
+            sampling_plan=sampling_plan,
+        )
+    normalized_schema = train_dataset.generated_schema()
+
+    if verbose >= 2:
+      # TODO(gbm): Also print the edge sets normalizer when available.
+      log.info(
+          "Normalizer:\n%s",
+          train_dataset.get_live().normalizer.config.nice_print(
+              return_output=True
+          ),
+      )
+      log.info(
+          "Normalized graph schema:\n%s",
+          print_schema_lib.print_schema(
+              normalized_schema, return_output=True, header=False
+          ),
+      )
+    dataset_preparator = train_dataset.get_live()
+    normalized_target_columns = (
+        dataset_preparator.normalizer.get_normalized_feature_names(
+            task.target_nodeset, task.target_column
+        )
+    )
+    if len(normalized_target_columns) != 1:
+      raise ValueError(
+          "Expected exactly one normalized feature for target column"
+          f" '{task.target_column}', but got {len(normalized_target_columns)}:"
+          f" {normalized_target_columns}"
+      )
+    task.normalized_target_column = normalized_target_columns[0]
+    label_spec = normalized_schema.node_sets[task.target_nodeset].features[
+        task.normalized_target_column
+    ]
+    if task.task_type == node_prediction_model.TaskType.NODE_CLASSIFICATION:
+      if label_spec.semantic != schema_lib.FeatureSemantic.CATEGORICAL:
+        raise ValueError(
+            f"Target column '{task.target_column}' in nodeset"
+            f" '{task.target_nodeset}' must have a CATEGORICAL semantic, but"
+            f" found {label_spec.semantic.name}."
+        )
+      if not label_spec.format.is_integer():
+        raise ValueError(
+            f"Target column '{task.target_column}' in nodeset"
+            f" '{task.target_nodeset}' must have an integer format, but found"
+            f" {label_spec.format.name}."
+        )
+      if label_spec.num_categorical_values is None:
+        raise ValueError(
+            f"Target column '{task.target_column}' in nodeset"
+            f" '{task.target_nodeset}' must have `num_categorical_values`"
+            " defined for classification tasks."
+        )
+    elif task.task_type == node_prediction_model.TaskType.NODE_REGRESSION:
+      if label_spec.semantic != schema_lib.FeatureSemantic.NUMERICAL:
+        raise ValueError(
+            f"Target column '{task.target_column}' in nodeset"
+            f" '{task.target_nodeset}' must have a NUMERICAL semantic, but"
+            f" found {label_spec.semantic.name}."
+        )
+      if not label_spec.format.is_numerical():
+        raise ValueError(
+            f"Target column '{task.target_column}' in nodeset"
+            f" '{task.target_nodeset}' must have a numerical format, but found"
+            f" {label_spec.format.name}."
+        )
+    else:
+      raise ValueError(f"Unsupported task type: {task.task_type}")
+
+    warmup_steps = min(200, 1 + num_train_steps // 5)  # pyrefly: ignore[unsupported-operation]
+    learning_rate_plan = optax.join_schedules(
+        schedules=[
+            optax.linear_schedule(
+                init_value=0.0,
+                end_value=hparams.learning_rate,
+                transition_steps=warmup_steps,
+            ),
+            optax.cosine_decay_schedule(
+                init_value=hparams.learning_rate,
+                decay_steps=int((num_train_steps or 100_000) - warmup_steps),
+            ),
+        ],
+        boundaries=[warmup_steps],
+    )
+
+    opt = optax.chain(
+        optax.clip_by_global_norm(1.0),
+        optax.adamw(
+            learning_rate=learning_rate_plan,
+            weight_decay=hparams.opt_weight_decay,
+        ),
+    )
+
+    def process_batch(
+        graph: jax_in_memory_graph.JaxInMemoryGraph,
+        merge_offsets: Dict[str, jnp.ndarray],
+    ) -> Batch:
+      return graph, merge_offsets[task.target_nodeset][:-1]
+
+    core_model_config = create_core_model_config(hparams, task, label_spec)
+    if experimental_preprocess_core_model_config is not None:
+      core_model_config = experimental_preprocess_core_model_config(
+          core_model_config
+      )
+
+    if verbose >= 2:
+      log.info(
+          "Core model config:\n%s",
+          textwrap.indent(core_model_config.architecture(), prefix="    "),
+      )
+
+    normalized_input_feature_schema = node_prediction_model.normalized_schema_to_normalized_input_feature_schema(
+        schema=normalized_schema,
+        task=task,
+    )
+    core_model = core_model_config.make(schema=normalized_input_feature_schema)
+
+    if verbose >= 2:
+      log.info(
+          "Normalized input features:\n%s",
+          print_schema_lib.print_schema(
+              normalized_input_feature_schema, return_output=True, header=False
+          ),
+      )
+
+    def loss_fn(
+        core_params: jaxtyping.PyTree,
+        batch_stats: jaxtyping.PyTree,
+        batch: Batch,
+        labels: jax.Array,
+        rng_key: Optional[jax.Array],
+        training: bool,
+    ) -> Tuple[jax.Array, jaxtyping.PyTree]:
+      if rng_key is not None:
+        rngs = {"dropout": rng_key}
+      else:
+        rngs = None
+
+      effective_params = {**core_params}
+      if batch_stats:
+        effective_params["batch_stats"] = batch_stats
+
+      output = core_model.apply(
+          effective_params,
+          batch,
+          training=training,
+          rngs=rngs,
+          mutable=["batch_stats"] if training and batch_stats else False,
+      )
+
+      logits, new_model_state = output if batch_stats else (output, {})
+
+      if task.task_type == node_prediction_model.TaskType.NODE_CLASSIFICATION:
+        loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels)  # pyrefly: ignore[bad-argument-type]
+        accuracy = jnp.argmax(logits, axis=-1) == labels  # pyrefly: ignore[bad-argument-type]
+        metrics = {"accuracy": accuracy.mean()}
+      elif task.task_type == node_prediction_model.TaskType.NODE_REGRESSION:
+        predictions = regression_lib.RegressionHead.logits_to_predictions(logits)  # pyrefly: ignore[bad-argument-type]
+        loss = optax.squared_error(predictions, labels)
+        metrics = {"rmse": jnp.sqrt(loss.mean())}
+      else:
+        raise ValueError(f"Unknown task type: {task.task_type}")
+
+      aux_data = {
+          "metrics": metrics,
+          "model_state": new_model_state,
+      }
+      return jnp.mean(loss), aux_data
+
+    def train_step(params, opt_state, batch: Batch, rng_key):
       graph, seed_node_idxs = batch
+
       labels = graph.node_sets[task.target_nodeset].features[
           task.normalized_target_column  # pyrefly: ignore[bad-index]
       ][seed_node_idxs]
-      loss, aux = loss_fn(params, {}, batch, labels, None, False)
-      return {"loss": loss, **aux["metrics"]}
 
-    jitted_valid_step = jax.jit(valid_step)
+      has_batch_stats = "batch_stats" in params
+      batch_stats = params.get("batch_stats", {})
+      core_params = {"params": params["params"]}
 
-    train_kwargs["valid_dataset_iterator_fn"] = valid_dataset_iterator_fn
-    train_kwargs["valid_step"] = jitted_valid_step
-
-  with util.print_timer("Training model", verbose >= 1):
-    with jax.profiler.TraceAnnotation("train model"):
-      checkpoint_dir = (
-          os.path.join(work_dir, "checkpoint") if work_dir else None
-      )
-      train_results = flax_train.train(
-          model=core_model,
-          opt=opt,
-          train_step=jitted_train_step,
-          dataset_iterator=infinite_train_dataset_iterator(),
-          num_train_steps=num_train_steps,  # pyrefly: ignore[bad-argument-type]
-          rng_key=jax.random.PRNGKey(hparams.random_seed),
-          working_path=checkpoint_dir,
-          disable_progress_bar=verbose == 0,
-          display_model_structure=verbose >= 3,
-          train_log_every_n_steps=100,
-          valid_every_n_steps=valid_every_n_steps,
-          print_logs=verbose >= 2,
-          max_training_time_seconds=max_training_time_seconds,
-          export_metrics_to_xm=export_metrics_to_xm,
-          early_stopping=hparams.early_stopping,
-          **train_kwargs,
+      (loss, aux_data), grads = jax.value_and_grad(loss_fn, has_aux=True)(
+          core_params, batch_stats, batch, labels, rng_key, True
       )
 
-  end_train_time = time.time()
-  train_duration = end_train_time - begin_train_time
+      updates, opt_state = opt.update(grads, opt_state, core_params)
+      core_params = optax.apply_updates(core_params, updates)
 
-  model = NodePredictionModel(
-      data=ModelData(
-          model_params=train_results.model_params,
-          core_model_config=core_model_config,
-          task=task,
-          hparams=hparams,
-          schema=schema,
-          normalizer_config=dataset_preparator.normalizer.config,
-          padding=dataset_preparator.padding,
-          sampling_plan=dataset_preparator.sampling_plan,
-          feature_stats=dataset_preparator.feature_stats,
-          temporal_sampling=time_aware,
-          nodeset_timestamp_features=nodeset_ts_features,
-          edgeset_timestamp_features=edgeset_ts_features,
-          training_stats=TrainingStats(
-              num_train_seed_nodes=train_dataset.num_nodes_in_seed_nodeset(),
-              num_valid_seed_nodes=valid_dataset.num_nodes_in_seed_nodeset()
-              if valid_dataset is not None
-              else None,
-              train_duration_seconds=train_duration,
-          ),
-      ),
-  )
-  model.metadata.trainig_logs = common.TrainingLogs(
-      train=train_results.train_logs,
-      valid=train_results.valid_logs,
-      num_train_step=train_results.num_train_step,
-  )
+      params = {**core_params}  # pyrefly: ignore[invalid-argument]
+      if has_batch_stats:
+        params["batch_stats"] = batch_stats
+      return params, opt_state, {"loss": loss, **aux_data["metrics"]}
 
+    # Use for speed.
+    jitted_train_step = jax.jit(train_step)
+
+    def infinite_train_dataset_iterator():
+      num_diagnostic_plots = 0
+      while True:
+        for sample, merge_offset in train_dataset.generate_jax():
+          with jax.profiler.TraceAnnotation("process_batch"):
+
+            if diagnostic_dir is not None and num_diagnostic_plots < 5:
+              _diagnose_train_batch(
+                  sample,
+                  merge_offset,
+                  diagnostic_dir,
+                  normalized_schema,
+                  num_diagnostic_plots,
+              )
+              num_diagnostic_plots += 1
+
+            yield process_batch(sample, merge_offset)
+
+    train_kwargs = {}
+    if valid_dataset is not None:
+
+      def valid_dataset_iterator_fn():
+        valid_generator = valid_dataset.generate_jax()
+        if num_valid_steps is not None:
+          valid_generator = itertools.islice(valid_generator, num_valid_steps)
+        for sample, merge_offset in valid_generator:
+          # TODO(gbm): Should we store the JAX arrays on device (this version), or
+          # the Numpy array on host?
+          yield process_batch(sample, merge_offset)
+
+      if cache_valid_dataset:
+        num_examples_to_cache = valid_dataset.num_nodes_in_seed_nodeset()
+        num_batches_to_cache = (
+            util.num_batches(
+                num_examples_to_cache,
+                batch_size=valid_dataset.batch_size,
+                drop_remainder=valid_dataset.drop_remainder,
+            )
+            if num_examples_to_cache is not None
+            else None
+        )
+        if num_valid_steps is not None:
+          if num_batches_to_cache is None:
+            num_batches_to_cache = num_valid_steps
+          else:
+            num_batches_to_cache = min(num_batches_to_cache, num_valid_steps)
+        with util.print_timer("Caching validation dataset", verbose >= 1):
+          if verbose >= 2:
+            valid_dataset_list = list(
+                tqdm.tqdm(
+                    valid_dataset_iterator_fn(),
+                    total=num_batches_to_cache,
+                    desc="Caching validation dataset",
+                )
+            )
+          else:
+            valid_dataset_list = list(valid_dataset_iterator_fn())
+
+        if verbose >= 1:
+          log.info(
+              "Number of cache validation batches: %d", len(valid_dataset_list)
+          )
+
+        def cached_valid_dataset_iterator_fn():
+          yield from valid_dataset_list
+
+        valid_dataset_iterator_fn = cached_valid_dataset_iterator_fn
+
+      def valid_step(params, opt_state, batch: Batch):
+        graph, seed_node_idxs = batch
+        labels = graph.node_sets[task.target_nodeset].features[
+            task.normalized_target_column  # pyrefly: ignore[bad-index]
+        ][seed_node_idxs]
+        loss, aux = loss_fn(params, {}, batch, labels, None, False)
+        return {"loss": loss, **aux["metrics"]}
+
+      jitted_valid_step = jax.jit(valid_step)
+
+      train_kwargs["valid_dataset_iterator_fn"] = valid_dataset_iterator_fn
+      train_kwargs["valid_step"] = jitted_valid_step
+
+    with util.print_timer("Training model", verbose >= 1):
+      with jax.profiler.TraceAnnotation("train model"):
+        checkpoint_dir = (
+            os.path.join(work_dir, "checkpoint") if work_dir else None
+        )
+        train_results = flax_train.train(
+            model=core_model,
+            opt=opt,
+            train_step=jitted_train_step,
+            dataset_iterator=infinite_train_dataset_iterator(),
+            num_train_steps=num_train_steps,  # pyrefly: ignore[bad-argument-type]
+            rng_key=jax.random.PRNGKey(hparams.random_seed),
+            working_path=checkpoint_dir,
+            disable_progress_bar=verbose == 0,
+            display_model_structure=verbose >= 3,
+            train_log_every_n_steps=100,
+            valid_every_n_steps=valid_every_n_steps,
+            print_logs=verbose >= 2,
+            max_training_time_seconds=max_training_time_seconds,
+            export_metrics_to_xm=export_metrics_to_xm,
+            early_stopping=hparams.early_stopping,
+            **train_kwargs,
+        )
+
+    end_train_time = time.time()
+    train_duration = end_train_time - begin_train_time
+
+    model = NodePredictionModel(
+        data=ModelData(
+            model_params=train_results.model_params,
+            core_model_config=core_model_config,
+            task=task,
+            hparams=hparams,
+            schema=schema,
+            normalizer_config=dataset_preparator.normalizer.config,
+            padding=dataset_preparator.padding,
+            sampling_plan=dataset_preparator.sampling_plan,
+            feature_stats=dataset_preparator.feature_stats,
+            temporal_sampling=time_aware,
+            nodeset_timestamp_features=nodeset_ts_features,
+            edgeset_timestamp_features=edgeset_ts_features,
+            training_stats=TrainingStats(
+                num_train_seed_nodes=train_dataset.num_nodes_in_seed_nodeset(),
+                num_valid_seed_nodes=valid_dataset.num_nodes_in_seed_nodeset()
+                if valid_dataset is not None
+                else None,
+                train_duration_seconds=train_duration,
+            ),
+        ),
+    )
+    model.metadata.trainig_logs = common.TrainingLogs(
+        train=train_results.train_logs,
+        valid=train_results.valid_logs,
+        num_train_step=train_results.num_train_step,
+    )
+
+  model.metadata.captured_logs = captured_logs
   return model
 
 

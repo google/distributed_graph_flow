@@ -305,6 +305,7 @@ class LinkPredictionModel(common.Model):
         },
         architecture=self.data().core_model_config.architecture(),
         num_model_weights=common.num_model_weights(self.data().model_params),
+        log_messages=self.metadata.captured_logs,
     )
 
     tabs.extend(common_tabs)

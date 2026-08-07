@@ -24,6 +24,55 @@ class LogTest(absltest.TestCase):
     log.info("hello %s", "world")
     log.warning("hello %s", "world")
 
+  def test_capture_logs(self):
+    with log.capture_logs(log_info=True, log_warning=True) as logs:
+      log.info("A")
+      log.warning("B")
+      log.info("C")
+
+    self.assertListEqual(
+        logs,
+        [
+            log.Message.info("A"),
+            log.Message.warning("B"),
+            log.Message.info("C"),
+        ],
+    )
+
+  def test_encapsulated_capture_logs(self):
+    with log.capture_logs(log_info=True) as logs1:
+      log.info("A")
+      with log.capture_logs(log_info=True) as logs2:
+        log.info("B")
+      log.info("C")
+
+    self.assertListEqual(
+        [m.text for m in logs1],
+        ["A", "B", "C"],
+    )
+    self.assertListEqual([m.text for m in logs2], ["B"])
+
+  def test_capture_logs_filtering(self):
+    # Test that info is filtered out (default) and warning passes.
+    with log.capture_logs() as logs1:
+      log.info("A")
+      log.warning("B")
+      log.error("C")
+    self.assertListEqual(
+        [m.text for m in logs1],
+        ["B", "C"],
+    )
+
+    # Test that warning is filtered out too.
+    with log.capture_logs(log_warning=False) as logs2:
+      log.info("D")
+      log.warning("E")
+      log.error("F")
+    self.assertListEqual(
+        [m.text for m in logs2],
+        ["F"],
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

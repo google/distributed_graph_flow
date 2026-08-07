@@ -359,12 +359,15 @@ class LinkPredictionToyTest(parameterized.TestCase):
 
     for expected in [
         "Objective",
-        "Train logs",
+        "Training",
         "Schemas",
         "Feature statistics",
         "Padding",
     ]:
       self.assertIn(expected, html_description)
+
+    self.assertIsNotNone(self.model.metadata.captured_logs)
+    self.assertIsInstance(self.model.metadata.captured_logs, list)
 
   def test_save_and_load(self):
     # Save and restore the model

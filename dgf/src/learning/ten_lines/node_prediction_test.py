@@ -260,12 +260,15 @@ class NodePredictionRealLooking(parameterized.TestCase):
     # TODO(gbm): Golden test describe output.
     for expected in [
         "Objective",
-        "Train logs",
+        "Training",
         "Schemas",
         "Feature statistics",
         "Graph sampling",
     ]:
       self.assertIn(expected, html_description)
+
+    self.assertIsNotNone(self.model.metadata.captured_logs)
+    self.assertIsInstance(self.model.metadata.captured_logs, list)
 
   def test_predict(self):
     predictions = self.model.predict(graph=self.graph, seed_node_idxs=[0, 1, 2])
