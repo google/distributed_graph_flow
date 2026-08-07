@@ -28,6 +28,7 @@ from dgf.src.data import padding as padding_data_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.data import statistics as statistics_lib
 from dgf.src.learning.ten_lines import common
+from dgf.src.plot import pyvis as plot_pyvis_lib
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.util import html_util
 from dgf.src.util import log
@@ -312,7 +313,36 @@ def _get_schema_tab(
   """Generates the Schema tab."""
   txt_schemas = ""
   for name, schema in schemas.items():
-    txt_schemas += f"<b>{name} schema</b>\n<pre>"
+    net = plot_pyvis_lib.plot_schema(
+        schema, features=False, pyvis_kwargs={"height": "400px"}
+    )
+    html_plot = net.generate_html()
+
+    # Make sure the graph is correctly plotted even if the tab is not visible
+    # by default.
+    html_plot += """
+    <script>
+    const resizeObserver = new ResizeObserver(() => {
+      if (typeof network !== 'undefined' && network !== null) {
+        network.fit();
+      }
+    });
+    resizeObserver.observe(document.body);
+    </script>
+    """
+
+    txt_schemas += f"<b>{name} schema plot</b>\n"
+
+    # Use an iframe to avoid collision between multiple pyvis plots.
+    # Note: We give an extra 10px of margin since pyvis does not exactly respect
+    # its input "height".
+    txt_schemas += (
+        '<iframe style="border: none; overflow: hidden;" scrolling="no"'
+        f' srcdoc="{html.escape(html_plot)}" width="100%" height="410px"'
+        " ></iframe>\n"
+    )
+
+    txt_schemas += f"<b>{name} schema textual</b>\n<pre>"
     txt_schemas += print_schema_lib.print_schema(  # pyrefly: ignore[unsupported-operation]
         schema, return_output=True, header=False
     )

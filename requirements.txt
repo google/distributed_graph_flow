@@ -35,3 +35,4 @@ pyarrow
 fastavro
 datasketch
 protobuf
+pyvis

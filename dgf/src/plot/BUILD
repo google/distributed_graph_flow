@@ -23,6 +23,15 @@ py_library(
 )
 
 py_library(
+    name = "pyvis",
+    srcs = ["pyvis.py"],
+    deps = [
+        "//dgf/src/data:schema",
+        "//third_party/py/pyvis",
+    ],
+)
+
+py_library(
     name = "nx",
     srcs = ["nx.py"],
     deps = [
@@ -41,6 +50,16 @@ py_test(
         ":network",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
+        "//dgf/src/util:gen_test_graph",
+    ],
+)
+
+py_test(
+    name = "pyvis_test",
+    srcs = ["pyvis_test.py"],
+    deps = [
+        ":pyvis",
+        # absl/testing:absltest dep,
         "//dgf/src/util:gen_test_graph",
     ],
 )
