@@ -17,6 +17,7 @@
 import dataclasses
 import html
 import pprint
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 import altair as alt
 from dgf.src.analyse import padding as analyse_padding_lib
@@ -96,31 +97,34 @@ def html_tabs(items: list[tuple[str, str]]) -> str:
   if not items:
     return ""
 
-  import uuid
-
   component_id = f"tabs-{uuid.uuid4().hex[:8]}"
 
   style = f"""
 <style>
   #{component_id} {{
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: 'Roboto', sans-serif;
+    font-size: 13px;
+    color: #202124;
     margin: 20px 0;
+    line-height: 1.5;
   }}
   #{component_id} .tab-header {{
     display: flex;
-    border-bottom: 2px solid #e0e0e0;
+    border-bottom: 1px solid #e0e0e0;
     margin-bottom: 15px;
+    font-family: 'Roboto', sans-serif;
   }}
   #{component_id} .tab-btn {{
     padding: 10px 20px;
     cursor: pointer;
     border: none;
     background: none;
-    font-size: 16px;
-    font-weight: 500;
+    font-family: 'Roboto', sans-serif;
+    font-size: 13px;
+    font-weight: normal;
     color: #5f6368;
     transition: color 0.2s, border-bottom 0.2s;
-    margin-bottom: -2px;
+    margin-bottom: -1px;
   }}
   #{component_id} .tab-btn:hover {{
     color: #1a73e8;
@@ -131,11 +135,59 @@ def html_tabs(items: list[tuple[str, str]]) -> str:
   }}
   #{component_id} .tab-content {{
     display: none;
-    padding: 10px;
+    padding: 10px 0;
     animation: fadeIn 0.3s;
   }}
   #{component_id} .tab-content.active {{
     display: block;
+  }}
+  #{component_id} pre, #{component_id} code {{
+    font-family: 'Roboto Mono', monospace;
+    font-size: 13px;
+  }}
+  #{component_id} pre {{
+    margin: 0 0 20px 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }}
+  #{component_id} b {{
+    font-weight: 600;
+    display: block;
+    margin-bottom: 4px;
+    font-family: 'Roboto', sans-serif;
+  }}
+  #{component_id} ul {{
+    list-style-type: none;
+    padding-left: 0;
+    margin: 0;
+  }}
+  #{component_id} li {{
+    margin: 0;
+    padding: 0;
+  }}
+  #{component_id} .lbl-key {{
+    color: #5f6368;
+    font-weight: 600;
+  }}
+  #{component_id} .dgf-table {{
+    border-collapse: collapse;
+    width: 100%;
+    margin-bottom: 20px;
+    font-size: inherit;
+    font-family: 'Roboto', sans-serif;
+  }}
+  #{component_id} .dgf-table td {{
+    padding: 4px 8px;
+    text-align: left;
+  }}
+  #{component_id} .dgf-table td:first-child {{
+    white-space: nowrap;
+  }}
+  #{component_id} .dgf-table td:last-child {{
+    width: 100%;
+  }}
+  #{component_id} .dgf-table tr:nth-child(odd) {{
+    background-color: #f8f9fa;
   }}
   @keyframes fadeIn {{
     from {{ opacity: 0; }}
@@ -191,7 +243,7 @@ def html_log_messages(log_messages: List[log.Message]) -> str:
   if not log_messages:
     return "<i>No logs were captured.</i>"
 
-  txt_logs = ""
+  table_rows = ""
   for msg in log_messages:
     if msg.severity == log.Severity.INFO:
       color = "blue"
@@ -201,11 +253,22 @@ def html_log_messages(log_messages: List[log.Message]) -> str:
       color = "red"
     else:
       assert False
-    txt_logs += (
-        f'<span style="color: {color};">[{msg.severity.value}]</span>'
-        f" {html.escape(msg.text)}\n"
+    table_rows += (
+        f"<tr>"
+        f'<td style="color: {color}; font-weight:'
+        f' 500;">{msg.severity.value}</td>'
+        "<td style=\"font-family: 'Roboto Mono',"
+        f' monospace;">{html.escape(msg.text)}</td>'
+        f"</tr>\n"
     )
-  return f"<pre>{txt_logs}</pre>"
+
+  return f"""
+<table class="dgf-table">
+  <tbody>
+{table_rows}
+  </tbody>
+</table>
+"""
 
 
 def get_common_tabs(
@@ -237,32 +300,46 @@ def get_common_tabs(
     tabs.append((
         "Training",
         f"""
+<table class="dgf-table">
+  <tbody>
 {training_stats_summary or ""}
-Number of training steps (final model): {training_logs.num_train_step}</br>
-<div style="width: 100%;">{train_log_plots}</div>
+    <tr><td>Number of training steps (final model)</td><td>{training_logs.num_train_step}</td></tr>
+  </tbody>
+</table>
+<div style="width: 100%; margin-top: 15px;">{train_log_plots}</div>
 """,
     ))
 
   if dataclasses.is_dataclass(hparams):
     hparams_dict = dataclasses.asdict(hparams)
-    lines = [f"{k}={repr(v)}" for k, v in hparams_dict.items()]
-    txt_hyper_parameters = "\n".join(lines)
+    table_rows = ""
+    for k, v in hparams_dict.items():
+      table_rows += (
+          f"<tr><td>{html.escape(k)}</td><td>{html.escape(repr(v))}</td></tr>\n"
+      )
+    txt_hyper_parameters = f"""
+<table class="dgf-table">
+  <tbody>
+{table_rows}
+  </tbody>
+</table>
+"""
   else:
     # Fallback for non-dataclass hparams.
-    txt_hyper_parameters = pprint.pformat(hparams)
+    txt_hyper_parameters = f"<pre>{html.escape(pprint.pformat(hparams))}</pre>"
 
   tabs.append((
       "Hyper-parameters",
-      f"<pre>{txt_hyper_parameters}</pre>",
+      txt_hyper_parameters,
   ))
 
   txt_schemas = ""
   for name, schema in schemas.items():
-    txt_schemas += f"<b>{name} schema</b><pre>\n"
+    txt_schemas += f"<b>{name} schema</b>\n<pre>"
     txt_schemas += print_schema_lib.print_schema(  # pyrefly: ignore[unsupported-operation]
         schema, return_output=True, header=False
     )
-    txt_schemas += "</pre><br>\n"
+    txt_schemas += "</pre>\n"
 
   tabs.append((
       "Schemas",
@@ -273,7 +350,7 @@ Number of training steps (final model): {training_logs.num_train_step}</br>
     txt_feature_stats = ""
     for name, stats in feature_stats.items():
       txt_feature_stats += f"<b>{name} feature statistics</b>\n"
-      txt_feature_stats += f"<pre>{repr(stats)}</pre><br>\n"
+      txt_feature_stats += f"<pre>{repr(stats)}</pre>\n"
 
     tabs.append((
         "Feature statistics",
@@ -283,11 +360,11 @@ Number of training steps (final model): {training_logs.num_train_step}</br>
   if sampling_plans is not None:
     txt_sampling_plan = ""
     for name, sampling_plan in sampling_plans.items():
-      txt_sampling_plan += f"<b>{name} sampling plan</b><pre>\n"
+      txt_sampling_plan += f"<b>{name} sampling plan</b>\n<pre>"
       txt_sampling_plan += analyse_sampling_lib.print_sampling_plan(  # pyrefly: ignore[unsupported-operation]
           sampling_plan, return_output=True, header=False
       )
-      txt_sampling_plan += "</pre><br>\n"
+      txt_sampling_plan += "</pre>\n"
     tabs.append(("Graph sampling", txt_sampling_plan))
 
   if architecture is not None:
@@ -299,19 +376,19 @@ Number of training steps (final model): {training_logs.num_train_step}</br>
     tabs.append((
         "Architecture",
         (
-            f"<b>Model Structure</b><br><pre>{architecture}</pre>"
-            f"<b>Model Weights</b><br><pre>{num_weights_str}</pre>"
+            f"<b>Model Structure</b>\n<pre>{architecture}</pre>\n"
+            f"<b>Model Weights</b>\n<pre>{num_weights_str}</pre>"
         ),
     ))
 
   if padding is not None:
     txt_padding = ""
     for name, pad in padding.items():
-      txt_padding += f"<b>{name} padding</b><pre>\n"
+      txt_padding += f"<b>{name} padding</b>\n<pre>"
       txt_padding += analyse_padding_lib.print_padding(  # pyrefly: ignore[unsupported-operation]
           pad, return_output=True, header=False
       )
-      txt_padding += "</pre><br>\n"
+      txt_padding += "</pre>\n"
 
     tabs.append((
         "Padding",

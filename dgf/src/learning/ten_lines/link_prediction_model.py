@@ -258,21 +258,21 @@ class LinkPredictionModel(common.Model):
     tabs.append((
         "Objective",
         f"""
-<p><b>Node prediction model:</b> Predict the value of a node feature.</p>
-<ul>
-  <li>Target edgeset: {self._data.task.target_edgeset}</li>
-</ul>
+<table class="dgf-table">
+  <tbody>
+    <tr><td>Type</td><td>Link prediction model - Predict the probability of an edge.</td></tr>
+    <tr><td>Target edgeset</td><td>{self._data.task.target_edgeset}</td></tr>
+  </tbody>
+</table>
 """,
     ))
 
     training_stats_summary = ""
     if self.metadata.trainig_logs is not None:
       training_stats_summary = f"""
-<ul>
-  <li>Number of training seed edges: {self._data.training_stats.num_train_seed_edges}</li>
-  <li>Number of validation seed edges: {self._data.training_stats.num_valid_seed_edges}</li>
-  <li>Training duration: {util.format_duration(self._data.training_stats.train_duration_seconds)}</li>
-</ul>
+    <tr><td>Number of training seed edges</td><td>{self._data.training_stats.num_train_seed_edges}</td></tr>
+    <tr><td>Number of validation seed edges</td><td>{self._data.training_stats.num_valid_seed_edges}</td></tr>
+    <tr><td>Training duration</td><td>{util.format_duration(self._data.training_stats.train_duration_seconds)}</td></tr>
 """
 
     # Reconstruct normalizers to get normalized schemas.

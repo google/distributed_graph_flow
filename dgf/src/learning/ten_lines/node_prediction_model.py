@@ -230,22 +230,23 @@ class NodePredictionModel(common.Model):
         "Objective",
         f"""
 <p><b>Node prediction model:</b> Predict the value of a node feature.</p>
-<ul>
-  <li>Target nodeset: {self._data.task.target_nodeset}</li>
-  <li>Target column: {self._data.task.target_column}</li>
-  <li>Number of label classes: {self.num_label_classes()}</li>
-</ul>
+<table class="dgf-table">
+  <tbody>
+    <tr><td>Type</td><td>Node prediction model -  Predict the value of a node feature.</td></tr>
+    <tr><td>Target nodeset</td><td>{self._data.task.target_nodeset}</td></tr>
+    <tr><td>Target column</td><td>{self._data.task.target_column}</td></tr>
+    <tr><td>Number of label classes</td><td>{self.num_label_classes()}</td></tr>
+  </tbody>
+</table>
 """,
     ))
 
     training_stats_summary = ""
     if self.metadata.trainig_logs is not None:
       training_stats_summary = f"""
-<ul>
-  <li>Number of training seed nodes: {self._data.training_stats.num_train_seed_nodes}</li>
-  <li>Number of validation seed nodes: {self._data.training_stats.num_valid_seed_nodes}</li>
-  <li>Training duration: {util.format_duration(self._data.training_stats.train_duration_seconds)}</li>
-</ul>
+    <tr><td>Number of training seed nodes</td><td>{self._data.training_stats.num_train_seed_nodes}</td></tr>
+    <tr><td>Number of validation seed nodes</td><td>{self._data.training_stats.num_valid_seed_nodes}</td></tr>
+    <tr><td>Training duration</td><td>{util.format_duration(self._data.training_stats.train_duration_seconds)}</td></tr>
 """
 
     common_tabs = report.get_common_tabs(
