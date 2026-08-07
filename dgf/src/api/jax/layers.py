@@ -16,8 +16,6 @@
 
 # pylint: disable=unused-import,g-importing-member,g-import-not-at-top,g-bad-import-order,reimported,disable=attribute-error
 
-from dgf.src.learning.jax.layers.mlp import MLP
-
 from dgf.src.learning.jax.layers.preprocess import EmbedAndHomogenizeGraphConfig
 from dgf.src.learning.jax.layers.preprocess import EmbedAndHomogenizeGraph
 
@@ -48,8 +46,11 @@ from dgf.src.learning.jax.layers.standard import modern_residual_mlp
 from dgf.src.learning.jax.layers.standard import ingest_feature
 from dgf.src.learning.jax.layers.standard import sequential_mlp
 from dgf.src.learning.jax.layers.standard import identity
-from dgf.src.learning.jax.layers.homo_gnn_sparse_deferred import ProjectorConfig
 
+from dgf.src.learning.jax.layers.mlp import MLP
+from dgf.src.learning.jax.layers.mlp import GnnPlus
+
+from dgf.src.learning.jax.layers.homo_gnn_sparse_deferred import ProjectorConfig
 from dgf.src.learning.jax.layers.homo_gnn_sparse_deferred import Projector
 from dgf.src.learning.jax.layers.homo_gnn_sparse_deferred import GCNConfig
 from dgf.src.learning.jax.layers.homo_gnn_sparse_deferred import GCN

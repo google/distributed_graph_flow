@@ -69,7 +69,9 @@ class ResidualMLP(nn.Module):
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass
 class ResidualMLPV2Config:
-  """A residual MLP layer.
+  """A [dense + norm + activation + drop-out + residual] * num_layers MLP layer.
+
+  Use GenericBlockConfig instead.
 
   Structured as: [dense + norm + activation + drop-out + residual] * num_layers
 
@@ -105,7 +107,10 @@ class ResidualMLPV2Config:
 
 
 class ResidualMLPV2(nn.Module):
-  """A residual MLP layer. See ResidualMLPV2Config."""
+  """A [dense + norm + activation + drop-out + residual] * num_layers MLP layer.
+
+  Use GenericBlock instead.
+  """
 
   config: ResidualMLPV2Config
 

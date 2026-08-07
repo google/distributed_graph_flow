@@ -105,7 +105,10 @@ class GnnConfigTest(absltest.TestCase):
     self.assertIsInstance(model, gnn_lib.MPNN)
 
     hidden_state = gnn_lib.get_node_hidden_state(
-        _forward(model, test_utils.generate_test_graph())
+        _forward(
+            model, test_utils.generate_test_graph(nodeset_name=cfg.nodeset_name)
+        ),
+        nodeset_name=cfg.nodeset_name,
     )
     self.assertEqual(hidden_state.shape, (4, 8))
 
@@ -426,7 +429,7 @@ class SDTests(parameterized.TestCase):
 
   def test_mpnn_basic(self):
     dummy_input = test_utils.generate_test_graph()
-    model = gnn_lib.MPNN(num_layers=2, hidden_dim=8)
+    model = gnn_lib.MPNNConfig(num_layers=2, hidden_dim=8).make()
     params = model.init(jax.random.PRNGKey(42), dummy_input)
     output = model.apply(params, dummy_input)
     hidden_state = gnn_lib.get_node_hidden_state(output)
@@ -440,12 +443,12 @@ class SDTests(parameterized.TestCase):
 
       @nn.compact
       def __call__(self, graph: GraphStruct, training: bool = False):
-        graph = gnn_lib.Projector(num_layers=1, hidden_dim=self.hidden_dim)(
-            graph, training
-        )
-        graph = gnn_lib.MPNN(num_layers=2, hidden_dim=self.hidden_dim)(
-            graph, training
-        )
+        graph = gnn_lib.ProjectorConfig(
+            num_layers=1, hidden_dim=self.hidden_dim
+        ).make()(graph, training)
+        graph = gnn_lib.MPNNConfig(
+            num_layers=2, hidden_dim=self.hidden_dim
+        ).make()(graph, training)
         return graph
 
     # Project the input D = 8 -> D = 4 then convolve.
@@ -456,7 +459,9 @@ class SDTests(parameterized.TestCase):
 
   def test_mpnn_plus(self):
     dummy_input = test_utils.generate_test_graph()
-    model = gnn_lib.MPNN(num_layers=2, hidden_dim=8, enable_gnn_plus=True)
+    model = gnn_lib.MPNNConfig(
+        num_layers=2, hidden_dim=8, enable_gnn_plus=True
+    ).make()
     params = model.init(jax.random.PRNGKey(42), dummy_input)
     output = model.apply(params, dummy_input)
     hidden_state = gnn_lib.get_node_hidden_state(output)
@@ -478,11 +483,11 @@ class SDTests(parameterized.TestCase):
   )
   def test_gcn(self, num_layers, hidden_dim, enable_gnn_plus):
 
-    model = gnn_lib.GCN(
+    model = gnn_lib.GCNConfig(
         num_layers=num_layers,
         hidden_dim=hidden_dim,
         enable_gnn_plus=enable_gnn_plus,
-    )
+    ).make()
 
     dummy_input = test_utils.generate_test_graph(hidden_dim)
     num_nodes = dummy_input.get_num_nodes(
@@ -509,11 +514,11 @@ class SDTests(parameterized.TestCase):
   )
   def test_gin(self, num_layers, hidden_dim, enable_gnn_plus):
     dummy_input = test_utils.generate_test_graph(hidden_dim)
-    model = gnn_lib.GIN(
+    model = gnn_lib.GINConfig(
         num_layers=num_layers,
         hidden_dim=hidden_dim,
         enable_gnn_plus=enable_gnn_plus,
-    )
+    ).make()
     num_nodes = dummy_input.get_num_nodes(
         engine=sdjnp.engine, node_name="nodes"
     )
@@ -555,9 +560,11 @@ class SDTests(parameterized.TestCase):
   def test_conditional_gin(self, num_layers, hidden_dim, enable_gnn_plus):
     dummy_input = test_utils.generate_test_graph(hidden_dim)
     model = gnn_lib.ConditionalGIN(
-        num_layers=num_layers,
-        hidden_dim=hidden_dim,
-        enable_gnn_plus=enable_gnn_plus,
+        config=gnn_lib.GINConfig(
+            num_layers=num_layers,
+            hidden_dim=hidden_dim,
+            enable_gnn_plus=enable_gnn_plus,
+        )
     )
     num_nodes = dummy_input.get_num_nodes(
         engine=sdjnp.engine, node_name="nodes"

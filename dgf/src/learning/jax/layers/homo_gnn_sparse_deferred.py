@@ -30,11 +30,15 @@ TODO(bmayer): Reference type encoding implementations and examples.
 """
 
 import dataclasses
+from typing import Optional
+
+from dgf.src.data import schema as schema_lib
 from dgf.src.learning.jax import common
 from dgf.src.learning.jax.layers import mlp as dgf_layers
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
+
 import sparse_deferred as sd
 import sparse_deferred.jax as sdjnp
 from sparse_deferred.nn.edges import concat_features  # pylint: disable=g-importing-member
@@ -159,7 +163,7 @@ def incidence_pooling(
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class ProjectorConfig(JaxBaseConfig):
-  """Makeable Projector config class with sensible defaults."""
+  """Config for Projector."""
 
   # TODO(deniscalin): look into making these optional and set to None, and
   # creating mlp_kwargs dict in make() to improve default values maintainance.
@@ -173,69 +177,51 @@ class ProjectorConfig(JaxBaseConfig):
   def name(self) -> str:
     return "Projector"
 
-  def make(self) -> "Projector":
-    return Projector(
-        num_layers=self.num_layers,
-        hidden_dim=self.hidden_dim,
-        use_bias=self.use_bias,
-        activation=self.activation_fn,
-        # TODO(deniscalin): consider creating a `common_kwargs` helper function
-        # to reuse in multiple configs.
-        dropout_rate=self.dropout_rate,
-        matrix_dtype=_jnp_dtype_from_string(self.matrix_precision),
-        norm_dtype=_jnp_dtype_from_string(self.pointwise_norm_precision),
-        node_set_name=self.nodeset_name,
-        input_node_feature=self.input_node_feature,
-        output_node_feature=self.input_node_feature,
-    )
+  def make(  # pytype: disable=signature-mismatch  # pyrefly: ignore[bad-override]
+      self, name: Optional[str] = None
+  ) -> "Projector":
+    return Projector(config=self, name=name)
 
 
 class Projector(nn.Module):
-  r"""Simple wrapper around the generic MLP layer for graph input/output.
+  r"""Homogeneous Graph Feature Projector.
 
+  Simple wrapper around the generic MLP layer for graph input/output.
   Purpose is typically to project features \in R^D_{in} -> R^D_{hidden}.
   """
 
-  num_layers: int
-  hidden_dim: int
-  activation: str = "tanh"
-  use_bias: bool = True
-  matrix_dtype: jnp.dtype = common.DEFAULT_MATRIX_PRECISION
-  norm_dtype: jnp.dtype = common.DEFAULT_POINTWISE_NORM_PRECISION
-  dropout_rate: float = common.DEFAULT_DROPOUT_RATE
-  name_prefix: str = "projector"
-
-  # TODO(deniscalin): standardize to `nodeset_name` as in other models,
-  # vs `node_set_name` used here.
-  node_set_name: str = DEFAULT_NODESET_NAME
-  input_node_feature: str = DEFAULT_NODE_FEATURE_NAME
-  output_node_feature: str = DEFAULT_NODE_FEATURE_NAME
+  config: ProjectorConfig
 
   def setup(self):
     self.projector = dgf_layers.MLP(
-        num_layers=self.num_layers,
-        hidden_dim=self.hidden_dim,
-        use_bias=self.use_bias,
-        matrix_dtype=self.matrix_dtype,
-        dropout_rate=self.dropout_rate,
-        name_prefix=self.name_prefix,
+        num_layers=self.config.num_layers,
+        hidden_dim=self.config.hidden_dim,
+        use_bias=self.config.use_bias,
+        matrix_dtype=_jnp_dtype_from_string(self.config.matrix_precision),
+        dropout_rate=self.config.dropout_rate,
+        name_prefix=self.config.name_prefix,
     )
 
   def __call__(self, graph: GraphStruct, training: bool = False) -> GraphStruct:
-    x = get_node_features(graph, self.node_set_name, self.input_node_feature)
+    nodeset_name = self.config.nodeset_name or DEFAULT_NODESET_NAME
+    input_feature = self.config.input_node_feature or DEFAULT_NODE_FEATURE_NAME
+
+    x = get_node_features(graph, nodeset_name, input_feature)
 
     x = self.projector(x)
 
-    graph = graph.update(
-        nodes={self.node_set_name: {self.output_node_feature: x}}
-    )
+    # Output features are written to the input feature name
+    # per `Projector` implementation.
+    output_feature = input_feature
+
+    graph = graph.update(nodes={nodeset_name: {output_feature: x}})
 
     return graph
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class GCNConfig(JaxBaseConfig):
-  """Makeable GCN config class with sensible defaults."""
+  """Config for GCN."""
 
   num_layers: int
   hidden_dim: int
@@ -248,87 +234,65 @@ class GCNConfig(JaxBaseConfig):
   def name(self) -> str:
     return "GCN"
 
-  def make(self) -> "GCN":
-    return GCN(
-        num_layers=self.num_layers,
-        hidden_dim=self.hidden_dim,
-        use_bias=self.use_bias,
-        activation_fn=self.activation_fn,
-        dropout_rate=self.dropout_rate,
-        matrix_dtype=_jnp_dtype_from_string(self.matrix_precision),
-        norm_dtype=_jnp_dtype_from_string(self.pointwise_norm_precision),
-        nodeset_name=self.nodeset_name,
-        edgeset_name=self.edgeset_name,
-        input_node_feature=self.input_node_feature,
-        output_node_feature=self.output_node_feature,
-        enable_gnn_plus=self.enable_gnn_plus,
-    )
+  def make(  # pytype: disable=signature-mismatch  # pyrefly: ignore[bad-override]
+      self, name: Optional[str] = None
+  ) -> "GCN":
+    return GCN(config=self, name=name)
 
 
 class GCN(nn.Module):
-  """Graph convolutional network: https://arxiv.org/pdf/1609.02907.pdf."""
+  """Homogeneous Graph Convolutional Network.
 
-  num_layers: int
-  hidden_dim: int
-  use_bias: bool = True
-  activation_fn: str = "leaky_relu"
-  # Technically, dropout is not used in the original paper.
-  dropout_rate: float = common.DEFAULT_DROPOUT_RATE
-  matrix_dtype: jnp.dtype = common.DEFAULT_MATRIX_PRECISION
-  norm_dtype: jnp.dtype = common.DEFAULT_POINTWISE_NORM_PRECISION
-  name_prefix: str = "gcn"
+  Paper: https://arxiv.org/pdf/1609.02907.pdf.
+  """
 
-  nodeset_name: str = DEFAULT_NODESET_NAME
-  edgeset_name: str = DEFAULT_EDGESET_NAME
-  input_node_feature: str = DEFAULT_NODE_FEATURE_NAME
-  output_node_feature: str = DEFAULT_HIDDEN_STATE_NAME
-
-  enable_gnn_plus: bool = False
+  config: GCNConfig
 
   def setup(self):
-    self.activation = common.get_activation(self.activation_fn)
+    self.activation = common.get_activation(self.config.activation_fn)
+    matrix_dtype = _jnp_dtype_from_string(self.config.matrix_precision)
 
     self.update_fn = [
         nn.Dense(
-            self.hidden_dim,
-            use_bias=self.use_bias,
-            dtype=self.matrix_dtype,
-            name=f"{self.name_prefix}/update/layer_{i:02d}",
+            self.config.hidden_dim,
+            use_bias=self.config.use_bias,
+            dtype=matrix_dtype,
+            name=f"{self.config.name_prefix}/update/layer_{i:02d}",
         )
-        for i in range(self.num_layers)
+        for i in range(self.config.num_layers)
     ]
 
     self.dropout = [
         nn.Dropout(
-            rate=self.dropout_rate,
-            name=f"{self.name_prefix}/dropout/layer_{i:02d}",
+            rate=self.config.dropout_rate,
+            name=f"{self.config.name_prefix}/dropout/layer_{i:02d}",
         )
-        for i in range(self.num_layers)
+        for i in range(self.config.num_layers)
     ]
 
     self.post_graph_conv = None
-    if self.enable_gnn_plus:
+    if self.config.enable_gnn_plus:
       self.post_graph_conv = dgf_layers.GnnPlus(
-          hidden_dim=self.hidden_dim,
-          num_layers=self.num_layers,
-          activation_fn=self.activation_fn,
-          use_bias=self.use_bias,
-          dropout_rate=self.dropout_rate,
-          matrix_dtype=self.matrix_dtype,
-          name_prefix=f"{self.name_prefix}/gnn_plus",
+          hidden_dim=self.config.hidden_dim,
+          num_layers=self.config.num_layers,
+          activation_fn=self.config.activation_fn,
+          use_bias=self.config.use_bias,
+          dropout_rate=self.config.dropout_rate,
+          matrix_dtype=matrix_dtype,
+          name_prefix=f"{self.config.name_prefix}/gnn_plus",
       )
 
   def __call__(self, graph: GraphStruct, training: bool = False) -> GraphStruct:
     x = get_node_features(
         graph,
-        nodeset_name=self.nodeset_name,
-        feature_name=self.input_node_feature,
+        nodeset_name=self.config.nodeset_name,
+        feature_name=self.config.input_node_feature,
     )
 
-    adj = graph.adj(sdjnp.engine, self.edgeset_name)
+    adj = graph.adj(sdjnp.engine, self.config.edgeset_name)
     adj_symnorm = (adj + adj.transpose()).add_eye().normalize_symmetric()
 
-    for layer_index in range(self.num_layers):
+    for layer_index in range(self.config.num_layers):
       hprev = x
       x = self.update_fn[layer_index](adj_symnorm @ x)
 
@@ -339,13 +303,13 @@ class GCN(nn.Module):
         x = self.dropout[layer_index](x, deterministic=not training)
 
     return graph.update(
-        nodes={self.nodeset_name: {self.output_node_feature: x}}
+        nodes={self.config.nodeset_name: {self.config.output_node_feature: x}}
     )
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class MPNNConfig(JaxBaseConfig):
-  """Makeable MPNN config class with sensible defaults."""
+  """Config for MPNN."""
 
   # TODO(bmayer): These can probably go on the base config?
   num_layers: int
@@ -360,100 +324,92 @@ class MPNNConfig(JaxBaseConfig):
   def name(self) -> str:
     return "MPNN"
 
-  def make(self) -> "MPNN":
-    return MPNN(
-        num_layers=self.num_layers,
-        hidden_dim=self.hidden_dim,
-        use_bias=self.use_bias,
-        activation_fn=self.activation_fn,
-        message_pooling=self.message_pooling,
-        dropout_rate=self.dropout_rate,
-        matrix_dtype=_jnp_dtype_from_string(self.matrix_precision),
-        norm_dtype=_jnp_dtype_from_string(self.pointwise_norm_precision),
-        enable_gnn_plus=self.enable_gnn_plus,
-    )
+  def make(  # pytype: disable=signature-mismatch  # pyrefly: ignore[bad-override]
+      self, name: Optional[str] = None
+  ) -> "MPNN":
+    return MPNN(config=self, name=name)
 
 
 class MPNN(nn.Module):
-  """Message-Passing Neural Network: https://arxiv.org/abs/1704.01212."""
+  """Homogeneous Message-Passing Neural Network.
 
-  num_layers: int
-  hidden_dim: int
-  use_bias: bool = True
-  activation_fn: str = "leaky_relu"
-  message_pooling: str = "sum"
-  dropout_rate: float = common.DEFAULT_DROPOUT_RATE
-  matrix_dtype: jnp.dtype = common.DEFAULT_MATRIX_PRECISION
-  norm_dtype: jnp.dtype = common.DEFAULT_POINTWISE_NORM_PRECISION
-  name_prefix: str = "mpnn"
+  Paper: https://arxiv.org/abs/1704.01212.
+  """
 
-  # TODO(bmayer): There's probably a better way to inject this. Either inject
-  # it funtionally or with a nested config object (when we get to configs).
-  enable_gnn_plus: bool = False
+  config: MPNNConfig
 
   def setup(self):
 
-    if self.message_pooling not in ["sum", "mean"]:
+    if self.config.message_pooling not in ["sum", "mean"]:
       raise ValueError(
-          f"Unsupported message_pooling spec: {self.message_pooling}"
+          f"Unsupported message_pooling spec: {self.config.message_pooling}"
       )
 
-    self.activation = common.get_activation(self.activation_fn)
+    self.activation = common.get_activation(self.config.activation_fn)
+    matrix_dtype = _jnp_dtype_from_string(self.config.matrix_precision)
 
     self.message_fn = [
         nn.Dense(
-            self.hidden_dim,
-            use_bias=self.use_bias,
-            dtype=self.matrix_dtype,
-            name=f"{self.name_prefix}/message/layer_{i:02d}",
+            self.config.hidden_dim,
+            use_bias=self.config.use_bias,
+            dtype=matrix_dtype,
+            name=f"{self.config.name_prefix}/message/layer_{i:02d}",
         )
-        for i in range(self.num_layers)
+        for i in range(self.config.num_layers)
     ]
 
     self.update_fn = [
         nn.Dense(
-            self.hidden_dim,
-            use_bias=self.use_bias,
-            dtype=self.matrix_dtype,
-            name=f"{self.name_prefix}/update/layer_{i:02d}",
+            self.config.hidden_dim,
+            use_bias=self.config.use_bias,
+            dtype=matrix_dtype,
+            name=f"{self.config.name_prefix}/update/layer_{i:02d}",
         )
-        for i in range(self.num_layers)
+        for i in range(self.config.num_layers)
     ]
 
     self.post_graph_conv = None
-    if self.enable_gnn_plus:
+    if self.config.enable_gnn_plus:
       self.post_graph_conv = dgf_layers.GnnPlus(
-          hidden_dim=self.hidden_dim,
-          num_layers=self.num_layers,
-          activation_fn=self.activation_fn,
-          use_bias=self.use_bias,
-          dropout_rate=self.dropout_rate,
-          matrix_dtype=self.matrix_dtype,
-          name_prefix=f"{self.name_prefix}/gnn_plus",
+          hidden_dim=self.config.hidden_dim,
+          num_layers=self.config.num_layers,
+          activation_fn=self.config.activation_fn,
+          use_bias=self.config.use_bias,
+          dropout_rate=self.config.dropout_rate,
+          matrix_dtype=matrix_dtype,
+          name_prefix=f"{self.config.name_prefix}/gnn_plus",
       )
 
   def __call__(self, graph: GraphStruct, training: bool = False) -> GraphStruct:
-    x = get_node_features(graph)
+    # Use JaxBaseConfig attributes if provided in MPNN config rather than hardcoded default values.
+    # We maintain previous functional logic mapping over defaults where config doesn't have it explicitly bound
+    nodeset_name = self.config.nodeset_name or DEFAULT_NODESET_NAME
+    edgeset_name = self.config.edgeset_name or DEFAULT_EDGESET_NAME
+    input_node_feature = (
+        self.config.input_node_feature or DEFAULT_NODE_FEATURE_NAME
+    )
+
+    x = get_node_features(
+        graph, nodeset_name=nodeset_name, feature_name=input_node_feature
+    )
 
     # TODO(bmayer): It may be more re-usable to separate node features, state
     # and graph topology. Chat with team and make changes accordingly.
-    graph = graph.update(
-        nodes={DEFAULT_NODESET_NAME: {DEFAULT_HIDDEN_STATE_NAME: x}}
-    )
+    graph = graph.update(nodes={nodeset_name: {DEFAULT_HIDDEN_STATE_NAME: x}})
 
-    for layer_index in range(self.num_layers):
-      h_prev = graph.nodes[DEFAULT_NODESET_NAME][DEFAULT_HIDDEN_STATE_NAME]
+    for layer_index in range(self.config.num_layers):
+      h_prev = graph.nodes[nodeset_name][DEFAULT_HIDDEN_STATE_NAME]
 
       edge_feature_name = (
           DEFAULT_EDGE_FEATURE_NAME
-          if DEFAULT_EDGE_FEATURE_NAME in graph.edges[DEFAULT_EDGESET_NAME][1]
+          if DEFAULT_EDGE_FEATURE_NAME in graph.edges[edgeset_name][1]
           else None
       )
 
       edge_features = map_nodes_to_incident_edges(
           sdjnp.engine,
           graph,
-          DEFAULT_EDGESET_NAME,
+          edgeset_name,
           node_feature_names=[
               DEFAULT_HIDDEN_STATE_NAME,
               DEFAULT_HIDDEN_STATE_NAME,
@@ -465,14 +421,14 @@ class MPNN(nn.Module):
       # Apply message function to messages on incident edges, will then
       # aggregate and update.
       messages = self.message_fn[layer_index](edge_features)
-      src_incidence = graph.incidence(sdjnp.engine, DEFAULT_EDGESET_NAME, 0)
-      dst_incidence = graph.incidence(sdjnp.engine, DEFAULT_EDGESET_NAME, 1)
+      src_incidence = graph.incidence(sdjnp.engine, edgeset_name, 0)
+      dst_incidence = graph.incidence(sdjnp.engine, edgeset_name, 1)
 
       src_messages = incidence_pooling(
-          self.message_pooling, src_incidence, messages
+          self.config.message_pooling, src_incidence, messages
       )
       dst_messages = incidence_pooling(
-          self.message_pooling, dst_incidence, messages
+          self.config.message_pooling, dst_incidence, messages
       )
 
       messages = jnp.concatenate([src_messages, dst_messages], axis=-1)
@@ -480,13 +436,13 @@ class MPNN(nn.Module):
           jnp.concatenate([h_prev, messages], axis=-1)
       )
 
-      if self.enable_gnn_plus:
+      if self.config.enable_gnn_plus:
         h_next = self.post_graph_conv(h_prev, h_next, layer_index, training)  # pyrefly: ignore[not-callable]
       else:
         h_next = self.activation(h_next)
 
       graph = graph.update(
-          nodes={DEFAULT_NODESET_NAME: {DEFAULT_HIDDEN_STATE_NAME: h_next}}
+          nodes={nodeset_name: {DEFAULT_HIDDEN_STATE_NAME: h_next}}
       )
 
     return graph
@@ -494,7 +450,7 @@ class MPNN(nn.Module):
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class GINConfig(JaxBaseConfig):
-  """Makeable GIN config class with sensible defaults."""
+  """Config for GIN."""
 
   num_layers: int
   hidden_dim: int
@@ -509,92 +465,67 @@ class GINConfig(JaxBaseConfig):
   def name(self) -> str:
     return "GIN"
 
-  def make(self) -> "GIN":
-    return GIN(
-        num_layers=self.num_layers,
-        hidden_dim=self.hidden_dim,
-        use_bias=self.use_bias,
-        activation_fn=self.activation_fn,
-        epsilon=self.epsilon,
-        num_mlp_layers=self.num_mlp_layers,
-        dropout_rate=self.dropout_rate,
-        matrix_dtype=_jnp_dtype_from_string(self.matrix_precision),
-        norm_dtype=_jnp_dtype_from_string(self.pointwise_norm_precision),
-        nodeset_name=self.nodeset_name,
-        edgeset_name=self.edgeset_name,
-        input_node_feature=self.input_node_feature,
-        output_node_feature=self.output_node_feature,
-        enable_gnn_plus=self.enable_gnn_plus,
-    )
+  def make(  # pytype: disable=signature-mismatch  # pyrefly: ignore[bad-override]
+      self, name: Optional[str] = None
+  ) -> "GIN":
+    return GIN(config=self, name=name)
 
 
 class GIN(nn.Module):
-  """Graph isomorphism network: https://arxiv.org/pdf/1810.00826.pdf."""
+  """Homogeneous Graph Isomorphism Network.
 
-  num_layers: int
-  hidden_dim: int
-  use_bias: bool = True
-  activation_fn: str = "relu"
-  epsilon: float = 0.1
-  num_mlp_layers: int = 2
-  # Technically, dropout is not used in the original paper.
-  dropout_rate: float = common.DEFAULT_DROPOUT_RATE
-  matrix_dtype: jnp.dtype = common.DEFAULT_MATRIX_PRECISION
-  norm_dtype: jnp.dtype = common.DEFAULT_POINTWISE_NORM_PRECISION
-  name_prefix: str = "gin"
-  nodeset_name: str = DEFAULT_NODESET_NAME
-  edgeset_name: str = DEFAULT_EDGESET_NAME
-  input_node_feature: str = DEFAULT_NODE_FEATURE_NAME
-  output_node_feature: str = DEFAULT_HIDDEN_STATE_NAME
+  Paper: https://arxiv.org/pdf/1810.00826.pdf.
+  """
 
-  enable_gnn_plus: bool = False
+  config: GINConfig
 
   def setup(self):
-    self.activation = common.get_activation(self.activation_fn)
+    self.activation = common.get_activation(self.config.activation_fn)
+    matrix_dtype = _jnp_dtype_from_string(self.config.matrix_precision)
 
     self.update_fn = [
         dgf_layers.MLP(
-            num_layers=self.num_mlp_layers,
-            hidden_dim=self.hidden_dim,
+            num_layers=self.config.num_mlp_layers,
+            hidden_dim=self.config.hidden_dim,
             activation="relu",
             use_bias=True,
             norm_type=None,
-            name=f"{self.name_prefix}/update/layer_{i:02d}",
+            name=f"{self.config.name_prefix}/update/layer_{i:02d}",
         )
-        for i in range(self.num_layers)
+        for i in range(self.config.num_layers)
     ]
 
     self.dropout = [
         nn.Dropout(
-            rate=self.dropout_rate,
-            name=f"{self.name_prefix}/dropout/layer_{i:02d}",
+            rate=self.config.dropout_rate,
+            name=f"{self.config.name_prefix}/dropout/layer_{i:02d}",
         )
-        for i in range(self.num_layers)
+        for i in range(self.config.num_layers)
     ]
 
     self.post_graph_conv = None
-    if self.enable_gnn_plus:
+    if self.config.enable_gnn_plus:
       self.post_graph_conv = dgf_layers.GnnPlus(
-          hidden_dim=self.hidden_dim,
-          num_layers=self.num_layers,
-          activation_fn=self.activation_fn,
-          use_bias=self.use_bias,
-          dropout_rate=self.dropout_rate,
-          matrix_dtype=self.matrix_dtype,
-          name_prefix=f"{self.name_prefix}/gnn_plus",
+          hidden_dim=self.config.hidden_dim,
+          num_layers=self.config.num_layers,
+          activation_fn=self.config.activation_fn,
+          use_bias=self.config.use_bias,
+          dropout_rate=self.config.dropout_rate,
+          matrix_dtype=matrix_dtype,
+          name_prefix=f"{self.config.name_prefix}/gnn_plus",
       )
 
   def __call__(self, graph: GraphStruct, training: bool = False) -> GraphStruct:
     x = get_node_features(
         graph,
-        nodeset_name=self.nodeset_name,
-        feature_name=self.input_node_feature,
+        nodeset_name=self.config.nodeset_name,
+        feature_name=self.config.input_node_feature,
     )
 
-    adj = graph.adj(sdjnp.engine, self.edgeset_name)
-    adj = (adj + adj.transpose()).add_eye(1 + self.epsilon)
+    adj = graph.adj(sdjnp.engine, self.config.edgeset_name)
+    adj = (adj + adj.transpose()).add_eye(1 + self.config.epsilon)
 
-    for layer_index in range(self.num_layers):
+    for layer_index in range(self.config.num_layers):
       hprev = x
       x = self.update_fn[layer_index](adj @ x)
 
@@ -605,28 +536,31 @@ class GIN(nn.Module):
         x = self.dropout[layer_index](x, deterministic=not training)
 
     return graph.update(
-        nodes={self.nodeset_name: {self.output_node_feature: x}}
+        nodes={self.config.nodeset_name: {self.config.output_node_feature: x}}
     )
 
 
 class ConditionalGIN(GIN):
-  """Conditional GIN with a labeling trick: https://arxiv.org/abs/2106.06935."""
+  """Homogeneous Conditional GIN with a labeling trick.
+
+  Paper: https://arxiv.org/abs/2106.06935.
+  """
 
   def setup(self):
     super().setup()
     self.labeling_feature_projection = dgf_layers.MLP(
         num_layers=2,
-        hidden_dim=self.hidden_dim,
+        hidden_dim=self.config.hidden_dim,
         activation="relu",
         dropout_rate=0.0,
-        name_prefix=f"{self.name_prefix}/labeling_projection",
+        name_prefix=f"{self.config.name_prefix}/labeling_projection",
     )
 
   def __call__(self, graph: GraphStruct, idx: int, training: bool = False) -> GraphStruct:  # pytype: disable=signature-mismatch  # overriding-return-type-checks
     x = get_node_features(
         graph,
-        nodeset_name=self.nodeset_name,
-        feature_name=self.input_node_feature,
+        nodeset_name=self.config.nodeset_name,
+        feature_name=self.config.input_node_feature,
     )
 
     # TODO(mgalkin): We can abstract this away into a separate module and use
@@ -634,17 +568,17 @@ class ConditionalGIN(GIN):
     label_features = labeling_trick_features(
         num_nodes=x.shape[0],
         idx=idx,
-        hidden_dim=self.hidden_dim,
+        hidden_dim=self.config.hidden_dim,
     )
     x = jnp.concatenate([x, label_features], axis=-1)
     # Project d+d features to d features for a safe residual stream.
     x = self.labeling_feature_projection(x)
 
     # Standard GIN routine.
-    adj = graph.adj(sdjnp.engine, self.edgeset_name)
-    adj = (adj + adj.transpose()).add_eye(1 + self.epsilon)
+    adj = graph.adj(sdjnp.engine, self.config.edgeset_name)
+    adj = (adj + adj.transpose()).add_eye(1 + self.config.epsilon)
 
-    for layer_index in range(self.num_layers):
+    for layer_index in range(self.config.num_layers):
       hprev = x
       x = self.update_fn[layer_index](adj @ x)
 
@@ -655,5 +589,5 @@ class ConditionalGIN(GIN):
         x = self.dropout[layer_index](x, deterministic=not training)
 
     return graph.update(
-        nodes={self.nodeset_name: {self.output_node_feature: x}}
+        nodes={self.config.nodeset_name: {self.config.output_node_feature: x}}
     )

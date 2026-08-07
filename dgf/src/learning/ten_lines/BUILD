@@ -138,6 +138,7 @@ py_library(
         "//dgf/src/data:padding",
         "//dgf/src/data:schema",
         "//dgf/src/data:statistics",
+        "//dgf/src/plot:pyvis",
         "//dgf/src/sampling:config",
         "//dgf/src/util:html_util",
         "//dgf/src/util:log",
