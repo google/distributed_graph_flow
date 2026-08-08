@@ -16,10 +16,10 @@
 
 # pylint: disable=unused-import,g-importing-member,g-import-not-at-top,g-bad-import-order,reimported,disable=attribute-error
 
-from dgf.src.learning.jax.common import get_activation
-from dgf.src.learning.jax.common import jnp_dtype_from_string
-from dgf.src.learning.jax.common import jnp_name_from_dtype
-from dgf.src.learning.jax.common import JaxBaseConfig
+# from dgf.src.learning.jax.common import get_activation
+# from dgf.src.learning.jax.common import jnp_dtype_from_string
+# from dgf.src.learning.jax.common import jnp_name_from_dtype
+# from dgf.src.learning.jax.common import JaxBaseConfig
 
 # TODO(bmayer,gbm): Modify API documentation generation to support constants.
 # from dgf.src.learning.jax.common import DEFAULT_DROPOUT_RATE

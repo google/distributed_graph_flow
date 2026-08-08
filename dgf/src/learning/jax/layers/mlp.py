@@ -28,6 +28,8 @@ JaxBaseConfig = common.JaxBaseConfig
 class MLP(nn.Module):
   """A generic MLP followed by a linear layer.
 
+  Use GenericBlock instead.
+
   Layer norm is by default applied to the output but can be turned off. If you
   set `norm = None`, you probably also want to set `use_bias = True`.
 
@@ -131,7 +133,9 @@ class MLP(nn.Module):
 
 
 class GnnPlus(nn.Module):
-  """Generic module for GnnPlus https://arxiv.org/pdf/2502.09263.
+  """Generic module for GnnPlus.
+
+  Paper: https://arxiv.org/pdf/2502.09263.
 
   This module can be interleaved with any API compatible GNN architecture. It
   doesn't require the topology of the graph as it is applied after message
