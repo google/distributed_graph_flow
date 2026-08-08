@@ -69,6 +69,33 @@ SingleSampleGeneratorIteratorFn = Callable[
 ]
 
 
+# TODO(simonmeierhans): This should be removed once we support edge features in
+# sample generation. It is currently necessary because propagating
+# timestamps to edges is necessary for temporal sampling, but edge features are
+# not supported.
+# NOTE: Currently dataset preparation is done separately for predicting, and 
+# needs to be kept in sync. This should be unified in the future. 
+def _sanitize_schema_for_sample_generator(
+    schema: schema_lib.GraphSchema,
+) -> schema_lib.GraphSchema:
+  """Returns a schema copy with empty feature schemas on edge sets.
+
+  In-memory sampled subgraphs for node prediction do not populate edge feature
+  arrays. Clearing feature schemas on edge sets prevents
+  TimestampFeatureExtractor from attempting to access unpopulated edge features
+  during sample generation.
+  """
+  if not any(bool(es.features) for es in schema.edge_sets.values()):
+    return schema
+  return dataclasses.replace(
+      schema,
+      edge_sets={
+          es_name: dataclasses.replace(es, features={})
+          for es_name, es in schema.edge_sets.items()
+      },
+  )
+
+
 @dataclasses.dataclass
 class SampleGeneratorFromAnything:
   """Converts a user input graph into a generator of batched graph samples.
@@ -174,6 +201,7 @@ class SampleGeneratorFromAnything:
   )
 
   def __post_init__(self):
+    self.schema = _sanitize_schema_for_sample_generator(self.schema)
     if self.seed_node_idxs is not None:
       self.seed_node_idxs = np.asarray(self.seed_node_idxs, dtype=np.int64)
 
@@ -238,14 +266,10 @@ class SampleGeneratorFromAnything:
         or self.timedelta_extraction is not None
     )
 
-    if (
-        self.temporal or self._has_per_sample_transforms
-    ) and self.format != GraphFormat.IN_MEMORY_GRAPH:
+    if self.temporal and self.format != GraphFormat.IN_MEMORY_GRAPH:
       raise ValueError(
-          "Temporal sampling (`temporal=True`) and per-sample transformations"
-          " (`timeseries_pad_and_cap`, `timedelta_extraction`) are"
-          " only supported for GraphFormat.IN_MEMORY_GRAPH, but got format:"
-          f" {self.format}"
+          "Temporal sampling (`temporal=True`) is only supported for"
+          f" GraphFormat.IN_MEMORY_GRAPH, but got format: {self.format}"
       )
 
     if (
@@ -413,17 +437,27 @@ class SampleGeneratorFromAnything:
           shuffle=self.shuffle,
       ):
         node_idx = int(node_idxs[0])
-        if self.temporal:
-          # Get the seed node timestamp
-          seed_timestamp = None
-          if self._seed_timestamps_all is not None:
-            seed_timestamp = int(self._seed_timestamps_all[node_idx])
+        seed_timestamp = None
+        if self._seed_timestamps_all is not None:
+          seed_timestamp = int(self._seed_timestamps_all[node_idx])
 
-          yield self.in_memory_sampler.sample(
+        if self.temporal:
+          sample = self.in_memory_sampler.sample(
               node_idx, seed_timestamps=seed_timestamp
           )
         else:
-          yield self.in_memory_sampler.sample(node_idx)
+          sample = self.in_memory_sampler.sample(node_idx)
+
+        if self._has_per_sample_transforms:
+          if self._pad_and_cap_transformer is not None:
+            sample = self._pad_and_cap_transformer(sample)
+          if self._timestamp_extractor is not None:
+            assert seed_timestamp is not None
+            sample = self._timestamp_extractor(
+                sample, seed_timestamp=seed_timestamp
+            )
+
+        yield sample
 
     return batch_generator, single_generator
 
@@ -432,6 +466,23 @@ class SampleGeneratorFromAnything:
   ) -> Tuple[BatchSampleGeneratorIteratorFn, SingleSampleGeneratorIteratorFn]:
     """Creates a SampleGenerator from a path to a bagz file."""
     assert isinstance(self.graph, str)
+    merge_schema = self.output_schema()
+
+    def transform_sample(sample):
+      if self._has_per_sample_transforms:
+        if self._pad_and_cap_transformer is not None:
+          sample = self._pad_and_cap_transformer(sample)
+        if self._timestamp_extractor is not None:
+          assert self._ts_feature is not None
+          seed_timestamp = int(
+              sample.node_sets[self._target_nodeset].features[
+                  self._ts_feature
+              ][0]
+          )
+          sample = self._timestamp_extractor(
+              sample, seed_timestamp=seed_timestamp
+          )
+      return sample
 
     def batch_generator():
       # TODO(gbm): Use pygrain and add shuffling?
@@ -442,27 +493,31 @@ class SampleGeneratorFromAnything:
         batch = []
         try:
           for _ in range(self.batch_size):
-            batch.append(next(it))
+            sample = transform_sample(next(it))
+            batch.append(sample)
         except StopIteration:
           if batch and not self.drop_remainder:
             try:
               yield merge_lib.merge_graphs(
-                  batch, self.schema, padding=self.padding
+                  batch, merge_schema, padding=self.padding
               )
             except merge_lib.InsufficientPaddingError as e:
               if not self.skip_overflow_padding_error:
                 raise e
           return
         try:
-          yield merge_lib.merge_graphs(batch, self.schema, padding=self.padding)
+          yield merge_lib.merge_graphs(
+              batch, merge_schema, padding=self.padding
+          )
         except merge_lib.InsufficientPaddingError as e:
           if not self.skip_overflow_padding_error:
             raise e
 
     def single_generator():
-      return tf_graph_sample.read_tfgnn_graphs(
+      for sample in tf_graph_sample.read_tfgnn_graphs(
           self.graph, self.schema, container_type=container_type
-      )
+      ):
+        yield transform_sample(sample)
 
     return batch_generator, single_generator
 
@@ -486,3 +541,8 @@ class SampleGeneratorFromAnything:
 
     else:
       raise ValueError(f"Unsupported format: {self.format}")
+
+  @property
+  def has_per_sample_transforms(self) -> bool:
+    """Returns True if per-sample transformations are configured."""
+    return self._has_per_sample_transforms

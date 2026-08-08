@@ -355,8 +355,6 @@ def train_node_model(
             train_seed_nodes=train_seed_nodes,
             valid_seed_nodes=valid_seed_nodes,
             temporal_sampling=time_aware,
-            nodeset_timestamp_features=nodeset_ts_features,
-            edgeset_timestamp_features=edgeset_ts_features,
             num_valid_steps=num_valid_steps,
             cache_valid_dataset=cache_valid_dataset,
             cache_normalized_features=cache_normalized_features,
@@ -675,9 +673,13 @@ def train_node_model(
             padding=dataset_preparator.padding,
             sampling_plan=dataset_preparator.sampling_plan,
             feature_stats=dataset_preparator.feature_stats,
-            temporal_sampling=time_aware,
-            nodeset_timestamp_features=nodeset_ts_features,
-            edgeset_timestamp_features=edgeset_ts_features,
+            temporal_sampling=dataset_preparator.sampling_plan.temporal_sampling,
+            nodeset_timestamp_features=temporal_util.nodeset_timestamp_features(
+                normalized_schema
+            ),
+            edgeset_timestamp_features=temporal_util.edgeset_timestamp_features(
+                normalized_schema
+            ),
             training_stats=TrainingStats(
                 num_train_seed_nodes=train_dataset.num_nodes_in_seed_nodeset(),
                 num_valid_seed_nodes=valid_dataset.num_nodes_in_seed_nodeset()
@@ -697,7 +699,7 @@ def train_node_model(
       if verbose >= 1:
         log.info("Final model evaluation")
       model.data().final_evaluation = model.evaluate_generator(
-          valid_dataset.get_live().sample_generator.single_iterator()
+          valid_dataset.get_live().sample_generator.single_iterator()  # pyrefly: ignore[missing-attribute]
       )
 
   model.metadata.captured_logs = captured_logs

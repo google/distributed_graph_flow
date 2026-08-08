@@ -74,11 +74,11 @@ def propagate_timestamp_to_edges(
     if target_edgesets is not None and edgeset_name not in target_edgesets:
       continue
 
-    if target_feature in edgeset_schema.features:
-      raise ValueError(
-          f"Target feature '{target_feature}' already exists in edgeset"
-          f" '{edgeset_name}'."
-      )
+    ts_name = temporal_util.creation_time_feature_name(edgeset_schema.features)
+    if ts_name is not None:
+      # Continue if the edgeset already has a creation time feature.
+      continue
+    feat_name = ts_name if ts_name is not None else target_feature
 
     src_ts, src_format = get_node_ts(edgeset_schema.source)
     tgt_ts, tgt_format = get_node_ts(edgeset_schema.target)
@@ -105,7 +105,7 @@ def propagate_timestamp_to_edges(
 
     new_edge_sets[edgeset_name] = in_memory_graph.InMemoryEdgeSet(
         adjacency=edgeset_value.adjacency,
-        features={**edgeset_value.features, target_feature: edge_ts},
+        features={**edgeset_value.features, feat_name: edge_ts},
     )
 
     new_edge_set_schemas[edgeset_name] = schema_lib.EdgeSchema(
@@ -113,7 +113,7 @@ def propagate_timestamp_to_edges(
         target=edgeset_schema.target,
         features={
             **edgeset_schema.features,
-            target_feature: schema_lib.FeatureSchema(
+            feat_name: schema_lib.FeatureSchema(
                 format=ts_format,
                 semantic=schema_lib.FeatureSemantic.TIMESTAMP,
                 is_creation_time=True,
