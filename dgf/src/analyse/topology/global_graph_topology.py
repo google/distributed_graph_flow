@@ -21,6 +21,7 @@ components. It also includes methods for auto-calculating derived statistics.
 
 import dataclasses
 from typing import Dict, Optional
+from dgf.src.analyse.topology import betti_defense
 from dgf.src.analyse.topology import node_degree
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
@@ -73,6 +74,7 @@ class GlobalGraphTopology:
   graph_diameter: Optional[float] = None
   homophily_ratio: Optional[float] = None
   degree_distribution: Optional[Dict[int, int]] = None
+  betti_1: Optional[int] = None
 
   ## No need to call post_init. Use update_graph_density() to auto-calculate
   ## derived statistics if not provided.
@@ -121,14 +123,20 @@ def get_in_memory_graph_topology(
     degree_distribution = dict(zip(degree.tolist(), counts.tolist()))
 
     ## Connected Components
-    cc = np.array([])
-    num_cc, cc_counts = np.unique(cc, return_counts=True)  # pyrefly: ignore[no-matching-overload]
-    largest_cc = np.max(cc_counts).item()
+    adj = next(iter(graph.edge_sets.values())).adjacency
+    num_nodes = next(iter(graph.node_sets.values())).num_nodes or 0
+    cc_labels = betti_defense.connected_components(adj, num_nodes)
+    num_cc, cc_counts = np.unique(cc_labels, return_counts=True)
+    largest_cc = int(np.max(cc_counts))
+
+    ## Betti-1
+    betti_1 = edge_set.num_edges() - num_nodes + int(num_cc.shape[0])
   else:
     average_degree = None
     degree_distribution = None
     num_cc = None
     largest_cc = None
+    betti_1 = None
 
   num_connected_components = num_cc.shape[0] if num_cc is not None else None
   ggt = GlobalGraphTopology(
@@ -138,6 +146,7 @@ def get_in_memory_graph_topology(
       num_connected_components=num_connected_components,
       largest_component_size=largest_cc,
       degree_distribution=degree_distribution,
+      betti_1=betti_1,
   )
 
   ggt.update_graph_density()
