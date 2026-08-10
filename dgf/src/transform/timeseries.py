@@ -581,9 +581,9 @@ class TimestampFeatureExtractor:
   ) -> in_memory_graph.Features:
     """Extracts time delta features for a single feature set."""
     new_values: in_memory_graph.Features = {}
-    assert seed_timestamp is not None, (
-        "seed_timestamp must be provided to extract seed deltas."
-    )
+    assert (
+        seed_timestamp is not None
+    ), "seed_timestamp must be provided to extract seed deltas."
 
     for fname, schema in schemas.items():
       raw_val = values[fname]
@@ -670,3 +670,121 @@ class TimestampFeatureExtractor:
     return in_memory_graph.InMemoryGraph(
         node_sets=new_node_sets, edge_sets=new_edge_sets
     )
+
+
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass
+class PerSampleTransformConfig:
+  """Configuration for per-sample preprocessing transforms.
+
+  Attributes:
+    timeseries_pad_and_cap: Optional configuration for padding and capping
+      timeseries features.
+    timedelta_extraction: Optional configuration for extracting relative
+      timestamp features (seed deltas).
+  """
+
+  timeseries_pad_and_cap: Optional[PadAndCapTimeseriesConfig] = None
+  timedelta_extraction: Optional[TimestampFeatureExtractorConfig] = None
+
+  def make(self, schema: schema_lib.GraphSchema) -> "PerSampleTransform":
+    return PerSampleTransform(self, schema)
+
+
+class PerSampleTransform:
+  """Executes per-sample transforms on InMemoryGraph samples.
+
+  Attributes:
+    config: The `PerSampleTransformConfig` specifying active transforms.
+    schema: The input `GraphSchema`.
+  """
+
+  def __init__(
+      self,
+      config: PerSampleTransformConfig,
+      schema: schema_lib.GraphSchema,
+  ):
+    self.config = config
+    self.schema = schema
+
+    current_schema = schema
+    self._pad_and_cap_transformer: Optional[PadAndCapTimeseries] = None
+    self._timestamp_extractor: Optional[TimestampFeatureExtractor] = None
+
+    if (
+        config.timeseries_pad_and_cap is not None
+        and temporal_util.schema_has_timeseries_features(current_schema)
+    ):
+      self._pad_and_cap_transformer = PadAndCapTimeseries(
+          current_schema, config.timeseries_pad_and_cap
+      )
+      current_schema = self._pad_and_cap_transformer.output_schema()
+
+    if temporal_util.schema_has_dynamic_timeseries_features(current_schema):
+      raise ValueError(
+          "Dynamic shape timeseries features were detected in the schema;"
+          " please configure `timeseries_pad_and_cap` to pad/cap the sequences"
+          " first."
+      )
+
+    if config.timedelta_extraction is not None:
+      self._timestamp_extractor = TimestampFeatureExtractor(
+          current_schema, config.timedelta_extraction
+      )
+      current_schema = self._timestamp_extractor.output_schema()
+
+    self._output_schema = current_schema
+
+  def output_schema(self) -> schema_lib.GraphSchema:
+    """Returns the transformed GraphSchema."""
+    return self._output_schema
+
+  def has_transforms(self) -> bool:
+    """Returns True if any per-sample transformer is active."""
+    return (
+        self._pad_and_cap_transformer is not None
+        or self._timestamp_extractor is not None
+    )
+
+  def transform_sample(
+      self,
+      sample: in_memory_graph.InMemoryGraph,
+      seed_timestamp: Optional[int] = None,
+  ) -> in_memory_graph.InMemoryGraph:
+    """Transforms a single InMemoryGraph sample."""
+    curr_sg = sample
+    if self._pad_and_cap_transformer is not None:
+      curr_sg = self._pad_and_cap_transformer(curr_sg)
+    if self._timestamp_extractor is not None:
+      assert (
+          seed_timestamp is not None
+      ), "seed_timestamp must be provided to extract seed deltas."
+      curr_sg = self._timestamp_extractor(
+          curr_sg, seed_timestamp=seed_timestamp
+      )
+    return curr_sg
+
+  def transform_sample_list(
+      self,
+      samples: List[in_memory_graph.InMemoryGraph],
+      seed_timestamps: Optional[np.ndarray] = None,
+  ) -> List[in_memory_graph.InMemoryGraph]:
+    """Transforms a list of InMemoryGraph samples."""
+    if not self.has_transforms():
+      return samples
+    transformed_samples = []
+    for i, sample in enumerate(samples):
+      st = int(seed_timestamps[i]) if seed_timestamps is not None else None
+      transformed_samples.append(
+          self.transform_sample(sample, seed_timestamp=st)
+      )
+    return transformed_samples
+
+  def __call__(
+      self,
+      sample: in_memory_graph.InMemoryGraph,
+      seed_timestamp: Optional[int] = None,
+  ) -> in_memory_graph.InMemoryGraph:
+    """Transforms a single InMemoryGraph sample."""
+    return self.transform_sample(sample, seed_timestamp=seed_timestamp)
+

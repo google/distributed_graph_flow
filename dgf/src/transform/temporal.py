@@ -17,6 +17,7 @@
 from typing import List, Optional
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
+from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 import numpy as np
 
@@ -55,8 +56,17 @@ def propagate_timestamp_to_edges(
   """
   new_edge_sets = dict(graph.edge_sets)
   new_edge_set_schemas = dict(schema.edge_sets)
+  if target_edgesets is not None:
+    unknown_edgesets = set(target_edgesets) - set(schema.edge_sets)
+    if unknown_edgesets:
+      raise ValueError(
+          f"Unknown target edgesets: {sorted(unknown_edgesets)}. Valid"
+          f" edgesets in schema are: {sorted(schema.edge_sets)}."
+      )
 
-  def get_node_ts(nodeset_name: str):
+  def get_node_ts(
+      nodeset_name: str,
+  ) -> tuple[Optional[np.ndarray], Optional[schema_lib.FeatureFormat]]:
     feat_name = temporal_util.creation_time_feature_name(
         schema.node_sets[nodeset_name].features
     )
@@ -74,38 +84,63 @@ def propagate_timestamp_to_edges(
     if target_edgesets is not None and edgeset_name not in target_edgesets:
       continue
 
-    if target_feature in edgeset_schema.features:
+    ts_name = temporal_util.creation_time_feature_name(edgeset_schema.features)
+    if (
+        ts_name is not None
+        and ts_name in graph.edge_sets[edgeset_name].features
+    ):
+      log.info(
+          "Skipping edge set '%s' because it already has a creation time"
+          " feature '%s'.",
+          edgeset_name,
+          ts_name,
+      )
+      continue
+    feat_name = ts_name if ts_name is not None else target_feature
+    if ts_name is None and feat_name in edgeset_schema.features:
       raise ValueError(
-          f"Target feature '{target_feature}' already exists in edgeset"
-          f" '{edgeset_name}'."
+          f"Feature '{feat_name}' already exists in edgeset '{edgeset_name}'"
+          " and is not marked as a creation time feature."
       )
 
     src_ts, src_format = get_node_ts(edgeset_schema.source)
     tgt_ts, tgt_format = get_node_ts(edgeset_schema.target)
 
     if src_ts is None and tgt_ts is None:
-      raise ValueError(
-          f"Neither source nodeset '{edgeset_schema.source}' nor target nodeset"
-          f" '{edgeset_schema.target}' has timestamps for edgeset"
-          f" '{edgeset_name}'."
+      if target_edgesets is not None:
+        raise ValueError(
+            f"Neither source nodeset '{edgeset_schema.source}' nor target"
+            f" nodeset '{edgeset_schema.target}' has timestamps for edgeset"
+            f" '{edgeset_name}'."
+        )
+      log.info(
+          "Skipping edge set '%s' because neither source nodeset '%s' nor"
+          " target nodeset '%s' has timestamps.",
+          edgeset_name,
+          edgeset_schema.source,
+          edgeset_schema.target,
       )
+      continue
 
     edgeset_value = graph.edge_sets[edgeset_name]
     src_indices, tgt_indices = edgeset_value.adjacency
 
     if src_ts is not None and tgt_ts is not None:
+      assert src_format is not None
       edge_ts = np.maximum(src_ts[src_indices], tgt_ts[tgt_indices])
       ts_format = src_format
     elif src_ts is not None:
+      assert src_format is not None
       edge_ts = src_ts[src_indices]
       ts_format = src_format
     else:
-      edge_ts = tgt_ts[tgt_indices]  # pyrefly: ignore[unsupported-operation]
+      assert tgt_ts is not None and tgt_format is not None
+      edge_ts = tgt_ts[tgt_indices]
       ts_format = tgt_format
 
     new_edge_sets[edgeset_name] = in_memory_graph.InMemoryEdgeSet(
         adjacency=edgeset_value.adjacency,
-        features={**edgeset_value.features, target_feature: edge_ts},
+        features={**edgeset_value.features, feat_name: edge_ts},
     )
 
     new_edge_set_schemas[edgeset_name] = schema_lib.EdgeSchema(
@@ -113,7 +148,7 @@ def propagate_timestamp_to_edges(
         target=edgeset_schema.target,
         features={
             **edgeset_schema.features,
-            target_feature: schema_lib.FeatureSchema(
+            feat_name: schema_lib.FeatureSchema(
                 format=ts_format,
                 semantic=schema_lib.FeatureSemantic.TIMESTAMP,
                 is_creation_time=True,

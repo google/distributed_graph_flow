@@ -2141,6 +2141,109 @@ def generate_temporal_in_memory_graph(
   return graph, schema
 
 
+def generate_temporal_timeseries_in_memory_graph(
+    num_alerts: int = 6,
+    num_hardware: int = 2,
+) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+  """Generates an InMemoryGraph with temporal and timeseries features for testing."""
+  schema = schema_lib.GraphSchema(
+      node_sets={
+          "alerts": schema_lib.NodeSchema(
+              features={
+                  "creation_time": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.INTEGER_64,
+                      semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                      is_creation_time=True,
+                  ),
+                  "label": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.FLOAT_32,
+                      semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                  ),
+              }
+          ),
+          "hardware": schema_lib.NodeSchema(
+              features={
+                  "time": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.INTEGER_64,
+                      semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                      is_timeseries=True,
+                      is_creation_time=True,
+                      shape=(None,),
+                  ),
+                  "signal": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.FLOAT_32,
+                      semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                      is_timeseries=True,
+                      shape=(None,),
+                  ),
+              }
+          ),
+      },
+      edge_sets={
+          "alert_to_hw": schema_lib.EdgeSchema(
+              source="alerts", target="hardware", features={}
+          ),
+          "hw_to_alert": schema_lib.EdgeSchema(
+              source="hardware", target="alerts", features={}
+          ),
+      },
+  )
+  alerts_nodes = in_memory_graph_lib.InMemoryNodeSet(
+      num_nodes=num_alerts,
+      features={
+          "creation_time": np.arange(
+              100, 100 + 100 * num_alerts, 100, dtype=np.int64
+          ),
+          "label": np.arange(1.0, num_alerts + 1.0, dtype=np.float32),
+      },
+  )
+  base_times = [
+      np.array([50, 80, 120], dtype=np.int64),
+      np.array([150, 250, 450], dtype=np.int64),
+      np.array([70, 90, 110, 130], dtype=np.int64),
+      np.array([60], dtype=np.int64),
+      np.array([100, 200, 250], dtype=np.int64),
+  ]
+  base_signals = [
+      np.array([1.5, 2.5, 3.5], dtype=np.float32),
+      np.array([4.5, 5.5, 6.5], dtype=np.float32),
+      np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32),
+      np.array([5.0], dtype=np.float32),
+      np.array([6.0, 7.0, 8.0], dtype=np.float32),
+  ]
+  hw_times = [base_times[i % len(base_times)] for i in range(num_hardware)]
+  hw_signals = [
+      base_signals[i % len(base_signals)] for i in range(num_hardware)
+  ]
+
+  hardware_nodes = in_memory_graph_lib.InMemoryNodeSet(
+      num_nodes=num_hardware,
+      features={
+          "time": np.array(hw_times, dtype=object),
+          "signal": np.array(hw_signals, dtype=object),
+      },
+  )
+  alert_to_hw = in_memory_graph_lib.InMemoryEdgeSet(
+      adjacency=np.array(
+          [np.arange(num_alerts), np.arange(num_alerts) % num_hardware],
+          dtype=np.int64,
+      ),
+      features={},
+  )
+  hw_to_alert = in_memory_graph_lib.InMemoryEdgeSet(
+      adjacency=np.array(
+          [np.arange(num_alerts) % num_hardware, np.arange(num_alerts)],
+          dtype=np.int64,
+      ),
+      features={},
+  )
+  graph = in_memory_graph_lib.InMemoryGraph(
+      node_sets={"alerts": alerts_nodes, "hardware": hardware_nodes},
+      edge_sets={"alert_to_hw": alert_to_hw, "hw_to_alert": hw_to_alert},
+  )
+  return graph, schema
+
+
 def generate_recommender_like_in_memory_graph() -> (
     Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]
 ):

@@ -37,6 +37,7 @@ from dgf.src.io import tf as io_tf_lib
 from dgf.src.learning.jax.layers import classification as classification_lib
 from dgf.src.learning.jax.layers import regression as regression_lib
 from dgf.src.learning.ten_lines import common
+from dgf.src.learning.ten_lines import dataset
 from dgf.src.learning.ten_lines import evaluation
 from dgf.src.learning.ten_lines import node_prediction_core_model
 from dgf.src.learning.ten_lines import report
@@ -44,6 +45,8 @@ from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
+from dgf.src.transform import temporal as temporal_transform
+from dgf.src.transform import timeseries as timeseries_transform
 from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
@@ -160,6 +163,9 @@ class ModelData:
   edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
       default_factory=dict
   )
+  per_sample_transforms: Optional[
+      timeseries_transform.PerSampleTransformConfig
+  ] = None
   final_evaluation: Optional[evaluation.Evaluation] = None
 
   # This field is serialized / deserialized manually.
@@ -205,6 +211,30 @@ class NodePredictionModel(common.Model):
 
   def data(self) -> ModelData:
     return self._data
+
+  @property
+  def target_has_creation_time(self) -> bool:
+    """Returns True if the target nodeset has a creation timestamp feature."""
+    return (
+        temporal_util.creation_time_feature_name(
+            self._data.schema.node_sets[self._data.task.target_nodeset].features
+        )
+        is not None
+    )
+
+  def inference_schema(
+      self, input_features_only: bool = True
+  ) -> schema_lib.GraphSchema:
+    """Returns the schema of pre-sampled subgraphs expected during inference."""
+    schema = self._data.schema
+    if input_features_only:
+      schema = schema_to_input_feature_schema(schema, self._data.task)
+    current_schema = dataset.sanitize_schema_for_sample_generator(schema)
+    if self._data.per_sample_transforms is not None:
+      return self._data.per_sample_transforms.make(
+          current_schema
+      ).output_schema()
+    return current_schema
 
   def _internal_save(self, path: str) -> None:
     # TODO(gbm): Have the params saving logic in common.
@@ -364,6 +394,15 @@ class NodePredictionModel(common.Model):
     # TODO(gbm): Implement a better fall-back option.
     batch_size = max(1, self._data.hparams.batch_size // 2)
 
+    # TODO(simonmeierhans): Factor out such preparation logic such that it is
+    # guaranteed to be consistent.
+    if self.target_has_creation_time and isinstance(
+        graph, in_memory_graph.InMemoryGraph
+    ):
+      graph, _ = temporal_transform.propagate_timestamp_to_edges(
+          graph, self._data.schema
+      )
+
     sampler = in_memory_sampler_lib.create_sampler(
         graph=graph,
         plan=self._data.sampling_plan,
@@ -391,26 +430,44 @@ class NodePredictionModel(common.Model):
           ),
       )
 
-    for batch_seed_node_idxs in batch_seed_node_idxs_generator:
+    current_schema = dataset.sanitize_schema_for_sample_generator(schema)
+    per_sample_transform = None
+    if self._data.per_sample_transforms is not None:
+      per_sample_transform = self._data.per_sample_transforms.make(
+          current_schema
+      )
+      current_schema = per_sample_transform.output_schema()
 
+    for batch_seed_node_idxs in batch_seed_node_idxs_generator:
       # TODO(gbm): The sampler should consume np array directly.
+      seed_timestamps = None
+      target_nodeset = self._data.task.target_nodeset
+      ts_feature = temporal_util.creation_time_feature_name(
+          self._data.schema.node_sets[target_nodeset].features
+      )
+      if ts_feature is not None and isinstance(
+          graph, in_memory_graph.InMemoryGraph
+      ):
+        timestamps = graph.node_sets[target_nodeset].features[ts_feature]
+        seed_timestamps = timestamps[batch_seed_node_idxs]
+
       if self._data.temporal_sampling:
-        target_nodeset = self._data.task.target_nodeset
-        ts_feature = temporal_util.creation_time_feature_name(
-            self._data.schema.node_sets[target_nodeset].features
-        )
-        seed_timestamps = None
-        if ts_feature is not None:
-          timestamps = graph.node_sets[target_nodeset].features[ts_feature]
-          seed_timestamps = timestamps[batch_seed_node_idxs]
         graph_samples = sampler.sample(
             batch_seed_node_idxs, seed_timestamps=seed_timestamps
         )
       else:
         graph_samples = sampler.sample(batch_seed_node_idxs)
 
+      if (
+          per_sample_transform is not None
+          and per_sample_transform.has_transforms()
+      ):
+        graph_samples = per_sample_transform.transform_sample_list(
+            graph_samples, seed_timestamps=seed_timestamps
+        )
+
       yield from self._predict_sub_batch(
-          live, schema, batch_seed_node_idxs, graph_samples
+          live, current_schema, batch_seed_node_idxs, graph_samples
       )
 
   def _predict_sub_batch(
@@ -471,7 +528,7 @@ class NodePredictionModel(common.Model):
       An array of probabilities for each graph sample.
     """
     live = self._get_live()
-    schema = schema_to_input_feature_schema(self._data.schema, self._data.task)
+    schema = self.inference_schema()
 
     merged_graph, merge_offsets = merge_lib.merge_graphs(
         graph_samples,
@@ -587,11 +644,12 @@ class NodePredictionModel(common.Model):
     if num_eval_steps is not None:
       graph_samples = itertools.islice(graph_samples, num_eval_steps)
 
+    current_schema = self.inference_schema(input_features_only=False)
+
     batch_size = max(1, self._data.hparams.batch_size // 2)
 
     def batch_prediction_generator():
       live = self._get_live()
-      schema = self._data.schema
       iterator = graph_samples
       if verbose >= 2:
         iterator = tqdm.tqdm(iterator, desc="Evaluation", total=num_eval_steps)
@@ -601,12 +659,18 @@ class NodePredictionModel(common.Model):
         batch.append(sample)
         if len(batch) == batch_size:
           yield from self._predict_sub_batch(
-              live, schema, np.zeros(len(batch), dtype=np.int32), batch
+              live,
+              current_schema,
+              np.zeros(len(batch), dtype=np.int32),
+              batch,
           )
           batch = []
       if batch:
         yield from self._predict_sub_batch(
-            live, schema, np.zeros(len(batch), dtype=np.int32), batch
+            live,
+            current_schema,
+            np.zeros(len(batch), dtype=np.int32),
+            batch,
         )
 
     if verbose >= 1:
@@ -759,10 +823,10 @@ class NodePredictionModel(common.Model):
         polymorphic_shapes=[(None, "(b,)")],
         native_serialization_platforms=["cpu", "cuda"],
     )
-    schema = self.data().schema
+    current_schema = self.inference_schema()
 
-    graph_spec = io_tf_lib.schema_to_spec(schema)
-    graph_dict_spec = io_tf_lib.schema_to_dict_spec(schema)
+    graph_spec = io_tf_lib.schema_to_spec(current_schema)
+    graph_dict_spec = io_tf_lib.schema_to_dict_spec(current_schema)
     seed_node_idxs_spec = tf.TensorSpec(
         shape=[None], dtype=tf.int32, name="seed_node_idxs"
     )
@@ -849,7 +913,7 @@ class NodePredictionModel(common.Model):
     wrapper = wrapper_class(
         tf_apply_core_model,
         live.normalizer,
-        self.data().schema,
+        current_schema,
         self.data().padding,
     )
 

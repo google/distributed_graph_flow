@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Prepare training datast for the 10-line node prediction model.
+"""Prepare training dataset for the 10-line node prediction model.
 
 The main utility GNNDatasetPreparator generates normalized, padded and batched
 graph samples for node prediction.
@@ -35,7 +35,10 @@ from dgf.src.learning.ten_lines import dataset
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import normalize as normalize_lib
+from dgf.src.transform import temporal as temporal_transform
+from dgf.src.transform import timeseries as timeseries_transform
 from dgf.src.util import log
+from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 import jax
 import jax.numpy as jnp
@@ -119,22 +122,18 @@ class GNNDatasetPreparator:
     verbose_preparation: If true, display a progress bar during the preparation
       stage that appears only the first time `generate` is called.
     skip_overflow_padding_error: If padding is set, the merging stage can fail
-      if the "padding" is not large enought. If
-      skip_overflow_padding_error=True, such batch is skipped. If
-      skip_overflow_padding_error=False, and error is raised.
+      if the "padding" is not large enough. If skip_overflow_padding_error=True,
+      such batches are skipped. If skip_overflow_padding_error=False, an error
+      is raised.
     format: The format of the graph. If set to AUTO, the format will be inferred
       from the graph object.
     seed_node_idxs: Optional array of node indices to use as seeds for sampling.
       If None, all nodes in the seed nodeset are used.
     temporal_sampling: True if the sampling relies on timestamp features to
       condition the sampling.
-    edgeset_timestamp_features: Optional dictionary mapping edgeset names to the
-      feature name containing timestamp information.
-    nodeset_timestamp_features: Optional dictionary mapping nodeset names to the
-      feature name containing timestamp information.
     cache_normalized_features: If True, pre-compute the normalized features
       during the preparation stage instead of computing them on the fly in the
-      generator. This optioncan speeds up data generation/training but increases
+      generator. This option speeds data generation/training but increases
       memory consumption. This option is only available for in memory graph
       inputs.
     cache_normalized_features_device: Specifies the device ("host" for RAM or
@@ -162,27 +161,63 @@ class GNNDatasetPreparator:
   verbose_preparation: bool = True
   skip_overflow_padding_error: bool = False
   temporal_sampling: bool = False
-  edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
-      default_factory=dict
-  )
-  nodeset_timestamp_features: Dict[str, str] = dataclasses.field(
-      default_factory=dict
-  )
   cache_normalized_features: bool = True
   cache_normalized_features_device: Literal["host", "device"] = "device"
 
-  # The is_prepared data computed by the `prepare()` method.
+  # Computed fields
+  edgeset_timestamp_features: Dict[str, str] = dataclasses.field(init=False)
+  nodeset_timestamp_features: Dict[str, str] = dataclasses.field(init=False)
+  per_sample_transforms: Optional[
+      timeseries_transform.PerSampleTransformConfig
+  ] = dataclasses.field(init=False, default=None)
   live: Optional[LiveData] = dataclasses.field(init=False, default=None)
+
+  @property
+  def target_has_creation_time(self) -> bool:
+    """Returns True if the target nodeset has a creation time feature."""
+    target_nodeset = self.sampling_plan.root.nodeset
+    return (
+        temporal_util.creation_time_feature_name(
+            self.schema.node_sets[target_nodeset].features
+        )
+        is not None
+    )
 
   def __post_init__(self):
     if self.batch_size <= 0:
       raise ValueError(f"batch_size must be positive, got {self.batch_size}")
+    self.nodeset_timestamp_features = temporal_util.nodeset_timestamp_features(
+        self.schema
+    )
+    self.edgeset_timestamp_features = temporal_util.edgeset_timestamp_features(
+        self.schema
+    )
+
+  def _get_per_sample_transforms(
+      self,
+  ) -> Optional[timeseries_transform.PerSampleTransformConfig]:
+    pad_and_cap_config = (
+        timeseries_transform.PadAndCapTimeseriesConfig()
+        if temporal_util.schema_has_timeseries_features(self.schema)
+        else None
+    )
+    timestamp_config = (
+        timeseries_transform.TimestampFeatureExtractorConfig()
+        if self.target_has_creation_time
+        else None
+    )
+    if pad_and_cap_config is not None or timestamp_config is not None:
+      return timeseries_transform.PerSampleTransformConfig(
+          timeseries_pad_and_cap=pad_and_cap_config,
+          timedelta_extraction=timestamp_config,
+      )
+    return None
 
   def get_live(self) -> LiveData:
     if self.live is None:
       raise RuntimeError(
-          "The dataset preparator has not been is_prepared yet. Call"
-          " `prepare()` or `generate()` at least once before calling"
+          "The dataset preparator has not been prepared yet. Call `prepare()`"
+          " or `prepare_from_existing_one()` before calling `generate()` or"
           " `generated_schema()`."
       )
     return self.live
@@ -201,16 +236,20 @@ class GNNDatasetPreparator:
   def prepare_from_existing_one(self, other: "GNNDatasetPreparator"):
     """Pre-compute data (same as "prepare") but with an already computed cache.
 
-    Instead of beeing recomputed, the following are grabbed from "other":
+    Instead of being recomputed, the following are grabbed from "other":
       - Feature statistics
-      - Normalier
+      - Normalizer
       - Padding
       - Sampling plan
 
     Args:
       other: Another dataset preparator from which to copy the data.
     """
+    if self.live is not None:
+      raise ValueError("prepare_from_existing_one() can only be called once.")
+
     other_live = other.get_live()
+    self.per_sample_transforms = other.per_sample_transforms
 
     sample_generator = dataset.SampleGeneratorFromAnything(
         graph=self.graph,
@@ -224,8 +263,9 @@ class GNNDatasetPreparator:
         skip_overflow_padding_error=self.skip_overflow_padding_error,
         padding=other_live.padding,
         temporal=self.temporal_sampling,
-        edgeset_timestamp_features=self.edgeset_timestamp_features,
-        nodeset_timestamp_features=self.nodeset_timestamp_features,
+        edgeset_timestamp_features=self.edgeset_timestamp_features or {},
+        nodeset_timestamp_features=self.nodeset_timestamp_features or {},
+        per_sample_transforms=self.per_sample_transforms,
     )
 
     self.live = LiveData(
@@ -236,6 +276,12 @@ class GNNDatasetPreparator:
         num_nodes_in_seed_nodeset=sample_generator.num_seed_nodes,
         sample_generator=sample_generator,
     )
+
+    # If the sample generator has per-sample transforms, we cannot cache the
+    # normalized features.
+    # TODO(simonmeierhans): Find a more robust way to ensure this.
+    if sample_generator.has_per_sample_transforms:
+      self.cache_normalized_features = False
 
     if self.cache_normalized_features:
       if isinstance(self.graph, in_memory_graph_lib.InMemoryGraph):
@@ -261,10 +307,9 @@ class GNNDatasetPreparator:
         self.cache_normalized_features = False
 
   def prepare(self):
-    """Pre-compute and pre-pare what is necessary for the generation.
+    """Pre-compute and prepare what is necessary for the generation.
 
-    Can only be called once. Called automatically the first time "generate" is
-    called.
+    Can only be called once.
     """
     if self.live is not None:
       raise ValueError("prepare() can only be called once.")
@@ -273,8 +318,11 @@ class GNNDatasetPreparator:
     if self.verbose_preparation:
       log.info("Create graph sampler")
 
+    per_sample_transforms = self._get_per_sample_transforms()
+    self.per_sample_transforms = per_sample_transforms
+
     # Convert the user input graph into a generator of batched graph samples.
-    # Note: Those samples are neither normalized not padded.
+    # Note: Those samples are neither normalized nor padded.
     sample_generator = dataset.SampleGeneratorFromAnything(
         graph=self.graph,
         schema=self.schema,
@@ -286,8 +334,9 @@ class GNNDatasetPreparator:
         format=self.format,
         skip_overflow_padding_error=self.skip_overflow_padding_error,
         temporal=self.temporal_sampling,
-        edgeset_timestamp_features=self.edgeset_timestamp_features,
-        nodeset_timestamp_features=self.nodeset_timestamp_features,
+        edgeset_timestamp_features=self.edgeset_timestamp_features or {},
+        nodeset_timestamp_features=self.nodeset_timestamp_features or {},
+        per_sample_transforms=per_sample_transforms,
     )
 
     # A generator of non-normalized graph samples.
@@ -299,21 +348,23 @@ class GNNDatasetPreparator:
     if self.num_samples_for_stats is not None:
       gen_raw_samples_iter = itertools.islice(
           gen_raw_samples_iter,
-          self.num_samples_for_stats // self.batch_size,
+          max(1, self.num_samples_for_stats // self.batch_size),
       )
+
+    effective_schema = sample_generator.output_schema()
 
     # Compute the feature statistics (for the feature normalization)
     if self.verbose_preparation:
       log.info("Compute feature statistics")
     feature_stats = (
         in_process_feature_statistics_lib.feature_statistics_from_graphs(
-            gen_raw_samples_iter, self.schema
+            gen_raw_samples_iter, effective_schema
         )
     )
     if self.verbose_preparation:
       log.info("  %s", feature_stats)
     normalizer = normalize_lib.auto_normalize(
-        schema=self.schema,
+        schema=effective_schema,
         stats=feature_stats,
         config=self.auto_normalize_config,
     )
@@ -328,14 +379,14 @@ class GNNDatasetPreparator:
     if self.num_samples_for_stats is not None:
       gen_normalized_samples_iter = itertools.islice(
           gen_normalized_samples_iter,
-          self.num_samples_for_stats // self.batch_size,
+          max(1, self.num_samples_for_stats // self.batch_size),
       )
 
     # Compute the batched graph statistics (for the padding)
     if self.verbose_preparation:
       log.info("Compute graph statistics for padding")
     padding = padding_lib.padding_from_graph_generator(
-        self.schema, gen_normalized_samples_iter
+        effective_schema, gen_normalized_samples_iter
     )
     if self.verbose_preparation:
       log.info(
@@ -352,6 +403,9 @@ class GNNDatasetPreparator:
         num_nodes_in_seed_nodeset=sample_generator.num_seed_nodes,
         sample_generator=sample_generator,
     )
+
+    if sample_generator.has_per_sample_transforms:
+      self.cache_normalized_features = False
 
     if self.cache_normalized_features:
       if isinstance(self.graph, in_memory_graph_lib.InMemoryGraph):
@@ -496,6 +550,8 @@ def compute_train_and_valid_node_idxs(
     train_seed_nodes: Optional[common.SeedNodeIdxs],
     valid_seed_nodes: Optional[common.SeedNodeIdxs],
     max_num_valid_examples: Optional[int],
+    schema: Optional[schema_lib.GraphSchema] = None,
+    batch_size: int = 1,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
   """Computes the training and validation seed node indices."""
   if not isinstance(graph, in_memory_graph_lib.InMemoryGraph) or (
@@ -510,6 +566,9 @@ def compute_train_and_valid_node_idxs(
       )
     return None, None
 
+  if schema is not None and target_nodeset not in schema.node_sets:
+    raise ValueError(f"Target node set '{target_nodeset}' not found in schema.")
+
   num_graph_seed_nodes = graph.node_sets[target_nodeset].num_nodes
   if valid_graph is None:
     num_valid_graph_seed_nodes = num_graph_seed_nodes
@@ -521,14 +580,14 @@ def compute_train_and_valid_node_idxs(
 
   if train_seed_nodes is not None:
     return np.array(train_seed_nodes), (
-        np.array(valid_seed_nodes) if valid_seed_nodes else None
+        np.array(valid_seed_nodes) if valid_seed_nodes is not None else None
     )
 
   if valid_seed_nodes is not None:
     if valid_graph is None:
       raise ValueError(
           "`valid_seed_nodes` can only be specified when `train_seed_nodes` is"
-          " also specified if not validation graph (valid_graph) is provided."
+          " also specified if no validation graph (valid_graph) is provided."
       )
     return None, np.array(valid_seed_nodes)
 
@@ -541,12 +600,30 @@ def compute_train_and_valid_node_idxs(
     )
     return None, None
 
-  train_seed_node_idxs, valid_seed_node_idxs = util.split_train_valid(
-      num_graph_seed_nodes,
-      validation_ratio,
-      random_seed,
-      max_num_valid_examples=max_num_valid_examples,
-  )
+  ts_feature = None
+  if schema is not None:
+    ts_feature = temporal_util.creation_time_feature_name(
+        schema.node_sets[target_nodeset].features
+    )
+
+  if ts_feature is not None:
+    timestamps = graph.node_sets[target_nodeset].features[ts_feature]
+    train_seed_node_idxs, valid_seed_node_idxs = (
+        util.split_train_valid_temporal(
+            creation_times=timestamps,
+            validation_ratio=validation_ratio,
+            batch_size=batch_size,
+            max_num_valid_examples=max_num_valid_examples,
+        )
+    )
+  else:
+    train_seed_node_idxs, valid_seed_node_idxs = util.split_train_valid(
+        num_graph_seed_nodes,
+        validation_ratio,
+        random_seed,
+        batch_size=batch_size,
+        max_num_valid_examples=max_num_valid_examples,
+    )
   log.info(
       "Num. training seed nodes: %d, Num. validation seed nodes: %d",
       len(train_seed_node_idxs),
@@ -557,7 +634,7 @@ def compute_train_and_valid_node_idxs(
 
 def prepare_datasets(
     graph: common.Graph,
-    valid_graph: common.Graph,
+    valid_graph: Optional[common.Graph],
     schema: schema_lib.GraphSchema,
     target_nodeset: str,
     random_seed: int,
@@ -567,16 +644,14 @@ def prepare_datasets(
     verbose: int,
     graph_format: Union[dataset.GraphFormat, str],
     validation_ratio: float,
-    train_seed_nodes: Optional[common.SeedNodeIdxs],
-    valid_seed_nodes: Optional[common.SeedNodeIdxs],
-    temporal_sampling: bool,
-    nodeset_timestamp_features: dict[str, str],
-    edgeset_timestamp_features: dict[str, str],
-    num_valid_steps: Optional[int],
-    cache_valid_dataset: bool,
-    cache_normalized_features: bool,
-    cache_normalized_features_device: Literal["host", "device"],
-    sampling_plan: Optional[sampling_config_lib.SamplingPlan],
+    train_seed_nodes: Optional[common.SeedNodeIdxs] = None,
+    valid_seed_nodes: Optional[common.SeedNodeIdxs] = None,
+    temporal_sampling: bool = False,
+    num_valid_steps: Optional[int] = None,
+    cache_valid_dataset: bool = False,
+    cache_normalized_features: bool = True,
+    cache_normalized_features_device: Literal["host", "device"] = "device",
+    sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None,
     auto_normalize_config: Optional[normalize_lib.AutoNormalizeConfig] = None,
     keep_raw_features: Optional[set[str]] = None,
 ) -> Tuple["GNNDatasetPreparator", Optional["GNNDatasetPreparator"]]:
@@ -597,8 +672,42 @@ def prepare_datasets(
           train_seed_nodes=train_seed_nodes,
           valid_seed_nodes=valid_seed_nodes,
           max_num_valid_examples=max_num_valid_examples,
+          schema=schema,
+          batch_size=batch_size,
       )
   )
+
+  target_has_creation_time = (
+      temporal_util.creation_time_feature_name(
+          schema.node_sets[target_nodeset].features
+      )
+      is not None
+  )
+
+  if target_has_creation_time:
+
+    orig_schema = schema
+    if isinstance(graph, in_memory_graph_lib.InMemoryGraph):
+      graph, schema = temporal_transform.propagate_timestamp_to_edges(
+          graph, schema
+      )
+    else:
+      log.warning(
+          "Automatic edge timestamp propagation is only supported for"
+          " InMemoryGraph inputs. Skipping edge timestamp propagation for"
+          " training graph."
+      )
+    if valid_graph is not None:
+      if isinstance(valid_graph, in_memory_graph_lib.InMemoryGraph):
+        valid_graph, _ = temporal_transform.propagate_timestamp_to_edges(
+            valid_graph, orig_schema
+        )
+      else:
+        log.warning(
+            "Automatic edge timestamp propagation is only supported for"
+            " InMemoryGraph inputs. Skipping edge timestamp propagation for"
+            " validation graph."
+        )
 
   if sampling_plan is None:
     sampling_config = sampling_config_lib.SimpleSamplingConfig(
@@ -614,11 +723,18 @@ def prepare_datasets(
 
   if auto_normalize_config is None:
     auto_normalize_config = normalize_lib.AutoNormalizeConfig(
-        keep_raw_features=keep_raw_features or set(),
+        keep_raw_features=set(keep_raw_features or ()),
         ignore_features_without_stats=True,
+        timedelta_sinusoid=target_has_creation_time,
     )
-  elif keep_raw_features is not None:
-    auto_normalize_config.keep_raw_features.update(keep_raw_features)
+  else:
+    merged_raw_features = set(auto_normalize_config.keep_raw_features)
+    if keep_raw_features is not None:
+      merged_raw_features.update(keep_raw_features)
+    auto_normalize_config = dataclasses.replace(
+        auto_normalize_config,
+        keep_raw_features=merged_raw_features,
+    )
 
   common_kwargs = {
       "format": graph_format,
@@ -630,8 +746,6 @@ def prepare_datasets(
       "auto_normalize_config": auto_normalize_config,
       "skip_overflow_padding_error": True,
       "temporal_sampling": temporal_sampling,
-      "nodeset_timestamp_features": nodeset_timestamp_features,
-      "edgeset_timestamp_features": edgeset_timestamp_features,
       "cache_normalized_features": cache_normalized_features,
       "cache_normalized_features_device": cache_normalized_features_device,
   }

@@ -28,10 +28,12 @@ class TemporalTest(absltest.TestCase):
     graph = in_memory_graph.InMemoryGraph(
         node_sets={
             "n1": in_memory_graph.InMemoryNodeSet(
-                num_nodes=2, features={"timestamps": np.array([10, 20], dtype=np.int64)}
+                num_nodes=2,
+                features={"timestamps": np.array([10, 20], dtype=np.int64)},
             ),
             "n2": in_memory_graph.InMemoryNodeSet(
-                num_nodes=2, features={"timestamps": np.array([5, 25], dtype=np.int64)}
+                num_nodes=2,
+                features={"timestamps": np.array([5, 25], dtype=np.int64)},
             ),
         },
         edge_sets={
@@ -84,7 +86,8 @@ class TemporalTest(absltest.TestCase):
     graph = in_memory_graph.InMemoryGraph(
         node_sets={
             "n1": in_memory_graph.InMemoryNodeSet(
-                num_nodes=2, features={"timestamps": np.array([10, 20], dtype=np.int64)}
+                num_nodes=2,
+                features={"timestamps": np.array([10, 20], dtype=np.int64)},
             ),
             "n2": in_memory_graph.InMemoryNodeSet(num_nodes=2, features={}),
         },
@@ -140,13 +143,138 @@ class TemporalTest(absltest.TestCase):
     )
 
     with self.assertRaisesRegex(ValueError, "Neither source nodeset"):
+      temporal.propagate_timestamp_to_edges(
+          graph, schema, target_edgesets=["e1"]
+      )
+
+  def test_propagate_timestamp_to_edges_unknown_edgeset_raises(self):
+    graph = in_memory_graph.InMemoryGraph(
+        node_sets={
+            "n1": in_memory_graph.InMemoryNodeSet(
+                num_nodes=2,
+                features={"timestamps": np.array([10, 20], dtype=np.int64)},
+            ),
+        },
+        edge_sets={
+            "e1": in_memory_graph.InMemoryEdgeSet(
+                adjacency=np.array([[0, 1], [1, 0]]),
+            )
+        },
+    )
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "timestamps": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        is_creation_time=True,
+                    )
+                }
+            ),
+        },
+        edge_sets={"e1": schema_lib.EdgeSchema(source="n1", target="n1")},
+    )
+    with self.assertRaisesRegex(ValueError, "Unknown target edgesets:"):
+      temporal.propagate_timestamp_to_edges(
+          graph, schema, target_edgesets=["non_existent_edgeset"]
+      )
+
+  def test_propagate_timestamp_to_edges_skips_static_auxiliary_edges(self):
+    graph = in_memory_graph.InMemoryGraph(
+        node_sets={
+            "temporal_node": in_memory_graph.InMemoryNodeSet(
+                num_nodes=2,
+                features={"timestamps": np.array([10, 20], dtype=np.int64)},
+            ),
+            "static_node": in_memory_graph.InMemoryNodeSet(
+                num_nodes=2,
+                features={},
+            ),
+        },
+        edge_sets={
+            "temporal_edge": in_memory_graph.InMemoryEdgeSet(
+                adjacency=np.array([[0, 1], [1, 0]]),
+            ),
+            "static_edge": in_memory_graph.InMemoryEdgeSet(
+                adjacency=np.array([[0, 1], [1, 0]]),
+            ),
+        },
+    )
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "temporal_node": schema_lib.NodeSchema(
+                features={
+                    "timestamps": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        is_creation_time=True,
+                    )
+                }
+            ),
+            "static_node": schema_lib.NodeSchema(features={}),
+        },
+        edge_sets={
+            "temporal_edge": schema_lib.EdgeSchema(
+                source="temporal_node", target="temporal_node"
+            ),
+            "static_edge": schema_lib.EdgeSchema(
+                source="static_node", target="static_node"
+            ),
+        },
+    )
+    _, new_schema = temporal.propagate_timestamp_to_edges(graph, schema)
+    self.assertIn("timestamps", new_schema.edge_sets["temporal_edge"].features)
+    self.assertNotIn("timestamps", new_schema.edge_sets["static_edge"].features)
+
+  def test_propagate_timestamp_to_edges_collision_raises(self):
+    graph = in_memory_graph.InMemoryGraph(
+        node_sets={
+            "n1": in_memory_graph.InMemoryNodeSet(
+                num_nodes=2,
+                features={"timestamps": np.array([10, 20], dtype=np.int64)},
+            ),
+        },
+        edge_sets={
+            "e1": in_memory_graph.InMemoryEdgeSet(
+                adjacency=np.array([[0], [1]]),
+                features={"timestamps": np.array([1.5], dtype=np.float32)},
+            )
+        },
+    )
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "timestamps": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        is_creation_time=True,
+                    )
+                }
+            ),
+        },
+        edge_sets={
+            "e1": schema_lib.EdgeSchema(
+                source="n1",
+                target="n1",
+                features={
+                    "timestamps": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        is_creation_time=False,
+                    )
+                },
+            )
+        },
+    )
+    with self.assertRaisesRegex(
+        ValueError, "already exists in edgeset 'e1' and is not marked"
+    ):
       temporal.propagate_timestamp_to_edges(graph, schema)
 
   def test_propagate_timestamp_to_edges_custom_names(self):
     graph = in_memory_graph.InMemoryGraph(
         node_sets={
             "n1": in_memory_graph.InMemoryNodeSet(
-                num_nodes=2, features={"time": np.array([10, 20], dtype=np.int64)}
+                num_nodes=2,
+                features={"time": np.array([10, 20], dtype=np.int64)},
             ),
             "n2": in_memory_graph.InMemoryNodeSet(
                 num_nodes=2, features={"ts": np.array([5, 25], dtype=np.int64)}
@@ -198,16 +326,17 @@ class TemporalTest(absltest.TestCase):
         new_schema.edge_sets["e1"].features["edge_ts"].is_creation_time
     )
 
-  def test_propagate_timestamp_to_edges_fail_existing_feature(self):
+  def test_propagate_timestamp_to_edges_skips_existing_creation_time(self):
     graph = in_memory_graph.InMemoryGraph(
         node_sets={
             "n1": in_memory_graph.InMemoryNodeSet(
-                num_nodes=2, features={"timestamps": np.array([10, 20], dtype=np.int64)}
+                num_nodes=2,
+                features={"timestamps": np.array([10, 20], dtype=np.int64)},
             ),
         },
         edge_sets={
             "e1": in_memory_graph.InMemoryEdgeSet(
-                adjacency=np.array([[0, 1]]),
+                adjacency=np.array([[0], [1]]),
                 features={"timestamps": np.array([1], dtype=np.int64)},
             )
         },
@@ -219,6 +348,7 @@ class TemporalTest(absltest.TestCase):
                 features={
                     "timestamps": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.INTEGER_64,
+                        is_creation_time=True,
                     )
                 }
             ),
@@ -230,14 +360,17 @@ class TemporalTest(absltest.TestCase):
                 features={
                     "timestamps": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.INTEGER_64,
+                        is_creation_time=True,
                     )
                 },
             )
         },
     )
 
-    with self.assertRaisesRegex(ValueError, "already exists in edgeset"):
-      temporal.propagate_timestamp_to_edges(graph, schema)
+    new_graph, _ = temporal.propagate_timestamp_to_edges(graph, schema)
+    np.testing.assert_array_equal(
+        new_graph.edge_sets["e1"].features["timestamps"], np.array([1])
+    )
 
 
 if __name__ == "__main__":
