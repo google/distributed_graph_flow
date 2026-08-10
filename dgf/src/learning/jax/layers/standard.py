@@ -49,7 +49,7 @@ def norm(
 def modern_residual_mlp(
     dims: int, dropout_rate: Optional[float] = 0.1, expansion_ratio: int = 4
 ) -> "GenericBlockConfig":
-  """Returns a GenericBlockConfig for a modern residual MLP.
+  """Preconfigured GenericBlockConfig for a modern residual MLP.
 
   It uses the config string "NL{expansion_ratio}ALDR" which stands for:
   Norm, Linear (expanded), Activation, Linear (contracted), Dropout, Residual.
@@ -60,7 +60,7 @@ def modern_residual_mlp(
 
 
 def ingest_feature(dims: int, norm: str = "layer_norm") -> "GenericBlockConfig":
-  """Returns a GenericBlockConfig for feature ingestion.
+  """Preconfigured GenericBlockConfig for feature ingestion.
 
   It uses the config string "LAN" which stands for: Linear, Activation, Norm.
   """
@@ -70,7 +70,7 @@ def ingest_feature(dims: int, norm: str = "layer_norm") -> "GenericBlockConfig":
 def sequential_mlp(
     dims: int, num_layers: int = 2, dropout_rate: Optional[float] = None
 ) -> "GenericBlockConfig":
-  """Returns a GenericBlockConfig for a sequential MLP.
+  """Preconfigured GenericBlockConfig for a sequential MLP.
 
   It builds a config string with `num_layers` of Linear + Activation (+ optional
   Dropout) followed by a final Linear layer.
@@ -87,7 +87,7 @@ def sequential_mlp(
 
 
 def identity() -> "GenericBlockConfig":
-  """Returns a GenericBlockConfig that acts as an identity block."""
+  """Preconfigured GenericBlockConfig that acts as an identity block."""
   return GenericBlockConfig("", dims=1)
 
 
@@ -143,7 +143,14 @@ def validate_config(layers: list[tuple[str, int]]) -> None:
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass
 class GenericBlockConfig(common.ArchitectureProvider):
-  """Configuration for a generic block parsed from a string."""
+  """Configuration for a generic block parsed from a string.
+
+  Usage example:
+  ```python
+  # A block with: normalization+linear+activation+dropout+linar.
+  model = GenericBlockConfig(config="NLADL").make()
+  ```
+  """
 
   config: str
   dims: int
@@ -210,7 +217,20 @@ class GenericBlockConfig(common.ArchitectureProvider):
 
 
 class GenericBlock(nn.Module):
-  """A generic configurable neural network block."""
+  """A generic configurable neural network block.
+
+  Usage example:
+  ```python
+  # A block with: normalization+linear+activation+dropout+linar.
+  model = GenericBlockConfig(config="NLADL").make()
+  x = jnp.ones((2, 4, 16))
+  rngs = {"params": jax.random.PRNGKey(0), "dropout": jax.random.PRNGKey(1)}
+  variables = model.init(rngs, x, training=True)
+  y, _ = model.apply(
+      variables, x, training=True, rngs=rngs, mutable=["batch_stats"]
+  )
+  ```
+  """
 
   config: GenericBlockConfig
 

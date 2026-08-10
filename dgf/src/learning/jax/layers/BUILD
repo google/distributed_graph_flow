@@ -145,6 +145,7 @@ py_library(
         # sparse_deferred/jax",
         # sparse_deferred/nn:edges",
         # sparse_deferred/structs:graph_struct",
+        "//dgf/src/data:schema",
         "//dgf/src/learning/jax:common",
         # flax:core dep,
         # jax dep,
