@@ -64,14 +64,20 @@ class InMemoryGraphTest(absltest.TestCase):
         issues,
         [
             Issue.warning(
-                "The nodeset 'n1' schema is missing the '#id' feature."
-                " Giving a clearly defined #id column is recommanded. It is"
-                " also required for non-string node IDs e.g. integer IDs."
+                "The nodeset 'n1' schema has no primary feature, i.e., a"
+                " feature with semantic=PRIMARY_ID. You won't be able to"
+                " serialize it. Recommended actions: Set it manually (e.g.,"
+                " `schema.node_sets['n1'].features[<some column>].semantic ="
+                " dgf.data.FeatureSemantic.PRIMARY_ID`) or use `schema ="
+                " dgf.validate.fix_schema(schema)`."
             ),
             Issue.warning(
-                "The nodeset 'n2' schema is missing the '#id' feature."
-                " Giving a clearly defined #id column is recommanded. It is"
-                " also required for non-string node IDs e.g. integer IDs."
+                "The nodeset 'n2' schema has no primary feature, i.e., a"
+                " feature with semantic=PRIMARY_ID. You won't be able to"
+                " serialize it. Recommended actions: Set it manually (e.g.,"
+                " `schema.node_sets['n2'].features[<some column>].semantic ="
+                " dgf.data.FeatureSemantic.PRIMARY_ID`) or use `schema ="
+                " dgf.validate.fix_schema(schema)`."
             ),
         ],
     )

@@ -277,6 +277,8 @@ def fix_schema(
         edgeset_name,
         primary_key,
     )
+
+
 def infer_schema_semantic(
     schema: schema_lib.GraphSchema,
     raise_on_error: bool = True,
@@ -374,4 +376,3 @@ def _infer_features_semantic(
         )
       else:
         log.warning(msg)
-

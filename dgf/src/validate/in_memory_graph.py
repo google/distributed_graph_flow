@@ -16,6 +16,7 @@
 
 import collections
 from typing import Sequence
+from dgf.src.analyse import schema as analyse_schema
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import feature_format
@@ -147,7 +148,7 @@ def feature_set_issues(
         items.append(
             Issue.error(
                 f"The feature {feature_name!r} in {source} has"
-                f" semantic=TIMESTAMP, but its format is"
+                " semantic=TIMESTAMP, but its format is"
                 f" {feature_schema.format!r}. Features with semantic=TIMESTAMP"
                 " must have format=INTEGER_64."
             )
@@ -287,7 +288,7 @@ def feature_set_issues(
       if all_identical:
         items.append(
             Issue.warning(
-                f"Multiple features with semantic=MASK found for timeseries"
+                "Multiple features with semantic=MASK found for timeseries"
                 f" group {ts_group!r} in {source}: {masks_in_group}. Since they"
                 " are identical, consider consolidating them into a single"
                 " mask."
@@ -296,7 +297,7 @@ def feature_set_issues(
       else:
         items.append(
             Issue.error(
-                f"Multiple features with semantic=MASK found for timeseries"
+                "Multiple features with semantic=MASK found for timeseries"
                 f" group {ts_group!r} in {source} with differing or unavailable"
                 f" values: {masks_in_group}."
             )
@@ -324,12 +325,19 @@ def issues(
         )
     )
 
-    if KEY_ID not in nodeset_schema.features:
+    primary_key = analyse_schema.primary_feature_or_none(
+        nodeset_name, nodeset_schema
+    )
+
+    if primary_key is None:
       items.append(
           Issue.warning(
-              f"The nodeset {nodeset_name!r} schema is missing the '#id'"
-              " feature. Giving a clearly defined #id column is recommanded."
-              " It is also required for non-string node IDs e.g. integer IDs."
+              f"The nodeset {nodeset_name!r} schema has no primary feature,"
+              " i.e., a feature with semantic=PRIMARY_ID. You won't be able to"
+              " serialize it. Recommended actions: Set it manually (e.g.,"
+              f" `schema.node_sets['{nodeset_name}'].features[<some"
+              " column>].semantic = dgf.data.FeatureSemantic.PRIMARY_ID`) or"
+              " use `schema = dgf.validate.fix_schema(schema)`."
           )
       )
 

@@ -18,3 +18,4 @@
 
 from dgf.src.validate.in_memory_graph import validate_graph
 from dgf.src.validate.graph_snapshots import validate_snapshots
+from dgf.src.analyse.schema import fix_schema
