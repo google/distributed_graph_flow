@@ -184,6 +184,9 @@ class RichDisplay:
   def _repr_(self) -> str:
     return self._text
 
+  def html(self) -> str:
+    return self._html
+
 
 def split_train_valid(
     num_values: int,
@@ -252,7 +255,7 @@ def split_train_valid_temporal(
 ) -> Tuple[np.ndarray, np.ndarray]:
   """Splits indices into training (past) and validation (future) sets chronologically.
 
-  The entities are sorted by `creation_times` in ascending order. The earlier 
+  The entities are sorted by `creation_times` in ascending order. The earlier
   entities are assigned to the training set, while the later entities are
   assigned to the validation set.
 

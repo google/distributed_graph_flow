@@ -9,6 +9,33 @@ package(
 # =========
 
 py_binary(
+    name = "node_classification_model",
+    srcs = ["node_classification_model.py"],
+    deps = [
+        # absl:app dep,
+        # absl/flags dep,
+        "//dgf",
+        # tensorflow:tensorflow_no_contrib dep,
+    ],
+)
+
+py_binary(
+    name = "node_classification_model_advanced",
+    srcs = ["node_classification_model_advanced.py"],
+    deps = [
+        # absl:app dep,
+        # absl/flags dep,
+        "//dgf",
+        # flax:core dep,
+        # jax dep,
+        # jaxtyping dep,
+        # matplotlib dep,
+        # numpy dep,
+        # optax dep,
+    ],
+)
+
+py_binary(
     name = "count_nodes",
     srcs = ["count_nodes.py"],
     deps = [
