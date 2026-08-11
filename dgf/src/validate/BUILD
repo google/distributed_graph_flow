@@ -23,6 +23,7 @@ py_library(
     srcs = ["in_memory_graph.py"],
     deps = [
         ":validate",
+        "//dgf/src/analyse:schema",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/io:feature_format",

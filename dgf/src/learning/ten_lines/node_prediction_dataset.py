@@ -521,7 +521,7 @@ def compute_train_and_valid_node_idxs(
 
   if train_seed_nodes is not None:
     return np.array(train_seed_nodes), (
-        np.array(valid_seed_nodes) if valid_seed_nodes else None
+        np.array(valid_seed_nodes) if valid_seed_nodes is not None else None
     )
 
   if valid_seed_nodes is not None:
