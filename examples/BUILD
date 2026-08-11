@@ -43,18 +43,6 @@ py_binary(
 )
 
 py_binary(
-    name = "convert_hgraph",
-    srcs = ["convert_hgraph.py"],
-    deps = [
-        "//file/colossus/public:cns",
-        # absl:app dep,
-        # absl/flags dep,
-        # apache_beam dep,
-        "//dgf",
-    ],
-)
-
-py_binary(
     name = "create_graph_samples_in_process",
     srcs = ["create_graph_samples_in_process.py"],
     deps = [
@@ -64,18 +52,6 @@ py_binary(
         "//dgf",
         # numpy dep,
         # tqdm dep,
-    ],
-)
-
-py_binary(
-    name = "convert_hgraph_to_gf_graph",
-    srcs = ["convert_hgraph_to_gf_graph.py"],
-    deps = [
-        "//file/colossus/public:cns",
-        # absl:app dep,
-        # absl/flags dep,
-        # apache_beam dep,
-        "//dgf",
     ],
 )
 
@@ -99,16 +75,6 @@ py_binary(
         # absl:app dep,
         # absl/flags dep,
         # absl/logging dep,
-        "//dgf",
-    ],
-)
-
-py_binary(
-    name = "validate_exported_graph",
-    srcs = ["validate_exported_graph.py"],
-    deps = [
-        # absl:app dep,
-        # absl/flags dep,
         "//dgf",
     ],
 )
