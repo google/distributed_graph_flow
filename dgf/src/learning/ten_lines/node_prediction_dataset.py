@@ -392,7 +392,7 @@ class GNNDatasetPreparator:
               "prepared in `prepare()`."
           )
         normalized_sample = attach_features_from_numpy_graph(
-            live.normalized_graph, sample
+            live.normalized_graph, sample, self.schema
         )
       else:
         normalized_sample = live.normalizer.normalize_numpy(sample)
@@ -437,10 +437,15 @@ class GNNDatasetPreparator:
 def attach_features_from_numpy_graph(
     graph: in_memory_graph_lib.InMemoryGraph,
     sample: in_memory_graph_lib.InMemoryGraph,
+    schema: schema_lib.GraphSchema,
 ) -> in_memory_graph_lib.InMemoryGraph:
   """Attaches the numpy features from `graph` to the `sample`."""
   in_memory_sampler_lib.add_features_to_samples(
-      graph, [sample], return_features=True, return_node_idxs=False
+      full_graph=graph,
+      samples=[sample],
+      schema=schema,
+      return_features=True,
+      return_node_idxs=False,
   )
   return sample
 

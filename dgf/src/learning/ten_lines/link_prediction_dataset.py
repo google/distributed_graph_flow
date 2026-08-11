@@ -803,19 +803,26 @@ class GNNLinkDatasetPreparator:
             "Cached normalized graph is not available in numpy format. If using"
             " device cache, use generate_jax()."
         )
+      sampling_schema = live.sampling_schema or self._sampling_schema()
       pos_src_graph = (
           node_prediction_dataset_lib.attach_features_from_numpy_graph(
-              live.normalized_source_graph, raw.positive_source_graph
+              live.normalized_source_graph,
+              raw.positive_source_graph,
+              sampling_schema,
           )
       )
       pos_trg_graph = (
           node_prediction_dataset_lib.attach_features_from_numpy_graph(
-              live.normalized_target_graph, raw.positive_target_graph
+              live.normalized_target_graph,
+              raw.positive_target_graph,
+              sampling_schema,
           )
       )
       neg_trg_graph = (
           node_prediction_dataset_lib.attach_features_from_numpy_graph(
-              live.normalized_target_graph, raw.negative_target_graph
+              live.normalized_target_graph,
+              raw.negative_target_graph,
+              sampling_schema,
           )
       )
     else:
