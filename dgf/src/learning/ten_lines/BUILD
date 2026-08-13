@@ -348,7 +348,6 @@ py_test(
         "//dgf/src/data:schema",
         "//dgf/src/io:tf_graph_sample",
         "//dgf/src/sampling:config",
-        "//dgf/src/transform:timeseries",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/validate:in_memory_graph",
         # numpy dep,
