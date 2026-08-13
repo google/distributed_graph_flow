@@ -19,7 +19,6 @@ from dgf.src.data import schema as schema_lib
 from dgf.src.io import tf_graph_sample
 from dgf.src.learning.ten_lines import dataset
 from dgf.src.sampling import config as sampling_config_lib
-from dgf.src.transform import timeseries as timeseries_transform
 from dgf.src.util import gen_test_graph
 from dgf.src.validate import in_memory_graph as in_memory_graph_validate_lib
 import numpy as np
@@ -259,12 +258,8 @@ class EvaluationTest(absltest.TestCase):
     )
     return graph, schema
 
-  def test_per_sample_transformations(self):
+  def test_temporal_sampling(self):
     graph, schema = self._create_temporal_test_graph_and_schema()
-
-    pad_and_cap_config = timeseries_transform.PadAndCapTimeseriesConfig(
-        sequence_length=5
-    )
 
     generator = dataset.SampleGeneratorFromAnything(
         graph=graph,
@@ -276,97 +271,25 @@ class EvaluationTest(absltest.TestCase):
             num_hops=1,
             hop_width=2,
             temporal_sampling=True,
+            max_timeseries_len=3,
         ),
         temporal=True,
-        timeseries_pad_and_cap=pad_and_cap_config,
-        timedelta_extraction=timeseries_transform.TimestampFeatureExtractorConfig(),
         drop_remainder=False,
         shuffle=False,
     )
 
-    self.assertIn(
+    self.assertNotIn(
         "time_mask", generator.output_schema().node_sets["hardware"].features
     )
-    self.assertIn(
-        "creation_time_seed_delta",
-        generator.output_schema().node_sets["alerts"].features,
-    )
-    self.assertIn(
-        "time_seed_delta",
-        generator.output_schema().node_sets["hardware"].features,
-    )
-
     num_batches = 0
     for sample, _ in generator.batch_iterator():
       in_memory_graph_validate_lib.validate_graph(
           sample, generator.output_schema(), raise_on_warning=False
       )
-      self.assertEqual(
-          sample.node_sets["hardware"].features["signal"].shape[1], 5
-      )
-      self.assertEqual(
-          sample.node_sets["hardware"].features["time_mask"].shape[1], 5
-      )
-      self.assertIn("time_seed_delta", sample.node_sets["hardware"].features)
-      self.assertIn(
-          "creation_time_seed_delta", sample.node_sets["alerts"].features
-      )
-      self.assertFalse(
-          np.all(sample.node_sets["hardware"].features["time_mask"] == 0)
-      )
       num_batches += 1
 
     self.assertEqual(num_batches, 2)
 
-  def test_default_no_per_sample_transforms(self):
-    graph, schema = self._create_temporal_test_graph_and_schema()
-    schema.node_sets["hardware"].features["time"] = schema_lib.FeatureSchema(
-        format=schema_lib.FeatureFormat.INTEGER_64,
-        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
-        is_timeseries=True,
-        is_creation_time=True,
-        shape=(3,),
-    )
-    schema.node_sets["hardware"].features["signal"] = schema_lib.FeatureSchema(
-        format=schema_lib.FeatureFormat.FLOAT_32,
-        semantic=schema_lib.FeatureSemantic.NUMERICAL,
-        is_timeseries=True,
-        shape=(3,),
-    )
-    graph.node_sets["hardware"].features["time"] = np.array(
-        [[50, 80, 120], [150, 250, 300]], dtype=np.int64
-    )
-    graph.node_sets["hardware"].features["signal"] = np.array(
-        [[1.5, 2.5, 3.5], [4.5, 5.5, 6.5]], dtype=np.float32
-    )
-
-    generator = dataset.SampleGeneratorFromAnything(
-        graph=graph,
-        schema=schema,
-        batch_size=2,
-        seed_node_idxs=None,
-        sampling_config=sampling_config_lib.SimpleSamplingConfig(
-            seed_nodeset="alerts",
-            num_hops=1,
-            hop_width=2,
-            temporal_sampling=True,
-        ),
-        temporal=True,
-        drop_remainder=False,
-        shuffle=False,
-    )
-
-    self.assertNotIn(
-        "time_mask", generator.output_schema().node_sets["hardware"].features
-    )
-    self.assertNotIn(
-        "creation_time_seed_delta",
-        generator.output_schema().node_sets["alerts"].features,
-    )
-    self.assertNotIn(
-        "time_seed_delta",
-        generator.output_schema().node_sets["hardware"].features,
-    )
 
   def test_temporal_sampling_requires_seed_timestamps(self):
     graph = gen_test_graph.generate_in_memory_graph(True, False)
@@ -389,30 +312,7 @@ class EvaluationTest(absltest.TestCase):
           shuffle=False,
       )
 
-  def test_sampler_returns_node_idxs_only_with_transforms_raises(self):
-    graph, schema = self._create_temporal_test_graph_and_schema()
-    with self.assertRaisesRegex(
-        ValueError, "cannot be used when `sampler_returns_node_idxs_only=True`"
-    ):
-      dataset.SampleGeneratorFromAnything(
-          graph=graph,
-          schema=schema,
-          batch_size=2,
-          seed_node_idxs=None,
-          sampling_config=sampling_config_lib.SimpleSamplingConfig(
-              seed_nodeset="alerts",
-              num_hops=1,
-              hop_width=2,
-              temporal_sampling=True,
-          ),
-          temporal=True,
-          timeseries_pad_and_cap=timeseries_transform.PadAndCapTimeseriesConfig(),
-          sampler_returns_node_idxs_only=True,
-          drop_remainder=False,
-          shuffle=False,
-      )
-
-  def test_non_in_memory_format_with_transforms_raises(self):
+  def test_non_in_memory_format_temporal_raises(self):
     _, schema = self._create_temporal_test_graph_and_schema()
     with self.assertRaisesRegex(
         ValueError,
@@ -430,96 +330,6 @@ class EvaluationTest(absltest.TestCase):
               temporal_sampling=True,
           ),
           temporal=True,
-          drop_remainder=False,
-          shuffle=False,
-      )
-
-  def test_timedelta_extraction_with_temporal_false(self):
-    graph, schema = self._create_temporal_test_graph_and_schema()
-    generator = dataset.SampleGeneratorFromAnything(
-        graph=graph,
-        schema=schema,
-        batch_size=2,
-        seed_node_idxs=np.array([0, 1, 2, 3], dtype=np.int64),
-        sampling_config=sampling_config_lib.SimpleSamplingConfig(
-            seed_nodeset="alerts",
-            num_hops=1,
-            hop_width=2,
-        ),
-        timeseries_pad_and_cap=timeseries_transform.PadAndCapTimeseriesConfig(
-            sequence_length=5
-        ),
-        timedelta_extraction=timeseries_transform.TimestampFeatureExtractorConfig(),
-        temporal=False,
-        drop_remainder=False,
-        shuffle=False,
-    )
-
-    self.assertIn(
-        "creation_time_seed_delta",
-        generator.output_schema().node_sets["alerts"].features,
-    )
-    self.assertIn(
-        "time_seed_delta",
-        generator.output_schema().node_sets["hardware"].features,
-    )
-    for sample, _ in generator.batch_iterator():
-      self.assertIn("time_seed_delta", sample.node_sets["hardware"].features)
-      self.assertIn(
-          "creation_time_seed_delta", sample.node_sets["alerts"].features
-      )
-      break
-
-  def test_dynamic_set_sampler_returns_node_idxs_only_raises(self):
-    graph, schema = self._create_temporal_test_graph_and_schema()
-    generator = dataset.SampleGeneratorFromAnything(
-        graph=graph,
-        schema=schema,
-        batch_size=2,
-        seed_node_idxs=None,
-        sampling_config=sampling_config_lib.SimpleSamplingConfig(
-            seed_nodeset="alerts",
-            num_hops=1,
-            hop_width=2,
-            temporal_sampling=True,
-        ),
-        temporal=True,
-        timeseries_pad_and_cap=timeseries_transform.PadAndCapTimeseriesConfig(),
-        drop_remainder=False,
-        shuffle=False,
-    )
-    with self.assertRaisesRegex(
-        ValueError, "cannot be used when `sampler_returns_node_idxs_only=True`"
-    ):
-      generator.set_sampler_returns_node_idxs_only(True)
-
-  def test_timedelta_extraction_without_pad_and_cap_dynamic_ts_raises(self):
-    graph, schema = self._create_temporal_test_graph_and_schema()
-    # Add a dynamic shape timeseries feature
-    schema.node_sets["hardware"].features["ts_dynamic"] = (
-        schema_lib.FeatureSchema(
-            format=schema_lib.FeatureFormat.FLOAT_32,
-            shape=(None,),
-            is_timeseries=True,
-        )
-    )
-    with self.assertRaisesRegex(
-        ValueError,
-        "Dynamic shape timeseries features were detected in the schema",
-    ):
-      dataset.SampleGeneratorFromAnything(
-          graph=graph,
-          schema=schema,
-          batch_size=2,
-          seed_node_idxs=None,
-          sampling_config=sampling_config_lib.SimpleSamplingConfig(
-              seed_nodeset="alerts",
-              num_hops=1,
-              hop_width=2,
-              temporal_sampling=True,
-          ),
-          temporal=True,
-          timedelta_extraction=timeseries_transform.TimestampFeatureExtractorConfig(),
           drop_remainder=False,
           shuffle=False,
       )

@@ -132,23 +132,34 @@ def _extract_entity_set_timeseries_specs(
     features: Dict[str, schema_lib.FeatureSchema],
 ) -> List[TimeseriesGroupSpec]:
   """Extracts and groups timeseries feature specs for a node set or edge set."""
-  ts_groups: Dict[Optional[str], List[str]] = collections.defaultdict(list)
+  grouped_features: Dict[str, List[str]] = collections.defaultdict(list)
+  ungrouped_features: List[str] = []
+
   for fname, fschema in features.items():
     if not fschema.is_timeseries:
       continue
     grp = fschema.group or (fname if fschema.is_creation_time else None)
-    ts_groups[grp].append(fname)
+    if grp is not None:
+      grouped_features[grp].append(fname)
+    else:
+      ungrouped_features.append(fname)
 
   specs = []
-  for grp_name, fnames in ts_groups.items():
-    ts_feat_name = None
-    if grp_name is not None:
-      ts_feat_name = group_creation_time_feature_name(grp_name, features)
+  for grp_name, fnames in grouped_features.items():
+    ts_feat_name = group_creation_time_feature_name(grp_name, features)
     specs.append(
         TimeseriesGroupSpec(
             timestamp_feature_name=ts_feat_name, feature_names=fnames
         )
     )
+
+  if ungrouped_features:
+    specs.append(
+        TimeseriesGroupSpec(
+            timestamp_feature_name=None, feature_names=ungrouped_features
+        )
+    )
+
   return specs
 
 

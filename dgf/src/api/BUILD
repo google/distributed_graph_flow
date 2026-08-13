@@ -144,6 +144,7 @@ py_library(
         "//dgf/src/sampling:beam_semi_distributed_sampler_v2",
         "//dgf/src/sampling:config",
         "//dgf/src/sampling:in_memory_sampler",
+        "//dgf/src/sampling:temporal",
         "//dgf/src/sampling/gcp:spanner_graph_sampler",
     ],
 )
