@@ -120,6 +120,29 @@ class ConfigTest(parameterized.TestCase):
     )
     self.assertEqual(sampling_config, expected_sampling_config)
 
+  def test_simple_sampling_config_to_sampling_plan_with_max_timeseries_len(
+      self,
+  ):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(features={}),
+        },
+        edge_sets={},
+    )
+    simple_config = config_lib.SimpleSamplingConfig(
+        seed_nodeset="n1", num_hops=0, max_timeseries_len=10
+    )
+    plan = config_lib.simple_sampling_config_to_sampling_plan(
+        simple_config, schema
+    )
+    self.assertEqual(plan.max_timeseries_len, 10)
+
+  def test_default_max_timeseries_len(self):
+    simple_config = config_lib.SimpleSamplingConfig(seed_nodeset="n1")
+    self.assertEqual(simple_config.max_timeseries_len, 32)
+    plan = config_lib.SamplingPlan(root=config_lib.PlanNode(nodeset="n1"))
+    self.assertEqual(plan.max_timeseries_len, 32)
+
 
 if __name__ == "__main__":
   absltest.main()

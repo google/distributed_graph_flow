@@ -31,6 +31,7 @@ py_library(
     srcs = ["temporal.py"],
     deps = [
         "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
         "//dgf/src/util:temporal",
         # numpy dep,
     ],
