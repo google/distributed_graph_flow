@@ -225,6 +225,19 @@ py_library(
 )
 
 py_library(
+    name = "pyg",
+    srcs = ["pyg.py"],
+    deps = [
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/util/weak_dep:weak_dep_base",
+        # numpy dep,
+        "//third_party/py/torch:pytorch",
+        "//third_party/py/torch_geometric",
+    ],
+)
+
+py_library(
     name = "tf",
     srcs = ["tf.py"],
     deps = [
@@ -633,5 +646,20 @@ py_test(
         "//dgf/src/data:histogram",
         "//dgf/src/data:statistics",
         "//dgf/src/util:test_util",
+    ],
+)
+
+py_test(
+    name = "pyg_test",
+    srcs = ["pyg_test.py"],
+    deps = [
+        ":pyg",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/util:gen_test_graph",
+        "//dgf/src/util:test_util",
+        # numpy dep,
+        "//third_party/py/torch:pytorch",
+        "//third_party/py/torch_geometric",
     ],
 )

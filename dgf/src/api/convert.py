@@ -42,3 +42,5 @@ from dgf.src.io.sparse_deferred import graph_to_sparse_deferred_struct
 from dgf.src.io.sparse_deferred import schema_to_sparse_deferred_schema
 
 from dgf.src.io.jax import graph_to_jax_graph
+
+from dgf.src.io.pyg import graph_to_pyg_data

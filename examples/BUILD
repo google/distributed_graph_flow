@@ -105,3 +105,19 @@ py_binary(
         "//dgf",
     ],
 )
+
+py_binary(
+    name = "node_classification_pyg",
+    srcs = ["node_classification_pyg.py"],
+    deps = [
+        # absl:app dep,
+        # absl/flags dep,
+        "//dgf",
+        # matplotlib dep,
+        # numpy dep,
+        "//third_party/py/torch:pytorch",
+        "//third_party/py/torch_geometric:data",
+        "//third_party/py/torch_geometric:nn",
+        # tqdm dep,
+    ],
+)

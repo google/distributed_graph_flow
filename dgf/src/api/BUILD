@@ -83,6 +83,7 @@ py_library(
         "//dgf/src/io:hgraph_in_memory",
         "//dgf/src/io:jax",
         "//dgf/src/io:networkx",
+        "//dgf/src/io:pyg",
         "//dgf/src/io:spanner",
         "//dgf/src/io:sparse_deferred",
         "//dgf/src/io:tf",
