@@ -15,15 +15,22 @@
 """Metadata for the GF Graph file format."""
 
 import dataclasses
+import enum
 from typing import Optional
-import dataclasses_json
 
+import dataclasses_json
 
 # Version
 # =======
 # In this section, explain the changes at each version.
 #
 # 0: First version.
+
+
+class Container(str, enum.Enum):
+  PARQUET = "PARQUET"
+  RECORDIO = "RECORDIO"
+  TF_RECORD = "TF_RECORD"
 
 
 @dataclasses_json.dataclass_json
@@ -34,8 +41,9 @@ class GFGraphMetadata:
   Attributes:
     version: Format version integer.
     timestamp: Optional integer creation timestamp of this graph snapshot.
+    container: Optional container format used to store nodes and edges.
   """
 
   version: int
   timestamp: Optional[int] = None
-
+  container: Container = Container.PARQUET

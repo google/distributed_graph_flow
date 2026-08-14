@@ -190,7 +190,7 @@ def read_parquet_to_numpy_dict(
   final_data: Dict[str, np.ndarray] = {}
   if not chunks:
     return final_data, 0
-  columns = list(chunks[0].keys())
+  columns = list(chunks[0])
   for key in columns:
     column_chunks = []
     for chunk in chunks:

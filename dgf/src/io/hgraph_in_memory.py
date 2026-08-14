@@ -26,8 +26,10 @@ from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import feature_format as feature_format_lib
+from dgf.src.io import graph_in_memory
 from dgf.src.io import hgraph_in_avro
 from dgf.src.io import io_ext
+from dgf.src.io import tf_graph_common
 from dgf.src.io import tfexample as tfexample_lib
 from dgf.src.util import filesystem
 from dgf.src.util import log
@@ -56,14 +58,6 @@ class HGraphContainerType(enum.Enum):
   RESERVED = 2
   AVRO = 3
   # TODO(gbm): Add an "AUTO" option.
-
-
-def get_extension(container_type: HGraphContainerType) -> str:
-  """Returns the file extension for the given container type."""
-  return {
-      HGraphContainerType.TF_RECORD: ".tfrecord.gz",
-      HGraphContainerType.AVRO: ".avro",
-  }[container_type]
 
 
 def tfgnn_schema_to_schema(
@@ -258,7 +252,7 @@ def read_graphai_hgraph(
         "Only HGraphContainerType.TF_RECORD, "
         "and HGraphContainerType.AVRO are currently supported."
     )
-  extension = get_extension(container_type)
+  extension = graph_in_memory.get_extension(container_type)
 
   # Import TF-GNN schema proto
   if override_schema is None:
@@ -334,12 +328,12 @@ def read_graphai_hgraph(
   ) -> Tuple[Dict[str, np.ndarray], int]:
     """Reads features given a container type."""
     if container_type == HGraphContainerType.TF_RECORD:
-      features, num_records = tfexample_lib.read_tf_record(
+      features, num_records = tfexample_lib.read_tfrecord(
           paths=paths, columns=columns, verbose=verbose, preserve_order=False  # pyrefly: ignore[bad-argument-type]
       )
     elif container_type == HGraphContainerType.AVRO:
       features, num_records = hgraph_in_avro.read_avro_record(
-          paths=paths, columns=columns, verbose=verbose  # pyrefly: ignore[bad-argument-type]
+          paths=paths, columns=columns, verbose=verbose
       )
     else:
       raise ValueError(
@@ -512,7 +506,7 @@ def read_graphai_hgraph(
           target_mapper,
           source_ids,
           target_ids,
-          min(32, os.cpu_count()),  # pyrefly: ignore[bad-specialization]
+          min(32, os.cpu_count() or 1),
       )
     else:
       # Slow path
@@ -586,141 +580,6 @@ def read_graphai_hgraph(
   return graph, schema
 
 
-def in_memory_node_to_tf_example(
-    node_index: int,
-    feature_schema: schema_lib.FeatureSetSchema,
-    features: dict[str, np.ndarray] | None,
-    node_id_column: Optional[str],
-) -> tf.train.Example:
-  """Converts in-memory node features to a tf example, using feature schema
-
-  as the blueprint for features to be converted.
-
-  In particular, the #id field in features is reserved for node id.
-  """
-  example = tf.train.Example()
-  if features is not None:
-    for feature_name in feature_schema.keys():
-      # in memory graph uses #id as the node id column name.
-      if feature_name == DEFAULT_KEY_ID:
-        continue
-      if feature_name not in features:
-        continue
-      feature_values = features[feature_name]
-      if feature_values.ndim == 1:
-        feature_value = [feature_values[node_index]]
-      else:
-        feature_value = feature_values[node_index]
-      if np.issubdtype(feature_values.dtype, np.integer):
-        example.features.feature[feature_name].int64_list.value.extend(
-            feature_value
-        )
-      elif np.issubdtype(feature_values.dtype, np.floating):
-        example.features.feature[feature_name].float_list.value.extend(
-            feature_value
-        )
-      elif feature_values.dtype.kind == "S":
-        example.features.feature[feature_name].bytes_list.value.extend(
-            feature_value
-        )
-      else:
-        raise ValueError(f"Non supported type {feature_values.dtype}")
-    # For nodes, #id is required.
-  if (
-      node_id_column is not None
-      and node_id_column not in example.features.feature
-  ):
-    if np.issubdtype(features[DEFAULT_KEY_ID].dtype, np.integer):  # pyrefly: ignore[unsupported-operation]
-      example.features.feature[node_id_column].int64_list.value.append(
-          features[DEFAULT_KEY_ID][node_index]  # pyrefly: ignore[unsupported-operation]
-      )
-    elif features[DEFAULT_KEY_ID].dtype.kind == "S":  # pyrefly: ignore[unsupported-operation]
-      example.features.feature[node_id_column].bytes_list.value.append(
-          features[DEFAULT_KEY_ID][node_index]  # pyrefly: ignore[unsupported-operation]
-      )
-    else:
-      raise ValueError(f"Non supported type {features[DEFAULT_KEY_ID]}")  # pyrefly: ignore[unsupported-operation]
-  return example
-
-
-def set_tf_scalar(dst, value, format: schema_lib.FeatureFormat):
-  if format.is_integer():
-    dst.int64_list.value.append(value)
-  elif format == schema_lib.FeatureFormat.BYTES:
-    dst.bytes_list.value.append(value)
-  else:
-    raise ValueError(f"Unsupported format: {format}")
-
-
-def in_memory_edge_to_tf_example(
-    edge_index: int,
-    feature_schema: schema_lib.FeatureSetSchema,
-    source: int | bytes,
-    source_format: schema_lib.FeatureFormat,
-    target: int | bytes,
-    target_format: schema_lib.FeatureFormat,
-    features: dict[str, np.ndarray] | None,
-    edge_id_column: Optional[str],
-) -> tf.train.Example:
-  """Converts in-memory edge adjacency to a tf example."""
-  example = tf.train.Example()
-  set_tf_scalar(
-      example.features.feature[KEY_SOURCE],
-      source,
-      source_format,
-  )
-  set_tf_scalar(
-      example.features.feature[KEY_TARGET],
-      target,
-      target_format,
-  )
-  if features is not None:
-    for feature_name in feature_schema.keys():
-      if feature_name == DEFAULT_KEY_ID:
-        continue
-      if feature_name not in features:
-        continue
-      feature_values = features[feature_name]
-      if feature_values.ndim == 1:
-        feature_value = [feature_values[edge_index]]
-      else:
-        feature_value = feature_values[edge_index]
-      if np.issubdtype(feature_values.dtype, np.integer):
-        example.features.feature[feature_name].int64_list.value.extend(
-            feature_value
-        )
-      elif np.issubdtype(feature_values.dtype, np.floating):
-        example.features.feature[feature_name].float_list.value.extend(
-            feature_value
-        )
-      elif feature_values.dtype.kind == "S":
-        example.features.feature[feature_name].bytes_list.value.extend(
-            feature_value
-        )
-      else:
-        raise ValueError(f"Non supported type {feature_values.dtype}")
-
-  # For edges, #id is optional.
-  if (
-      edge_id_column is not None
-      and edge_id_column in feature_schema
-      and features is not None
-      and DEFAULT_KEY_ID in features
-      and edge_id_column not in example.features.feature
-  ):
-    if np.issubdtype(features[DEFAULT_KEY_ID].dtype, np.integer):
-      example.features.feature[edge_id_column].int64_list.value.append(
-          features[DEFAULT_KEY_ID][edge_index]
-      )
-    elif features[DEFAULT_KEY_ID].dtype.kind == "S":
-      example.features.feature[edge_id_column].bytes_list.value.append(
-          features[DEFAULT_KEY_ID][edge_index]
-      )
-    else:
-      raise ValueError(f"Non supported type {features[DEFAULT_KEY_ID]}")
-  return example
-
-
 def _validate_in_memory_graph_to_hgraph_request(
     graph: in_memory_graph_lib.InMemoryGraph,
     container_type: HGraphContainerType | str,
@@ -774,7 +633,7 @@ def _write_tfrecord_node_sets(
   """Writes node sets to TFRecord files."""
   for nodeset_name, nodeset in graph.node_sets.items():
     num_shards, num_nodes_per_shard = shard_lib.estimate_num_node_shards(
-        nodeset.num_nodes  # pyrefly: ignore[bad-argument-type]
+        nodeset.num_nodes or 0
     )
     for shard_index in range(num_shards):
       examples = []
@@ -784,24 +643,26 @@ def _write_tfrecord_node_sets(
           num_shards=num_shards,
           extension=extension,
       )
+      nodeset_features_schema = schema.node_sets[nodeset_name].features
+      nodeset_features = nodeset.features
       for node_index in range(
           shard_index * num_nodes_per_shard,
-          min(  # pyrefly: ignore[bad-argument-type, bad-specialization]
+          min(
               (shard_index + 1) * num_nodes_per_shard,
-              nodeset.num_nodes,
+              nodeset.num_nodes or 0,
           ),
       ):
         examples.append(
-            in_memory_node_to_tf_example(
+            tf_graph_common.in_memory_node_to_tf_example(
                 node_index,
-                schema.node_sets[nodeset_name].features,
-                nodeset.features if nodeset.features else None,
+                nodeset_features_schema,
+                nodeset_features,
                 node_id_column,
             )
         )
         # TODO(canliu): parallelize the serialization for better performance.
         # Example: cl/813227631.
-      tfexample_lib.write_tf_record(os.path.join(directory, filename), examples)
+      tfexample_lib.write_tfrecord(os.path.join(directory, filename), examples)
 
 
 def _write_tfrecord_edge_sets(
@@ -825,6 +686,25 @@ def _write_tfrecord_edge_sets(
         .features[node_id_column]
         .format
     )
+    source_nodeset = schema.edge_sets[edgeset_name].source
+    target_nodeset = schema.edge_sets[edgeset_name].target
+
+    edgeset_features = edgeset.features.copy()
+    edgeset_features[tf_graph_common.KEY_SOURCE] = graph.node_sets[
+        source_nodeset
+    ].features[node_id_column][edgeset.adjacency[0]]
+    edgeset_features[tf_graph_common.KEY_TARGET] = graph.node_sets[
+        target_nodeset
+    ].features[node_id_column][edgeset.adjacency[1]]
+
+    features_schema = schema.edge_sets[edgeset_name].features.copy()
+    features_schema[tf_graph_common.KEY_SOURCE] = schema_lib.FeatureSchema(
+        format=source_format, shape=None
+    )
+    features_schema[tf_graph_common.KEY_TARGET] = schema_lib.FeatureSchema(
+        format=target_format, shape=None
+    )
+
     num_shards, num_edges_per_shard = shard_lib.estimate_num_edge_shards(
         num_edges
     )
@@ -843,29 +723,16 @@ def _write_tfrecord_edge_sets(
               num_edges,
           ),
       ):
-        source_index, target_index = edgeset.adjacency[:, edge_index]
-        source_nodeset = schema.edge_sets[edgeset_name].source
-        target_nodeset = schema.edge_sets[edgeset_name].target
-        source = graph.node_sets[source_nodeset].features[node_id_column][
-            source_index
-        ]
-        target = graph.node_sets[target_nodeset].features[node_id_column][
-            target_index
-        ]
-
-        examples.append(
-            in_memory_edge_to_tf_example(
-                edge_index,
-                schema.edge_sets[edgeset_name].features,
-                source,
-                source_format,
-                target,
-                target_format,
-                edgeset.features if edgeset.features else None,
-                edge_id_column,
-            )
+        example = tf.train.Example()
+        tf_graph_common.populate_features(
+            example,
+            edge_index,
+            features_schema,
+            edgeset_features,
+            ignore_keys=(),
         )
-      tfexample_lib.write_tf_record(os.path.join(directory, filename), examples)
+        examples.append(example)
+      tfexample_lib.write_tfrecord(os.path.join(directory, filename), examples)
 
 
 def write_graphai_hgraph(
@@ -895,7 +762,7 @@ def write_graphai_hgraph(
   """
   if isinstance(container_type, str):
     container_type = HGraphContainerType[container_type]
-  extension = get_extension(container_type)
+  extension = graph_in_memory.get_extension(container_type)
   tfgnn_schema = schema_to_tfgnn_schema(schema)
 
   _validate_in_memory_graph_to_hgraph_request(graph, container_type)

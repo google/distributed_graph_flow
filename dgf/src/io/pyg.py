@@ -76,12 +76,12 @@ def graph_to_pyg_data(
 
     x_features = []
     # Sort feature names to ensure deterministic order if multiple exist
-    for feature_name in sorted(nodeset_schema.features.keys()):
+    for feature_name in sorted(nodeset_schema.features):
       feature_value = nodeset_value.features[feature_name]
 
       # PyTorch only supports numerical / boolean arrays.
       feature_tensor = torch.from_numpy(feature_value)
-      if feature_tensor.ndim == 1:
+      if not nodeset_schema.features[feature_name].shape:
         feature_tensor = feature_tensor.unsqueeze(1)
       x_features.append(feature_tensor)
 
@@ -98,11 +98,11 @@ def graph_to_pyg_data(
     data[edge_type].edge_index = torch.from_numpy(adjacency).long()
 
     edge_attrs = []
-    for feature_name in sorted(edgeset_schema.features.keys()):
+    for feature_name in sorted(edgeset_schema.features):
       feature_value = edgeset_value.features[feature_name]
 
       feature_tensor = torch.from_numpy(feature_value)
-      if feature_tensor.ndim == 1:
+      if not edgeset_schema.features[feature_name].shape:
         feature_tensor = feature_tensor.unsqueeze(1)
       edge_attrs.append(feature_tensor)
 
