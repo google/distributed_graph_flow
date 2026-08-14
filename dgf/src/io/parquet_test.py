@@ -139,7 +139,10 @@ class ParquetTest(parameterized.TestCase):
     test_util.assert_are_equal(
         self,
         data,
-        {"f1": np.array([], dtype=np.int32), "f2": np.array([], dtype="|S2")},
+        {
+            "f1": np.array([], dtype=np.int32),
+            "f2": np.empty((0, 2), dtype="|S1"),
+        },
     )
 
   @parameterized.named_parameters(

@@ -195,13 +195,27 @@ def graph_to_tfgnn_graph_dict(
               "dynamic shape but is not a numpy array of dtype object. "
               f"Found type: {type(feature_value)}, dtype: {feature_value.dtype}"
           )
+
         feature_dict[tf_feature_name] = np.concatenate(
-            [value.flatten() for value in feature_value],
+            [
+                np.ravel(
+                    np.asarray(
+                        value.tolist(),
+                        dtype=feature_format_lib.FEATURE_FORMAT_TO_NP_DTYPE[
+                            feature_schema.format
+                        ],
+                    )
+                )
+                if isinstance(value, np.ndarray) and value.dtype == object
+                else value.flatten()
+                for value in feature_value
+            ],
             axis=0,
             dtype=feature_format_lib.FEATURE_FORMAT_TO_NP_DTYPE[
                 feature_schema.format
             ],
         )
+
         # TODO(gbm): Add support for more than one "ragged" dimension.
         feature_dict[f"nodes/{nodeset_name}.{feature_name}.d1"] = np.array(
             [len(value) for value in feature_value],

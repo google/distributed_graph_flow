@@ -35,7 +35,7 @@ class PlotInMemoryGraphTest(parameterized.TestCase):
 // Graph Schema
 digraph {
 	n1 [label=<<b>n1</b><br/>f1<br/>f2> shape=box]
-	n2 [label=<<b>n2</b><br/>f3<br/>f4<br/>f5> shape=box]
+	n2 [label=<<b>n2</b><br/>f3<br/>f4<br/>f5<br/>f6> shape=box]
 	n1 -> n1 [label=e1]
 	n1 -> n2 [label=e2]
 }

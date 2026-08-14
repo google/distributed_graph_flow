@@ -49,9 +49,9 @@ def read_graphai_hgraph(
   This PTransform reads a HGraph where data components like node features,
   edge features, and adjacencies are stored in a distributed format.
 
-  For small HGraph that can fit in memory, using
+  For small HGraphs that can fit in memory, using
   "dgf.io.read_graphai_hgraph" (i.e., loading the HGraph in memory)
-  might be easier to use and more efficient on small dataset.
+  might be easier to use and more efficient on small datasets.
 
   Usage example:
 
@@ -70,12 +70,12 @@ def read_graphai_hgraph(
       key. If using a tfrecord (or another format without native key) and
       `node_id_column=None`, node_id_column defaults to '#id'. If
       `node_id_column` is set, use this column as id. This column is not
-      necesseraly a feature defined in the grpah schema.
+      necessarily a feature defined in the graph schema.
     edge_id_column: Column name containing the edge id. If None, the edges have
       no ID. Edge IDs are necessary for edge features.
     override_schema: Schema of the HGraph. If not provided, the schema is
       inferred from the TF GNN schema contained in the HGraph. Specifying the
-      format allows to only includes a subset of features / nodesets / edgesets.
+      format allows to only include a subset of features / nodesets / edgesets.
 
   Returns:
     A distributed graph.
@@ -363,14 +363,20 @@ def tf_feature_to_feature(
     if value.shape[0] != 1:
       raise ValueError(
           f"Expected scalar value for feature '{key}' but got value with shape"
-          f" {value.shape}. If the feature is multi-dimentionnal, its `shape`"
+          f" {value.shape}. If the feature is multi-dimensional, its `shape`"
           " should be specified in the Graph Schema. Note: If you cannot fix"
           " the schema file, use the `override_schema` or `schema_transformer`"
           " argument of the `read_graphai_hgraph` function."
       )
     value = np.squeeze(value, axis=0)
-  elif value.ndim != 1:
-    value = np.reshape(value, feature_schema.shape)  # pyrefly: ignore[no-matching-overload]
+  else:
+    # Shape of the expected array. Replace None values with -1 in the shape:
+    # DGF uses None for unknown shape while NP uses -1.
+    # (1,None,4) => (1,-1,4)
+    expected_shape = tuple(
+        s if s is not None else -1 for s in feature_schema.shape
+    )
+    value = np.reshape(value, expected_shape)
   return value
 
 
@@ -382,7 +388,7 @@ def tf_feature_to_bytes(example: tf.train.Example, key: str) -> bytes:
     key: The key of the feature to extract.
 
   Returns:
-    A numpy array containing the feature values.
+    A single bytes or int value.
   """
   feature = example.features.feature.get(key)
   if feature is None:
@@ -398,7 +404,7 @@ def tf_feature_to_bytes(example: tf.train.Example, key: str) -> bytes:
     if len(feature.int64_list.value) != 1:
       raise ValueError(
           f"Expected a single int value for {key}. Instead got"
-          f" {len(feature.bytes_list.value)} values."
+          f" {len(feature.int64_list.value)} values."
       )
     return feature.int64_list.value[0]
   else:
@@ -562,6 +568,7 @@ def node_to_tf_example(
       value = node.features[feature_name]  # pyrefly: ignore[unsupported-operation]
       if value.ndim == 0:
         value = np.expand_dims(value, axis=0)
+      value = value.flatten()
 
     if feature_schema.format.is_integer():
       example.features.feature[feature_name].int64_list.value.extend(value)
@@ -644,7 +651,7 @@ def write_graphai_hgraph(
     node_id_column: Optional[str] = None,
     edge_id_column: Optional[str] = None,
 ):
-  """Initializes the WriteToHGraph PTransform.
+  """Writes a distributed HGraph using Beam.
 
   Args:
     graph: Graph to write.

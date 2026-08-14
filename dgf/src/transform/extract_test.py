@@ -33,6 +33,7 @@ class FilterTest(absltest.TestCase):
     del expected_extracted_schema.node_sets["n1"].features["f2"]
     del expected_extracted_schema.node_sets["n2"].features["f4"]
     del expected_extracted_schema.node_sets["n2"].features["f5"]
+    del expected_extracted_schema.node_sets["n2"].features["f6"]
     test_util.assert_are_equal(
         self,
         extracted_schema,

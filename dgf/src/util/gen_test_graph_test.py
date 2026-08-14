@@ -104,11 +104,18 @@ class GenHGraphTest(parameterized.TestCase):
 
     # Check variable_length feature 'f5' in node set 'n2'
     n2_has_f5 = "f5" in graph.node_sets["n2"].features
+    n2_has_f6 = "f6" in graph.node_sets["n2"].features
     self.assertEqual(
         n2_has_f5,
         variable_length,
         "Node set 'n2' feature 'f5' presence mismatch."
         f" Expected: {variable_length}, Got: {n2_has_f5}",
+    )
+    self.assertEqual(
+        n2_has_f6,
+        variable_length,
+        "Node set 'n2' feature 'f6' presence mismatch."
+        f" Expected: {variable_length}, Got: {n2_has_f6}",
     )
     if variable_length:
       self.assertEqual(graph.node_sets["n2"].features["f5"].dtype, object)
@@ -117,6 +124,19 @@ class GenHGraphTest(parameterized.TestCase):
               graph.node_sets["n2"].features["f5"],
               np.array(
                   [np.array([11, 12]), np.array([12, 13, 14])], dtype=object
+              ),
+          )
+      )
+      self.assertEqual(graph.node_sets["n2"].features["f6"].dtype, object)
+      self.assertTrue(
+          test_util.are_equal(
+              graph.node_sets["n2"].features["f6"],
+              np.array(
+                  [
+                      np.array([[11, 12], [13, 14]], dtype=np.int64),
+                      np.array([[15, 16], [17, 18], [19, 20]], dtype=np.int64),
+                  ],
+                  dtype=object,
               ),
           )
       )

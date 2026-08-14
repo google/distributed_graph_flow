@@ -35,7 +35,8 @@ GraphSchema(nodesets=[
     Feature(name='#id', shape=[], format=INTEGER_64),
     Feature(name='f3', shape=[], format=INTEGER_64),
     Feature(name='f4', shape=[], format=INTEGER_64),
-    Feature(name='f5', shape=[None], format=INTEGER_64)
+    Feature(name='f5', shape=[None], format=INTEGER_64),
+    Feature(name='f6', shape=[None, 2], format=INTEGER_64)
   ])
 ], edgesets=[
   Edgeset(name='e1', source_nodeset=0, target_nodeset=0, features=[]),

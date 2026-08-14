@@ -89,6 +89,12 @@ class StatisticsTest(parameterized.TestCase):
                             maximum=14,
                             quantiles=[11.0, 12.0, 12.6667, 14.0],
                         ),
+                        "f6": statistics_lib.FeatureStatistics(
+                            count=2,
+                            minimum=11,
+                            maximum=20,
+                            quantiles=[11.0, 14.0, 17.0, 20.0],
+                        ),
                     }
                 ),
             }

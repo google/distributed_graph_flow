@@ -82,30 +82,54 @@ def py_arrow_chunked_binary_to_np_bytes(column: pa.ChunkedArray) -> np.ndarray:
   return out.view(f"S{max_len}")
 
 
+def _pa_array_to_numpy(arr: pa.Array) -> np.ndarray:
+  """Recursively converts a pyarrow Array to a numpy array, preserving multidimensional structure."""
+  if pa.types.is_binary(arr.type) or pa.types.is_large_binary(arr.type):
+    return py_arrow_chunked_binary_to_np_bytes(pa.chunked_array([arr]))
+
+  if pa.types.is_list(arr.type) or pa.types.is_large_list(arr.type):
+    flat_arr = arr.flatten()
+    flat_np = _pa_array_to_numpy(flat_arr)
+    offsets = arr.offsets.to_numpy()
+    if len(offsets) < 2:
+      return np.empty(0, dtype=object)
+    split_points = offsets[1:-1]
+    jagged_list = np.split(flat_np, split_points)
+    res = np.empty(len(jagged_list), dtype=object)
+    res[:] = jagged_list
+    return res
+
+  if pa.types.is_fixed_size_list(arr.type):
+    flat_np = _pa_array_to_numpy(arr.flatten())
+    if len(flat_np) == 0:
+      return flat_np.reshape(0, arr.type.list_size)
+    return flat_np.reshape(-1, arr.type.list_size)
+
+  feature = arr.to_numpy(zero_copy_only=False)
+  if pa.types.is_string(arr.type):
+    feature = feature.astype(np.bytes_)
+  return feature
+
+
 def _table_to_numpy_dict(table: pa.Table) -> Dict[str, np.ndarray]:
   """Converts a pyarrow Table to a dictionary of numpy arrays."""
 
-  def process_column(value):
-
+  def process_column(value: pa.ChunkedArray):
     pq_type = value.type
     if pa.types.is_binary(pq_type) or pa.types.is_large_binary(pq_type):
       # A numpy array of np.bytes
       return py_arrow_chunked_binary_to_np_bytes(value)
-    else:
-      # Can be a simple numpy array, or a numpy array of numpy array.
+
+    arrays = [_pa_array_to_numpy(chunk) for chunk in value.chunks]
+    if len(arrays) == 0:
       feature = value.to_numpy()
-
-      if pa.types.is_fixed_size_list(pq_type):
-        # TODO(gbm): Directly create the final feature (skip the vstack and
-        # np.object steps).
-        if len(feature) > 0:  # pylint: disable=g-explicit-length-test
-          feature = np.vstack(feature)
-        pq_type = pq_type.value_type
-
-      if pq_type == pa.binary() or pq_type == pa.string():
+      if pa.types.is_string(pq_type):
         feature = feature.astype(np.bytes_)
-
-    return feature
+      return feature
+    elif len(arrays) == 1:
+      return arrays[0]
+    else:
+      return np.concatenate(arrays, axis=0)
 
   return {key: process_column(table[key]) for key in table.column_names}
 

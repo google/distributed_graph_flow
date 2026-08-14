@@ -40,12 +40,13 @@ Node Sets:
     | f2        | FLOAT_32 | EMBEDDING   | (2,)    | None            |
 
   n2:
-    | Feature   | Format     | Semantic   | Shape   | Num cat. vals   |
-    |-----------|------------|------------|---------|-----------------|
-    | #id       | INTEGER_64 | PRIMARY_ID | None    | None            |
-    | f3        | INTEGER_64 | NUMERICAL  | None    | None            |
-    | f4        | INTEGER_64 | NUMERICAL  | ()      | None            |
-    | f5        | INTEGER_64 | NUMERICAL  | (None,) | None            |
+    | Feature   | Format     | Semantic   | Shape     | Num cat. vals   |
+    |-----------|------------|------------|-----------|-----------------|
+    | #id       | INTEGER_64 | PRIMARY_ID | None      | None            |
+    | f3        | INTEGER_64 | NUMERICAL  | None      | None            |
+    | f4        | INTEGER_64 | NUMERICAL  | ()        | None            |
+    | f5        | INTEGER_64 | NUMERICAL  | (None,)   | None            |
+    | f6        | INTEGER_64 | NUMERICAL  | (None, 2) | None            |
 
 
 Edge Sets:

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Literal, Optional, TYPE_CHECKING, Tuple
+from typing import Any, Dict, List, Literal, TYPE_CHECKING, Tuple
 from unittest import mock
 
 from dgf.src.util.weak_dep.weak_dep_bagz import bagz
@@ -32,7 +32,6 @@ from dgf.src.data import gf_metadata as gf_metadata_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.data import tf_in_memory_graph as tf_in_memory_graph_lib
-from dgf.src.io import graph_in_beam as gf_graph_in_beam_lib
 from dgf.src.io import schema as schema_io_lib
 from dgf.src.io.gcp import common as gcp_common_lib
 from dgf.src.io.gcp import spanner_graph_metadata as sgm
@@ -44,7 +43,6 @@ import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
-
 
 parse_schema = fastavro.parse_schema
 
@@ -131,6 +129,13 @@ def generate_schema(
         format=schema_lib.FeatureFormat.INTEGER_64,
         shape=(None,),  # Variable length
     )
+    n2_features["f6"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        shape=(
+            None,
+            2,
+        ),  # Variable length + embedding
+    )
 
   if semantic:
     if bytes_feature:
@@ -140,6 +145,7 @@ def generate_schema(
     n2_features["f4"].semantic = schema_lib.FeatureSemantic.NUMERICAL
     if variable_length:
       n2_features["f5"].semantic = schema_lib.FeatureSemantic.NUMERICAL
+      n2_features["f6"].semantic = schema_lib.FeatureSemantic.NUMERICAL
 
   if node_ids:
     n1_features["#id"] = schema_lib.FeatureSchema(
@@ -245,8 +251,18 @@ def generate_tf_gnn_graph_schema(
           }
         }
     """
+    f6_feature = """
+        features {
+          key: "f6"
+          value {
+            dtype: DT_INT64
+            shape { dim { size: -1 } dim { size: 2 } }
+          }
+        }
+    """
   else:
     f5_feature = ""
+    f6_feature = ""
 
   graph_schema_pbtxt = (
       """
@@ -293,6 +309,7 @@ def generate_tf_gnn_graph_schema(
         }
         """
       + f5_feature
+      + f6_feature
       + """
       }
     }
@@ -371,8 +388,18 @@ def generate_gf_graph(
               pa.array([4]),
               pa.array([10]),
           ]
-          + ([pa.array([[11, 12]])] if variable_length else []),
-          names=["#id", "f3", "f4"] + (["f5"] if variable_length else []),
+          + (
+              [
+                  pa.array([[11, 12]]),
+                  pa.array(
+                      [[[11, 12], [13, 14]]],
+                      type=pa.list_(pa.list_(pa.int64(), 2)),
+                  ),
+              ]
+              if variable_length
+              else []
+          ),
+          names=["#id", "f3", "f4"] + (["f5", "f6"] if variable_length else []),
       ),
       os.path.join(path, "nodesets", "n2-00000-of-00002.parquet"),
   )
@@ -383,8 +410,18 @@ def generate_gf_graph(
               pa.array([5]),
               pa.array([11]),
           ]
-          + ([pa.array([[12, 13, 14]])] if variable_length else []),
-          names=["#id", "f3", "f4"] + (["f5"] if variable_length else []),
+          + (
+              [
+                  pa.array([[12, 13, 14]]),
+                  pa.array(
+                      [[[15, 16], [17, 18], [19, 20]]],
+                      type=pa.list_(pa.list_(pa.int64(), 2)),
+                  ),
+              ]
+              if variable_length
+              else []
+          ),
+          names=["#id", "f3", "f4"] + (["f5", "f6"] if variable_length else []),
       ),
       os.path.join(path, "nodesets", "n2-00001-of-00002.parquet"),
   )
@@ -558,9 +595,39 @@ def generate_hgraph(
           }
         }
     """
+    f6_1 = """
+    feature {
+          key: "f6"
+          value {
+            int64_list {
+            value: 11
+            value: 12
+            value: 13
+            value: 14
+            }
+          }
+        }
+    """
+    f6_2 = """
+    feature {
+          key: "f6"
+          value {
+            int64_list {
+              value: 15
+              value: 16
+              value: 17
+              value: 18
+              value: 19
+              value: 20
+            }
+          }
+        }
+    """
   else:
     f5_1 = ""
     f5_2 = ""
+    f6_1 = ""
+    f6_2 = ""
 
   _write_sharded_tfrecord_tfexample(
       directory=os.path.join(path, "node_features"),
@@ -597,6 +664,7 @@ def generate_hgraph(
         }
         """
           + f5_1
+          + f6_1
           + """
       }
     """,
@@ -628,6 +696,7 @@ def generate_hgraph(
         }
         """
           + f5_2
+          + f6_2
           + """
       }
     """,
@@ -767,7 +836,7 @@ def generate_avro_graph(
     path: Path to generated avro graph directory.
     node_id: Create a node id in the schema.
     edge_id: Create a edge id in the schema.
-    variable_length: Generate the f5 variable len feature.
+    variable_length: Generate the f5 and f6 variable len feature.
   """
 
   os.makedirs(os.path.join(path, "node_features"), exist_ok=True)
@@ -827,16 +896,19 @@ def generate_avro_graph(
   ]
   if variable_length:
     n2_fields.append({"name": "f5", "type": {"type": "array", "items": "long"}})  # pyrefly: ignore[bad-argument-type]
+    n2_fields.append({"name": "f6", "type": {"type": "array", "items": {"type": "array", "items": "long"}}})  # pyrefly: ignore[bad-argument-type]
   n2_schema_dict = {"type": "record", "name": "n2", "fields": n2_fields}
   n2_schema = parse_schema(n2_schema_dict)
 
   n2_record1 = {"#id": 1, "f3": 4, "f4": 10}
   if variable_length:
     n2_record1["f5"] = [11, 12]  # pyrefly: ignore[bad-assignment]
+    n2_record1["f6"] = [[11, 12], [13, 14]]  # pyrefly: ignore[bad-assignment]
 
   n2_record2 = {"#id": 2, "f3": 5, "f4": 11}
   if variable_length:
     n2_record2["f5"] = [12, 13, 14]  # pyrefly: ignore[bad-assignment]
+    n2_record2["f6"] = [[15, 16], [17, 18], [19, 20]]  # pyrefly: ignore[bad-assignment]
 
   _write_sharded_avro(
       directory=os.path.join(path, "node_features"),
@@ -1088,6 +1160,32 @@ def generate_tf_graph_sample(
       }
     }
   }
+  feature {
+    key: "nodes/n2.f6"
+    value {
+      int64_list {
+        value: 11
+        value: 12
+        value: 13
+        value: 14
+        value: 15
+        value: 16
+        value: 17
+        value: 18
+        value: 19
+        value: 20
+      }
+    }
+  }
+  feature {
+    key: "nodes/n2.f6.d1"
+    value {
+      int64_list {
+        value: 2
+        value: 3
+      }
+    }
+  }
         """
 
   base_pbtxt = f"""
@@ -1195,6 +1293,13 @@ def generate_in_memory_graph(
   if variable_length:
     n2_features["f5"] = np.array(  # pyrefly: ignore[bad-assignment]
         [np.array([11, 12]), np.array([12, 13, 14])], dtype=np.object_
+    )
+    n2_features["f6"] = np.array(  # pyrefly: ignore[bad-assignment]
+        [
+            np.array([[11, 12], [13, 14]], dtype=np.int64),
+            np.array([[15, 16], [17, 18], [19, 20]], dtype=np.int64),
+        ],
+        dtype=np.object_,
     )
 
   e1_features = {}
@@ -1352,6 +1457,7 @@ def generate_graph_pieces(
                   "f3": np.array(4, dtype=np.int64),
                   "f4": np.array(10, dtype=np.int64),
                   "f5": np.array([11, 12], dtype=np.int64),
+                  "f6": np.array([[11, 12], [13, 14]], dtype=np.int64),
               },
           ),
           Node(
@@ -1360,6 +1466,9 @@ def generate_graph_pieces(
                   "f3": np.array(5, dtype=np.int64),
                   "f4": np.array(11, dtype=np.int64),
                   "f5": np.array([12, 13, 14], dtype=np.int64),
+                  "f6": np.array(
+                      [[15, 16], [17, 18], [19, 20]], dtype=np.int64
+                  ),
               },
           ),
       ],
@@ -2031,7 +2140,7 @@ def gen_toy_regression_dataset(
       label_val = n1_f1[i] * 2.0 + np.sum(connected_n2_f2) + rng.random()
     else:
       label_val = n1_f1[i] * 2.0 + rng.random()
-      
+
     if label_dim > 1:
       label_val = [label_val + j * 0.5 for j in range(label_dim)]
 

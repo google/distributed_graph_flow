@@ -84,6 +84,7 @@ class ReadHGraphTest(absltest.TestCase):
                             "f3": np.array(4),
                             "f4": np.array(10),
                             "f5": np.array([11, 12]),
+                            "f6": np.array([[11, 12], [13, 14]]),
                         },
                     ),
                     distributed_graph.Node(
@@ -92,6 +93,7 @@ class ReadHGraphTest(absltest.TestCase):
                             "f3": np.array(5),
                             "f4": np.array(11),
                             "f5": np.array([12, 13, 14]),
+                            "f6": np.array([[15, 16], [17, 18], [19, 20]]),
                         },
                     ),
                 ],

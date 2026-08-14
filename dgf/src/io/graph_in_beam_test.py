@@ -121,6 +121,7 @@ def _check_graph(self, graph, edge_ids: bool, has_edges: bool = True):
                       "f3": np.array(4, dtype=np.int64),
                       "f4": np.array(10, dtype=np.int64),
                       "f5": np.array([11, 12], dtype=np.int64),
+                      "f6": np.array([[11, 12], [13, 14]], dtype=np.int64),
                       "#id": np.array(1, dtype=np.int64),
                   },
               ),
@@ -130,6 +131,9 @@ def _check_graph(self, graph, edge_ids: bool, has_edges: bool = True):
                       "f3": np.array(5, dtype=np.int64),
                       "f4": np.array(11, dtype=np.int64),
                       "f5": np.array([12, 13, 14], dtype=np.int64),
+                      "f6": np.array(
+                          [[15, 16], [17, 18], [19, 20]], dtype=np.int64
+                      ),
                       "#id": np.array(2, dtype=np.int64),
                   },
               ),

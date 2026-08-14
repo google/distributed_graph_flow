@@ -69,6 +69,12 @@ class InMemoryStatisticsTest(absltest.TestCase):
                           maximum=14,
                           quantiles=[11.0, 12.0, 13.0, 14.0],
                       ),
+                      "f6": statistics_lib.FeatureStatistics(
+                          count=4,
+                          minimum=11,
+                          maximum=20,
+                          quantiles=[11.0, 14.0, 17.0, 20.0],
+                      ),
                   }
               ),
               "n1": statistics_lib.FeatureSetStatistics(
