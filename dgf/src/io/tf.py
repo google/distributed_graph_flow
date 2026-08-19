@@ -318,14 +318,14 @@ def tf_graph_dict_to_tf_graph(
         edgeset_features[edgeset_name][attr] = val
 
   tf_node_sets = {}
-  for name in set(nodeset_num_nodes.keys()).union(nodeset_features.keys()):
+  for name in set(nodeset_num_nodes).union(nodeset_features):
     tf_node_sets[name] = tf_in_memory_graph_lib.TFInMemoryNodeSet(
         num_nodes=nodeset_num_nodes.get(name),
         features=nodeset_features.get(name, {}),
     )
 
   tf_edge_sets = {}
-  for name in set(edgeset_adjacency.keys()).union(edgeset_features.keys()):
+  for name in set(edgeset_adjacency).union(edgeset_features):
     tf_edge_sets[name] = tf_in_memory_graph_lib.TFInMemoryEdgeSet(
         adjacency=edgeset_adjacency.get(name),
         features=edgeset_features.get(name, {}),

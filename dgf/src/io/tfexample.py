@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Utilities to read/write TFRecord files efficiently in memory."""
+"""Utilities to read/write TFExample in-process in OSS containers."""
 
 from __future__ import annotations
 
@@ -23,6 +23,40 @@ from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import numpy as np
 import tqdm
 
+def _sparse_to_numpy(
+    values: tf.SparseTensor, expected_shape: Tuple[int, ...], column: str
+) -> np.ndarray:
+  if expected_shape and (-1 in expected_shape or None in expected_shape):
+    ragged = tf.RaggedTensor.from_sparse(values)
+    dense_tensor = np.empty(ragged.shape[0], dtype=object)
+    for i, r in enumerate(ragged):
+      arr = r.numpy()
+      if arr.dtype == object:
+        arr = arr.astype(np.bytes_)
+      if expected_shape[1:] != ():
+        arr = arr.reshape((-1,) + expected_shape[1:])
+      dense_tensor[i] = arr
+  else:
+    dense_tensor = tf.sparse.to_dense(values).numpy()
+    if dense_tensor.dtype == object:
+      dense_tensor = dense_tensor.astype(np.bytes_)
+    if expected_shape != ():
+      expected_flat_size = int(np.prod(expected_shape))
+      if dense_tensor.shape[1] != expected_flat_size:
+        if dense_tensor.shape[1] == 0:
+          dense_tensor = np.zeros(
+              shape=(dense_tensor.shape[0], expected_flat_size),
+              dtype=dense_tensor.dtype,
+          )
+        else:
+          raise ValueError(
+              f"Feature '{column}' has unexpected shape in a batch."
+              f" Expected flat size: {expected_flat_size} (shape:"
+              f" {expected_shape}), but got flat size:"
+              f" {dense_tensor.shape[1]} (shape: {dense_tensor.shape}). "
+          )
+  return dense_tensor
+
 
 def _read_dataset_generic(
     paths: list[str],
@@ -32,9 +66,6 @@ def _read_dataset_generic(
     key_column: Optional[str] = None,
     verbose: bool = False,
 ) -> Tuple[Dict[str, np.ndarray], int]:
-  """Generic helper to read a dataset of TF Examples."""
-  if len(columns) != len(set(columns.keys())):
-    raise ValueError(f"The 'columns' dict contains duplicate keys: {columns}")
 
   time_begin = datetime.datetime.now()
   if verbose:
@@ -44,7 +75,9 @@ def _read_dataset_generic(
       col: tf.io.VarLenFeature(dtype) for col, (dtype, _) in columns.items()
   }
 
-  path_dataset = tf.data.Dataset.from_tensor_slices(paths)  # pyrefly: ignore[bad-argument-type]
+  path_dataset = tf.data.Dataset.from_tensor_slices(
+      tf.constant(paths, dtype=tf.string)
+  )
 
   if not paths:
     raise ValueError("paths should not be empty")
@@ -100,25 +133,7 @@ def _read_dataset_generic(
           data[column].append(np.expand_dims(keys_noop, axis=-1))
         else:
           values = batch[column]
-          dense_tensor = tf.sparse.to_dense(values).numpy()
-          if dense_tensor.dtype == object:
-            dense_tensor = dense_tensor.astype(np.bytes_)
-          expected_shape = columns[column][1]
-          if expected_shape != ():
-            expected_flat_size = int(np.prod(expected_shape))
-            if dense_tensor.shape[1] != expected_flat_size:
-              if dense_tensor.shape[1] == 0:
-                dense_tensor = np.zeros(
-                    shape=(dense_tensor.shape[0], expected_flat_size),
-                    dtype=dense_tensor.dtype,
-                )
-              else:
-                raise ValueError(
-                    f"Feature '{column}' has unexpected shape in a batch."
-                    f" Expected flat size: {expected_flat_size} (shape:"
-                    f" {expected_shape}), but got flat size:"
-                    f" {dense_tensor.shape[1]} (shape: {dense_tensor.shape}). "
-                )
+          dense_tensor = _sparse_to_numpy(values, columns[column][1], column)
           data[column].append(dense_tensor)
       num_examples += batch_size
       if pbar is not None:
@@ -127,25 +142,7 @@ def _read_dataset_generic(
     for batch in dataset:
       batch_size = 0
       for column, values in batch.items():
-        dense_tensor = tf.sparse.to_dense(values).numpy()
-        if dense_tensor.dtype == object:
-          dense_tensor = dense_tensor.astype(np.bytes_)
-        expected_shape = columns[column][1]
-        if expected_shape != ():
-          expected_flat_size = int(np.prod(expected_shape))
-          if dense_tensor.shape[1] != expected_flat_size:
-            if dense_tensor.shape[1] == 0:
-              dense_tensor = np.zeros(
-                  shape=(dense_tensor.shape[0], expected_flat_size),
-                  dtype=dense_tensor.dtype,
-              )
-            else:
-              raise ValueError(
-                  f"Feature '{column}' has unexpected shape in a batch."
-                  f" Expected flat size: {expected_flat_size} (shape:"
-                  f" {expected_shape}), but got flat size:"
-                  f" {dense_tensor.shape[1]} (shape: {dense_tensor.shape}). "
-              )
+        dense_tensor = _sparse_to_numpy(values, columns[column][1], column)
         batch_size = dense_tensor.shape[0]
         data[column].append(dense_tensor)
       num_examples += batch_size
@@ -179,14 +176,14 @@ def _read_dataset_generic(
             " `schema_transformer` argument."
         )
       value = np.squeeze(value, axis=1)
-    else:
+    elif -1 not in shape and None not in shape:
       value = np.reshape(value, (-1,) + shape)
     final_data[key] = value
 
   return final_data, num_examples
 
 
-def read_tf_record(
+def read_tfrecord(
     paths: list[str],
     columns: Dict[str, Tuple[tf.DType, Tuple[int, ...]]],
     preserve_order: bool,
@@ -230,7 +227,7 @@ def read_tf_record(
   )
 
 
-def write_tf_record(
+def write_tfrecord(
     path: str, examples: list[tf.train.Example], compression: str = "GZIP"
 ):
   """Writes a list of tf.train.Example to a TFRecord file."""

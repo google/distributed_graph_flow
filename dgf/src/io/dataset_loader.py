@@ -460,8 +460,7 @@ def fetch_ogb_graph(
 
   if name not in loaders:
     raise ValueError(
-        f"Unknown graph: {name}. The available graph names are:"
-        f" {list(loaders.keys())}"
+        f"Unknown graph: {name}. The available graph names are: {list(loaders)}"
     )
 
   def load_graph():

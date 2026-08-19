@@ -23,7 +23,10 @@ from typing import TYPE_CHECKING
 
 from dgf.src.data import distributed_graph
 from dgf.src.data import schema as schema_lib
+from dgf.src.io import beam_tf_graph_common
+from dgf.src.io import graph_in_memory
 from dgf.src.io import hgraph_in_memory
+from dgf.src.io import tf_graph_common
 from dgf.src.util import filesystem
 from dgf.src.util import proto as proto_lib
 from dgf.src.util import shard as shard_lib
@@ -45,21 +48,6 @@ def read_graphai_hgraph(
     remove_dangling_edges: bool = False,
 ) -> distributed_graph.Graph:
   """Reads a distributed HGraph using Beam.
-
-  This PTransform reads a HGraph where data components like node features,
-  edge features, and adjacencies are stored in a distributed format.
-
-  For small HGraphs that can fit in memory, using
-  "dgf.io.read_graphai_hgraph" (i.e., loading the HGraph in memory)
-  might be easier to use and more efficient on small datasets.
-
-  Usage example:
-
-  ```python
-  graph = dgf.beam.io.read_graphai_hgraph(pbegin, "gs:/my/dataset")
-  ```
-
-  Note: Currently only support TFRecord HGraph.
 
   Args:
     pbegin: Beam pbegin.
@@ -128,7 +116,7 @@ class ReadFromHGraph(PTransform):
     else:
       schema = self.schema
 
-    extension = hgraph_in_memory.get_extension(self.container_type)
+    extension = graph_in_memory.get_extension(self.container_type)
 
     # Read the node features
     # TODO(gbm): Add support for graph without node features.
@@ -255,35 +243,6 @@ class ReadFromHGraph(PTransform):
     )
 
 
-class ReadTfExampleContainer(PTransform):
-  """Reads a container of tf.train.Example."""
-
-  def __init__(
-      self,
-      file_pattern: str,
-      container_type: hgraph_in_memory.HGraphContainerType,
-  ):
-    self.file_pattern = file_pattern
-    self.container_type = container_type
-
-  def expand(
-      self, pbegin: beam.pvalue.PBegin
-  ) -> beam.PCollection[tf.train.Example]:
-    tfe_coder = beam.coders.ProtoCoder(tf.train.Example)
-    if self.container_type == hgraph_in_memory.HGraphContainerType.TF_RECORD:
-      return (
-          pbegin
-          | f"Read {self.file_pattern}"
-          >> beam.io.tfrecordio.ReadFromTFRecord(
-              file_pattern=self.file_pattern,
-              coder=tfe_coder,
-              compression_type=beam.io.filesystem.CompressionTypes.GZIP,
-          )
-      )
-    else:
-      raise ValueError(f"Unsupported container type: {self.container_type}")
-
-
 class ReadNodeSet(PTransform):
   """Reads a container of nodes."""
 
@@ -305,174 +264,28 @@ class ReadNodeSet(PTransform):
     tfe_coder = beam.coders.ProtoCoder(tf.train.Example)
 
     if self.container_type == hgraph_in_memory.HGraphContainerType.TF_RECORD:
-
-      if self.node_id_column is None:
-        node_id_column = hgraph_in_memory.DEFAULT_KEY_ID
-      else:
-        node_id_column = self.node_id_column
-
+      node_id_column = (
+          self.node_id_column
+          if self.node_id_column is not None
+          else hgraph_in_memory.DEFAULT_KEY_ID
+      )
       return (
           pbegin
-          | f"Read {self.file_pattern}"
-          >> beam.io.tfrecordio.ReadFromTFRecord(
+          | beam_tf_graph_common.ReadTfExampleContainer(
               file_pattern=self.file_pattern,
-              coder=tfe_coder,
-              compression_type=beam.io.filesystem.CompressionTypes.GZIP,
+              container_type=tf_graph_common.TfExampleContainer.TF_RECORD,
           )
           | "Build nodes"
           >> beam.Map(
-              nonkeyed_tf_example_to_node,
+              beam_tf_graph_common.nonkeyed_tf_example_to_node,
               schema=self.schema,
               node_id_column=node_id_column,
+              ignore_keys=(node_id_column,) if node_id_column else (),
           )
       )
 
     else:
       raise ValueError(f"Unsupported container type: {self.container_type}")
-
-
-def tf_feature_to_feature(
-    example: tf.train.Example,
-    key: str,
-    feature_schema: schema_lib.FeatureSchema,
-) -> np.ndarray:
-  """Extracts features from a tf.train.Example feature.
-
-  Args:
-    example: A tf.train.Example.
-    key: The key of the feature to extract.
-    feature_schema: Schema of the feature.
-
-  Returns:
-    A numpy array containing the feature values.
-  """
-
-  feature = example.features.feature.get(key)
-  if feature is None:
-    raise ValueError(f"Missing feature {key}")
-  if feature.HasField("int64_list"):
-    value = np.array(feature.int64_list.value, dtype=np.int64)
-  elif feature.HasField("float_list"):
-    value = np.array(feature.float_list.value, dtype=np.float32)
-  elif feature.HasField("bytes_list"):
-    value = np.array(feature.bytes_list.value, dtype=np.bytes_)
-  else:
-    raise ValueError("Non supported type")
-
-  if feature_schema.shape is None or feature_schema.shape == ():
-    if value.shape[0] != 1:
-      raise ValueError(
-          f"Expected scalar value for feature '{key}' but got value with shape"
-          f" {value.shape}. If the feature is multi-dimensional, its `shape`"
-          " should be specified in the Graph Schema. Note: If you cannot fix"
-          " the schema file, use the `override_schema` or `schema_transformer`"
-          " argument of the `read_graphai_hgraph` function."
-      )
-    value = np.squeeze(value, axis=0)
-  else:
-    # Shape of the expected array. Replace None values with -1 in the shape:
-    # DGF uses None for unknown shape while NP uses -1.
-    # (1,None,4) => (1,-1,4)
-    expected_shape = tuple(
-        s if s is not None else -1 for s in feature_schema.shape
-    )
-    value = np.reshape(value, expected_shape)
-  return value
-
-
-def tf_feature_to_bytes(example: tf.train.Example, key: str) -> bytes:
-  """Extracts a byte value from a tf.train.Example feature.
-
-  Args:
-    example: A tf.train.Example.
-    key: The key of the feature to extract.
-
-  Returns:
-    A single bytes or int value.
-  """
-  feature = example.features.feature.get(key)
-  if feature is None:
-    raise ValueError(f"Missing feature {key}")
-  if feature.HasField("bytes_list"):
-    if len(feature.bytes_list.value) != 1:
-      raise ValueError(
-          f"Expected a single bytes value for {key}. Instead got"
-          f" {len(feature.bytes_list.value)} values."
-      )
-    return feature.bytes_list.value[0]
-  elif feature.HasField("int64_list"):
-    if len(feature.int64_list.value) != 1:
-      raise ValueError(
-          f"Expected a single int value for {key}. Instead got"
-          f" {len(feature.int64_list.value)} values."
-      )
-    return feature.int64_list.value[0]
-  else:
-    raise ValueError("Non supported type")
-
-
-def nonkeyed_tf_example_to_node(
-    example: tf.train.Example,
-    schema: schema_lib.NodeSchema,
-    node_id_column: str,
-) -> distributed_graph.Node:
-  """Build a node from a tf example."""
-  node_features = {}
-  for feature_name, feature_schema in schema.features.items():
-    if feature_name == node_id_column:
-      continue
-    node_features[feature_name] = tf_feature_to_feature(
-        example, feature_name, feature_schema
-    )
-  node_id = tf_feature_to_bytes(example, node_id_column)
-  return distributed_graph.Node(id=node_id, features=node_features)
-
-
-def keyed_tf_example_to_node(
-    keyed_example: Tuple[bytes, tf.train.Example],
-    schema: schema_lib.NodeSchema,
-    node_id_column: Optional[str],
-) -> distributed_graph.Node:
-  """Build a node from a tf example."""
-  key, example = keyed_example
-  node_features = {}
-  for feature_name, feature_schema in schema.features.items():
-    if feature_name == node_id_column:
-      continue
-    node_features[feature_name] = tf_feature_to_feature(
-        example, feature_name, feature_schema
-    )
-  if node_id_column is not None:
-    node_features[node_id_column] = np.array([key], dtype=np.bytes_)
-  return distributed_graph.Node(id=key, features=node_features)
-
-
-def tf_example_to_edge(
-    example: tf.train.Example,
-    edge_id_column: Optional[str],
-) -> distributed_graph.Edge:
-  """Extracts edge adjacency from a tf example.
-
-  Args:
-    example: A tf.train.Example.
-    edge_id_column: Column containing the edge id.
-
-  Returns:
-    Edge adjacency.
-  """
-  edge_target = tf_feature_to_bytes(example, hgraph_in_memory.KEY_TARGET)
-  edge_source = tf_feature_to_bytes(example, hgraph_in_memory.KEY_SOURCE)
-
-  if edge_id_column is not None and edge_id_column in example.features.feature:
-    # TODO(gbm): How to generate an error where the ID is "missing" while
-    # allowing the automatic detection of id.
-    edge_id = tf_feature_to_bytes(example, edge_id_column)
-  else:
-    edge_id = None
-
-  return distributed_graph.Edge(
-      source=edge_source, target=edge_target, id=edge_id
-  )
 
 
 class ReadEdgeSet(PTransform):
@@ -497,149 +310,35 @@ class ReadEdgeSet(PTransform):
     else:
       edge_id_column = self.edge_id_column
 
-    if self.container_type == hgraph_in_memory.HGraphContainerType.TF_RECORD:
+    if self.container_type in (
+        hgraph_in_memory.HGraphContainerType.TF_RECORD,
+    ):
       return (
           pbegin
-          | ReadTfExampleContainer(
+          | beam_tf_graph_common.ReadTfExampleContainer(
               file_pattern=self.file_pattern,
-              container_type=self.container_type,
+              container_type=tf_graph_common.TfExampleContainer[
+                  self.container_type.name
+              ],
           )
           | "Import edgeset"
-          >> beam.Map(tf_example_to_edge, edge_id_column=edge_id_column)
-      )
-    else:
-      raise ValueError(f"Unsupported container type: {self.container_type}")
-
-
-class WriteTfExampleContainer(PTransform):
-  """Writes a container of tf.train.Example."""
-
-  def __init__(
-      self,
-      file_path_prefix: str,
-      extension: str,
-      container_type: hgraph_in_memory.HGraphContainerType,
-  ):
-    self.file_path_prefix = file_path_prefix
-    self.extension = extension
-    self.container_type = container_type
-
-  def expand(
-      self, pcoll: beam.PCollection[tf.train.Example]
-  ) -> beam.pvalue.PDone:
-    tfe_coder = beam.coders.ProtoCoder(tf.train.Example)
-    if self.container_type == hgraph_in_memory.HGraphContainerType.TF_RECORD:
-      return (
-          pcoll
-          | f"Write {self.file_path_prefix}"
-          >> beam.io.tfrecordio.WriteToTFRecord(
-              file_path_prefix=self.file_path_prefix,
-              file_name_suffix=self.extension,
-              coder=tfe_coder,
-              compression_type=beam.io.filesystem.CompressionTypes.GZIP,
+          >> beam.Map(
+              beam_tf_graph_common.tf_example_to_edge,
+              edge_id_column=edge_id_column,
+              ignore_keys=(
+                  tf_graph_common.KEY_SOURCE,
+                  tf_graph_common.KEY_TARGET,
+                  edge_id_column,
+              )
+              if edge_id_column
+              else (
+                  tf_graph_common.KEY_SOURCE,
+                  tf_graph_common.KEY_TARGET,
+              ),
           )
       )
     else:
       raise ValueError(f"Unsupported container type: {self.container_type}")
-
-
-def node_to_tf_example(
-    node: distributed_graph.Node,
-    node_id_column: Optional[str],
-    nodeset_schema: schema_lib.NodeSchema,
-) -> tf.train.Example:
-  """Converts node features to a tf example.
-
-  Args:
-    node: Input distributed node.
-    node_id_column: Optional tf example column where to export the node id.
-    nodeset_schema: Schema of the node set.
-
-  Returns:
-    A tf.train.Example.
-  """
-
-  example = tf.train.Example()
-
-  for feature_name, feature_schema in nodeset_schema.features.items():
-    if feature_name == node_id_column:
-      value = [node.id]
-    else:
-      value = node.features[feature_name]  # pyrefly: ignore[unsupported-operation]
-      if value.ndim == 0:
-        value = np.expand_dims(value, axis=0)
-      value = value.flatten()
-
-    if feature_schema.format.is_integer():
-      example.features.feature[feature_name].int64_list.value.extend(value)
-    elif feature_schema.format.is_float():
-      example.features.feature[feature_name].float_list.value.extend(value)
-    elif feature_schema.format == schema_lib.FeatureFormat.BYTES:
-      example.features.feature[feature_name].bytes_list.value.extend(value)
-    else:
-      raise ValueError(f"Non supported type {feature_schema.format}")
-
-  return example
-
-
-def set_tf_scalar(dst, value, format: schema_lib.FeatureFormat):
-  if format.is_integer():
-    dst.int64_list.value.append(value)
-  elif format == schema_lib.FeatureFormat.BYTES:
-    dst.bytes_list.value.append(value)
-  else:
-    raise ValueError(f"Unsupported format: {format}")
-
-
-def edge_to_tf_example(
-    edge: distributed_graph.Edge,
-    edge_id_column: Optional[str],
-    edge_schema: schema_lib.EdgeSchema,
-    schema: schema_lib.GraphSchema,
-) -> tf.train.Example:
-  """Converts edge adjacency to a tf example.
-
-  Args:
-    edge: a distributed_graph.Edge instance.
-    edge_id_column: Optional tf example column where to export the edge id.
-    edge_schema: Schema of the edge set.
-    schema: Schema of the entire graph.
-
-  Returns:
-    A tf.train.Example.
-  """
-
-  example = tf.train.Example()
-
-  source_format = (
-      schema.node_sets[edge_schema.source]
-      .features[hgraph_in_memory.DEFAULT_KEY_ID]
-      .format
-  )
-  target_format = (
-      schema.node_sets[edge_schema.target]
-      .features[hgraph_in_memory.DEFAULT_KEY_ID]
-      .format
-  )
-
-  set_tf_scalar(
-      example.features.feature[hgraph_in_memory.KEY_SOURCE],
-      edge.source,
-      source_format,
-  )
-  set_tf_scalar(
-      example.features.feature[hgraph_in_memory.KEY_TARGET],
-      edge.target,
-      target_format,
-  )
-
-  if (
-      edge.id is not None
-      and edge_id_column is not None
-      and edge_id_column not in example.features.feature
-  ):
-    example.features.feature[edge_id_column].bytes_list.value.append(edge.id)
-  return example
 
 
 def write_graphai_hgraph(
@@ -675,7 +374,7 @@ def write_graphai_hgraph(
       os.path.join(path, hgraph_in_memory.PATH_GRAPH_SCHEMA), tfgnn_schema
   )
 
-  extension = hgraph_in_memory.get_extension(container_type)
+  extension = graph_in_memory.get_extension(container_type)
 
   if container_type == hgraph_in_memory.HGraphContainerType.TF_RECORD:
     if node_id_column is None:
@@ -690,38 +389,53 @@ def write_graphai_hgraph(
         nodeset
         | f"Export nodeset {nodeset_name}"
         >> beam.Map(
-            node_to_tf_example,
+            beam_tf_graph_common.node_to_tf_example,
             node_id_column=node_id_column,
             nodeset_schema=nodeset_schema,
         )
         | f"Write nodeset {nodeset_name}"
-        >> WriteTfExampleContainer(
+        >> beam_tf_graph_common.WriteTfExampleContainer(
             file_path_prefix=os.path.join(
                 path, hgraph_in_memory.PATH_NODE_FEATURE, nodeset_name
             ),
             extension=extension,
-            container_type=container_type,
+            container_type=tf_graph_common.TfExampleContainer[
+                container_type.name
+            ],
         )
     )
 
   # Write the edge adjacency
   for edgeset_name, edgeset_schema in graph.schema.edge_sets.items():
     edgeset = graph.edge_sets[edgeset_name]
+    source_format = (
+        graph.schema.node_sets[edgeset_schema.source]
+        .features[hgraph_in_memory.DEFAULT_KEY_ID]
+        .format
+    )
+    target_format = (
+        graph.schema.node_sets[edgeset_schema.target]
+        .features[hgraph_in_memory.DEFAULT_KEY_ID]
+        .format
+    )
     _ = (
         edgeset
         | f"Export edgeset {edgeset_name}"
         >> beam.Map(
-            edge_to_tf_example,
+            beam_tf_graph_common.edge_to_tf_example,
             edge_id_column=edge_id_column,
             edge_schema=edgeset_schema,
-            schema=graph.schema,
+            source_format=source_format,
+            target_format=target_format,
         )
         | f"Write edgeset {edgeset_name}"
-        >> WriteTfExampleContainer(
+        >> beam_tf_graph_common.WriteTfExampleContainer(
             file_path_prefix=os.path.join(
                 path, hgraph_in_memory.PATH_EDGES, edgeset_name
             ),
             extension=extension,
-            container_type=container_type,
+            container_type=tf_graph_common.TfExampleContainer[
+                container_type.name
+            ],
         )
     )

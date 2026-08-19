@@ -23,14 +23,6 @@ import tensorflow as tf
 
 class TfExampleTest(absltest.TestCase):
 
-  def _write_tfrecord(self, path, examples, compressed=False):
-    options = tf.io.TFRecordOptions(
-        compression_type="GZIP" if compressed else ""
-    )
-    with tf.io.TFRecordWriter(path, options=options) as writer:
-      for example in examples:
-        writer.write(example.SerializeToString())
-
   def _create_example(self, f1_val, f2_val, f3_val, f4_val):
     feature = {
         "f1": tf.train.Feature(float_list=tf.train.FloatList(value=[f1_val])),
@@ -42,7 +34,7 @@ class TfExampleTest(absltest.TestCase):
     }
     return tf.train.Example(features=tf.train.Features(feature=feature))
 
-  def test_read_tf_record_sharded(self):
+  def test_read_tfrecord_sharded(self):
     test_dir = tempfile.mkdtemp()
     file_path1 = os.path.join(test_dir, "shard-00000-of-00002.tfrecord")
     file_path2 = os.path.join(test_dir, "shard-00001-of-00002.tfrecord")
@@ -55,17 +47,52 @@ class TfExampleTest(absltest.TestCase):
         self._create_example(3.0, [14, 15], "C", 300),
     ]
 
-    self._write_tfrecord(file_path1, examples1)
-    self._write_tfrecord(file_path2, examples2)
+    tfexample.write_tfrecord(file_path1, examples1, compression="GZIP")
+    tfexample.write_tfrecord(file_path2, examples2, compression="GZIP")
 
-    data, num_examples = tfexample.read_tf_record(
+    data, num_examples = tfexample.read_tfrecord(
         [file_path1, file_path2],
         {
             "f1": (tf.float32, ()),
             "f2": (tf.int64, (2, 1)),
             "f3": (tf.string, (1,)),
         },
-        compressed=False,
+        compressed=True,
+        preserve_order=True,
+    )
+
+    np.testing.assert_array_equal(data["f1"], np.array([1.0, 2.0, 3.0]))
+    np.testing.assert_array_equal(
+        data["f2"], np.array([[[10], [11]], [[12], [13]], [[14], [15]]])
+    )
+    np.testing.assert_array_equal(
+        data["f3"], np.array([[b"A"], [b"B"], [b"C"]])
+    )
+    self.assertEqual(num_examples, 3)
+
+  def test_read_recordio_sharded(self):
+    test_dir = tempfile.mkdtemp()
+    file_path1 = os.path.join(test_dir, "shard-00000-of-00002.recordio")
+    file_path2 = os.path.join(test_dir, "shard-00001-of-00002.recordio")
+
+    examples1 = [
+        self._create_example(1.0, [10, 11], "A", 100),
+        self._create_example(2.0, [12, 13], "B", 200),
+    ]
+    examples2 = [
+        self._create_example(3.0, [14, 15], "C", 300),
+    ]
+
+    tfexample.write_recordio(file_path1, examples1)
+    tfexample.write_recordio(file_path2, examples2)
+
+    data, num_examples = tfexample.read_recordio(
+        [file_path1, file_path2],
+        {
+            "f1": (tf.float32, ()),
+            "f2": (tf.int64, (2, 1)),
+            "f3": (tf.string, (1,)),
+        },
         preserve_order=True,
     )
 

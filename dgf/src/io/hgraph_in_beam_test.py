@@ -236,7 +236,7 @@ class WriteHGraphTest(absltest.TestCase):
             node_id.encode()
         )
         n1_examples.append(example)
-      tfexample_lib.write_tf_record(
+      tfexample_lib.write_tfrecord(
           os.path.join(path, "node_features", "n1-00000-of-00001.tfrecord.gz"),
           n1_examples,
       )
@@ -256,7 +256,7 @@ class WriteHGraphTest(absltest.TestCase):
           _create_edge_example("A", "C"),
           _create_edge_example("C", "B"),
       ]
-      tfexample_lib.write_tf_record(
+      tfexample_lib.write_tfrecord(
           os.path.join(path, "edges", "e1-00000-of-00001.tfrecord.gz"),
           edge_examples,
       )

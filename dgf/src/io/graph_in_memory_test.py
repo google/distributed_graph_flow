@@ -17,6 +17,7 @@ import tempfile
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.data import distributed_graph
+from dgf.src.data import gf_metadata as gf_metadata_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import graph_in_memory as gf_graph_in_memory
@@ -105,8 +106,10 @@ class ReadGfGraphTest(parameterized.TestCase):
       in_memory_graph_validate_lib.validate_graph(graph, schema)
       self.assertEqual(graph.edge_sets["e2"].num_edges(), 1)
 
-  @parameterized.product(edge_ids=[True, False])
-  def test_write_graph(self, edge_ids: bool):
+  @parameterized.product(
+      edge_ids=[True, False], container=["PARQUET", "TF_RECORD", "RECORDIO"]
+  )
+  def test_write_graph(self, edge_ids: bool, container: str):
     with tempfile.TemporaryDirectory() as tmpdir:
 
       # Generate a toy in-memory graph
@@ -119,7 +122,9 @@ class ReadGfGraphTest(parameterized.TestCase):
       )
 
       # Write and read back the graph
-      gf_graph_in_memory.write_graph(in_memory_graph, schema, output_path)
+      gf_graph_in_memory.write_graph(
+          in_memory_graph, schema, output_path, container=container
+      )
       output_in_memory_graph, output_schema = gf_graph_in_memory.read_graph(
           output_path
       )
@@ -129,13 +134,17 @@ class ReadGfGraphTest(parameterized.TestCase):
       test_util.assert_are_equal(self, output_in_memory_graph, in_memory_graph)
 
       # Check files
+
+      extension = gf_graph_in_memory.get_extension(
+          gf_metadata_lib.Container(container)
+      )
       expected_files = [
           "/schema.json",
           "/metadata.json",
-          "/nodesets/n1-00000-of-00001.parquet",
-          "/nodesets/n2-00000-of-00001.parquet",
-          "/edgesets/e1-00000-of-00001.parquet",
-          "/edgesets/e2-00000-of-00001.parquet",
+          f"/nodesets/n1-00000-of-00001{extension}",
+          f"/nodesets/n2-00000-of-00001{extension}",
+          f"/edgesets/e1-00000-of-00001{extension}",
+          f"/edgesets/e2-00000-of-00001{extension}",
       ]
       actual_files = []
       for dirpath, _, filenames in os.walk(output_path):
@@ -174,4 +183,3 @@ class ReadGfGraphTest(parameterized.TestCase):
 
 if __name__ == "__main__":
   absltest.main()
-
