@@ -21,7 +21,8 @@
 namespace dgf::util::concurrency {
 
 // TODO(gbm): Use XYZ's thread.
-typedef std::unique_lock<std::mutex> MutexLock;
+typedef std::lock_guard<std::mutex> MutexLock;
+typedef std::unique_lock<std::mutex> UniqueMutexLock;
 typedef std::thread Thread;
 typedef std::mutex Mutex;
 
@@ -40,7 +41,7 @@ class Channel {
   // Close the channel. No new items can be push in the channel. Any "Pop" will
   // return immediately with an empty optional.
   void Close() {
-    MutexLock l(mutex_);
+    UniqueMutexLock l(mutex_);
     if (channel_closed_) {
       return;
     }
@@ -51,7 +52,7 @@ class Channel {
 
   // Push an item in the channel.
   void Push(Input item) {
-    MutexLock l(mutex_);
+    UniqueMutexLock l(mutex_);
     if (max_items_.has_value()) {
       while (content_.size() >= *max_items_ && !channel_closed_) {
         not_full_.wait(l);
@@ -68,7 +69,7 @@ class Channel {
   // {}. If the channel is empty but not closed, blocks. If the channel is not
   // empty, returns the first added element.
   std::optional<Input> Pop() {
-    MutexLock l(mutex_);
+    UniqueMutexLock l(mutex_);
     while (content_.empty() && !channel_closed_) {
       not_empty_.wait(l);
     }
@@ -88,7 +89,7 @@ class Channel {
   std::atomic<bool> channel_closed_ = false;
   std::condition_variable not_empty_;  // Signaled when an item is added.
   std::condition_variable not_full_;   // Signaled when an item is removed.
-  std::mutex mutex_;
+  Mutex mutex_;
   std::optional<size_t> max_items_;
 };
 

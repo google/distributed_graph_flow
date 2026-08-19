@@ -44,6 +44,7 @@ py_library(
         ":utils",
         "//dgf",
         "//dgf/src/util:log",
+        # numpy dep,
     ],
 )
 

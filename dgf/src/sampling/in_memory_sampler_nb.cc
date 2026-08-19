@@ -39,8 +39,10 @@ absl::StatusOr<SamplingPlan> CreateSamplingPlan(
 
   DGF_GET_ATTR_OR_RETURN(nb::object, py_root, py_plan, "root");
   DGF_GET_ATTR_OR_RETURN(bool, with_replacement, py_plan, "with_replacement");
+  DGF_GET_ATTR_OR_RETURN(bool, multi_visit, py_plan, "multi_visit");
 
   plan.with_replacement = with_replacement;
+  plan.multi_visit = multi_visit;
 
   std::function<absl::StatusOr<std::unique_ptr<SamplingPlan::Node>>(
       const nb::object&)>

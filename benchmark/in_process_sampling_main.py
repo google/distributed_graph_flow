@@ -27,7 +27,20 @@ blaze run -c opt --cpu=haswell //third_party/py/dgf/benchmark:in_process_samplin
   --graph_path=/cns/iz-d/home/research-graph/public/graphflow_datasets/fetch_repo/ogb_arxiv\
   --seed_nodeset=nodes
 
+Profiling Instructions:
+1. Build the binary in opt mode:
+   blaze build -c opt --cpu=haswell //third_party/py/dgf/benchmark:in_process_sampling_main
+2. Run with CPUPROFILE enabled:
+   CPUPROFILE=/tmp/prof.out ./blaze-bin/third_party/py/dgf/benchmark/in_process_sampling_main \
+     --work_dir=/tmp/gf_benchmark \
+     --graph_path=/cns/iz-d/home/research-graph/public/graphflow_datasets/fetch_repo/ogb_arxiv \
+    --seed_nodeset=nodes
 
+3. View the profiling results:
+   # Top functions:
+   pprof --text ./blaze-bin/third_party/py/dgf/benchmark/in_process_sampling_main /tmp/prof.out | head -n 40
+   # Interactive Web UI:
+   pprof -http=localhost:8080 ./blaze-bin/third_party/py/dgf/benchmark/in_process_sampling_main /tmp/prof.out
 
 # Note: For very large datasets like `papers100` (1.6B edges), avoid using
 # `--work_dir` to prevent local caching, as the dataset is very large.
@@ -58,7 +71,7 @@ _SEED_NODESET = flags.DEFINE_string(
 )
 _LIST_NUM_HOPS = flags.DEFINE_list(
     "list_num_hops",
-    "2,3,4",
+    "3",
     "A comma-separated list of integers representing the number of hops to"
     " sample.",
 )

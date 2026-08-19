@@ -214,6 +214,7 @@ struct SamplingPlan {
 
   std::unique_ptr<Node> root;
   bool with_replacement;
+  bool multi_visit;
 
   // Total number of steps. "step_idx" in "Node" are in [0, num_steps).
   size_t num_steps;

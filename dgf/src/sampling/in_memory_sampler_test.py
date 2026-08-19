@@ -1518,5 +1518,66 @@ Node(nodeset_idx=0, children=[
       )
 
 
+class InMemorySamplerDiamon(parameterized.TestCase):
+
+  @classmethod
+  def setUpClass(cls):
+    super().setUpClass()
+    cls.schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "f1": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64
+                    )
+                }
+            ),
+        },
+        edge_sets={
+            "e11": schema_lib.EdgeSchema(source="n1", target="n1"),
+        },
+    )
+    # Create a diamon followed by 3 nodes.
+    cls.graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "n1": in_memory_graph_lib.InMemoryNodeSet(
+                features={"f1": np.array([10, 11, 12, 13, 14, 15, 16])},
+                num_nodes=7,
+            ),
+        },
+        edge_sets={
+            "e11": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array(
+                    [[0, 0, 1, 2, 3, 3, 3], [1, 2, 3, 3, 4, 5, 6]]
+                )
+            ),
+        },
+    )
+
+  def test_sample(self):
+    plan = config_lib.simple_sampling_config_to_sampling_plan(
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1",
+            num_hops=5,
+            hop_width=2,
+            reverse=False,
+            multi_visit=False,
+        ),
+        self.schema,
+    )
+    sampler = in_memory_sampler_lib.create_sampler(
+        self.graph,
+        plan,
+        self.schema,
+        return_features=True,
+        return_node_idxs=False,
+        batch_size=5,
+    )
+    sample = sampler.sample(0)
+    self.assertIsNotNone(sample)
+    # The diamon and exactly 2 or the last 3 nodes are sampled.
+    self.assertEqual(sample.node_sets["n1"].num_nodes, 6)
+
+
 if __name__ == "__main__":
   absltest.main()
