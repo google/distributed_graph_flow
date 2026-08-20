@@ -40,7 +40,7 @@ class ReadBigQueryGraphInMemoryParquetExport(benchmark_utils.Benchmark):
     self._num_edges = -1
 
   @override
-  def name(self) -> str:
+  def impl_name(self) -> str:
     return "Read a BigQuery Graph using Parquet Export in memory"
 
   @override

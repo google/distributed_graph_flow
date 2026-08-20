@@ -55,9 +55,11 @@ py_binary(
     srcs = ["in_process_io_main.py"],
     deps = [
         ":in_process_io",
+        ":utils",
         # "//learning/brain/research/jax:gpu_support",
         # absl:app dep,
         # absl/flags dep,
+        "//dgf",
     ],
 )
 
@@ -90,6 +92,7 @@ py_test(
     srcs = ["in_process_io_test.py"],
     deps = [
         ":in_process_io",
+        ":utils",
         # absl/testing:absltest dep,
         "//dgf",
         "//dgf/src/util:gen_test_graph",

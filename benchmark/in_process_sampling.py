@@ -74,7 +74,7 @@ class GenGraphSamples(benchmark_utils.Benchmark):
     self.sum_sampled_nodes = 0
     self.num_samples = 0
 
-  def name(self) -> str:
+  def impl_name(self) -> str:
     return "GraphSAGE"
 
   def setup(self):
@@ -193,7 +193,7 @@ class GenGraphSubsets(benchmark_utils.Benchmark):
 
     self.set_unit_multiplicator(self.batch_size)
 
-  def name(self) -> str:
+  def impl_name(self) -> str:
     return "Subgraph"
 
   def setup(self):

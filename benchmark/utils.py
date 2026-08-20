@@ -35,6 +35,11 @@ class Benchmark(abc.ABC):
   automatic_num_units: int = -1
   max_runtime_seconds: float = 5
   unit_multiplicator: int = 1
+  extra_name: str = ""
+
+  def set_extra_name(self, value: str) -> "Benchmark":
+    self.extra_name = value
+    return self
 
   def setup(self):
     """Run once before 'run'."""
@@ -87,13 +92,19 @@ class Benchmark(abc.ABC):
     """Run once after all the 'run' calls."""
     pass
 
-  @abc.abstractmethod
   def name(self) -> str:
     """Name of the benchmark."""
+    extra_name = self.extra_name
+    if extra_name:
+      extra_name = " " + extra_name
+    return self.impl_name() + extra_name
+
+  @abc.abstractmethod
+  def impl_name(self) -> str:
     pass
 
   def num_units(self) -> int:
-    """Num of units.
+    """Number of units.
 
     Only need to be overriden if the user defines "run" instead of "run_unit".
     Used to show the time per units. Called after "clean".

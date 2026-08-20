@@ -14,11 +14,11 @@
 
 import os
 import tempfile
-from unittest import mock
 
 from absl.testing import absltest
 import dgf
 from dgf.benchmark import in_process_io
+from dgf.benchmark import utils as benchmark_utils
 from dgf.src.util import gen_test_graph
 
 
@@ -58,7 +58,7 @@ class InProcessIOTest(absltest.TestCase):
 
       dgf.io.write_tfgnn_graphs(
           in_mem_graphs(),
-          os.path.join(tf_graph_samples_path, "data@20.rio"),
+          os.path.join(tf_graph_samples_path, "data@3.tfrecord.gz"),
           schema=schema,
       )
       schema = gen_test_graph.generate_schema(variable_length=False)
@@ -66,42 +66,39 @@ class InProcessIOTest(absltest.TestCase):
           schema, os.path.join(tf_graph_samples_path, "schema.json")
       )
 
-      with mock.patch(
-          "dgf.io.read_spanner_graph"
-      ) as mock_read_spanner:
+      benchmarker = benchmark_utils.Benchmarker()
 
-        mock_read_spanner.return_value = (graph, schema)
-
-        # Run benchmark
-        in_process_io.io_in_memory_dataset_in_process(
-            work_dir=work_dir,
-            hgraph_path=hgraph_path,
-            gf_graph_path=gf_graph_path,
-            tf_graph_samples_path=tf_graph_samples_path,
-            spanner_config=in_process_io.SpannerGraphConfig(
-                project_id="test_project",
-                instance_id="test_instance",
-                database_id="test_database",
-                graph_id="SpannerGraph",
-            ),
-            spanner_write_config=in_process_io.SpannerGraphConfig(
-                project_id="test_project_2",
-                instance_id="test_instance_2",
-                database_id="test_database_2",
-                graph_id="SpannerGraph2",
-            ),
-        )
-
-      self.assertEqual(mock_read_spanner.call_count, 1)
-
-      mock_read_spanner.assert_called_with(
-          project="test_project",
-          instance="test_instance",
-          database="test_database",
-          graph="SpannerGraph",
-          verbose=True,
+      benchmarker.run(
+          in_process_io.ReadGraphAIGraphInMemory(hgraph_path=hgraph_path),
+          repetitions=1,
+          warmup_repetitions=0,
       )
-
+      benchmarker.run(
+          in_process_io.ReadGFGraphInMemory(gf_graph_path=gf_graph_path),
+          repetitions=1,
+          warmup_repetitions=0,
+      )
+      benchmarker.run(
+          in_process_io.ReadPickleInMemoryGraph(
+              work_dir=work_dir, hgraph_path=hgraph_path
+          ),
+          repetitions=1,
+          warmup_repetitions=0,
+      )
+      benchmarker.run(
+          in_process_io.ReadTFGraphSamplesInMemory(
+              tf_graph_samples_path=tf_graph_samples_path, max_samples=3
+          ),
+          repetitions=1,
+          warmup_repetitions=0,
+      )
+      benchmarker.run(
+          in_process_io.WriteTFGraphSamplesInMemory(
+              work_dir=work_dir, tf_graph_samples_path=tf_graph_samples_path
+          ),
+          repetitions=1,
+          warmup_repetitions=0,
+      )
 
 if __name__ == "__main__":
   absltest.main()

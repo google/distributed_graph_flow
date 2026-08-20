@@ -140,7 +140,9 @@ def _read_single_parquet_file(
   """Reads a single Parquet file into a pyarrow Table."""
   try:
     with filesystem.open_read(path, binary=True) as f:
-      table = pq.ParquetFile(f).read(columns=columns)
+      table = pq.ParquetFile(
+          f, pre_buffer=True, buffer_size=256 * 1024 * 1024
+      ).read(columns=columns)
       # Note: We immediately convert the table into numpy array.
       return _table_to_numpy_dict(table)
   except Exception as e:

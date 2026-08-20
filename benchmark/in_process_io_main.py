@@ -18,147 +18,40 @@ Usage example:
 
 sudo apt install linux-cpupower
 sudo cpupower frequency-set --governor performance
+blaze run -c opt //third_party/py/dgf/benchmark:in_process_io_main -- \
+    --work_dir=/usr/local/google/home/gbm/project/graphflow_2/runs/io_benchmark
 
-blaze run //third_party/py/dgf/benchmark:in_process_io_main -- \
-  --work_dir=/cns/is-d/home/gbm/tmp/ttl=15d \
-  --hgraph_path=/cns/iz-d/home/research-graph/public/hgraph_datasets/tfrecord_based/ogbn_arxiv\
-  --tf_graph_samples_path=/cns/iz-d/home/research-graph/public/graph_samples_datasets/tfrecord_based/ogbn_arxiv \
-  --spanner_project=biggraphs-poc \
-  --spanner_instance=gcp-gnns \
-  --spanner_database=ogbn_arxiv \
-  --spanner_graph_id=ogbn_arxiv \
-  --spanner_database_2=ogbn_arxiv_2 \
-  --spanner_graph_id_2=ogbn_arxiv_2
+Last run:
 
-Preparation for Spanner Graph Benchmark:
-----------------------------------------
-To run the Spanner benchmark, you must have an existing Spanner database pre-loaded
-with OGBN-MAG data and a Property Graph schema defined.
+=================================================================================================================================
+Wall time (s)      CPU time (s)       Wall time (s)/unit    units/s            Name
+=================================================================================================================================
+       34.05342            2.84482            0.00020         4972.86307    Read DGF Graph from CNS; num_nodes=169343 num_edges=1166243 (169343)
+        0.56409            0.66995            0.00000       300204.38709    Read DGF Graph from local; num_nodes=169343 num_edges=1166243 (169343)
+        0.32633            2.32004            0.00000       518926.13800    Write DGF Graph; num_nodes=169343 num_edges=1166243 (169343)
+       43.08198           11.68357            0.00431          232.11560    Read TF-GNN Graph samples from CNS; num_samples=10000 (10000)
+        1.86787            4.37955            0.00019         5353.68895    Read TF-GNN Graph samples from local; num_samples=10000 (10000)
+        8.85905            8.90962            0.00089         1128.78878    Write TF-GNN Graph Samples; num_samples=10000 (10000)
+        7.56402            5.88479            0.00004        22387.95834    Read GraphAI Graph from CNS; num_nodes=169343 num_edges=1166243 (169343)
+        1.69344            4.69786            0.00001        99999.28070    Read GraphAI Graph from local; num_nodes=169343 num_edges=1166243 (169343)
+        0.01274            0.01177            0.00000     13296115.73024    Read Pickled DGF Graph; num_nodes=169343 num_edges=1166243 (169343)
+=================================================================================================================================
+"""  # fmt: skip
 
-1.  **Resources**: Ensure you have access to the Spanner instance.
-    - `spanner_project`: Your Google Cloud Project ID (e.g., 'dgf-demo').
-    - `spanner_instance`: The Spanner Instance ID (e.g., 'gcp-gnns').
-    - `spanner_database`: The Database ID containing the tables (e.g., 'ogbn_mag').
-
-2.  **Schema Setup (Step A - Create Tables)**:
-    Before creating the graph view, the base tables must exist. Run this DDL first:
-
-    CREATE TABLE author (id STRING(MAX) NOT NULL) PRIMARY KEY(id);
-    CREATE TABLE field_of_study (id STRING(MAX) NOT NULL) PRIMARY KEY(id);
-    CREATE TABLE institution (id STRING(MAX) NOT NULL) PRIMARY KEY(id);
-    CREATE TABLE paper (
-      id STRING(MAX) NOT NULL,
-      year INT64,
-      labels INT64,
-      feat ARRAY<FLOAT64>
-    ) PRIMARY KEY(id);
-
-    CREATE TABLE affiliated_with (
-      id STRING(MAX) NOT NULL,
-      target_id STRING(MAX) NOT NULL,
-      CONSTRAINT FK_affiliated_author FOREIGN KEY(id) REFERENCES author(id),
-      CONSTRAINT FK_affiliated_inst FOREIGN KEY(target_id) REFERENCES institution(id)
-    ) PRIMARY KEY(id, target_id);
-
-    CREATE TABLE cites (
-      id STRING(MAX) NOT NULL,
-      target_id STRING(MAX) NOT NULL,
-      CONSTRAINT FK_cites_source FOREIGN KEY(id) REFERENCES paper(id),
-      CONSTRAINT FK_cites_target FOREIGN KEY(target_id) REFERENCES paper(id)
-    ) PRIMARY KEY(id, target_id);
-
-    CREATE TABLE has_topic (
-      id STRING(MAX) NOT NULL,
-      target_id STRING(MAX) NOT NULL,
-      CONSTRAINT FK_topic_paper FOREIGN KEY(id) REFERENCES paper(id),
-      CONSTRAINT FK_topic_field FOREIGN KEY(target_id) REFERENCES field_of_study(id)
-    ) PRIMARY KEY(id, target_id);
-
-    CREATE TABLE writes (
-      id STRING(MAX) NOT NULL,
-      target_id STRING(MAX) NOT NULL,
-      CONSTRAINT FK_writes_author FOREIGN KEY(id) REFERENCES author(id),
-      CONSTRAINT FK_writes_paper FOREIGN KEY(target_id) REFERENCES paper(id)
-    ) PRIMARY KEY(id, target_id);
-
-3.  **Schema Setup (Step B - Create Graph View)**:
-    Once tables are created, run this DDL to define the Property Graph 'ogbn_mag':
-
-    CREATE OR REPLACE PROPERTY GRAPH ogbn_mag
-      NODE TABLES(
-        author KEY(id) LABEL author PROPERTIES(id),
-        field_of_study KEY(id) LABEL field_of_study PROPERTIES(id),
-        institution KEY(id) LABEL institution PROPERTIES(id),
-        paper KEY(id) LABEL paper PROPERTIES(id, labels, year, feat)
-      )
-      EDGE TABLES(
-        affiliated_with
-          KEY(id, target_id)
-          SOURCE KEY(id) REFERENCES author(id)
-          DESTINATION KEY(target_id) REFERENCES institution(id)
-          LABEL affiliated_with PROPERTIES(id, target_id),
-        cites
-          KEY(id, target_id)
-          SOURCE KEY(id) REFERENCES paper(id)
-          DESTINATION KEY(target_id) REFERENCES paper(id)
-          LABEL cites PROPERTIES(id, target_id),
-        has_topic
-          KEY(id, target_id)
-          SOURCE KEY(id) REFERENCES paper(id)
-          DESTINATION KEY(target_id) REFERENCES field_of_study(id)
-          LABEL has_topic PROPERTIES(id, target_id),
-        writes
-          KEY(id, target_id)
-          SOURCE KEY(id) REFERENCES author(id)
-          DESTINATION KEY(target_id) REFERENCES paper(id)
-          LABEL writes PROPERTIES(id, target_id)
-      );
-
-4.  **Data Loading**: Ensure you import or insert the OGBN-MAG dataset into these
-    tables before benchmarking.
-
-5.  **Authentication**: Ensure you have Application Default Credentials active
-    (e.g., via `gcloud auth application-default login`).
-"""
-
+import os
+import subprocess
 from absl import app
 from absl import flags
-from dgf.benchmark import in_process_io
+import dgf
+from dgf.benchmark import in_process_io as lib
+from dgf.benchmark import utils as benchmark_utils
 
-_WORK_DIR_PATH = flags.DEFINE_string(
+_WORK_DIR = flags.DEFINE_string(
     "work_dir",
     None,
-    "Working directory with read and write access. Needs to exist already.",
-)
-_HGRAPH_PATH = flags.DEFINE_string(
-    "hgraph_path", None, "Optional path to the hgraph dataset."
-)
-_GF_GRAPH_PATH = flags.DEFINE_string(
-    "gf_graph_path", None, "Optional path to the GF graph dataset."
-)
-_TF_GRAPH_SAMPLES_PATH = flags.DEFINE_string(
-    "tf_graph_samples_path",
-    None,
-    "Directory containing TF graph samples dataset in data@*.rio and a schema"
-    " in schema.json.",
-)
-_SPANNER_PROJECT = flags.DEFINE_string(
-    "spanner_project", None, "GCP Project ID for Spanner Graph."
-)
-_SPANNER_INSTANCE = flags.DEFINE_string(
-    "spanner_instance", None, "Spanner instance ID."
-)
-_SPANNER_DATABASE = flags.DEFINE_string(
-    "spanner_database", None, "Spanner database ID."
-)
-_SPANNER_GRAPH_ID = flags.DEFINE_string(
-    "spanner_graph_id", None, "The name of the graph in Spanner."
-)
-_SPANNER_DATABASE_2 = flags.DEFINE_string(
-    "spanner_database_2", None, "Spanner database ID for write."
-)
-_SPANNER_GRAPH_ID_2 = flags.DEFINE_string(
-    "spanner_graph_id_2", None, "The name of the graph in Spanner for write."
+    "Working directory with read and write access. Should be local since the"
+    " benchmark tests both local and cns reading.",
+    required=True,
 )
 
 
@@ -166,32 +59,79 @@ def main(argv):
   if len(argv) > 1:
     raise app.UsageError("Too many command-line arguments.")
 
-  spanner_config = None
-  if _SPANNER_PROJECT.value and _SPANNER_INSTANCE.value:
-    spanner_config = in_process_io.SpannerGraphConfig(
-        project_id=_SPANNER_PROJECT.value,
-        instance_id=_SPANNER_INSTANCE.value,
-        database_id=_SPANNER_DATABASE.value,  # pyrefly: ignore[bad-argument-type]
-        graph_id=_SPANNER_GRAPH_ID.value,  # pyrefly: ignore[bad-argument-type]
-    )
+  # Configure dataset used for the benchmark
+  graph_repo = "/cns/iz-d/home/research-graph/public/graphflow_datasets"
+  graph_name = "ogbn_arxiv"  # Possible values: ogbn_arxiv, ogbn_mag_v2
 
-  spanner_write_config = None
-  if _SPANNER_PROJECT.value and _SPANNER_INSTANCE.value:
-    spanner_write_config = in_process_io.SpannerGraphConfig(
-        project_id=_SPANNER_PROJECT.value,
-        instance_id=_SPANNER_INSTANCE.value,
-        database_id=_SPANNER_DATABASE_2.value,  # pyrefly: ignore[bad-argument-type]
-        graph_id=_SPANNER_GRAPH_ID_2.value,  # pyrefly: ignore[bad-argument-type]
-    )
+  graphai_graph_path = f"{graph_repo}/{graph_name}/raw_hgraph"
+  dgf_graph_path = f"{graph_repo}/{graph_name}/raw_gf_graph"
+  tfgnn_graph_samples = f"{graph_repo}/{graph_name}/raw_gnn_samples_d2_w2_sfull"
 
-  in_process_io.io_in_memory_dataset_in_process(
-      work_dir=_WORK_DIR_PATH.value,  # pyrefly: ignore[bad-argument-type]
-      hgraph_path=_HGRAPH_PATH.value,
-      gf_graph_path=_GF_GRAPH_PATH.value,
-      tf_graph_samples_path=_TF_GRAPH_SAMPLES_PATH.value,
-      spanner_config=spanner_config,
-      spanner_write_config=spanner_write_config,
-  )
+  # Create local workdir
+  work_dir = _WORK_DIR.value
+  dgf.filesystem.makedirs(work_dir)
+
+  # Copy the CNS data locally to test local reading.
+  local_cache = os.path.join(work_dir, "cache")
+  dgf.filesystem.makedirs(local_cache, exist_ok=True)
+  local_graphai_graph_path = os.path.join(local_cache, "graphai")
+  local_dgf_graph_path = os.path.join(local_cache, "dgf")
+  local_tfgnn_graph_samples = os.path.join(local_cache, "tfgnn_samples")
+  for src, dst in [
+      (graphai_graph_path, local_graphai_graph_path),
+      (dgf_graph_path, local_dgf_graph_path),
+      (tfgnn_graph_samples, local_tfgnn_graph_samples),
+  ]:
+    if not dgf.filesystem.exists(dst):
+      print(f"Copy {src} to {dst}")
+      subprocess.check_call(["fileutil", "cp", "-R", src, dst])
+
+  # Configure benchmarks
+  # Note: You can comment-out benchmarks you don't care.
+  benchmarks = [
+      # DGF
+      lib.ReadGFGraphInMemory(gf_graph_path=dgf_graph_path).set_extra_name(
+          "from CNS (PARQUET)"
+      ),  # TODO(gbm): This is slow. Improve speed.
+      lib.ReadGFGraphInMemory(
+          gf_graph_path=local_dgf_graph_path
+      ).set_extra_name("from local (PARQUET)"),
+      lib.WriteGFGraphInMemory(
+          work_dir=work_dir, gf_graph_path=local_dgf_graph_path
+      ),
+      # Graph samples
+      lib.ReadTFGraphSamplesInMemory(
+          tf_graph_samples_path=tfgnn_graph_samples
+      ).set_extra_name("from CNS"),
+      lib.ReadTFGraphSamplesInMemory(
+          tf_graph_samples_path=local_tfgnn_graph_samples,
+      ).set_extra_name("from local"),
+      lib.WriteTFGraphSamplesInMemory(
+          work_dir=work_dir,
+          tf_graph_samples_path=local_tfgnn_graph_samples,
+      ),
+      # GraphAI Graph
+      lib.ReadGraphAIGraphInMemory(
+          hgraph_path=graphai_graph_path
+      ).set_extra_name("from CNS"),
+      lib.ReadGraphAIGraphInMemory(
+          hgraph_path=local_graphai_graph_path
+      ).set_extra_name("from local"),
+      # Pickle
+      lib.ReadPickleInMemoryGraph(
+          work_dir=work_dir, hgraph_path=graphai_graph_path
+      ),
+  ]
+
+  common_kwargs = {
+      "repetitions": 1,
+      "warmup_repetitions": 0,
+  }
+  benchmarker = benchmark_utils.Benchmarker()
+  for benchmark_idx, benchmark in enumerate(benchmarks):
+    print(f"Running benchmark {benchmark_idx+1}/{len(benchmarks)}")
+    benchmarker.run(benchmark, **common_kwargs)
+  benchmarker.print_results()
 
 
 if __name__ == "__main__":
