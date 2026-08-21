@@ -21,6 +21,7 @@ from typing import Any, Callable, List, Optional
 import dgf
 from dgf.benchmark import utils as benchmark_utils
 from dgf.src.util import log
+import numpy as np
 
 
 class OutputFormat(enum.Enum):
@@ -58,6 +59,7 @@ class GenGraphSamples(benchmark_utils.Benchmark):
       output_format: OutputFormat = OutputFormat.NUMPY,
       edgeset_to_mask: Optional[str] = None,
       with_replacement: bool = False,
+      multi_visit: bool = True,
   ):
     self.seed_nodeset = seed_nodeset
     self.extract_features = extract_features
@@ -70,6 +72,7 @@ class GenGraphSamples(benchmark_utils.Benchmark):
     self.batch_size = 12
     self.edgeset_to_mask = edgeset_to_mask
     self.set_unit_multiplicator(self.batch_size)
+    self.multi_visit = multi_visit
 
     self.sum_sampled_nodes = 0
     self.num_samples = 0
@@ -84,6 +87,7 @@ class GenGraphSamples(benchmark_utils.Benchmark):
         num_hops=self.num_hops,
         hop_width=self.hop_width,
         with_replacement=self.with_replacement,
+        multi_visit=self.multi_visit,
     )
     sampling_plan = dgf.sampling.simple_sampling_config_to_sampling_plan(
         self.sampling_config,
@@ -134,12 +138,12 @@ class GenGraphSamples(benchmark_utils.Benchmark):
     self.output_fn = output_fn
 
   def run_unit(self):
-    seed_node_idxs = [
-        random.randrange(0, self.num_nodes) for _ in range(self.batch_size)
-    ]
+    seed_node_idxs = np.random.randint(
+        0, self.num_nodes, size=self.batch_size, dtype=np.int64
+    )
     if self.edgeset_to_mask is not None:
       # Pass dummy masked edge indices (e.g. all 0).
-      masked_edge_idxs = [0 for _ in range(self.batch_size)]
+      masked_edge_idxs = np.zeros(self.batch_size, dtype=np.int64)
       samples = self.sampler.sample(
           seed_node_idxs, masked_edge_idxs=masked_edge_idxs
       )
@@ -154,14 +158,15 @@ class GenGraphSamples(benchmark_utils.Benchmark):
 
   def details(self) -> str:
     return (
-        f"num_hops={self.sampling_config.num_hops}"
-        f" hop_width={self.sampling_config.hop_width}"
-        f" extract_features={self.extract_features}"
-        f" output_format={self.output_format.value}"
-        f" with_replacement={self.with_replacement}"
-        f" batch_size={self.batch_size}"
-        f" edgeset_to_mask={self.edgeset_to_mask}"
-        f" nodes_per_sample={self.sum_sampled_nodes / self.num_samples}"
+        f"hops={self.sampling_config.num_hops}"
+        f" width={self.sampling_config.hop_width}"
+        f" feat.={self.extract_features}"
+        f" format={self.output_format.value}"
+        f" with_rep.={int(self.with_replacement)}"
+        f" batch={self.batch_size}"
+        f" mask={self.edgeset_to_mask}"
+        f" nodes/spl.={int(self.sum_sampled_nodes / self.num_samples)}"
+        f" multi_visit={self.multi_visit}"
     )
 
 
@@ -261,31 +266,50 @@ def in_process_sampling(
   edgeset_to_mask = edgeset_names[0] if edgeset_names else None
 
   for num_hops in list_num_hops:
-    for extract_features in [False, True]:
-      benchmarker.run(
-          GenGraphSubsets(
-              graph=graph,
-              schema=schema,
-              seed_nodeset=seed_nodeset,
-              extract_features=extract_features,
-              num_hops=num_hops,
-          ),
-          repetitions=1,
-          warmup_repetitions=1,
-      )
+    for extract_features in [True, False]:
+      for with_replacement in [True, False]:
+        benchmarker.run(
+            GenGraphSubsets(
+                graph=graph,
+                schema=schema,
+                seed_nodeset=seed_nodeset,
+                extract_features=extract_features,
+                num_hops=num_hops,
+            ),
+            repetitions=1,
+            warmup_repetitions=1,
+        )
 
-      benchmarker.run(
-          GenGraphSamples(
-              num_hops=num_hops,
-              graph=graph,
-              schema=schema,
-              seed_nodeset=seed_nodeset,
-              extract_features=extract_features,
-              output_format=OutputFormat.NUMPY,
-          ),
-          repetitions=1,
-          warmup_repetitions=1,
-      )
+        benchmarker.run(
+            GenGraphSamples(
+                num_hops=num_hops,
+                graph=graph,
+                schema=schema,
+                seed_nodeset=seed_nodeset,
+                extract_features=extract_features,
+                output_format=OutputFormat.NUMPY,
+                with_replacement=with_replacement,
+                multi_visit=True,
+            ),
+            repetitions=1,
+            warmup_repetitions=1,
+        )
+
+        if not with_replacement:
+          benchmarker.run(
+              GenGraphSamples(
+                  num_hops=num_hops,
+                  graph=graph,
+                  schema=schema,
+                  seed_nodeset=seed_nodeset,
+                  extract_features=extract_features,
+                  output_format=OutputFormat.NUMPY,
+                  with_replacement=with_replacement,
+                  multi_visit=False,
+              ),
+              repetitions=1,
+              warmup_repetitions=1,
+          )
 
       if edgeset_to_mask is not None:
         benchmarker.run(

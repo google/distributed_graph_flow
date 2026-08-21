@@ -14,9 +14,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <functional>
-#include <iostream>
 #include <latch>
 #include <limits>
 #include <memory>
@@ -50,8 +48,6 @@
 #include "dgf/src/util/nanobind_util.h"
 #include "dgf/src/util/status_caster.h"
 #include "dgf/src/util/util.h"
-
-namespace nb = nanobind;
 
 namespace dgf::sampling::in_memory_sampler {
 
@@ -110,10 +106,7 @@ struct Sampler {
 
   // Pool of available SampleBuilders to reuse them across seeds and calls.
   std::vector<std::unique_ptr<SampleBuilder>> sample_builder_pool_;
-  std::mutex sample_builder_pool_mutex_;
-
-  std::unique_ptr<SampleBuilder> AcquireSampleBuilder();
-  void ReleaseSampleBuilder(std::unique_ptr<SampleBuilder> builder);
+  util::concurrency::Mutex sample_builder_pool_mutex_;
 
   Sampler(int num_threads) : thread_pool(num_threads) {}
 
@@ -201,7 +194,7 @@ struct Sampler {
 struct SampleBuilder {
   struct EdgeSet {
     // The pair of sampled edges (i.e., src/target node index).
-    absl::btree_set<std::pair<SampleIdx, SampleIdx>> edges;
+    std::vector<std::pair<SampleIdx, SampleIdx>> edges;
   };
 
   struct NodeSet {
@@ -209,7 +202,7 @@ struct SampleBuilder {
     std::vector<InputIdx> sampled_node_idx_to_node_idx;
     // Inverse mapping of "sampled_node_idx_to_node_idx".
     // Only used when sampling without replacement.
-    absl::btree_map<InputIdx, SampleIdx> node_idx_to_sampled_node_idx;
+    absl::flat_hash_map<InputIdx, SampleIdx> node_idx_to_sampled_node_idx;
   };
 
   // Per edge-set information indexed by edgeset index.
@@ -278,8 +271,19 @@ struct SampleBuilder {
       // Recursively sample the sub-nodes.
       auto& sample_target_nodeset = nodesets[plan_edge.node->nodeset_idx];
       auto& sample_edgeset = edgesets[plan_edge.edgeset_idx];
+
+      const auto add_edge = [&](SampleIdx src, SampleIdx trg) {
+        if (!plan_edge.reversed) {
+          sample_edgeset.edges.push_back({src, trg});
+        } else {
+          sample_edgeset.edges.push_back({trg, src});
+        }
+      };
+
       for (const auto target_node : cache_node_idxs) {
         // Record the target node and create/reuse a sampled node.
+
+        bool recuse = true;
 
         SampleIdx target_sampled_node;
         if (!sampler.plan_.with_replacement) {
@@ -289,21 +293,15 @@ struct SampleBuilder {
                   target_node,
                   sample_target_nodeset.node_idx_to_sampled_node_idx.size());
           target_sampled_node = target_sampled_node_it->second;
+          add_edge(source_sampled_node, target_sampled_node);
 
           if (inserted) {
             sample_target_nodeset.sampled_node_idx_to_node_idx.push_back(
                 target_node);
-            DGF_STATUS_CHECK(
-                sample_target_nodeset.sampled_node_idx_to_node_idx.size() ==
-                sample_target_nodeset.node_idx_to_sampled_node_idx.size());
-          }
-          // Record the edge, if it is a new edge.
-          if (!plan_edge.reversed) {
-            sample_edgeset.edges.insert(
-                {source_sampled_node, target_sampled_node});
-          } else {
-            sample_edgeset.edges.insert(
-                {target_sampled_node, source_sampled_node});
+            DCHECK(sample_target_nodeset.sampled_node_idx_to_node_idx.size() ==
+                   sample_target_nodeset.node_idx_to_sampled_node_idx.size());
+          } else if (!sampler.plan_.multi_visit) {
+            recuse = false;
           }
         } else {
           // Sampling with replacement.
@@ -311,20 +309,15 @@ struct SampleBuilder {
               sample_target_nodeset.sampled_node_idx_to_node_idx.size();
           sample_target_nodeset.sampled_node_idx_to_node_idx.push_back(
               target_node);
-          // Record the edge, if it is a new edge.
-          if (!plan_edge.reversed) {
-            sample_edgeset.edges.insert(
-                {source_sampled_node, target_sampled_node});
-          } else {
-            sample_edgeset.edges.insert(
-                {target_sampled_node, source_sampled_node});
-          }
+          add_edge(source_sampled_node, target_sampled_node);
         }
 
         // Build the sub-sample.
-        DGF_RETURN_IF_ERROR(RecursiveGrow(sampler, *plan_edge.node, target_node,
-                                          target_sampled_node, seed_timestamp,
-                                          masked_edge_idx, depth + 1));
+        if (recuse) {
+          DGF_RETURN_IF_ERROR(RecursiveGrow(
+              sampler, *plan_edge.node, target_node, target_sampled_node,
+              seed_timestamp, masked_edge_idx, depth + 1));
+        }
       }
     }
     return absl::OkStatus();
@@ -364,9 +357,26 @@ struct SampleBuilder {
     }
 
     // Recursive transversal.
-    return RecursiveGrow(sampler, *sampler.plan_.root, seed_node_idx,
-                         sample_seed_node_idx, seed_timestamp, masked_edge_idx,
-                         /*depth=*/0);
+    DGF_RETURN_IF_ERROR(RecursiveGrow(sampler, *sampler.plan_.root,
+                                      seed_node_idx, sample_seed_node_idx,
+                                      seed_timestamp, masked_edge_idx,
+                                      /*depth=*/0));
+
+    // Deduplicate the edges.
+    // Note: We also sort edges in debug mode.
+    const bool dedup_edges =
+        !sampler.plan_.with_replacement && sampler.plan_.multi_visit;
+    if (dedup_edges || sampler.debug_sampling_) {
+      for (auto& sampled_edgeset : edgesets) {
+        std::sort(sampled_edgeset.edges.begin(), sampled_edgeset.edges.end());
+        if (dedup_edges) {
+          sampled_edgeset.edges.erase(std::unique(sampled_edgeset.edges.begin(),
+                                                  sampled_edgeset.edges.end()),
+                                      sampled_edgeset.edges.end());
+        }
+      }
+    }
+    return absl::OkStatus();
   }
 
   absl::StatusOr<nb::object> ExportToInMemoryGraph(const Sampler& sampler) {
@@ -396,21 +406,6 @@ struct SampleBuilder {
     return sampler.module_index_.graph_cls(py_nodesets, py_edgesets);
   }
 };
-
-std::unique_ptr<SampleBuilder> Sampler::AcquireSampleBuilder() {
-  std::lock_guard<std::mutex> lock(sample_builder_pool_mutex_);
-  if (sample_builder_pool_.empty()) {
-    return std::make_unique<SampleBuilder>(rng_());
-  }
-  auto builder = std::move(sample_builder_pool_.back());
-  sample_builder_pool_.pop_back();
-  return builder;
-}
-
-void Sampler::ReleaseSampleBuilder(std::unique_ptr<SampleBuilder> builder) {
-  std::lock_guard<std::mutex> lock(sample_builder_pool_mutex_);
-  sample_builder_pool_.push_back(std::move(builder));
-}
 
 // Creates a graph sample starting from a given seed node.
 // The returned `nb::object` is an instance of `InMemoryGraph`
@@ -446,15 +441,28 @@ absl::StatusOr<nb::list> Sampler::Sample(
     }
   }
 
-  // Pre-allocate pool if needed.
+  std::vector<std::unique_ptr<SampleBuilder>> active_builders(num_seeds);
+
+  // Pre-allocate builders + grab the ones we need.
   {
-    std::lock_guard<std::mutex> lock(sample_builder_pool_mutex_);
-    while (sample_builder_pool_.size() < thread_pool.num_threads()) {
-      sample_builder_pool_.push_back(std::make_unique<SampleBuilder>(rng_()));
+    util::concurrency::MutexLock lock(sample_builder_pool_mutex_);
+    for (size_t seed_idx = 0; seed_idx < num_seeds; seed_idx++) {
+      if (!sample_builder_pool_.empty()) {
+        active_builders[seed_idx] = std::move(sample_builder_pool_.back());
+        sample_builder_pool_.pop_back();
+      } else {
+        active_builders[seed_idx] = std::make_unique<SampleBuilder>(rng_());
+      }
     }
   }
 
-  std::vector<std::unique_ptr<SampleBuilder>> active_builders(num_seeds);
+  // Release builders back to pool even on failure.
+  const auto release_builders = [&]() {
+    util::concurrency::MutexLock lock(sample_builder_pool_mutex_);
+    for (auto& builder : active_builders) {
+      sample_builder_pool_.push_back(std::move(builder));
+    }
+  };
 
   // Create samples
   {
@@ -469,7 +477,7 @@ absl::StatusOr<nb::list> Sampler::Sample(
 
     // Start the sampling.
     absl::Status global_status;
-    std::mutex global_status_mutex;
+    util::concurrency::Mutex global_status_mutex;
     std::latch latch(num_seeds);
 
     for (size_t seed_idx = 0; seed_idx < num_seeds; seed_idx++) {
@@ -484,16 +492,15 @@ absl::StatusOr<nb::list> Sampler::Sample(
         masked_edge_idx = masked_edge_idxs->view()(seed_idx);
       }
       const uint64_t seed = seeds[seed_idx];
-      thread_pool.Schedule([this, seed_idx, seed, &active_builders,
-                            seed_node_idx, seed_timestamp, masked_edge_idx,
-                            &latch, &global_status_mutex, &global_status]() {
-        std::unique_ptr<SampleBuilder> sample_builder = AcquireSampleBuilder();
+      SampleBuilder* sample_builder = active_builders[seed_idx].get();
+      thread_pool.Schedule([this, sample_builder, seed, seed_node_idx,
+                            seed_timestamp, masked_edge_idx, &latch,
+                            &global_status_mutex, &global_status]() {
         sample_builder->rng.seed(seed);
 
         const auto status = sample_builder->Grow(
             *this, seed_node_idx, seed_timestamp, masked_edge_idx);
 
-        active_builders[seed_idx] = std::move(sample_builder);
         latch.count_down();
 
         // If the sampling failed, record the failure.
@@ -509,12 +516,7 @@ absl::StatusOr<nb::list> Sampler::Sample(
 
     // Return an error if any of the samplers failed.
     if (!global_status.ok()) {
-      // Release builders back to pool even on failure.
-      for (auto& builder : active_builders) {
-        if (builder != nullptr) {
-          ReleaseSampleBuilder(std::move(builder));
-        }
-      }
+      release_builders();
       return global_status;
     }
   }
@@ -526,9 +528,10 @@ absl::StatusOr<nb::list> Sampler::Sample(
     DGF_ASSIGN_OR_RETURN(auto graph,
                          sample_builder->ExportToInMemoryGraph(*this));
     graphs.append(graph);
-    // Release builder back to pool.
-    ReleaseSampleBuilder(std::move(sample_builder));
   }
+
+  // Release builders back to pool in bulk.
+  release_builders();
   return graphs;
 }
 
