@@ -19,31 +19,22 @@ from absl.testing import absltest
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.transform import extract as extract_lib
+from dgf.src.transform import schema as schema_transform_lib
 from dgf.src.util import gen_test_graph
 from dgf.src.util import test_util
 
 
 class FilterTest(absltest.TestCase):
 
-  def test_filter_schema(self):
-    schema = gen_test_graph.generate_schema()
-    selected_features = ["f1", "f3"]
-    extracted_schema = extract_lib.filter_schema(schema, selected_features)
-    expected_extracted_schema = copy.deepcopy(schema)
-    del expected_extracted_schema.node_sets["n1"].features["f2"]
-    del expected_extracted_schema.node_sets["n2"].features["f4"]
-    del expected_extracted_schema.node_sets["n2"].features["f5"]
-    del expected_extracted_schema.node_sets["n2"].features["f6"]
-    test_util.assert_are_equal(
-        self,
-        extracted_schema,
-        expected_extracted_schema,
-    )
-
   def test_filter_graph(self):
     graph = gen_test_graph.generate_in_memory_graph(variable_length=False)
     full_schema = gen_test_graph.generate_schema(variable_length=False)
-    extracted_schema = extract_lib.filter_schema(full_schema, ["f1", "f3"])
+    extracted_schema = schema_transform_lib.filter_schema(
+        full_schema,
+        schema_lib.GraphSchemaFilter(
+            feature_fn=lambda name, _: name in ["f1", "f3"]
+        ),
+    )
     extracted_graph = extract_lib.filter_graph(graph, extracted_schema)
     expected_extracted_graph = copy.deepcopy(graph)
     del expected_extracted_graph.node_sets["n1"].features["f2"]

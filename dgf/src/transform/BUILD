@@ -185,6 +185,7 @@ py_test(
     srcs = ["extract_test.py"],
     deps = [
         ":extract",
+        ":schema",
         # absl/testing:absltest dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",

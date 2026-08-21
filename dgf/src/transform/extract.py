@@ -15,41 +15,10 @@
 """Operations on a schema."""
 
 import copy
-from typing import List, Tuple
+from typing import Tuple
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.transform import schema as schema_transform_lib
-
-
-def filter_schema(
-    src: schema_lib.GraphSchema, selected_features: List[str]
-) -> schema_lib.GraphSchema:
-  """Creates a new schema with a subset of the features.
-
-  The other parts of the schema are not modified.
-
-  Args:
-    src: The source schema to extract.
-    selected_features: A list of feature names to include in the new schema.
-
-  Returns:
-    The extracted schema.
-  """
-  extracted_schema = copy.deepcopy(src)
-
-  for node_name in extracted_schema.node_sets:
-    node_schema = extracted_schema.node_sets[node_name]
-    node_schema.features = {
-        k: v for k, v in node_schema.features.items() if k in selected_features
-    }
-
-  for edge_name in extracted_schema.edge_sets:
-    edge_schema = extracted_schema.edge_sets[edge_name]
-    edge_schema.features = {
-        k: v for k, v in edge_schema.features.items() if k in selected_features
-    }
-
-  return extracted_schema
 
 
 def filter_graph(

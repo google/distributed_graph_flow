@@ -29,7 +29,6 @@ from dgf.src.transform.normalize import IdentityNormalizer
 from dgf.src.transform.normalize import SoftQuantileNormalizer
 from dgf.src.transform.normalize import SinusoidTimedeltaNormalizer
 
-from dgf.src.transform.extract import filter_schema
 from dgf.src.transform.extract import filter_graph
 from dgf.src.transform.extract import drop_edge_features
 
