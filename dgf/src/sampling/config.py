@@ -61,6 +61,8 @@ class SimpleSamplingConfig:
       grpah.
     temporal_sampling: If True, temporal sampling is enabled and causal
       timestamps are inferred from the schema.
+    max_timeseries_len: The maximum number of historical causal sequence steps
+      retained for each timeseries feature.
   """
 
   seed_nodeset: str
@@ -70,6 +72,7 @@ class SimpleSamplingConfig:
   with_replacement: bool = False
   temporal_sampling: bool = False
   multi_visit: bool = True
+  max_timeseries_len: int = 32
 
 
 @dataclasses.dataclass
@@ -113,6 +116,8 @@ class SamplingPlan:
       timestamps are inferred from the schema.
     edgeset_timestamp_features: Mapping from edgeset name to its timestamp
       feature name for causal filtering.
+    max_timeseries_len: The maximum number of historical causal sequence steps
+      retained for each timeseries feature.
   """
 
   root: PlanNode
@@ -122,6 +127,7 @@ class SamplingPlan:
   edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
       default_factory=dict
   )
+  max_timeseries_len: int = 32
 
 
 def simple_sampling_config_to_sampling_plan(
@@ -178,4 +184,5 @@ def simple_sampling_config_to_sampling_plan(
       temporal_sampling=src.temporal_sampling,
       multi_visit=src.multi_visit,
       edgeset_timestamp_features=edgeset_ts_features,
+      max_timeseries_len=src.max_timeseries_len,
   )

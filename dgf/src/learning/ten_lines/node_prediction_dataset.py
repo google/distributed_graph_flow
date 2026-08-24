@@ -33,9 +33,10 @@ from dgf.src.learning.jax import common as jax_common_lib
 from dgf.src.learning.ten_lines import common
 from dgf.src.learning.ten_lines import dataset
 from dgf.src.sampling import config as sampling_config_lib
-from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
+from dgf.src.sampling import temporal as sampling_temporal_lib
 from dgf.src.transform import normalize as normalize_lib
 from dgf.src.util import log
+from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 import jax
 import jax.numpy as jnp
@@ -55,6 +56,7 @@ class LiveData:
   sample_generator: dataset.SampleGeneratorFromAnything
   normalized_graph: Optional[in_memory_graph_lib.InMemoryGraph] = None
   normalized_jax_graph: Optional[jax_in_memory_graph.JaxInMemoryGraph] = None
+  timeseries_schema_cache: Optional[temporal_util.TimeseriesSchemaCache] = None
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -235,6 +237,9 @@ class GNNDatasetPreparator:
         sampling_plan=sample_generator.sampling_config,  # pyrefly: ignore[bad-argument-type]
         num_nodes_in_seed_nodeset=sample_generator.num_seed_nodes,
         sample_generator=sample_generator,
+        timeseries_schema_cache=temporal_util.extract_timeseries_schema_cache(
+            self.schema
+        ),
     )
 
     if self.cache_normalized_features:
@@ -351,6 +356,9 @@ class GNNDatasetPreparator:
         sampling_plan=sample_generator.sampling_config,  # pyrefly: ignore[bad-argument-type]
         num_nodes_in_seed_nodeset=sample_generator.num_seed_nodes,
         sample_generator=sample_generator,
+        timeseries_schema_cache=temporal_util.extract_timeseries_schema_cache(
+            self.schema
+        ),
     )
 
     if self.cache_normalized_features:
@@ -392,7 +400,9 @@ class GNNDatasetPreparator:
               "prepared in `prepare()`."
           )
         normalized_sample = attach_features_from_numpy_graph(
-            live.normalized_graph, sample
+            live.normalized_graph,
+            sample,
+            live.timeseries_schema_cache or self.schema,
         )
       else:
         normalized_sample = live.normalizer.normalize_numpy(sample)
@@ -437,11 +447,23 @@ class GNNDatasetPreparator:
 def attach_features_from_numpy_graph(
     graph: in_memory_graph_lib.InMemoryGraph,
     sample: in_memory_graph_lib.InMemoryGraph,
+    schema_or_cache: Union[
+        schema_lib.GraphSchema, temporal_util.TimeseriesSchemaCache
+    ],
 ) -> in_memory_graph_lib.InMemoryGraph:
   """Attaches the numpy features from `graph` to the `sample`."""
-  in_memory_sampler_lib.add_features_to_samples(
-      graph, [sample], return_features=True, return_node_idxs=False
+  if isinstance(schema_or_cache, schema_lib.GraphSchema):
+    cache = temporal_util.extract_timeseries_schema_cache(schema_or_cache)
+  else:
+    cache = schema_or_cache
+  sampling_temporal_lib.extract_features_timeseries(
+      graph=sample,
+      source_graph=graph,
+      timeseries_schema_cache=cache,
   )
+  for node_set in sample.node_sets.values():
+    if "#idx" in node_set.features:
+      del node_set.features["#idx"]
   return sample
 
 

@@ -32,26 +32,27 @@ class Sampler:
       self,
       cc_sampler,
       full_graph: in_memory_graph_lib.InMemoryGraph,
+      schema: schema_lib.GraphSchema,
       return_features: bool,
       return_node_idxs: bool,
-      schema: Optional[schema_lib.GraphSchema] = None,
-      slice_timeseries_by_seed: bool = True,
-      max_timeseries_len: Optional[int] = None,
-      has_temporal_edgesets: bool = False,
+      slice_timeseries_by_seed: bool,
+      max_timeseries_len: int,
+      has_temporal_edgesets: bool,
   ):
     self._cc_sampler = cc_sampler
     self._full_graph = full_graph
+    self._schema = schema
     self._return_features = return_features
     self._return_node_idxs = return_node_idxs
-    self._schema = schema
     self._slice_timeseries_by_seed = slice_timeseries_by_seed
     self._max_timeseries_len = max_timeseries_len
     self._has_temporal_edgesets = has_temporal_edgesets
     self._timeseries_schema_cache = (
         temporal_util.extract_timeseries_schema_cache(self._schema)
-        if self._schema is not None and self._slice_timeseries_by_seed
-        else None
     )
+
+    if self._max_timeseries_len <= 0:
+      raise ValueError("max_timeseries_len must be positive")
 
   def set_return_options(self, return_features: bool, return_node_idxs: bool):
     """Sets whether to return features and node indices in sampled graphs.
@@ -117,6 +118,19 @@ class Sampler:
     """
 
     # Check and convert the user input into what the c++ sampler expects.
+    assert (
+        not (
+            self._return_features
+            and self._slice_timeseries_by_seed
+            and self._has_timeseries_features()
+        )
+        or seed_timestamps is not None
+    ), (
+        "`seed_timestamps` must be provided when"
+        " `slice_timeseries_by_seed=True` and the schema contains"
+        " `is_timeseries=True` features."
+    )
+
     return_single_graph = False
     if isinstance(seed_node_idxs, int):
       return_single_graph = True
@@ -277,9 +291,10 @@ class Sampler:
 
     If `_return_features` is True, full feature values are added.
     If `_return_node_idxs` is False, the "#idx" feature is removed.
-    If `seed_timestamps` and `_schema` are available and
-    `_slice_timeseries_by_seed` is True, any `is_timeseries=True` features are
-    causally filtered by the seed node timestamp.
+    If `_return_features` is True and the schema has timeseries features:
+    - If `_slice_timeseries_by_seed` is True, timeseries features are causally
+      filtered by the seed node timestamp and clipped to `max_timeseries_len`.
+    - Otherwise, timeseries features are clipped to `max_timeseries_len`.
 
     Args:
       graphs: A list of `InMemoryGraph` objects to be finalized.
@@ -288,26 +303,25 @@ class Sampler:
     add_features_to_samples(
         self._full_graph, graphs, self._return_features, self._return_node_idxs
     )
-    if self._slice_timeseries_by_seed and self._return_features:
-      if seed_timestamps is None and self._has_timeseries_features():
+    if self._has_timeseries_features() and self._return_features:
+      if self._slice_timeseries_by_seed and seed_timestamps is None:
         raise ValueError(
             "`seed_timestamps` must be provided when"
             " `slice_timeseries_by_seed=True` and the schema contains"
             " `is_timeseries=True` features."
         )
-      if seed_timestamps is not None:
-        if self._schema is None:
-          raise ValueError(
-              "schema must be provided when `slice_timeseries_by_seed=True` and"
-              " `seed_timestamps` are passed."
-          )
-        for i, sample in enumerate(graphs):
-          sampling_temporal_lib.filter_timeseries_by_timestamp(
-              graph=sample,
-              schema_cache=self._timeseries_schema_cache,  # pyrefly: ignore[bad-argument-type]
-              target_timestamp=int(seed_timestamps[i]),
-              max_timeseries_len=self._max_timeseries_len,
-          )
+      for i, sample in enumerate(graphs):
+        target_timestamp = (
+            int(seed_timestamps[i])
+            if (self._slice_timeseries_by_seed and seed_timestamps is not None)
+            else None
+        )
+        sampling_temporal_lib.extract_features_timeseries(
+            graph=sample,
+            timeseries_schema_cache=self._timeseries_schema_cache,  # pyrefly: ignore[bad-argument-type]
+            target_timestamp=target_timestamp,
+            max_timeseries_len=self._max_timeseries_len,
+        )
 
 
 def add_features_to_samples(
@@ -335,18 +349,15 @@ def add_features_to_samples(
   if return_features or not return_node_idxs:
     # Extract feature values.
     # TODO(gbm): Do this in C++.
-    full_node_sets = full_graph.node_sets
     for sample in samples:
       for node_set_name, node_set in sample.node_sets.items():
         node_idxs = node_set.features["#idx"]
         if not return_node_idxs:
           del node_set.features["#idx"]
         if return_features:
-          features = full_node_sets[node_set_name].features
+          features = full_graph.node_sets[node_set_name].features
           for feature_name, full_feature_value in features.items():
-            node_set.features[feature_name] = np.take(
-                full_feature_value, node_idxs, axis=0
-            )
+            node_set.features[feature_name] = full_feature_value[node_idxs]
 
 
 def create_sampler(
@@ -362,7 +373,6 @@ def create_sampler(
     seed: Optional[int] = None,
     edgeset_to_mask: Optional[str] = None,
     slice_timeseries_by_seed: Optional[bool] = None,
-    max_timeseries_len: Optional[int] = None,
 ) -> Sampler:
   """Creates an in-memory sampler.
 
@@ -390,8 +400,6 @@ def create_sampler(
     slice_timeseries_by_seed: Whether to causally slice `is_timeseries=True`
       sequence features by the seed node timestamp. Defaults to
       `plan.temporal_sampling`.
-    max_timeseries_len: Optional cap on the number of historical causal sequence
-      steps retained for each timeseries feature.
 
   TODO(gbm): Should we remove the compilation variations (e.g., change in random
     number generator, change in hashmaps).
@@ -443,6 +451,6 @@ def create_sampler(
       return_node_idxs=return_node_idxs,
       schema=schema,
       slice_timeseries_by_seed=slice_timeseries_by_seed,
-      max_timeseries_len=max_timeseries_len,
+      max_timeseries_len=plan.max_timeseries_len,
       has_temporal_edgesets=bool(edgeset_timestamp_features),
   )
