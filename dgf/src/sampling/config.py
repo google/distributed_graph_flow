@@ -69,6 +69,7 @@ class SimpleSamplingConfig:
   reverse: bool = True
   with_replacement: bool = False
   temporal_sampling: bool = False
+  multi_visit: bool = True
 
 
 @dataclasses.dataclass
@@ -117,6 +118,7 @@ class SamplingPlan:
   root: PlanNode
   with_replacement: bool = False
   temporal_sampling: bool = False
+  multi_visit: bool = True
   edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
       default_factory=dict
   )
@@ -168,14 +170,12 @@ def simple_sampling_config_to_sampling_plan(
 
   edgeset_ts_features = {}
   if src.temporal_sampling:
-    edgeset_ts_features = temporal_util.edgeset_timestamp_features(
-        schema
-    )
+    edgeset_ts_features = temporal_util.edgeset_timestamp_features(schema)
 
   return SamplingPlan(
       root=rec_build(src.seed_nodeset, depth=0),
       with_replacement=src.with_replacement,
       temporal_sampling=src.temporal_sampling,
+      multi_visit=src.multi_visit,
       edgeset_timestamp_features=edgeset_ts_features,
   )
-

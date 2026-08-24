@@ -335,15 +335,18 @@ def add_features_to_samples(
   if return_features or not return_node_idxs:
     # Extract feature values.
     # TODO(gbm): Do this in C++.
+    full_node_sets = full_graph.node_sets
     for sample in samples:
       for node_set_name, node_set in sample.node_sets.items():
         node_idxs = node_set.features["#idx"]
         if not return_node_idxs:
           del node_set.features["#idx"]
         if return_features:
-          features = full_graph.node_sets[node_set_name].features
+          features = full_node_sets[node_set_name].features
           for feature_name, full_feature_value in features.items():
-            node_set.features[feature_name] = full_feature_value[node_idxs]
+            node_set.features[feature_name] = np.take(
+                full_feature_value, node_idxs, axis=0
+            )
 
 
 def create_sampler(
