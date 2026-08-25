@@ -12,6 +12,7 @@
 #include "third_party/gbbs/gbbs/macros.h"
 #include "third_party/parlay/include/parlay/parallel.h"
 #include "third_party/parlay/include/parlay/scheduler.h"
+#include "third_party/parlay/include/parlay/sequence.h"
 #include "dgf/src/gbbs/connected_components.h"
 #include "dgf/src/gbbs/gbbs_graph_handle.h"
 #include "dgf/src/util/status_caster.h"
@@ -168,6 +169,22 @@ NB_MODULE(_gbbs_ext, m) {
       "Works on both symmetric and asymmetric (directed) graphs.")
       .def(nb::init<>());
 
+  nb::class_<StronglyConnectedComponentsParams>(
+      m, "StronglyConnectedComponentsParams",
+      "Strongly connected components algorithm.\n"
+      "Supports directed (asymmetric) graphs.\n\n"
+      "Attributes:\n"
+      "  beta: step multiplier for subset discovery (default 1.5).")
+      .def(nb::init<>())
+      .def(
+          "__init__",
+          [](StronglyConnectedComponentsParams* self, double beta) {
+            new (self) StronglyConnectedComponentsParams{beta};
+          },
+          nb::arg("beta") = 1.5)
+      .def_rw("beta", &StronglyConnectedComponentsParams::beta,
+              "Step multiplier for subset discovery.");
+
   // ---------------------------------------------------------------------------
   // Connected Components: Result
   // ---------------------------------------------------------------------------
@@ -206,6 +223,10 @@ NB_MODULE(_gbbs_ext, m) {
       "Run a connected components algorithm on a GBBS graph.\n\n"
       "Returns InvalidArgumentError if the algorithm requires a symmetric\n"
       "graph but the graph is asymmetric (directed).");
+
+  m.def(
+      "RequiresSymmetricGraph", &RequiresSymmetricGraph, nb::arg("params"),
+      "Returns true if the algorithm requires a symmetric (undirected) graph.");
 }
 
 }  // namespace dgf::gbbs

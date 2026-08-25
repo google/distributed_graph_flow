@@ -43,6 +43,7 @@ BfsCCParams = _gbbs_ext.BfsCCParams
 LabelPropagationCCParams = _gbbs_ext.LabelPropagationCCParams
 WorkEfficientCCParams = _gbbs_ext.WorkEfficientCCParams
 ShiloachVishkinCCParams = _gbbs_ext.ShiloachVishkinCCParams
+StronglyConnectedComponentsParams = _gbbs_ext.StronglyConnectedComponentsParams
 
 ConnectedComponentsResult = _gbbs_ext.ConnectedComponentsResult
 CCSession = _gbbs_ext.CCSession
@@ -54,15 +55,8 @@ CCParams = Union[
     LabelPropagationCCParams,
     WorkEfficientCCParams,
     ShiloachVishkinCCParams,
+    StronglyConnectedComponentsParams,
 ]
-
-# Algorithms that only follow outgoing edges (edgeMap) and therefore require a
-# symmetric (undirected) graph to produce correct weakly-connected components.
-_SYMMETRIC_ONLY_PARAMS = frozenset({
-    BfsCCParams,
-    LabelPropagationCCParams,
-    WorkEfficientCCParams,
-})
 
 
 def validate_graph_params(
@@ -87,7 +81,7 @@ def validate_graph_params(
     ValueError: If the algorithm requires a symmetric graph but the graph
       was constructed as asymmetric (directed).
   """
-  if type(params) in _SYMMETRIC_ONLY_PARAMS and not graph.is_symmetric():
+  if _gbbs_ext.RequiresSymmetricGraph(params) and not graph.is_symmetric():
     raise ValueError(
         f"{type(params).__name__} requires a symmetric (undirected) graph, "
         "but the graph was built as asymmetric (directed). Use "

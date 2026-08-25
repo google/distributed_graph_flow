@@ -88,10 +88,15 @@ struct WorkEfficientCCParams {
 
 struct ShiloachVishkinCCParams {};
 
+struct StronglyConnectedComponentsParams {
+  double beta = 1.5;
+};
+
 // Set of all supported CC algorithms.
-using CCParams = std::variant<SimpleUnionAsyncCCParams, BfsCCParams,
-                              LabelPropagationCCParams, WorkEfficientCCParams,
-                              ShiloachVishkinCCParams>;
+using CCParams =
+    std::variant<SimpleUnionAsyncCCParams, BfsCCParams,
+                 LabelPropagationCCParams, WorkEfficientCCParams,
+                 ShiloachVishkinCCParams, StronglyConnectedComponentsParams>;
 
 // ---------------------------------------------------------------------------
 // Validation
