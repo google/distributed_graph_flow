@@ -67,6 +67,7 @@ def gen_toy_graph(
     num_nodes_b: int = 500,
     num_categorical_values: int = 200,
     random_seed: int = 42,
+    has_timestamp_feature: bool = False,
 ) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Generates a toy dataset for link prediction testing.
 
@@ -83,6 +84,7 @@ def gen_toy_graph(
     num_nodes_b: Number of nodes in node set "B".
     num_categorical_values: Number of categories for feature "f2".
     random_seed: Seed for reproducibility of features and edge selection.
+    has_timestamp_feature: If True, adds timestamp features to nodes and edges.
 
   Returns:
     A tuple containing the generated InMemoryGraph and its GraphSchema.
@@ -90,48 +92,64 @@ def gen_toy_graph(
 
   rng = np.random.default_rng(random_seed)
 
+  node_a_features_schema = {
+      "#id": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.BYTES,
+          semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+      ),
+      "f1": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.FLOAT_32,
+          semantic=schema_lib.FeatureSemantic.EMBEDDING,
+      ),
+      "f2": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.INTEGER_32,
+          semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+          num_categorical_values=num_categorical_values,
+      ),
+  }
+  node_b_features_schema = {
+      "#id": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.BYTES,
+          semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+      ),
+      "f1": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.FLOAT_32,
+          semantic=schema_lib.FeatureSemantic.EMBEDDING,
+      ),
+      "f2": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.INTEGER_32,
+          semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+          num_categorical_values=num_categorical_values,
+      ),
+  }
+  edge_features_schema = {}
+  if has_timestamp_feature:
+    node_a_features_schema["timestamp"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_creation_time=True,
+    )
+    node_b_features_schema["timestamp"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_creation_time=True,
+    )
+    edge_features_schema["timestamp"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_creation_time=True,
+    )
+
   schema = schema_lib.GraphSchema(
       node_sets={
-          "A": schema_lib.NodeSchema(
-              features={
-                  "#id": schema_lib.FeatureSchema(
-                      format=schema_lib.FeatureFormat.BYTES,
-                      semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
-                  ),
-                  "f1": schema_lib.FeatureSchema(
-                      format=schema_lib.FeatureFormat.FLOAT_32,
-                      semantic=schema_lib.FeatureSemantic.EMBEDDING,
-                  ),
-                  "f2": schema_lib.FeatureSchema(
-                      format=schema_lib.FeatureFormat.INTEGER_32,
-                      semantic=schema_lib.FeatureSemantic.CATEGORICAL,
-                      num_categorical_values=num_categorical_values,
-                  ),
-              }
-          ),
-          "B": schema_lib.NodeSchema(
-              features={
-                  "#id": schema_lib.FeatureSchema(
-                      format=schema_lib.FeatureFormat.BYTES,
-                      semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
-                  ),
-                  "f1": schema_lib.FeatureSchema(
-                      format=schema_lib.FeatureFormat.FLOAT_32,
-                      semantic=schema_lib.FeatureSemantic.EMBEDDING,
-                  ),
-                  "f2": schema_lib.FeatureSchema(
-                      format=schema_lib.FeatureFormat.INTEGER_32,
-                      semantic=schema_lib.FeatureSemantic.CATEGORICAL,
-                      num_categorical_values=num_categorical_values,
-                  ),
-              }
-          ),
+          "A": schema_lib.NodeSchema(features=node_a_features_schema),
+          "B": schema_lib.NodeSchema(features=node_b_features_schema),
       },
       edge_sets={
           "A_to_B": schema_lib.EdgeSchema(
               source="A",
               target="B",
-              features={},
+              features=edge_features_schema,
           ),
       },
   )
@@ -178,33 +196,43 @@ def gen_toy_graph(
       np.mean(degrees),
   )
 
+  node_a_features = {
+      "f1": f1_a,
+      "f2": f2_a,
+      "#id": np.array([f"A_{i}".encode() for i in range(num_nodes_a)]),
+  }
+  node_b_features = {
+      "f1": f1_b,
+      "f2": f2_b,
+      "#id": np.array([f"B_{i}".encode() for i in range(num_nodes_b)]),
+  }
+  edge_features = {}
+  if has_timestamp_feature:
+    node_a_features["timestamp"] = rng.integers(
+        0, 1000, size=num_nodes_a, dtype=np.int64
+    )
+    node_b_features["timestamp"] = rng.integers(
+        0, 1000, size=num_nodes_b, dtype=np.int64
+    )
+    edge_features["timestamp"] = rng.integers(
+        0, 1000, size=len(src_idxs), dtype=np.int64
+    )
+
   graph = in_memory_graph_lib.InMemoryGraph(
       node_sets={
           "A": in_memory_graph_lib.InMemoryNodeSet(
-              features={
-                  "f1": f1_a,
-                  "f2": f2_a,
-                  "#id": np.array(
-                      [f"A_{i}".encode() for i in range(num_nodes_a)]
-                  ),
-              },
+              features=node_a_features,
               num_nodes=num_nodes_a,
           ),
           "B": in_memory_graph_lib.InMemoryNodeSet(
-              features={
-                  "f1": f1_b,
-                  "f2": f2_b,
-                  "#id": np.array(
-                      [f"B_{i}".encode() for i in range(num_nodes_b)]
-                  ),
-              },
+              features=node_b_features,
               num_nodes=num_nodes_b,
           ),
       },
       edge_sets={
           "A_to_B": in_memory_graph_lib.InMemoryEdgeSet(
               adjacency=np.stack([src_idxs, tgt_idxs], axis=0),
-              features={},
+              features=edge_features,
           ),
       },
   )
@@ -907,6 +935,155 @@ class LinkPredictionPredictibleModelTest(absltest.TestCase):
     logging.info("evaluation:\n%s", evaluation)
     self.assertEqual(evaluation.num_examples, 4)
     # Note: The random negative sampling make the evaluation non deterministic.
+
+
+class LinkPredictionRealLookingTemporal(parameterized.TestCase):
+
+  @classmethod
+  def setUpClass(cls):
+    super().setUpClass()
+
+    cls.graph, cls.schema = gen_toy_graph(has_timestamp_feature=True)
+
+    def train_model() -> link_prediction_model.LinkPredictionModel:
+      return link_prediction_train.train_link_model(
+          graph=cls.graph,
+          schema=cls.schema,
+          target_edgeset="A_to_B",
+          time_aware=True,
+          **RAPID_TRAINING_KWARGS,
+      )
+
+    cls.model = train_model()
+
+  def test_evaluate(self):
+    evaluation = self.model.evaluate(self.graph)
+    logging.info("evaluation:\n%s", evaluation)
+    assert evaluation.num_examples is not None
+    self.assertGreater(evaluation.num_examples, 0)
+
+  def test_predict(self):
+    src_nodes = self.graph.edge_sets["A_to_B"].adjacency[0][:2]
+    trg_nodes = self.graph.edge_sets["A_to_B"].adjacency[1][:2]
+    edge_timestamps = self.graph.edge_sets["A_to_B"].features["timestamp"][:2]
+    predictions = self.model.predict(
+        graph=self.graph,
+        source_node_idxs=src_nodes,
+        target_node_idxs=trg_nodes,
+        edge_timestamps=edge_timestamps,
+    )
+    self.assertEqual(predictions.shape, (2,))
+    self.assertTrue(np.all(predictions >= 0.0) and np.all(predictions <= 1.0))
+
+  @parameterized.named_parameters(
+      (
+          "2d_matrix_combinations",
+          np.array([[100, 200, 300], [400, 500, 600]]),
+          True,
+          (2, 3),
+      ),
+      ("1d_vector_pairwise", np.array([300, 400]), False, (2,)),
+  )
+  def test_predict_with_edge_timestamps(
+      self, edge_timestamps, all_combinations, expected_shape
+  ):
+    predictions = self.model.predict(
+        graph=self.graph,
+        source_node_idxs=[0, 1],
+        target_node_idxs=[0, 1, 2] if all_combinations else [0, 1],
+        edge_timestamps=edge_timestamps,
+        all_combinations=all_combinations,
+    )
+    self.assertEqual(predictions.shape, expected_shape)
+    self.assertTrue(np.all(predictions >= 0.0) and np.all(predictions <= 1.0))
+
+  def test_predict_embedding(self):
+    emb_dim = self.model.data().hparams.node_embedding_dim
+    emb = self.model.predict_embedding(
+        self.graph,
+        node_idxs=[0, 1],
+        encoder="source",
+        node_timestamps=np.array([100, 200]),
+    )
+    self.assertEqual(emb.shape, (2, emb_dim))
+
+  def test_save_and_load(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      self.model.save(tmpdir)
+      restored_model = common_lib.load_model(tmpdir)
+
+    assert isinstance(restored_model, link_prediction_model.LinkPredictionModel)
+    self.assertTrue(restored_model.data().temporal_sampling)
+    self.assertTrue(
+        restored_model.data().source_sampling_plan.temporal_sampling
+    )
+    self.assertTrue(
+        restored_model.data().target_sampling_plan.temporal_sampling
+    )
+    test_util.assert_are_equal(self, self.model.data(), restored_model.data())
+
+    src_nodes = self.graph.edge_sets["A_to_B"].adjacency[0][:2]
+    trg_nodes = self.graph.edge_sets["A_to_B"].adjacency[1][:2]
+    edge_timestamps = self.graph.edge_sets["A_to_B"].features["timestamp"][:2]
+    predictions = self.model.predict(
+        graph=self.graph,
+        source_node_idxs=src_nodes,
+        target_node_idxs=trg_nodes,
+        edge_timestamps=edge_timestamps,
+    )
+    restored_predictions = restored_model.predict(
+        graph=self.graph,
+        source_node_idxs=src_nodes,
+        target_node_idxs=trg_nodes,
+        edge_timestamps=edge_timestamps,
+    )
+    self.assertEqual(predictions.shape, restored_predictions.shape)
+    self.assertTrue(
+        np.all(restored_predictions >= 0.0)
+        and np.all(restored_predictions <= 1.0)
+    )
+
+  def test_errors_and_validation(self):
+    with self.assertRaisesRegex(
+        ValueError,
+        "`edge_timestamps` must be provided",
+    ):
+      self.model.predict(
+          graph=self.graph,
+          source_node_idxs=[0],
+          target_node_idxs=[0],
+      )
+
+    with self.assertRaises(AssertionError):
+      self.model.predict(
+          graph=self.graph,
+          source_node_idxs=[0, 1],
+          target_node_idxs=[0, 1, 2],
+          edge_timestamps=np.array([100, 200, 300, 400]),
+          all_combinations=True,
+      )
+
+    with self.assertRaises(AssertionError):
+      self.model.predict_embedding(
+          self.graph,
+          node_idxs=[0, 1],
+          encoder="source",
+          node_timestamps=np.array([100, 200, 300]),
+      )
+
+    graph, schema = gen_toy_graph(has_timestamp_feature=True)
+    del schema.edge_sets["A_to_B"].features["timestamp"]
+    with self.assertRaisesRegex(
+        ValueError,
+        "The target edgeset 'A_to_B' must have a creation time feature",
+    ):
+      link_prediction_train.train_link_model(
+          graph=graph,
+          schema=schema,
+          target_edgeset="A_to_B",
+          time_aware=True,
+          **RAPID_TRAINING_KWARGS,
+      )
 
 
 if __name__ == "__main__":

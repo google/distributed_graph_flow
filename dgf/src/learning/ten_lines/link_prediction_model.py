@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
-from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Tuple, Union
 
 import dataclasses_json
 from dgf.src.data import in_memory_graph
@@ -102,6 +102,13 @@ class ModelData:
   source_sampling_plan: sampling_config_lib.SamplingPlan
   target_sampling_plan: sampling_config_lib.SamplingPlan
   training_stats: TrainingStats
+  temporal_sampling: bool = False
+  nodeset_timestamp_features: Dict[str, str] = dataclasses.field(
+      default_factory=dict
+  )
+  edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
+      default_factory=dict
+  )
   edge_neighbor_generator: (
       edge_neighbor_generator_lib.EdgeNeighborGeneratorConfig
   ) = edge_neighbor_generator_lib.registry.field(
@@ -370,6 +377,7 @@ class LinkPredictionModel(common.Model):
       source_node_idxs: common.SeedNodeIdxs,
       target_node_idxs: common.SeedNodeIdxs,
       *,
+      edge_timestamps: Optional[np.ndarray] = None,
       all_combinations: bool = False,
       verbose: int = 2,
   ) -> np.ndarray:
@@ -413,6 +421,7 @@ class LinkPredictionModel(common.Model):
       graph: The graph containing nodes and features.
       source_node_idxs: A list of node indices for edge sources.
       target_node_idxs: A list of node indices for edge targets.
+      edge_timestamps: Optional timestamps for the evaluated edges.
       all_combinations: If False (default), `len(target_node_idxs)` must be
         divisible by `len(source_node_idxs)`. If `m = len(target_node_idxs) //
         len(source_node_idxs)`, edge `source_node_idxs[i // m] ->
@@ -440,7 +449,8 @@ class LinkPredictionModel(common.Model):
         graph,
         source_node_idxs,
         target_node_idxs,
-        all_combinations,
+        all_combinations=all_combinations,
+        edge_timestamps=edge_timestamps,
         verbose=verbose,
     ):
       prediction_list.append(batch.predictions)
@@ -487,6 +497,7 @@ class LinkPredictionModel(common.Model):
         "edgeset_to_mask": (
             self._data.task.target_edgeset
             if self._data.hparams.message_passing_on_target_edgeset
+            and not self._data.temporal_sampling
             else None
         ),
     }
@@ -504,6 +515,7 @@ class LinkPredictionModel(common.Model):
       source_node_idxs: common.SeedNodeIdxs,
       target_node_idxs: common.SeedNodeIdxs,
       all_combinations: bool = False,
+      edge_timestamps: Optional[np.ndarray] = None,
       verbose: int = 2,
       source_sampler: Optional[in_memory_sampler_lib.Sampler] = None,
       target_sampler: Optional[in_memory_sampler_lib.Sampler] = None,
@@ -514,7 +526,10 @@ class LinkPredictionModel(common.Model):
     np_source_node_idxs = np.asarray(source_node_idxs)
     np_target_node_idxs = np.asarray(target_node_idxs)
 
-    mask_edges = self._data.hparams.message_passing_on_target_edgeset
+    mask_edges = (
+        self._data.hparams.message_passing_on_target_edgeset
+        and not self._data.temporal_sampling
+    )
     edge_lookup = None
     target_edgeset = self._data.task.target_edgeset
     if mask_edges:
@@ -531,11 +546,30 @@ class LinkPredictionModel(common.Model):
       flat_sources = grid[0].flatten()
       flat_targets = grid[1].flatten()
       num_examples = len(flat_sources)
+      if edge_timestamps is not None:
+        assert edge_timestamps.shape == (
+            len(np_source_node_idxs),
+            len(np_target_node_idxs),
+        )
+        flat_timestamps = edge_timestamps.flatten()
+      else:
+        flat_timestamps = None
     else:
       num_examples = len(np_target_node_idxs)
       m = num_examples // len(np_source_node_idxs)
       flat_sources = np.repeat(np_source_node_idxs, m)
       flat_targets = np_target_node_idxs
+      if edge_timestamps is not None:
+        assert edge_timestamps.shape == (num_examples,)
+        flat_timestamps = edge_timestamps
+      else:
+        flat_timestamps = None
+
+    if self._data.temporal_sampling and edge_timestamps is None:
+      raise ValueError(
+          "`edge_timestamps` must be provided in `predict()` / `predict_batch()` "
+          "when `temporal_sampling=True`."
+      )
 
     source_nodeset = self._data.schema.edge_sets[
         self._data.task.target_edgeset
@@ -613,7 +647,20 @@ class LinkPredictionModel(common.Model):
       batch_src = flat_sources[batch_indices]
       batch_trg = flat_targets[batch_indices]
 
-      if mask_edges:
+      batch_timestamps = (
+          flat_timestamps[batch_indices]
+          if flat_timestamps is not None
+          else None
+      )
+
+      if self._data.temporal_sampling:
+        source_samples = source_sampler.sample(
+            batch_src, seed_timestamps=batch_timestamps
+        )
+        target_samples = target_sampler.sample(
+            batch_trg, seed_timestamps=batch_timestamps
+        )
+      elif mask_edges:
         assert edge_lookup is not None
         queries = np.stack([batch_src, batch_trg], axis=0)
         masked_edge_idxs = edge_lookup.query_array(queries)
@@ -641,6 +688,7 @@ class LinkPredictionModel(common.Model):
       node_idxs: common.SeedNodeIdxs,
       encoder: Literal["source", "target"],
       *,
+      node_timestamps: Optional[np.ndarray] = None,
       verbose: int = 2,
   ) -> np.ndarray:
     """Predicts node embeddings for source or target sides.
@@ -677,6 +725,7 @@ class LinkPredictionModel(common.Model):
       node_idxs: A list of node indices for which to predict the embedding.
       encoder: Whether to predict the embedding using the "source" or "target"
         encoder of the model. Must be one of {"source", "target"}.
+      node_timestamps: Optional timestamps for the evaluated nodes.
       verbose: Verbosity level.
 
     Returns:
@@ -715,6 +764,22 @@ class LinkPredictionModel(common.Model):
     else:
       raise ValueError(f"Invalid encoder: {encoder}")
 
+    flat_node_timestamps = None
+    if node_timestamps is not None:
+      assert node_timestamps.shape == (len(np_node_idxs),)
+      flat_node_timestamps = node_timestamps
+    elif self._data.temporal_sampling:
+      if nodeset not in self._data.nodeset_timestamp_features:
+        raise ValueError(
+            "Cannot perform temporal sampling during embedding prediction"
+            f" because node set '{nodeset}' has no creation timestamp feature."
+            " Please provide `node_timestamps` in `predict_embedding()`."
+        )
+      ts_feature = self._data.nodeset_timestamp_features[nodeset]
+      flat_node_timestamps = graph.node_sets[nodeset].features[ts_feature][
+          np_node_idxs
+      ]
+
     generator = util.batch_indices_generator(
         np.arange(len(np_node_idxs)),
         batch_size=self._data.hparams.batch_size,
@@ -750,7 +815,12 @@ class LinkPredictionModel(common.Model):
     embeddings_list = []
     for batch_indices in generator:
       nodes = np_node_idxs[batch_indices]
-      samples = sampler.sample(nodes)
+      seed_timestamps = (
+          flat_node_timestamps[batch_indices]
+          if flat_node_timestamps is not None
+          else None
+      )
+      samples = sampler.sample(nodes, seed_timestamps=seed_timestamps)
 
       for emb in self.execute_with_split_on_error(
           merge_and_predict_emb, samples
@@ -1215,10 +1285,19 @@ class LinkPredictionModel(common.Model):
     examples_per_seed_edge = 1 + num_negative_nodes
     carry_over_probs = np.array([])
 
+    full_timestamps = None
+    if self._data.temporal_sampling:
+      ts_feature = self._data.edgeset_timestamp_features[target_edgeset]
+      seed_timestamps = graph.edge_sets[target_edgeset].features[ts_feature][
+          seed_edge_idxs
+      ]
+      full_timestamps = np.repeat(seed_timestamps, examples_per_seed_edge)
+
     for batch_pred in self.predict_batch(
         graph,
         full_src.tolist(),
         full_trg.tolist(),
+        edge_timestamps=full_timestamps,
         verbose=verbose,
         source_sampler=source_sampler,
         target_sampler=target_sampler,

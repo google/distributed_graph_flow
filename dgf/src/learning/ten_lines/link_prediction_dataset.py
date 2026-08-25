@@ -39,6 +39,7 @@ from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
 from dgf.src.util import log
+from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 import jax
 import jax.numpy as jnp
@@ -108,6 +109,7 @@ class NodeIdsBatch:
   pos_trg_node_idxs: np.ndarray
   neg_trg_node_idxs: np.ndarray
   edge_idxs: np.ndarray
+  seed_timestamps: Optional[np.ndarray] = None
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -198,6 +200,10 @@ class GNNLinkDatasetPreparator:
   )
   verbose_preparation: bool = True
   skip_overflow_padding_error: bool = False
+  temporal_sampling: bool = False
+  edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
+      default_factory=dict
+  )
 
   # The is_prepared data computed by the `prepare()` method.
   live: Optional[LiveData] = dataclasses.field(init=False, default=None)
@@ -211,6 +217,22 @@ class GNNLinkDatasetPreparator:
           " `mask_target_edgeset` is True, the entire target edgeset is removed"
           " from the sampling schema, making `mask_seed_edge` redundant."
       )
+    if self.cache_normalized_features and (
+        self.temporal_sampling
+        or temporal_util.schema_has_dynamic_timeseries_features(self.schema)
+    ):
+      raise ValueError(
+          "`cache_normalized_features=True` is not currently supported with"
+          " `temporal_sampling=True` or dynamic timeseries features."
+      )
+    if self.temporal_sampling:
+      if self.target_edgeset not in self.edgeset_timestamp_features:
+        raise ValueError(
+            f"The target edgeset '{self.target_edgeset}' must have a creation"
+            " time feature when temporal_sampling=True. Set"
+            " is_creation_time=True on the creation time feature in"
+            f" schema.edge_sets['{self.target_edgeset}']."
+        )
 
   def get_live(self) -> LiveData:
     if self.live is None:
@@ -344,10 +366,11 @@ class GNNLinkDatasetPreparator:
     return self.schema
 
   def _edgeset_to_mask(self) -> Optional[str]:
-    if self.mask_seed_edge:
-      return self.target_edgeset
-    else:
-      return None
+    return (
+        self.target_edgeset
+        if self.mask_seed_edge and not self.temporal_sampling
+        else None
+    )
 
   def _get_merge_schema(
       self, base_schema: schema_lib.GraphSchema
@@ -401,11 +424,18 @@ class GNNLinkDatasetPreparator:
         shuffle=self.shuffle,
     ):
       nei = nei_generator.generate(batch_edge_idxs)
+      seed_timestamps = None
+      if self.temporal_sampling:
+        ts_feature = self.edgeset_timestamp_features[self.target_edgeset]
+        seed_timestamps = target_edgeset_data.features[ts_feature][
+            batch_edge_idxs
+        ]
       yield NodeIdsBatch(
           pos_src_node_idxs=nei.pos_src_node_idxs,
           pos_trg_node_idxs=nei.pos_trg_node_idxs,
           neg_trg_node_idxs=nei.neg_trg_node_idxs,
           edge_idxs=batch_edge_idxs,
+          seed_timestamps=seed_timestamps,
       )
 
   def _prepare_on_in_memory_graph(self):
@@ -433,24 +463,43 @@ class GNNLinkDatasetPreparator:
     sampling_schema = self._sampling_schema()
     edgeset_to_mask = self._edgeset_to_mask()
 
+    source_plan = (
+        self.source_sampling_plan
+        if self.source_sampling_plan is not None
+        else sampling_config_lib.simple_sampling_config_to_sampling_plan(
+            self.sampling_config, self.schema
+        )
+        if isinstance(
+            self.sampling_config, sampling_config_lib.SimpleSamplingConfig
+        )
+        else self.sampling_config
+    )
+    target_plan_config = dataclasses.replace(
+        self.sampling_config,
+        seed_nodeset=self.schema.edge_sets[self.target_edgeset].target,
+    )
+    target_plan = (
+        self.target_sampling_plan
+        if self.target_sampling_plan is not None
+        else sampling_config_lib.simple_sampling_config_to_sampling_plan(
+            target_plan_config, self.schema
+        )
+        if isinstance(
+            target_plan_config, sampling_config_lib.SimpleSamplingConfig
+        )
+        else target_plan_config
+    )
+
     source_sampler = in_memory_sampler_lib.create_sampler(
         graph=self.graph,
-        plan=self.source_sampling_plan
-        if self.source_sampling_plan is not None
-        else self.sampling_config,
+        plan=source_plan,
         schema=sampling_schema,
         batch_size=self.batch_size,
         edgeset_to_mask=edgeset_to_mask,
     )
-    target_plan = dataclasses.replace(
-        self.sampling_config,
-        seed_nodeset=self.schema.edge_sets[self.target_edgeset].target,
-    )
     target_sampler = in_memory_sampler_lib.create_sampler(
         graph=self.graph,
-        plan=self.target_sampling_plan
-        if self.target_sampling_plan is not None
-        else target_plan,
+        plan=target_plan,
         schema=sampling_schema,
         batch_size=self.batch_size * self.num_negative_nodes,
         edgeset_to_mask=edgeset_to_mask,
@@ -464,11 +513,15 @@ class GNNLinkDatasetPreparator:
       """Generate graph samples for the source nodeset."""
       while True:
         for batch_seed in self._in_memory_generate_node_ids(nei_generator):
+          masked_edge_idxs = (
+              batch_seed.edge_idxs
+              if self.mask_seed_edge and batch_seed.seed_timestamps is None
+              else None
+          )
           samples = source_sampler.sample(
               batch_seed.pos_src_node_idxs,
-              masked_edge_idxs=batch_seed.edge_idxs
-              if self.mask_seed_edge
-              else None,
+              masked_edge_idxs=masked_edge_idxs,
+              seed_timestamps=batch_seed.seed_timestamps,
           )
           for sample in samples:
             yield sample
@@ -477,20 +530,31 @@ class GNNLinkDatasetPreparator:
       """Generate graph samples for the target nodeset."""
       while True:
         for batch_seed in self._in_memory_generate_node_ids(nei_generator):
+          masked_edge_idxs = (
+              batch_seed.edge_idxs
+              if self.mask_seed_edge and batch_seed.seed_timestamps is None
+              else None
+          )
           # We generate both positive and negative samples.
           pos_trg_samples = target_sampler.sample(
               batch_seed.pos_trg_node_idxs,
-              masked_edge_idxs=batch_seed.edge_idxs
-              if self.mask_seed_edge
-              else None,
+              masked_edge_idxs=masked_edge_idxs,
+              seed_timestamps=batch_seed.seed_timestamps,
+          )
+          neg_seed_timestamps = (
+              np.repeat(batch_seed.seed_timestamps, self.num_negative_nodes)
+              if batch_seed.seed_timestamps is not None
+              else None
+          )
+          neg_masked_edge_idxs = (
+              np.repeat(batch_seed.edge_idxs, self.num_negative_nodes, axis=0)
+              if self.mask_seed_edge and batch_seed.seed_timestamps is None
+              else None
           )
           neg_trg_samples = target_sampler.sample(
               batch_seed.neg_trg_node_idxs.flatten(),
-              masked_edge_idxs=np.repeat(
-                  batch_seed.edge_idxs, self.num_negative_nodes, axis=0
-              )
-              if self.mask_seed_edge
-              else None,
+              masked_edge_idxs=neg_masked_edge_idxs,
+              seed_timestamps=neg_seed_timestamps,
           )
           for sample in pos_trg_samples:
             yield sample
@@ -550,11 +614,15 @@ class GNNLinkDatasetPreparator:
     ):
       while True:
         for batch_seed in self._in_memory_generate_node_ids(nei_generator):
+          masked_edge_idxs = (
+              batch_seed.edge_idxs
+              if self.mask_seed_edge and batch_seed.seed_timestamps is None
+              else None
+          )
           samples = source_sampler.sample(
               batch_seed.pos_src_node_idxs,
-              masked_edge_idxs=batch_seed.edge_idxs
-              if self.mask_seed_edge
-              else None,
+              masked_edge_idxs=masked_edge_idxs,
+              seed_timestamps=batch_seed.seed_timestamps,
           )
           merged_samples, _ = merge_lib.merge_graphs(
               samples, sampling_schema, padding=None, sentinel_offset=True
@@ -566,11 +634,15 @@ class GNNLinkDatasetPreparator:
     ):
       while True:
         for batch_seed in self._in_memory_generate_node_ids(nei_generator):
+          masked_edge_idxs = (
+              batch_seed.edge_idxs
+              if self.mask_seed_edge and batch_seed.seed_timestamps is None
+              else None
+          )
           samples = target_sampler.sample(
               batch_seed.pos_trg_node_idxs,
-              masked_edge_idxs=batch_seed.edge_idxs
-              if self.mask_seed_edge
-              else None,
+              masked_edge_idxs=masked_edge_idxs,
+              seed_timestamps=batch_seed.seed_timestamps,
           )
           merged_samples, _ = merge_lib.merge_graphs(
               samples, sampling_schema, padding=None, sentinel_offset=True
@@ -582,13 +654,20 @@ class GNNLinkDatasetPreparator:
     ):
       while True:
         for batch_seed in self._in_memory_generate_node_ids(nei_generator):
+          neg_seed_timestamps = (
+              np.repeat(batch_seed.seed_timestamps, self.num_negative_nodes)
+              if batch_seed.seed_timestamps is not None
+              else None
+          )
+          neg_masked_edge_idxs = (
+              np.repeat(batch_seed.edge_idxs, self.num_negative_nodes, axis=0)
+              if self.mask_seed_edge and batch_seed.seed_timestamps is None
+              else None
+          )
           samples = target_sampler.sample(
               batch_seed.neg_trg_node_idxs.flatten(),
-              masked_edge_idxs=np.repeat(
-                  batch_seed.edge_idxs, self.num_negative_nodes, axis=0
-              )
-              if self.mask_seed_edge
-              else None,
+              masked_edge_idxs=neg_masked_edge_idxs,
+              seed_timestamps=neg_seed_timestamps,
           )
           merged_samples, _ = merge_lib.merge_graphs(
               samples, sampling_schema, padding=None, sentinel_offset=True
@@ -662,18 +741,8 @@ class GNNLinkDatasetPreparator:
         positive_source_padding=positive_source_padding,
         positive_target_padding=positive_target_padding,
         negative_target_padding=negative_target_padding,
-        source_sampling_plan=sampling_config_lib.simple_sampling_config_to_sampling_plan(
-            self.sampling_config, self.schema
-        )
-        if isinstance(
-            self.sampling_config, sampling_config_lib.SimpleSamplingConfig
-        )
-        else self.sampling_config,
-        target_sampling_plan=sampling_config_lib.simple_sampling_config_to_sampling_plan(
-            target_plan, self.schema
-        )
-        if isinstance(target_plan, sampling_config_lib.SimpleSamplingConfig)
-        else target_plan,
+        source_sampling_plan=source_plan,
+        target_sampling_plan=target_plan,
         source_sampler=source_sampler,
         target_sampler=target_sampler,
         num_edges_in_seed_edgeset=len(self.seed_edge_idxs)
@@ -737,10 +806,16 @@ class GNNLinkDatasetPreparator:
           target.
         - A tuple of merge offsets dictionaries for each merged graph.
     """
+    masked_edge_idxs = (
+        batch_seed.edge_idxs
+        if self.mask_seed_edge and batch_seed.seed_timestamps is None
+        else None
+    )
     # Positive source
     pos_src_samples = live.source_sampler.sample(
         batch_seed.pos_src_node_idxs,
-        masked_edge_idxs=batch_seed.edge_idxs if self.mask_seed_edge else None,
+        masked_edge_idxs=masked_edge_idxs,
+        seed_timestamps=batch_seed.seed_timestamps,
     )
     pos_src_merged, pos_src_offsets = merge_lib.merge_graphs(
         pos_src_samples,
@@ -752,7 +827,8 @@ class GNNLinkDatasetPreparator:
     # Positive target
     pos_trg_samples = live.target_sampler.sample(
         batch_seed.pos_trg_node_idxs,
-        masked_edge_idxs=batch_seed.edge_idxs if self.mask_seed_edge else None,
+        masked_edge_idxs=masked_edge_idxs,
+        seed_timestamps=batch_seed.seed_timestamps,
     )
     pos_trg_merged, pos_trg_offsets = merge_lib.merge_graphs(
         pos_trg_samples,
@@ -762,13 +838,20 @@ class GNNLinkDatasetPreparator:
     )
 
     # Negative target
+    neg_seed_timestamps = (
+        np.repeat(batch_seed.seed_timestamps, self.num_negative_nodes)
+        if batch_seed.seed_timestamps is not None
+        else None
+    )
+    neg_masked_edge_idxs = (
+        np.repeat(batch_seed.edge_idxs, self.num_negative_nodes, axis=0)
+        if self.mask_seed_edge and batch_seed.seed_timestamps is None
+        else None
+    )
     neg_trg_samples = live.target_sampler.sample(
         batch_seed.neg_trg_node_idxs.flatten(),
-        masked_edge_idxs=np.repeat(
-            batch_seed.edge_idxs, self.num_negative_nodes, axis=0
-        )
-        if self.mask_seed_edge
-        else None,
+        masked_edge_idxs=neg_masked_edge_idxs,
+        seed_timestamps=neg_seed_timestamps,
     )
     neg_trg_merged, neg_trg_offsets = merge_lib.merge_graphs(
         neg_trg_samples,

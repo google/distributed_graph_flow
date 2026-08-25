@@ -39,6 +39,7 @@ from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
 from dgf.src.util import filesystem as fs
 from dgf.src.util import log
+from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 import jax
 import jax.numpy as jnp
@@ -168,6 +169,8 @@ def prepare_datasets(
     cache_normalized_features_device: Literal["host", "device"],
     source_sampling_plan: Optional[sampling_config_lib.SamplingPlan],
     target_sampling_plan: Optional[sampling_config_lib.SamplingPlan],
+    temporal_sampling: bool,
+    edgeset_timestamp_features: Dict[str, str],
 ) -> Tuple[
     link_prediction_dataset.GNNLinkDatasetPreparator,
     Optional[link_prediction_dataset.GNNLinkDatasetPreparator],
@@ -197,6 +200,7 @@ def prepare_datasets(
       num_hops=hparams.num_sampling_hops,
       hop_width=hparams.sampling_width,
       reverse=True,
+      temporal_sampling=temporal_sampling,
   )
 
   # TODO(gbm): Parametrize.
@@ -235,6 +239,8 @@ def prepare_datasets(
       "edge_neighbor_generator": edge_neighbor_generator,
       "cache_normalized_features": cache_normalized_features,
       "cache_normalized_features_device": cache_normalized_features_device,
+      "temporal_sampling": temporal_sampling,
+      "edgeset_timestamp_features": edgeset_timestamp_features,
   }
 
   train_dataset = link_prediction_dataset.GNNLinkDatasetPreparator(
@@ -309,6 +315,7 @@ def train_link_model(
     node_embedding_dim: int = 128,
     learning_rate: float = 1e-3,
     cache_valid_dataset: bool = True,
+    time_aware: bool = False,
     num_negative_nodes: int = 8,
     message_passing_on_target_edgeset: bool = True,
     negative_edges: Literal["random", "random-walk"] = "random",
@@ -370,6 +377,9 @@ def train_link_model(
     node_embedding_dim: Node embedding dimension.
     learning_rate: Learning rate.
     cache_valid_dataset: If True, the validation dataset is cached in memory.
+    time_aware: Enables temporal-aware training. If `False` (default), no
+      temporal sampling is applied. If `True`, timestamp features are inferred
+      from the schema (via features marked as creation timestamps).
     num_negative_nodes: Number of negative target nodes to sample for each edge.
     message_passing_on_target_edgeset: If True, message passing is allowed to
       use edges from the `target_edgeset`. Otherwise, these edges are excluded
@@ -413,7 +423,6 @@ def train_link_model(
     A LinkPredictionModel instance.
   """
 
-  # TODO(gbm): Add support for temporal aware sampling.
   # TODO(gbm): Add support for decomposable and non-decomposable decoders.
   # TODO(gbm): Add support for other type of graph inputs.
 
@@ -436,6 +445,20 @@ def train_link_model(
             "`target_edgeset` must be specified when the schema contains more"
             " than one edgeset."
         )
+
+    if time_aware:
+      nodeset_ts_features = temporal_util.nodeset_timestamp_features(schema)
+      edgeset_ts_features = temporal_util.edgeset_timestamp_features(schema)
+      if target_edgeset not in edgeset_ts_features:
+        raise ValueError(
+            f"The target edgeset '{target_edgeset}' must have a creation time"
+            " feature. Set is_creation_time=True on the creation time feature"
+            f" (e.g. `schema.edge_sets['{target_edgeset}'].features[<creation time"
+            " feature>].is_creation_time = True`)."
+        )
+    else:
+      nodeset_ts_features = {}
+      edgeset_ts_features = {}
 
     if verbose >= 2:
       log.info(
@@ -486,6 +509,8 @@ def train_link_model(
           cache_normalized_features_device=cache_normalized_features_device,
           source_sampling_plan=source_sampling_plan,
           target_sampling_plan=target_sampling_plan,
+          temporal_sampling=time_aware,
+          edgeset_timestamp_features=edgeset_ts_features,
       )
     source_normalized_schema = (
         train_dataset.get_live().source_normalizer.output_schema()
@@ -772,6 +797,9 @@ def train_link_model(
             target_feature_stats=train_dataset.get_live().target_feature_stats,
             source_sampling_plan=train_dataset.get_live().source_sampling_plan,
             target_sampling_plan=train_dataset.get_live().target_sampling_plan,
+            temporal_sampling=time_aware,
+            nodeset_timestamp_features=nodeset_ts_features,
+            edgeset_timestamp_features=edgeset_ts_features,
             training_stats=TrainingStats(
                 num_train_seed_edges=train_dataset.num_edge_in_seed_edgeset(),
                 num_valid_seed_edges=valid_dataset.num_edge_in_seed_edgeset()

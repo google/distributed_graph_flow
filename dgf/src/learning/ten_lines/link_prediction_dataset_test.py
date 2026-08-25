@@ -522,6 +522,85 @@ class GNNLinkDatasetPreparatorTest(parameterized.TestCase):
       num_batches += 1
     self.assertEqual(num_batches, 2)
 
+  def test_in_memory_temporal_graph(self):
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(False)
+    sampling_config = sampling_config_lib.SimpleSamplingConfig(
+        seed_nodeset="n1",
+        num_hops=2,
+        hop_width=3,
+        reverse=True,
+        temporal_sampling=True,
+    )
+    preparator = link_prediction_dataset.GNNLinkDatasetPreparator(
+        graph=graph,
+        schema=schema,
+        sampling_config=sampling_config,
+        batch_size=2,
+        drop_remainder=False,
+        shuffle=True,
+        target_edgeset="e1",
+        num_negative_nodes=2,
+        seed_edge_idxs=None,
+        temporal_sampling=True,
+        edgeset_timestamp_features={"e1": "timestamp"},
+        edge_neighbor_generator=edge_neighbor_generator_lib.RandomEdgeNeighborGeneratorConfig(),
+    )
+    self.assertFalse(preparator.is_prepared())
+    preparator.prepare()
+    self.assertTrue(preparator.is_prepared())
+
+    num_batches = 0
+    live = preparator.get_live()
+    for sample in preparator.generate():
+      in_memory_graph_validate_lib.validate_graph(
+          sample.positive_source_graph,
+          live.source_normalizer.output_schema(),
+          raise_on_warning=False,
+      )
+      in_memory_graph_validate_lib.validate_graph(
+          sample.positive_target_graph,
+          live.target_normalizer.output_schema(),
+          raise_on_warning=False,
+      )
+      in_memory_graph_validate_lib.validate_graph(
+          sample.negative_target_graph,
+          live.target_normalizer.output_schema(),
+          raise_on_warning=False,
+      )
+      num_batches += 1
+    self.assertEqual(num_batches, 2)
+
+  def test_temporal_cache_normalized_features_raises(self):
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(False)
+    sampling_config = sampling_config_lib.SimpleSamplingConfig(
+        seed_nodeset="n1",
+        num_hops=1,
+        hop_width=2,
+        reverse=True,
+        temporal_sampling=True,
+    )
+    with self.assertRaisesRegex(
+        ValueError,
+        "`cache_normalized_features=True` is not currently supported",
+    ):
+      link_prediction_dataset.GNNLinkDatasetPreparator(
+          graph=graph,
+          schema=schema,
+          sampling_config=sampling_config,
+          batch_size=2,
+          drop_remainder=False,
+          shuffle=True,
+          target_edgeset="e1",
+          num_negative_nodes=2,
+          seed_edge_idxs=None,
+          temporal_sampling=True,
+          cache_normalized_features=True,
+          edgeset_timestamp_features={"e1": "timestamp"},
+          edge_neighbor_generator=(
+              edge_neighbor_generator_lib.RandomEdgeNeighborGeneratorConfig()
+          ),
+      )
+
 
 if __name__ == "__main__":
   absltest.main()
