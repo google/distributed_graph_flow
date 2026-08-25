@@ -26,7 +26,7 @@ import pyarrow as pa
 
 class _LazyFeatureFormatToTfDtype:
 
-  def __getitem__(self, key):
+  def __getitem__(self, key: schema_lib.FeatureFormat) -> "tf.DType":
     return {
         schema_lib.FeatureFormat.INTEGER_64: tf.int64,
         schema_lib.FeatureFormat.INTEGER_32: tf.int32,
@@ -43,7 +43,7 @@ FEATURE_FORMAT_TO_TF_DTYPE = _LazyFeatureFormatToTfDtype()
 
 class _LazyTfDtypeToFeatureFormat:
 
-  def __getitem__(self, key):
+  def __getitem__(self, key: "tf.DType") -> schema_lib.FeatureFormat:
     return {
         tf.int64: schema_lib.FeatureFormat.INTEGER_64,
         tf.int32: schema_lib.FeatureFormat.INTEGER_32,

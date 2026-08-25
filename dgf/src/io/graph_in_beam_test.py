@@ -16,17 +16,28 @@ import os
 import tempfile
 from absl.testing import absltest
 from absl.testing import parameterized
+import apache_beam as beam
 from apache_beam.testing import test_pipeline
 from apache_beam.testing import util as beam_test_util
+from dgf.src.beam import runners
 from dgf.src.data import distributed_graph
+from dgf.src.data import gf_metadata as gf_metadata_lib
+from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import graph_in_beam as gf_graph_in_beam_lib
+from dgf.src.io import graph_in_memory as gf_graph_in_memory
 from dgf.src.util import gen_test_graph
 from dgf.src.util import test_util
 import numpy as np
 
 test_util.disable_diff_truncation()
 Edge = distributed_graph.Edge
+
+
+def _create_pipeline():
+  return test_pipeline.TestPipeline(
+      runner=runners.runner_from_name("FlumePython")
+  )
 
 
 class ReadGFGGraphTest(parameterized.TestCase):
@@ -38,17 +49,25 @@ class ReadGFGGraphTest(parameterized.TestCase):
       path = os.path.join(tmpdir, "gf_graph")
       gen_test_graph.generate_gf_graph(path, edge_ids=edge_ids)
 
-      with test_pipeline.TestPipeline() as root:
+      with _create_pipeline() as root:
         graph = gf_graph_in_beam_lib.read_graph(root, path)
         _check_graph(self, graph, edge_ids=edge_ids)
 
-  def test_read_graph_with_filter(self):
+  @parameterized.parameters("PARQUET", "TF_RECORD", "RECORDIO")
+  def test_read_graph_with_filter(self, container: str):
     with tempfile.TemporaryDirectory() as tmpdir:
-      # Generate some toy data
       path = os.path.join(tmpdir, "gf_graph")
-      gen_test_graph.generate_gf_graph(path, edge_ids=False)
+      in_memory_graph = gen_test_graph.generate_in_memory_graph(
+          node_ids=True, edge_ids=False
+      )
+      schema = gen_test_graph.generate_schema(
+          node_ids=True, edge_ids=False, semantic=True
+      )
+      gf_graph_in_memory.write_graph(
+          in_memory_graph, schema, path, container=container
+      )
 
-      with test_pipeline.TestPipeline() as root:
+      with _create_pipeline() as root:
         graph = gf_graph_in_beam_lib.read_graph(
             root,
             path,
@@ -59,21 +78,152 @@ class ReadGFGGraphTest(parameterized.TestCase):
         )
         _check_graph(self, graph, edge_ids=False, has_edges=False)
 
-  @parameterized.parameters(True, False)
-  def test_write_graph(self, edge_ids: bool):
+  @parameterized.product(
+      edge_ids=[True, False], container=["PARQUET", "TF_RECORD", "RECORDIO"]
+  )
+  def test_write_graph(self, edge_ids: bool, container: str):
     with tempfile.TemporaryDirectory() as tmpdir:
       # Generate some toy data
       old_path = os.path.join(tmpdir, "old_gf_graph")
       new_path = os.path.join(tmpdir, "new_gf_graph")
 
-      with test_pipeline.TestPipeline() as root:
+      with _create_pipeline() as root:
         gen_test_graph.generate_gf_graph(old_path, edge_ids=edge_ids)
         graph = gf_graph_in_beam_lib.read_graph(root, old_path)
-        gf_graph_in_beam_lib.write_graph(graph, new_path)
+        gf_graph_in_beam_lib.write_graph(
+            graph,
+            new_path,
+            num_node_shards=1,
+            num_edge_shards=1,
+            container_type=container,
+        )
 
-      with test_pipeline.TestPipeline() as root:
+      with _create_pipeline() as root:
         reloaded_graph = gf_graph_in_beam_lib.read_graph(root, new_path)
         _check_graph(self, reloaded_graph, edge_ids=edge_ids)
+
+      # Check files
+      extension = gf_graph_in_memory.get_extension(
+          gf_metadata_lib.Container(container)
+      )
+      expected_files = [
+          "/schema.json",
+          "/metadata.json",
+          f"/nodesets/n1-00000-of-00001{extension}",
+          f"/nodesets/n2-00000-of-00001{extension}",
+          f"/edgesets/e1-00000-of-00001{extension}",
+          f"/edgesets/e2-00000-of-00001{extension}",
+      ]
+      actual_files = []
+      for dirpath, _, filenames in os.walk(new_path):
+        for filename in filenames:
+          actual_files.append(
+              os.path.join(dirpath, filename).removeprefix(new_path)
+          )
+      self.assertSameElements(sorted(actual_files), sorted(expected_files))
+
+  @parameterized.product(
+      edge_ids=[True, False], container=["PARQUET", "TF_RECORD", "RECORDIO"]
+  )
+  def test_in_memory_write_and_beam_read(self, edge_ids: bool, container: str):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      path = os.path.join(tmpdir, "gf_graph")
+      in_memory_graph = gen_test_graph.generate_in_memory_graph(
+          node_ids=True, edge_ids=edge_ids
+      )
+      schema = gen_test_graph.generate_schema(
+          node_ids=True, edge_ids=edge_ids, semantic=True
+      )
+      gf_graph_in_memory.write_graph(
+          in_memory_graph, schema, path, container=container
+      )
+
+      with _create_pipeline() as root:
+        graph = gf_graph_in_beam_lib.read_graph(root, path)
+        _check_graph(self, graph, edge_ids=edge_ids)
+
+  @parameterized.product(
+      edge_ids=[True, False], container=["PARQUET", "TF_RECORD", "RECORDIO"]
+  )
+  def test_beam_write_and_in_memory_read(self, edge_ids: bool, container: str):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      old_path = os.path.join(tmpdir, "old_gf_graph")
+      new_path = os.path.join(tmpdir, "new_gf_graph")
+
+      with _create_pipeline() as root:
+        gen_test_graph.generate_gf_graph(old_path, edge_ids=edge_ids)
+        graph = gf_graph_in_beam_lib.read_graph(root, old_path)
+        gf_graph_in_beam_lib.write_graph(
+            graph,
+            new_path,
+            num_node_shards=1,
+            num_edge_shards=1,
+            container_type=container,
+        )
+
+      output_in_memory_graph, output_schema = gf_graph_in_memory.read_graph(
+          new_path
+      )
+      expected_schema = gen_test_graph.generate_schema(
+          node_ids=True, edge_ids=edge_ids, semantic=True
+      )
+      expected_in_memory_graph = gen_test_graph.generate_in_memory_graph(
+          node_ids=True, edge_ids=edge_ids
+      )
+      test_util.assert_are_equal(self, output_schema, expected_schema)
+      test_util.assert_are_equal(
+          self,
+          _canonicalize_graph(output_in_memory_graph, expected_schema),
+          _canonicalize_graph(expected_in_memory_graph, expected_schema),
+      )
+
+
+def _canonicalize_graph(
+    graph: in_memory_graph_lib.InMemoryGraph,
+    schema: schema_lib.GraphSchema,
+) -> in_memory_graph_lib.InMemoryGraph:
+  new_node_sets = {}
+  node_perm = {}
+  for nodeset_name, nodeset in graph.node_sets.items():
+    if (
+        "#id" in nodeset.features
+        and nodeset.num_nodes
+        and nodeset.num_nodes > 1
+    ):
+      order = np.argsort(nodeset.features["#id"])
+      inv_order = np.empty_like(order)
+      inv_order[order] = np.arange(len(order))
+      node_perm[nodeset_name] = inv_order
+      new_features = {k: v[order] for k, v in nodeset.features.items()}
+      new_node_sets[nodeset_name] = in_memory_graph_lib.InMemoryNodeSet(
+          num_nodes=nodeset.num_nodes, features=new_features
+      )
+    else:
+      node_perm[nodeset_name] = np.arange(nodeset.num_nodes or 0)
+      new_node_sets[nodeset_name] = nodeset
+
+  new_edge_sets = {}
+  for edgeset_name, edgeset in graph.edge_sets.items():
+    edge_schema = schema.edge_sets[edgeset_name]
+    src_perm = node_perm[edge_schema.source]
+    dst_perm = node_perm[edge_schema.target]
+    new_src = src_perm[edgeset.adjacency[0]]
+    new_dst = dst_perm[edgeset.adjacency[1]]
+    if "#id" in edgeset.features:
+      edge_order = np.argsort(edgeset.features["#id"])
+    else:
+      edge_order = np.lexsort((new_dst, new_src))
+    new_adjacency = np.stack([new_src[edge_order], new_dst[edge_order]])
+    new_features = {k: v[edge_order] for k, v in edgeset.features.items()}
+    new_edge_sets[edgeset_name] = in_memory_graph_lib.InMemoryEdgeSet(
+        adjacency=new_adjacency, features=new_features
+    )
+
+  return in_memory_graph_lib.InMemoryGraph(
+      node_sets=new_node_sets,
+      edge_sets=new_edge_sets,
+      timestamp=graph.timestamp,
+  )
 
 
 def _check_graph(self, graph, edge_ids: bool, has_edges: bool = True):

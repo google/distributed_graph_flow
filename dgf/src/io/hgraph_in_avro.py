@@ -224,7 +224,7 @@ def write_avro_edge_sets(
     }
     parsed_schema = fastavro.parse_schema(avro_schema_dict)
     num_edges = edgeset.adjacency.shape[1]
-    feature_items = list(edgeset.features.items()) if edgeset.features else []
+    feature_items = list(edgeset.features.items())
 
     source_ids = graph.node_sets[source_nodeset_name].features[node_id_column][
         edgeset.adjacency[0]
@@ -270,9 +270,7 @@ def read_avro_record(
     verbose: bool,
 ) -> Tuple[Dict[str, np.ndarray], int]:
   """Reads an Avro file and updates the feature builders."""
-  feature_builders: Dict[str, List[Any]] = {
-      f_name: [] for f_name in columns.keys()
-  }
+  feature_builders: Dict[str, List[Any]] = {f_name: [] for f_name in columns}
   num_records = 0
 
   for avro_file in paths:
@@ -287,7 +285,7 @@ def read_avro_record(
         )
       for record in record_iterator:
         num_records += 1
-        for feature_name in feature_builders.keys():
+        for feature_name in feature_builders:
           feature_builders[feature_name].append(record[feature_name])  # pyrefly: ignore[bad-index, unsupported-operation]
 
   # Convert lists to numpy arrays

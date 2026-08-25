@@ -35,8 +35,10 @@ py_library(
     srcs = ["hgraph_in_memory.py"],
     deps = [
         ":feature_format",
+        ":graph_in_memory",
         ":hgraph_in_avro",
         ":io_ext",
+        ":tf_graph_common",
         ":tfexample",
         # apache_beam dep,
         "//dgf/src/analyse:schema",
@@ -57,7 +59,10 @@ py_library(
     name = "hgraph_in_beam",
     srcs = ["hgraph_in_beam.py"],
     deps = [
+        ":beam_tf_graph_common",
+        ":graph_in_memory",
         ":hgraph_in_memory",
+        ":tf_graph_common",
         # apache_beam dep,
         "//dgf/src/data:distributed_graph",
         "//dgf/src/data:schema",
@@ -75,10 +80,13 @@ py_library(
     name = "graph_in_memory",
     srcs = ["graph_in_memory.py"],
     deps = [
+        ":feature_format",
         ":graph_constants",
         ":io_ext",
         ":parquet",
         ":schema",
+        ":tf_graph_common",
+        ":tfexample",
         "//dgf/src/analyse:schema",
         "//dgf/src/data:gf_metadata",
         "//dgf/src/data:in_memory_graph",
@@ -88,6 +96,7 @@ py_library(
         "//dgf/src/util:log",
         "//dgf/src/util:shard",
         "//dgf/src/util:util_py",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # numpy dep,
     ],
 )
@@ -199,6 +208,16 @@ py_library(
 )
 
 py_library(
+    name = "tf_graph_common",
+    srcs = ["tf_graph_common.py"],
+    deps = [
+        "//dgf/src/data:schema",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
+        # numpy dep,
+    ],
+)
+
+py_library(
     name = "sparse_deferred",
     srcs = ["sparse_deferred.py"],
     deps = [
@@ -227,6 +246,7 @@ py_library(
 py_library(
     name = "pyg",
     srcs = ["pyg.py"],
+    pytype_deps = ["//third_party/py/torch_geometric"],
     deps = [
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
@@ -281,9 +301,13 @@ py_library(
     name = "graph_in_beam",
     srcs = ["graph_in_beam.py"],
     deps = [
+        ":beam_tf_graph_common",
         ":feature_format",
         ":graph_constants",
+        ":graph_in_memory",
+        ":hgraph_in_memory",
         ":schema",
+        ":tf_graph_common",
         "//dgf/src/analyse:schema",
         "//dgf/src/data:distributed_graph",
         "//dgf/src/data:gf_metadata",
@@ -411,7 +435,7 @@ py_test(
         "//dgf/src/util:test_util",
         # google/protobuf:use_fast_cpp_protos dep,
         # numpy dep,
-        # tensorflow dep,
+        # tensorflow:tensorflow_no_contrib dep,
         # tensorflow_gnn/proto dep,
     ],
 )
@@ -430,7 +454,7 @@ py_test(
         "//dgf/src/util:test_util",
         # google/protobuf:use_fast_cpp_protos dep,
         # numpy dep,
-        # tensorflow dep,
+        # tensorflow:tensorflow_no_contrib dep,
     ],
 )
 
@@ -443,11 +467,13 @@ py_test(
         # absl/testing:parameterized dep,
         # apache_beam dep,
         "//dgf/src/data:distributed_graph",
+        "//dgf/src/data:gf_metadata",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
         "//dgf/src/validate:in_memory_graph",
+        # numpy dep,
     ],
 )
 
@@ -464,7 +490,7 @@ py_test(
         "//dgf/src/data:distributed_graph",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
-        # tensorflow dep,
+        # tensorflow:tensorflow_no_contrib dep,
     ],
 )
 
@@ -490,7 +516,7 @@ py_test(
         # absl/testing:absltest dep,
         # google/protobuf:use_fast_cpp_protos dep,
         # numpy dep,
-        # tensorflow dep,
+        # tensorflow:tensorflow_no_contrib dep,
     ],
 )
 
@@ -569,12 +595,17 @@ py_test(
 py_test(
     name = "graph_in_beam_test",
     srcs = ["graph_in_beam_test.py"],
+    shard_count = 4,
     deps = [
         ":graph_in_beam",
+        ":graph_in_memory",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         # apache_beam dep,
+        "//dgf/src/beam:runners",
         "//dgf/src/data:distributed_graph",
+        "//dgf/src/data:gf_metadata",
+        "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
@@ -661,5 +692,49 @@ py_test(
         # numpy dep,
         "//third_party/py/torch:pytorch",
         "//third_party/py/torch_geometric",
+    ],
+)
+
+py_library(
+    name = "beam_tf_graph_common",
+    srcs = ["beam_tf_graph_common.py"],
+    deps = [
+        ":tf_graph_common",
+        # apache_beam dep,
+        "//dgf/src/data:distributed_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "tf_graph_common_test",
+    srcs = ["tf_graph_common_test.py"],
+    deps = [
+        ":tf_graph_common",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:schema",
+        # numpy dep,
+        # tensorflow:tensorflow_no_contrib dep,
+    ],
+)
+
+py_test(
+    name = "beam_tf_graph_common_test",
+    srcs = ["beam_tf_graph_common_test.py"],
+    deps = [
+        ":beam_tf_graph_common",
+        ":tf_graph_common",
+        # absl/testing:absltest dep,
+        # apache_beam dep,
+        "//dgf/src/beam:runners",
+        "//dgf/src/data:distributed_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/util/weak_dep:weak_dep_apache_beam",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
+        # numpy dep,
+        # tensorflow:tensorflow_no_contrib dep,
     ],
 )

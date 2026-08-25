@@ -143,7 +143,7 @@ class SpannerTest(parameterized.TestCase):
       )
 
     node_set_table_schemas: Dict[str, Set[Tuple[str, str, str]]] = {}
-    for node_set_name in self.schema.node_sets.keys():
+    for node_set_name in self.schema.node_sets:
       with self.database.snapshot() as snapshot:
         results = snapshot.execute_sql(
             "SELECT column_name, spanner_type, is_nullable FROM"
@@ -177,7 +177,7 @@ class SpannerTest(parameterized.TestCase):
 
     # edge_set_table_schemas = defaultdict(list)
     edge_set_table_schemas: Dict[str, Set[Tuple[str, str, str]]] = {}
-    for edge_set_name in self.schema.edge_sets.keys():
+    for edge_set_name in self.schema.edge_sets:
       with self.database.snapshot() as snapshot:
         results = snapshot.execute_sql(
             "SELECT column_name, spanner_type, is_nullable FROM"

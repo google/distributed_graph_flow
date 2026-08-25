@@ -75,10 +75,11 @@ def graph_to_networkx(
     num_nodes = node_set.num_nodes
     assert num_nodes is not None
 
+    node_features_items = list(node_set.features.items())
     for i in range(num_nodes):
       node_id = _get_element_id(node_set_name, i, for_graphml)
       node_attrs = {"node_set": node_set_name}
-      for feat_name, feat_val in node_set.features.items():
+      for feat_name, feat_val in node_features_items:
         node_attrs[feat_name] = _get_feature_value(feat_val[i], for_graphml)
       nx_graph.add_node(node_id, **node_attrs)
 
@@ -92,13 +93,14 @@ def graph_to_networkx(
     sources = edge_set.adjacency[0]
     targets = edge_set.adjacency[1]
 
+    edge_features_items = list(edge_set.features.items())
     for i in range(edge_set.num_edges()):
       src_node = _get_element_id(source_set_name, sources[i], for_graphml)
       tgt_node = _get_element_id(target_set_name, targets[i], for_graphml)
       edge_attrs = {"edge_set": edge_set_name}
       edge_key = f"{edge_set_name}_{i}" if for_graphml else None
 
-      for feat_name, feat_val in edge_set.features.items():
+      for feat_name, feat_val in edge_features_items:
         edge_attrs[feat_name] = _get_feature_value(feat_val[i], for_graphml)
       nx_graph.add_edge(src_node, tgt_node, key=edge_key, **edge_attrs)
 
@@ -170,7 +172,7 @@ def networkx_to_graph(
 
     feature_names = set()
     for attrs in info["features"]:
-      for k in attrs.keys():
+      for k in attrs:
         if k != "node_set":
           feature_names.add(k)
 
@@ -227,7 +229,7 @@ def networkx_to_graph(
 
     feature_names = set()
     for attrs in info["features"]:
-      for k in attrs.keys():
+      for k in attrs:
         if k != "edge_set":
           feature_names.add(k)
 

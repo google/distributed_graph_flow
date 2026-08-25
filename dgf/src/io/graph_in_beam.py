@@ -24,9 +24,12 @@ from dgf.src.analyse import schema as schema_analyse_lib
 from dgf.src.data import distributed_graph as distributed_graph_lib
 from dgf.src.data import gf_metadata as gf_metadata_lib
 from dgf.src.data import schema as schema_lib
+from dgf.src.io import beam_tf_graph_common
 from dgf.src.io import feature_format as feature_format_lib
 from dgf.src.io import graph_constants
+from dgf.src.io import graph_in_memory
 from dgf.src.io import schema as schema_io_lib
+from dgf.src.io import tf_graph_common
 from dgf.src.transform import schema as schema_filter_lib
 from dgf.src.util import filesystem
 from dgf.src.util import shard as shard_lib
@@ -118,36 +121,95 @@ def read_graph(
 
   node_sets = {}
   for nodeset_name, nodeset_def in schema.node_sets.items():
+    extension = graph_in_memory.get_extension(metadata.container)
+
     file_pattern = shard_lib.shard_pattern_to_glob(
         os.path.join(path, FILENAME_NODE_FEATURE, nodeset_name),
-        PARQUET_EXTENSION,
+        extension,
     )
 
-    node_sets[nodeset_name] = (
-        pbegin
-        | f"{beam_namespace}Read nodeset {nodeset_name!r}"
-        >> read_node_set_features(
-            file_pattern=file_pattern,
-            schema=nodeset_def,
-            nodeset_name=nodeset_name,
-        )
-    )
+    if metadata.container == gf_metadata_lib.Container.PARQUET:
+      node_sets[nodeset_name] = (
+          pbegin
+          | f"{beam_namespace}Read nodeset {nodeset_name!r}"
+          >> read_node_set_features(
+              file_pattern=file_pattern,
+              schema=nodeset_def,
+              nodeset_name=nodeset_name,
+          )
+      )
+    elif metadata.container in (
+        gf_metadata_lib.Container.TF_RECORD,
+        gf_metadata_lib.Container.RECORDIO,
+    ):
+      node_id_column = schema_analyse_lib.primary_feature(
+          nodeset_name, nodeset_def
+      )
+      node_sets[nodeset_name] = (
+          pbegin
+          | f"{beam_namespace}Read nodeset container {nodeset_name!r}"
+          >> beam_tf_graph_common.ReadTfExampleContainer(
+              file_pattern=file_pattern,
+              container_type=tf_graph_common.TfExampleContainer[
+                  metadata.container.name
+              ],
+          )
+          | f"{beam_namespace}Build nodes {nodeset_name!r}"
+          >> beam.Map(
+              beam_tf_graph_common.nonkeyed_tf_example_to_node,
+              schema=nodeset_def,
+              node_id_column=node_id_column,
+              ignore_keys=(),
+          )
+      )
+    else:
+      raise ValueError(f"Unsupported container: {metadata.container}")
 
   edge_sets = {}
   for edgeset_name, edgeset_def in schema.edge_sets.items():
+    extension = graph_in_memory.get_extension(metadata.container)
+
     file_pattern = shard_lib.shard_pattern_to_glob(
         os.path.join(path, FILENAME_EDGES_ADJACENCIES, edgeset_name),
-        PARQUET_EXTENSION,
+        extension,
     )
-    edge_sets[edgeset_name] = (
-        pbegin
-        | f"{beam_namespace}Read edgeset {edgeset_name!r}"
-        >> read_edge_set_features(
-            file_pattern=file_pattern,
-            schema=edgeset_def,
-            edgeset_name=edgeset_name,
-        )
-    )
+    if metadata.container == gf_metadata_lib.Container.PARQUET:
+      edge_sets[edgeset_name] = (
+          pbegin
+          | f"{beam_namespace}Read edgeset {edgeset_name!r}"
+          >> read_edge_set_features(
+              file_pattern=file_pattern,
+              schema=edgeset_def,
+              edgeset_name=edgeset_name,
+          )
+      )
+    elif metadata.container in (
+        gf_metadata_lib.Container.TF_RECORD,
+        gf_metadata_lib.Container.RECORDIO,
+    ):
+      edge_id_column = schema_analyse_lib.primary_feature_or_none(
+          edgeset_name, edgeset_def
+      )
+      edge_sets[edgeset_name] = (
+          pbegin
+          | f"{beam_namespace}Read edgeset container {edgeset_name!r}"
+          >> beam_tf_graph_common.ReadTfExampleContainer(
+              file_pattern=file_pattern,
+              container_type=tf_graph_common.TfExampleContainer[
+                  metadata.container.name
+              ],
+          )
+          | f"{beam_namespace}Build edges {edgeset_name!r}"
+          >> beam.Map(
+              beam_tf_graph_common.tf_example_to_edge,
+              edge_id_column=edge_id_column,
+              schema=edgeset_def,
+              ignore_keys=(
+                  tf_graph_common.KEY_SOURCE,
+                  tf_graph_common.KEY_TARGET,
+              ),
+          )
+      )
 
   return distributed_graph_lib.Graph(
       schema=schema,
@@ -259,6 +321,10 @@ def write_graph(
     num_node_shards: int = 0,
     num_edge_shards: int = 0,
     compression: str = "snappy",
+    container_type: (
+        str | gf_metadata_lib.Container
+    ) = gf_metadata_lib.Container.PARQUET,
+    container: Optional[str | gf_metadata_lib.Container] = None,
 ) -> beam.pvalue.PDone:
   """Writes a GF Graph from a distributed graph (beam).
 
@@ -279,6 +345,11 @@ def write_graph(
     graph: Graph to write.
     path: Path to the output GF graph directory.
     beam_namespace: Optional namespace to prepend to Beam stage names.
+    num_node_shards: Number of shards for node sets (0 = automatic).
+    num_edge_shards: Number of shards for edge sets (0 = automatic).
+    compression: Compression codec to use.
+    container_type: Container format to use (PARQUET, TF_RECORD, RECORDIO).
+    container: Alias for container_type.
 
   Returns:
     A PCollection of type `beam.pvalue.PDone` that represents the completion
@@ -286,11 +357,18 @@ def write_graph(
   """
   filesystem.makedirs(path)
 
+  if container is not None:
+    container_type = container
+  if isinstance(container_type, str):
+    container_type = gf_metadata_lib.Container(container_type)
+
   # Write Schema
   schema_io_lib.write_schema(graph.schema, os.path.join(path, FILENAME_SCHEMA))
 
   # Write Metadata
-  metadata = gf_metadata_lib.GFGraphMetadata(version=MAX_SUPPORTED_GF_VERSION)
+  metadata = gf_metadata_lib.GFGraphMetadata(
+      version=MAX_SUPPORTED_GF_VERSION, container=container_type
+  )
   metadata_path = os.path.join(path, FILENAME_METADATA)
   with filesystem.open_write(metadata_path) as f:
     f.write(metadata.to_json(indent=2))  # pyrefly: ignore[missing-attribute]
@@ -303,19 +381,48 @@ def write_graph(
   for nodeset_name, nodeset_schema in graph.schema.node_sets.items():
     pnode_collection = graph.node_sets[nodeset_name]
     file_path_prefix = os.path.join(nodeset_dir, nodeset_name)
-    write_result = (
-        pnode_collection
-        | f"{beam_namespace}NodeToRaw_{nodeset_name}"
-        >> beam.Map(_node_to_raw, schema=nodeset_schema)
-        | f"{beam_namespace}WriteNodeset_{nodeset_name}"
-        >> beam.io.parquetio.WriteToParquet(
-            file_path_prefix=file_path_prefix,
-            file_name_suffix=PARQUET_EXTENSION,
-            schema=_node_schema_to_parquet_schema(nodeset_schema),
-            codec=compression,
-            num_shards=num_node_shards,
-        )
-    )
+    if metadata.container == gf_metadata_lib.Container.PARQUET:
+      write_result = (
+          pnode_collection
+          | f"{beam_namespace}NodeToRaw_{nodeset_name}"
+          >> beam.Map(_node_to_raw, schema=nodeset_schema)
+          | f"{beam_namespace}WriteNodeset_{nodeset_name}"
+          >> beam.io.parquetio.WriteToParquet(
+              file_path_prefix=file_path_prefix,
+              file_name_suffix=PARQUET_EXTENSION,
+              schema=_node_schema_to_parquet_schema(nodeset_schema),
+              codec=compression,
+              num_shards=num_node_shards,
+          )
+      )
+    elif metadata.container in (
+        gf_metadata_lib.Container.TF_RECORD,
+        gf_metadata_lib.Container.RECORDIO,
+    ):
+      node_id_column = schema_analyse_lib.primary_feature(
+          nodeset_name, nodeset_schema
+      )
+      write_result = (
+          pnode_collection
+          | f"{beam_namespace}NodeToExample_{nodeset_name}"
+          >> beam.Map(
+              beam_tf_graph_common.node_to_tf_example,
+              node_id_column=node_id_column,
+              nodeset_schema=nodeset_schema,
+          )
+          | f"{beam_namespace}WriteNodeset_{nodeset_name}"
+          >> beam_tf_graph_common.WriteTfExampleContainer(
+              file_path_prefix=file_path_prefix,
+              extension=graph_in_memory.get_extension(metadata.container),
+              container_type=tf_graph_common.TfExampleContainer[
+                  metadata.container.name
+              ],
+              num_shards=num_node_shards,
+          )
+      )
+    else:
+      raise ValueError(f"Unsupported container: {metadata.container}")
+
     write_results.append(write_result)
 
   # Write Edge Sets
@@ -324,19 +431,68 @@ def write_graph(
   for edgeset_name, edgeset_schema in graph.schema.edge_sets.items():
     pedge_collection = graph.edge_sets[edgeset_name]
     file_path_prefix = os.path.join(edgeset_dir, edgeset_name)
-    write_result = (
-        pedge_collection
-        | f"{beam_namespace}EdgeToRaw_{edgeset_name}"
-        >> beam.Map(_edge_to_raw, schema=edgeset_schema)
-        | f"{beam_namespace}WriteEdgeset_{edgeset_name}"
-        >> beam.io.parquetio.WriteToParquet(
-            file_path_prefix=file_path_prefix,
-            file_name_suffix=PARQUET_EXTENSION,
-            schema=_edge_schema_to_parquet_schema(edgeset_schema, graph.schema),
-            codec=compression,
-            num_shards=num_edge_shards,
-        )
-    )
+    if metadata.container == gf_metadata_lib.Container.PARQUET:
+      write_result = (
+          pedge_collection
+          | f"{beam_namespace}EdgeToRaw_{edgeset_name}"
+          >> beam.Map(_edge_to_raw, schema=edgeset_schema)
+          | f"{beam_namespace}WriteEdgeset_{edgeset_name}"
+          >> beam.io.parquetio.WriteToParquet(
+              file_path_prefix=file_path_prefix,
+              file_name_suffix=PARQUET_EXTENSION,
+              schema=_edge_schema_to_parquet_schema(
+                  edgeset_schema, graph.schema
+              ),
+              codec=compression,
+              num_shards=num_edge_shards,
+          )
+      )
+    elif metadata.container in (
+        gf_metadata_lib.Container.TF_RECORD,
+        gf_metadata_lib.Container.RECORDIO,
+    ):
+      edge_id_column = schema_analyse_lib.primary_feature_or_none(
+          edgeset_name, edgeset_schema
+      )
+      source_nodeset_primary_key = schema_analyse_lib.primary_feature(
+          edgeset_schema.source, graph.schema.node_sets[edgeset_schema.source]
+      )
+      source_format = (
+          graph.schema.node_sets[edgeset_schema.source]
+          .features[source_nodeset_primary_key]
+          .format
+      )
+      target_nodeset_primary_key = schema_analyse_lib.primary_feature(
+          edgeset_schema.target, graph.schema.node_sets[edgeset_schema.target]
+      )
+      target_format = (
+          graph.schema.node_sets[edgeset_schema.target]
+          .features[target_nodeset_primary_key]
+          .format
+      )
+      write_result = (
+          pedge_collection
+          | f"{beam_namespace}EdgeToExample_{edgeset_name}"
+          >> beam.Map(
+              beam_tf_graph_common.edge_to_tf_example,
+              edge_id_column=edge_id_column,
+              edge_schema=edgeset_schema,
+              source_format=source_format,
+              target_format=target_format,
+          )
+          | f"{beam_namespace}WriteEdgeset_{edgeset_name}"
+          >> beam_tf_graph_common.WriteTfExampleContainer(
+              file_path_prefix=file_path_prefix,
+              extension=graph_in_memory.get_extension(metadata.container),
+              container_type=tf_graph_common.TfExampleContainer[
+                  metadata.container.name
+              ],
+              num_shards=num_edge_shards,
+          )
+      )
+    else:
+      raise ValueError(f"Unsupported container: {metadata.container}")
+
     write_results.append(write_result)
 
   return (

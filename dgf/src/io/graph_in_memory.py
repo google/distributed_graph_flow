@@ -28,15 +28,19 @@ from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import gf_metadata as gf_metadata_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
+from dgf.src.io import feature_format as feature_format_lib
 from dgf.src.io import graph_constants
 from dgf.src.io import io_ext
 from dgf.src.io import parquet as parquet_lib
 from dgf.src.io import schema as schema_io_lib
+from dgf.src.io import tf_graph_common
+from dgf.src.io import tfexample as tfexample_lib
 from dgf.src.transform import schema as schema_filter_lib
 from dgf.src.util import filesystem
 from dgf.src.util import log
 from dgf.src.util import shard as shard_lib
 from dgf.src.util import util as util_lib
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import numpy as np
 
 FILENAME_SCHEMA = graph_constants.FILENAME_SCHEMA
@@ -54,27 +58,72 @@ IMPLICIT_EDGE_FEATURES = {KEY_SOURCE, KEY_TARGET}
 # Highest GF version number supported
 
 
-def _read_sharded_parquet(
-    base_path: str, name: str, columns: Sequence[str], verbose: bool
+def get_extension(container_type) -> str:
+  """Returns the file extension for the given container type."""
+  name = container_type.name
+  if name == "PARQUET":
+    return PARQUET_EXTENSION
+  elif name == "TF_RECORD":
+    return ".tfrecord.gz"
+  elif name == "RECORDIO":
+    return ".recordio"
+  elif name == "AVRO":
+    return ".avro"
+  else:
+    raise ValueError(f"Unknown container: {container_type}")
+
+
+def _read_container(
+    base_path: str,
+    name: str,
+    features_def: schema_lib.FeatureSetSchema,
+    container_type: gf_metadata_lib.Container,
+    verbose: bool,
 ) -> Tuple[Dict[str, np.ndarray], int]:
-  """Reads sharded Parquet files for a given node or edge set."""
+  """Reads files from the specified container type."""
+  extension = get_extension(container_type)
   sharded_files = shard_lib.list_paths(
-      base_path, PARQUET_EXTENSION, allow_bq_fallback=True
+      base_path,
+      extension,
+      allow_bq_fallback=(container_type == gf_metadata_lib.Container.PARQUET),
   )
   if not sharded_files:
     raise ValueError(
         "No files found matching pattern"
-        f" {shard_lib.shard_pattern_to_glob(base_path, PARQUET_EXTENSION)} or "
-        f"{base_path}-*{PARQUET_EXTENSION}"
+        f" {shard_lib.shard_pattern_to_glob(base_path, extension)} or "
+        f"{base_path}-*{extension}"
     )
 
   try:
-    return parquet_lib.read_parquet_to_numpy_dict(
-        paths=sharded_files, columns=columns, verbose=verbose
-    )
+    if container_type == gf_metadata_lib.Container.PARQUET:
+      return parquet_lib.read_parquet_to_numpy_dict(
+          paths=sharded_files, columns=list(features_def), verbose=verbose
+      )
+    elif container_type in (
+        gf_metadata_lib.Container.TF_RECORD,
+        gf_metadata_lib.Container.RECORDIO,
+    ):
+      tf_columns = {}
+      for col, schema_feat in features_def.items():
+        dtype = feature_format_lib.FEATURE_FORMAT_TO_TF_DTYPE[
+            schema_feat.format
+        ]
+        shape = schema_feat.shape if schema_feat.shape is not None else ()
+        # Keep original shape natively for dynamic features
+        tf_columns[col] = (dtype, shape)
+
+      if container_type == gf_metadata_lib.Container.TF_RECORD:
+        return tfexample_lib.read_tfrecord(
+            paths=sharded_files,
+            columns=tf_columns,
+            verbose=verbose,
+            preserve_order=False,
+        )
+    else:
+      raise ValueError(f"Unknown container: {container_type}")
   except Exception as e:
     raise ValueError(
-        f"Failed to read sharded Parquet file at {base_path} for '{name}'"
+        f"Failed to read file(s) at {base_path} for '{name}'"
     ) from e
 
 
@@ -82,16 +131,20 @@ def _read_node_set(
     path: str,
     nodeset_name: str,
     nodeset_def: schema_lib.NodeSchema,
+    container_type: gf_metadata_lib.Container,
     verbose: bool,
 ) -> tuple[dict[str, np.ndarray], int, io_ext.ByteIdToIdxMapper]:
   """Reads a node set from a GF graph."""
   nodeset_path = os.path.join(path, FILENAME_NODE_FEATURE, nodeset_name)
-  columns = list(nodeset_def.features.keys())
   primary_key = analyse_schema_lib.primary_feature(nodeset_name, nodeset_def)
 
   try:
-    features, node_count = _read_sharded_parquet(
-        nodeset_path, nodeset_name, columns, verbose=verbose
+    features, node_count = _read_container(
+        nodeset_path,
+        nodeset_name,
+        nodeset_def.features,
+        container_type,
+        verbose=verbose,
     )
   except ValueError as e:
     raise ValueError(
@@ -129,24 +182,118 @@ def _read_node_set(
   return features, node_count, mapper
 
 
+def _write_container(
+    features_to_write: dict[str, np.ndarray],
+    name: str,
+    output_dir: str,
+    features_schema: schema_lib.FeatureSetSchema,
+    num_shards: int,
+    verbose: bool,
+    compression: str,
+    container_type: gf_metadata_lib.Container,
+):
+  """Writes layout arrays matching a schema into a specified sharded container.
+
+  Args:
+    features_to_write: Dictionary mapping feature keys to parallel layout
+      arrays.
+    name: Name of the output container component (e.g. nodeset or edgeset name).
+    output_dir: Base directory for the output file path.
+    features_schema: Schema describing feature domains and shapes to write.
+    num_shards: Number of shards to generate.
+    verbose: Whether to log output natively.
+    compression: Compression type to write (e.g. GZIP).
+    container_type: Internal storage backend layout (Parquet, TFRecord, etc.).
+  """
+  if container_type == gf_metadata_lib.Container.PARQUET:
+    parquet_lib.write_numpy_dict_to_parquet(
+        features_to_write,
+        name,
+        output_dir,
+        features_schema,
+        num_shards,
+        verbose,
+        compression=compression,
+    )
+  elif container_type in (
+      gf_metadata_lib.Container.TF_RECORD,
+      gf_metadata_lib.Container.RECORDIO,
+  ):
+    extension = get_extension(container_type)
+    num_rows = (
+        next(iter(features_to_write.values())).shape[0]
+        if features_to_write
+        else 0
+    )
+
+    if num_rows == 0:
+      return
+
+    rows_per_shard = (num_rows + num_shards - 1) // num_shards
+    for shard_index in range(num_shards):
+      start_row = shard_index * rows_per_shard
+      end_row = min((shard_index + 1) * rows_per_shard, num_rows)
+      if start_row >= end_row:
+        continue
+
+      examples = []
+      filename = shard_lib.sharded_filename(
+          filename=name,
+          shard=shard_index,
+          num_shards=num_shards,
+          extension=extension,
+      )
+      for idx in range(start_row, end_row):
+        example = tf.train.Example()
+        tf_graph_common.populate_features(
+            example, idx, features_schema, features_to_write, ignore_keys=()
+        )
+        examples.append(example)
+
+      path = os.path.join(output_dir, filename)
+      if container_type == gf_metadata_lib.Container.TF_RECORD:
+        tfexample_lib.write_tfrecord(path, examples)
+      else:
+        raise ValueError(f"Unsupported container type: {container_type}")
+  else:
+    raise ValueError(
+        f"Unsupported dict writer for container type: {container_type}"
+    )
+
+
 def _read_edge_set(
     path: str,
     edgeset_name: str,
     edgeset_def: schema_lib.EdgeSchema,
     nodeset_mapping: dict[str, io_ext.ByteIdToIdxMapper],
+    container_type: gf_metadata_lib.Container,
+    schema: schema_lib.GraphSchema,
     remove_dangling_edges: bool,
     verbose: bool,
 ) -> tuple[np.ndarray, dict[str, np.ndarray]]:
   """Reads an edge set from a GF graph."""
   edge_set_path = os.path.join(path, FILENAME_EDGES_ADJACENCIES, edgeset_name)
-  columns = [
-      KEY_SOURCE,
-      KEY_TARGET,
-      *edgeset_def.features.keys(),
+  features_def = {**edgeset_def.features}
+  source_primary_key = analyse_schema_lib.primary_feature(
+      edgeset_def.source, schema.node_sets[edgeset_def.source]
+  )
+  features_def[KEY_SOURCE] = schema.node_sets[edgeset_def.source].features[
+      source_primary_key
   ]
+  target_primary_key = analyse_schema_lib.primary_feature(
+      edgeset_def.target, schema.node_sets[edgeset_def.target]
+  )
+  features_def[KEY_TARGET] = schema.node_sets[edgeset_def.target].features[
+      target_primary_key
+  ]
+
   try:
-    features, _ = _read_sharded_parquet(
-        edge_set_path, edgeset_name, columns, verbose=verbose
+    features, _ = _read_container(
+        edge_set_path,
+        edgeset_name,
+        features_def,
+        container_type,
+        verbose=verbose,
     )
   except ValueError as e:
     raise ValueError(
@@ -299,7 +446,7 @@ def read_graph(
     if verbose:
       log.info("Reading nodeset %s from %s", nodeset_name, path)
     features, num_nodes, mapper = _read_node_set(
-        path, nodeset_name, nodeset_def, verbose
+        path, nodeset_name, nodeset_def, metadata.container, verbose
     )
     node_sets[nodeset_name] = in_memory_graph_lib.InMemoryNodeSet(
         features=features,
@@ -317,6 +464,8 @@ def read_graph(
         edgeset_name,
         edgeset_def,
         nodeset_mapping,
+        metadata.container,
+        schema,
         remove_dangling_edges=remove_dangling_edges,
         verbose=verbose,
     )
@@ -346,6 +495,9 @@ def write_graph(
     verbose: bool = False,
     max_num_shards: Optional[int] = None,
     compression: str = "snappy",
+    container: (
+        str | gf_metadata_lib.Container
+    ) = gf_metadata_lib.Container.PARQUET,
 ):
   """Writes an in-memory graph and schema to a GF Graph directory.
 
@@ -362,6 +514,7 @@ def write_graph(
     max_num_shards: If provided, limits the maximum number of shards used when
       writing the Parquet files for each node and edge set.
     compression: Compression algorithm for Parquet files.
+    container: The file format for writing data blocks.
   """
   start_time = time.monotonic()
 
@@ -373,9 +526,14 @@ def write_graph(
     log.info("Writing schema to %s", schema_path)
   schema_io_lib.write_schema(schema, schema_path)
 
+  if isinstance(container, str):
+    container = gf_metadata_lib.Container(container)
+
   # Write Metadata
   metadata = gf_metadata_lib.GFGraphMetadata(
-      version=MAX_SUPPORTED_GF_VERSION, timestamp=graph.timestamp
+      version=MAX_SUPPORTED_GF_VERSION,
+      timestamp=graph.timestamp,
+      container=container,
   )
   metadata_path = os.path.join(path, FILENAME_METADATA)
   if verbose:
@@ -395,7 +553,7 @@ def write_graph(
     if verbose:
       log.info("Writing nodeset %s to %s", nodeset_name, node_dir)
 
-    num_shards, _ = shard_lib.estimate_num_node_shards(node_set.num_nodes)  # pyrefly: ignore[bad-argument-type]
+    num_shards, _ = shard_lib.estimate_num_node_shards(node_set.num_nodes or 0)
     if max_num_shards is not None:
       num_shards = min(num_shards, max_num_shards)
 
@@ -403,7 +561,7 @@ def write_graph(
     if features_to_write is None:
       raise ValueError(f"Node set {nodeset_name} has no features to write.")
 
-    parquet_lib.write_numpy_dict_to_parquet(
+    _write_container(
         features_to_write,
         nodeset_name,
         node_dir,
@@ -411,6 +569,7 @@ def write_graph(
         num_shards,
         verbose,
         compression=compression,
+        container_type=container,
     )
 
   # Write Edge Sets
@@ -438,7 +597,7 @@ def write_graph(
     source_idxs = edge_set.adjacency[0]
     target_idxs = edge_set.adjacency[1]
 
-    features_to_write = edge_set.features.copy() if edge_set.features else {}
+    features_to_write = edge_set.features.copy()
     features_to_write[KEY_SOURCE] = source_ids[source_idxs]
     features_to_write[KEY_TARGET] = target_ids[target_idxs]
 
@@ -450,11 +609,11 @@ def write_graph(
         edgeset_schema.target
     ].features[target_primary_key]
 
-    num_shards, _ = shard_lib.estimate_num_node_shards(edge_set.num_edges())
+    num_shards, _ = shard_lib.estimate_num_edge_shards(edge_set.num_edges())
     if max_num_shards is not None:
       num_shards = min(num_shards, max_num_shards)
 
-    parquet_lib.write_numpy_dict_to_parquet(
+    _write_container(
         features_to_write,
         edgeset_name,
         edge_dir,
@@ -462,6 +621,7 @@ def write_graph(
         num_shards,
         verbose,
         compression=compression,
+        container_type=container,
     )
 
   end_time = time.monotonic()
