@@ -24,16 +24,39 @@ cc_library(
     ],
 )
 
+cc_library(
+    name = "connected_components",
+    srcs = ["connected_components.cc"],
+    hdrs = ["connected_components.h"],
+    deps = [
+        ":gbbs_graph_handle",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/time",
+        "//third_party/gbbs/benchmarks/Connectivity:common",
+        "//third_party/gbbs/benchmarks/Connectivity/BFSCC:Connectivity",
+        "//third_party/gbbs/benchmarks/Connectivity/LabelPropagation:Connectivity",
+        "//third_party/gbbs/benchmarks/Connectivity/ShiloachVishkin:Connectivity",
+        "//third_party/gbbs/benchmarks/Connectivity/SimpleUnionAsync:Connectivity",
+        "//third_party/gbbs/benchmarks/Connectivity/WorkEfficientSDB14:Connectivity",
+        "//third_party/gbbs/gbbs:bridge",
+        "//third_party/parlay/include/parlay:monoid",
+        "//third_party/parlay/include/parlay:parallel",
+        "//third_party/parlay/include/parlay:primitives",
+    ],
+)
+
 # Nanobind Extension
 # =================
 nanobind_extension(
     name = "_gbbs_ext",
     srcs = ["gbbs_ext.cc"],
     deps = [
+        ":connected_components",
         ":gbbs_graph_handle",
         "//third_party/gbbs/gbbs:macros",
         "//third_party/parlay/include/parlay:parallel",
         "//third_party/parlay/include/parlay:scheduler",
+        "//dgf/src/util:status_caster",
     ],
 )
 
@@ -55,6 +78,15 @@ py_library(
 )
 
 py_library(
+    name = "connected_components_py",
+    srcs = ["connected_components.py"],
+    deps = [
+        ":_gbbs_ext",
+        # tqdm dep,
+    ],
+)
+
+py_library(
     name = "gbbs",
     srcs = ["__init__.py"],
 )
@@ -69,6 +101,18 @@ py_test(
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/io:graph_in_memory",
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "connected_components_test",
+    srcs = ["connected_components_test.py"],
+    deps = [
+        ":connected_components_py",
+        ":loader",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
         # numpy dep,
     ],
 )
