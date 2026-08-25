@@ -1,0 +1,100 @@
+{
+  "node_sets": {
+    "n1": {
+      "features": {
+        "f2": {
+          "format": "FLOAT_32",
+          "semantic": "EMBEDDING",
+          "shape": [
+            2
+          ],
+          "num_categorical_values": null,
+          "is_utf8_string": false,
+          "is_timeseries": false,
+          "is_creation_time": false,
+          "group": null
+        },
+        "f1": {
+          "format": "BYTES",
+          "semantic": "CATEGORICAL",
+          "shape": [
+            1
+          ],
+          "num_categorical_values": null,
+          "is_utf8_string": false,
+          "is_timeseries": false,
+          "is_creation_time": false,
+          "group": null
+        },
+        "#id": {
+          "format": "BYTES",
+          "semantic": "PRIMARY_ID",
+          "shape": null,
+          "num_categorical_values": null,
+          "is_utf8_string": false,
+          "is_timeseries": false,
+          "is_creation_time": false,
+          "group": null
+        }
+      }
+    },
+    "n2": {
+      "features": {
+        "f3": {
+          "format": "INTEGER_64",
+          "semantic": "NUMERICAL",
+          "shape": null,
+          "num_categorical_values": null,
+          "is_utf8_string": false,
+          "is_timeseries": false,
+          "is_creation_time": false,
+          "group": null
+        },
+        "f4": {
+          "format": "INTEGER_64",
+          "semantic": "NUMERICAL",
+          "shape": [],
+          "num_categorical_values": null,
+          "is_utf8_string": false,
+          "is_timeseries": false,
+          "is_creation_time": false,
+          "group": null
+        },
+        "f5": {
+          "format": "INTEGER_64",
+          "semantic": "NUMERICAL",
+          "shape": [
+            null
+          ],
+          "num_categorical_values": null,
+          "is_utf8_string": false,
+          "is_timeseries": false,
+          "is_creation_time": false,
+          "group": null
+        },
+        "#id": {
+          "format": "BYTES",
+          "semantic": "PRIMARY_ID",
+          "shape": null,
+          "num_categorical_values": null,
+          "is_utf8_string": false,
+          "is_timeseries": false,
+          "is_creation_time": false,
+          "group": null
+        }
+      }
+    }
+  },
+  "edge_sets": {
+    "e1": {
+      "source": "n1",
+      "target": "n1",
+      "features": {}
+    },
+    "e2": {
+      "source": "n1",
+      "target": "n2",
+      "features": {}
+    }
+  }
+}
