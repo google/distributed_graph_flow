@@ -1525,9 +1525,7 @@ Node(nodeset_idx=0, children=[
         " `slice_timeseries_by_seed=True` and the schema contains"
         " `is_timeseries=True` features.",
     ):
-      sampler_missing_timestamps.sample(
-          seed_node_idxs=0, seed_timestamps=None
-      )
+      sampler_missing_timestamps.sample(seed_node_idxs=0, seed_timestamps=None)
 
   def test_timeseries_subgraph_and_multisubgraph_clipping(self):
     graph, schema = self._create_causal_timeseries_test_graph()
@@ -1672,14 +1670,15 @@ class InMemorySamplerDiamon(parameterized.TestCase):
         },
     )
 
-  def test_sample(self):
+  @parameterized.parameters(True, False)
+  def test_multi_visit(self, multi_visit: bool):
     plan = config_lib.simple_sampling_config_to_sampling_plan(
         config_lib.SimpleSamplingConfig(
             seed_nodeset="n1",
             num_hops=5,
             hop_width=2,
             reverse=False,
-            multi_visit=False,
+            multi_visit=multi_visit,
         ),
         self.schema,
     )
@@ -1693,8 +1692,10 @@ class InMemorySamplerDiamon(parameterized.TestCase):
     )
     sample = sampler.sample(0)
     self.assertIsNotNone(sample)
-    # The diamon and exactly 2 or the last 3 nodes are sampled.
-    self.assertEqual(sample.node_sets["n1"].num_nodes, 6)
+    if multi_visit:
+      self.assertEqual(sample.node_sets["n1"].num_nodes, 7)
+    else:
+      self.assertEqual(sample.node_sets["n1"].num_nodes, 6)
 
 
 if __name__ == "__main__":

@@ -29,6 +29,7 @@
 #include "absl/container/btree_map.h"
 #include "absl/container/btree_set.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -215,6 +216,10 @@ struct SampleBuilder {
   // depth.
   std::vector<std::vector<InputIdx>> recursion_cache;
 
+  // Keep track of visited nodes per plan step to avoid multi-visits on the same
+  // step.
+  std::vector<absl::flat_hash_set<InputIdx>> visited_node_idxs;
+
   // Random number generator.
   std::mt19937_64 rng;
 
@@ -300,9 +305,17 @@ struct SampleBuilder {
                 target_node);
             DCHECK(sample_target_nodeset.sampled_node_idx_to_node_idx.size() ==
                    sample_target_nodeset.node_idx_to_sampled_node_idx.size());
-          } else if (!sampler.plan_.multi_visit) {
-            recuse = false;
           }
+
+          if (!sampler.plan_.multi_visit) {
+            // Further expand the node iff it was not already visited in
+            // this plan edge. Note that the same node can be expanded multiple
+            // times through different plan edges.
+            auto [_it, inserted_local] =
+                visited_node_idxs[plan_edge.node->step_idx].insert(target_node);
+            recuse = inserted_local;
+          }
+
         } else {
           // Sampling with replacement.
           target_sampled_node =
@@ -329,6 +342,14 @@ struct SampleBuilder {
     // Pre-allocate recursion cache to avoid reallocations during recursion.
     if (recursion_cache.size() < sampler.plan_.num_steps) {
       recursion_cache.resize(sampler.plan_.num_steps);
+    }
+    if (!sampler.plan_.multi_visit) {
+      if (visited_node_idxs.size() < sampler.plan_.num_steps) {
+        visited_node_idxs.resize(sampler.plan_.num_steps);
+      }
+      for (auto& s : visited_node_idxs) {
+        s.clear();
+      }
     }
 
     // Reuse capacity of edgesets and nodesets.
@@ -1112,7 +1133,7 @@ absl::Status Sampler::IndexEdgeSets(const nb::object& py_graph,
   // Index the nodesets.
   nodesets_.assign(schema_->nodeset_name_to_idx.size(), {});
   DGF_GET_ATTR_OR_RETURN(nb::dict, py_node_sets, py_graph, "node_sets");
-  for (const auto nodeset : schema_->nodeset_name_to_idx) {
+  for (const auto& nodeset : schema_->nodeset_name_to_idx) {
     DGF_ASSIGN_OR_RETURN(const nb::object py_nodeset,
                          GetItemFromPyDict<nb::object>(
                              py_node_sets, string_to_py_str(nodeset.first)));
