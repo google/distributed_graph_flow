@@ -125,7 +125,7 @@ class WriteGFGraphInMemory(benchmark_utils.Benchmark):
         graph=self._graph,
         schema=self._schema,
         path=os.path.join(self.work_dir, f"WriteGFGraphInMemory"),
-        max_num_shards=20,
+        num_shards=20,
     )
 
   @override

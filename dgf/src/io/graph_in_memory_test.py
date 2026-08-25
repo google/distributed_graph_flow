@@ -14,6 +14,7 @@
 
 import os
 import tempfile
+from unittest import mock
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.data import distributed_graph
@@ -182,12 +183,10 @@ class ReadGfGraphTest(parameterized.TestCase):
       self.assertIsNone(loaded_graph2.timestamp)
 
   @parameterized.product(
-      max_num_shards=[1, 2, 3],
+      num_shards=[1, 2, 3],
       container=["PARQUET", "TF_RECORD", "RECORDIO"],
   )
-  def test_write_and_read_sharded_graph(
-      self, max_num_shards: int, container: str
-  ):
+  def test_write_and_read_sharded_graph(self, num_shards: int, container: str):
     with tempfile.TemporaryDirectory() as tmpdir:
       output_path = os.path.join(tmpdir, "sharded_gf_graph")
       num_nodes = 2500
@@ -255,7 +254,7 @@ class ReadGfGraphTest(parameterized.TestCase):
           graph,
           schema,
           output_path,
-          max_num_shards=max_num_shards,
+          num_shards=num_shards,
           container=container,
       )
       loaded_graph, loaded_schema = gf_graph_in_memory.read_graph(output_path)
@@ -270,7 +269,7 @@ class ReadGfGraphTest(parameterized.TestCase):
       extension = gf_graph_in_memory.get_extension(
           gf_metadata_lib.Container(container)
       )
-      expected_num_shards = min(3, max_num_shards)
+      expected_num_shards = num_shards
       expected_files = ["/schema.json", "/metadata.json"]
       for s in range(expected_num_shards):
         expected_files.append(
@@ -287,6 +286,47 @@ class ReadGfGraphTest(parameterized.TestCase):
               os.path.join(dirpath, filename).removeprefix(output_path)
           )
       self.assertSameElements(sorted(actual_files), sorted(expected_files))
+
+  def test_write_graph_num_shards_skips_estimate(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      output_path = os.path.join(tmpdir, "output_gf_graph")
+      in_memory_graph = gen_test_graph.generate_in_memory_graph(
+          node_ids=True, edge_ids=True
+      )
+      schema = gen_test_graph.generate_schema(
+          node_ids=True, edge_ids=True, semantic=True
+      )
+
+      with mock.patch.object(
+          gf_graph_in_memory.shard_lib,
+          "estimate_num_node_shards",
+          autospec=True,
+      ) as mock_node_shards, mock.patch.object(
+          gf_graph_in_memory.shard_lib,
+          "estimate_num_edge_shards",
+          autospec=True,
+      ) as mock_edge_shards:
+        gf_graph_in_memory.write_graph(
+            in_memory_graph, schema, output_path, num_shards=2
+        )
+        mock_node_shards.assert_not_called()
+        mock_edge_shards.assert_not_called()
+
+      output_path2 = os.path.join(tmpdir, "output_gf_graph2")
+      with mock.patch.object(
+          gf_graph_in_memory.shard_lib,
+          "estimate_num_node_shards",
+          return_value=(1, 10000),
+      ) as mock_node_shards, mock.patch.object(
+          gf_graph_in_memory.shard_lib,
+          "estimate_num_edge_shards",
+          return_value=(1, 10000),
+      ) as mock_edge_shards:
+        gf_graph_in_memory.write_graph(
+            in_memory_graph, schema, output_path2, num_shards=None
+        )
+        self.assertTrue(mock_node_shards.called)
+        self.assertTrue(mock_edge_shards.called)
 
 
 def _canonicalize_graph(

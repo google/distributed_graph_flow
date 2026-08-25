@@ -180,13 +180,13 @@ class ShardTest(parameterized.TestCase):
       shard.expand_output_paths("m*.ext", num_shards=2)
 
   @parameterized.parameters(
-      (100, 1, 1000),
-      (1000, 1, 1000),
-      (1001, 2, 1000),
-      (1000 * 100, 100, 1000),
-      (1000 * 100 + 1, 100, 1001),
-      (1000 * 200, 100, 2000),
-      (1000 * 200 + 1, 100, 2001),
+      (100, 1, 10000),
+      (10000, 1, 10000),
+      (10001, 2, 10000),
+      (10000 * 100, 100, 10000),
+      (10000 * 100 + 1, 100, 10001),
+      (10000 * 200, 100, 20000),
+      (10000 * 200 + 1, 100, 20001),
   )
   def test_estimate_num_node_shards(
       self, num_nodes, expected_num_shards, expected_num_nodes_per_shard
@@ -197,20 +197,20 @@ class ShardTest(parameterized.TestCase):
     )
 
   @parameterized.parameters(
-      (100, 1, 1000),
-      (1000, 1, 1000),
-      (1001, 2, 1000),
-      (1000 * 100, 100, 1000),
-      (1000 * 100 + 1, 100, 1001),
-      (1000 * 200, 100, 2000),
-      (1000 * 200 + 1, 100, 2001),
+      (100, 1, 10000),
+      (10000, 1, 10000),
+      (10001, 2, 10000),
+      (10000 * 100, 100, 10000),
+      (10000 * 100 + 1, 100, 10001),
+      (10000 * 200, 100, 20000),
+      (10000 * 200 + 1, 100, 20001),
   )
   def test_estimate_num_edge_shards(
-      self, num_edges, expected_num_shards, expected_num_edeg_per_shard
+      self, num_edges, expected_num_shards, expected_num_edges_per_shard
   ):
     self.assertEqual(
         shard.estimate_num_edge_shards(num_edges),
-        (expected_num_shards, expected_num_edeg_per_shard),
+        (expected_num_shards, expected_num_edges_per_shard),
     )
 
 

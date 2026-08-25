@@ -493,7 +493,7 @@ def write_graph(
     schema: schema_lib.GraphSchema,
     path: str,
     verbose: bool = False,
-    max_num_shards: Optional[int] = None,
+    num_shards: Optional[int] = None,
     compression: str = "snappy",
     container: (
         str | gf_metadata_lib.Container
@@ -511,8 +511,8 @@ def write_graph(
     schema: The schema of the graph.
     path: The path to the GF Graph directory.
     verbose: If True, print progress information.
-    max_num_shards: If provided, limits the maximum number of shards used when
-      writing the Parquet files for each node and edge set.
+    num_shards: If provided, the number of shards used when writing the files
+      for each node and edge set. If None, the number of shards is estimated.
     compression: Compression algorithm for Parquet files.
     container: The file format for writing data blocks.
   """
@@ -553,9 +553,12 @@ def write_graph(
     if verbose:
       log.info("Writing nodeset %s to %s", nodeset_name, node_dir)
 
-    num_shards, _ = shard_lib.estimate_num_node_shards(node_set.num_nodes or 0)
-    if max_num_shards is not None:
-      num_shards = min(num_shards, max_num_shards)
+    if num_shards is not None:
+      effective_num_shards = num_shards
+    else:
+      effective_num_shards, _ = shard_lib.estimate_num_node_shards(
+          node_set.num_nodes or 0
+      )
 
     features_to_write = node_set.features
     if features_to_write is None:
@@ -566,7 +569,7 @@ def write_graph(
         nodeset_name,
         node_dir,
         nodeset_schema.features,
-        num_shards,
+        effective_num_shards,
         verbose,
         compression=compression,
         container_type=container,
@@ -609,16 +612,19 @@ def write_graph(
         edgeset_schema.target
     ].features[target_primary_key]
 
-    num_shards, _ = shard_lib.estimate_num_edge_shards(edge_set.num_edges())
-    if max_num_shards is not None:
-      num_shards = min(num_shards, max_num_shards)
+    if num_shards is not None:
+      effective_num_shards = num_shards
+    else:
+      effective_num_shards, _ = shard_lib.estimate_num_edge_shards(
+          edge_set.num_edges()
+      )
 
     _write_container(
         features_to_write,
         edgeset_name,
         edge_dir,
         features_schema,
-        num_shards,
+        effective_num_shards,
         verbose,
         compression=compression,
         container_type=container,

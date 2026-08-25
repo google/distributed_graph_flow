@@ -16,13 +16,15 @@
 
 from __future__ import annotations
 
+import math
 import re
 from typing import List, Optional, Tuple
 
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 
-NUM_NODES_PER_SHARD = 1000
-NUM_EDGES_PER_SHARD = 1000
+MAX_NUM_SHARDS = 100
+NUM_NODES_PER_SHARD = 10000
+NUM_EDGES_PER_SHARD = 10000
 
 
 def expand_output_paths(path: str, num_shards: Optional[int]) -> List[str]:
@@ -271,13 +273,11 @@ def estimate_num_node_shards(num_nodes: int) -> tuple[int, int]:
   Returns:
     The estimated number of shards, and the number of nodes per shard.
   """
-  num_shards = (num_nodes // NUM_NODES_PER_SHARD) + (
-      num_nodes % NUM_NODES_PER_SHARD > 0
-  )
-  if num_shards <= 100:
+  num_shards = math.ceil(num_nodes / NUM_NODES_PER_SHARD)
+  if num_shards <= MAX_NUM_SHARDS:
     return num_shards, NUM_NODES_PER_SHARD
   else:
-    return 100, num_nodes // 100 + (num_nodes % 100 > 0)
+    return MAX_NUM_SHARDS, math.ceil(num_nodes / MAX_NUM_SHARDS)
 
 
 def estimate_num_edge_shards(num_edges: int) -> tuple[int, int]:
@@ -291,10 +291,8 @@ def estimate_num_edge_shards(num_edges: int) -> tuple[int, int]:
   Returns:
     The estimated number of shards, and the number of edges per shard.
   """
-  num_shards = (num_edges // NUM_EDGES_PER_SHARD) + (
-      num_edges % NUM_EDGES_PER_SHARD > 0
-  )
-  if num_shards <= 100:
+  num_shards = math.ceil(num_edges / NUM_EDGES_PER_SHARD)
+  if num_shards <= MAX_NUM_SHARDS:
     return num_shards, NUM_EDGES_PER_SHARD
   else:
-    return 100, num_edges // 100 + (num_edges % 100 > 0)
+    return MAX_NUM_SHARDS, math.ceil(num_edges / MAX_NUM_SHARDS)
