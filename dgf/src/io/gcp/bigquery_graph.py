@@ -129,7 +129,6 @@ def _graph_element_table(
 
 def metadata_to_schema(
     bigquery_graph_metadata: bigquery_graph_metadata_lib.BigQueryGraphMetadata,
-    combine_as_json: bool,
 ) -> schema_lib.GraphSchema:
   """Converts BigQuery graph metadata to a GraphFlow schema."""
 
@@ -139,7 +138,7 @@ def metadata_to_schema(
         features=gcp_common_lib.infer_feature_set_schema(
             _graph_element_table(node_table.label_and_properties),  # pyrefly: ignore[bad-argument-type]
             node_table.key_columns,
-            combine_as_json,
+            combine_as_json=False,
         )
     )
 
@@ -151,7 +150,7 @@ def metadata_to_schema(
         features=gcp_common_lib.infer_feature_set_schema(
             _graph_element_table(edge_table.label_and_properties),  # pyrefly: ignore[bad-argument-type]
             [],  # Add support for edge ids,
-            combine_as_json,
+            combine_as_json=False,
         ),
     )
 
@@ -210,7 +209,6 @@ def read_bigquery_graph_schema(
     dataset: str,
     graph: str,
     *,
-    combine_as_json: bool = False,
     verbose: Union[int, bool] = True,
 ):
   """Reads the schema of a BigQuery graph into a GF schema.
@@ -231,7 +229,6 @@ def read_bigquery_graph_schema(
     project: The GCP project ID of the BigQuery Graph.
     dataset: The BQ dataset ID of the BigQuery Graph.
     graph: The ID of the BigQuery Graph.
-    combine_as_json: Whether to combine the features as JSON.
     verbose: Amount of verbose (0: no, 1 or true: a little, 2: a lot).
 
   Returns:
@@ -241,7 +238,7 @@ def read_bigquery_graph_schema(
   metadata = get_metadata(project, dataset, graph)
   if verbose >= 2:
     log.info("meta-data:\n%s", metadata)
-  return metadata_to_schema(metadata, combine_as_json)
+  return metadata_to_schema(metadata)
 
 
 def read_bigquery_graph(
@@ -251,7 +248,7 @@ def read_bigquery_graph(
     *,
     schema: Optional[schema_lib.GraphSchema] = None,
     work_dir: str,
-    combine_as_json: bool = False,
+    remove_dangling_edges: bool = False,
     max_workers: int = 10,
     verbose: Union[int, bool] = True,
 ) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
@@ -273,8 +270,12 @@ def read_bigquery_graph(
     project: The Google Cloud project ID.
     dataset: The BigQuery dataset ID.
     graph: The BigQuery graph ID.
+    schema: Optional GraphFlow schema. If None, the schema is inferred from
+      BigQuery graph metadata.
     work_dir: The working directory to use for the temporary storage.
-    combine_as_json: Whether to combine the features as JSON.
+    remove_dangling_edges: If False (default), fails if an edge is dangling
+      (i.e., it refers to non-existing nodes). If True, dangling edges are
+      removed.
     max_workers: The maximum number of workers to use for parallel processing.
     verbose: Amount of verbose (0: no, 1 or true: a little, 2: a lot).
 
@@ -294,14 +295,15 @@ def read_bigquery_graph(
         project=project,
         dataset=dataset,
         graph=graph,
-        combine_as_json=combine_as_json,
         max_workers=max_workers,
         verbose=verbose,
         schema=schema,
     )
 
     in_memory_graph, in_memory_schema = gf_graph_in_memory_lib.read_graph(
-        work_dir, verbose=verbose >= 1
+        work_dir,
+        remove_dangling_edges=remove_dangling_edges,
+        verbose=verbose >= 1,
     )
   finally:
     try:
@@ -319,7 +321,6 @@ def export_bigquery_to_disk(
     graph: str,
     *,
     schema: Optional[schema_lib.GraphSchema] = None,
-    combine_as_json: bool = False,
     max_workers: int = 10,
     verbose: Union[int, bool] = True,
 ):
@@ -342,7 +343,8 @@ def export_bigquery_to_disk(
     project: The Google Cloud project ID.
     dataset: The BigQuery dataset ID.
     graph: The BigQuery graph ID.
-    combine_as_json: Whether to combine the features as JSON.
+    schema: Optional GraphFlow schema. If None, the schema is inferred from
+      BigQuery graph metadata.
     max_workers: The maximum number of workers to use for parallel processing.
     verbose: Amount of verbose (0: no, 1 or true: a little, 2: a lot).
 
@@ -361,7 +363,7 @@ def export_bigquery_to_disk(
   # TODO(b/328622124): Add feature_shapes, feature_semantics, and
   # num_categorical_values to the function signature and pass them here.
   if schema is None:
-    schema = metadata_to_schema(metadata, combine_as_json)
+    schema = metadata_to_schema(metadata)
 
   if verbose >= 2:
     log.info("%s", print_schema_lib.print_schema(schema, return_output=True))

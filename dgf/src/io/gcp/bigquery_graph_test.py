@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for bigquery_graph."""
+"""Tests for BigQuery Graph reading, schema generation, and export."""
 
 import copy
 from unittest import mock
@@ -195,10 +195,7 @@ class BigqueryGraphTest(parameterized.TestCase):
     metadata = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
         infoschema_query_response_json
     )
-    schema = bigquery_graph.metadata_to_schema(
-        metadata,
-        combine_as_json=False,
-    )
+    schema = bigquery_graph.metadata_to_schema(metadata)
     self.assertIn("nodes", schema.node_sets)
     self.assertIn("biggraphs-poc.ogbn_arxiv_2.edges", schema.edge_sets)
 
@@ -258,6 +255,85 @@ class BigqueryGraphTest(parameterized.TestCase):
         )
     )
     self.assertEqual(mock_read_graph.call_args[1]["verbose"], 1)
+    self.assertFalse(mock_read_graph.call_args[1]["remove_dangling_edges"])
+
+  @mock.patch("dgf.src.io.gcp.bigquery_graph.get_metadata")
+  @mock.patch("dgf.src.io.gcp.bigquery_graph._execute_query")
+  @mock.patch("dgf.src.io.gcp.parquet_export.create_export_sql")
+  @mock.patch("dgf.src.io.schema.write_schema")
+  @mock.patch("dgf.src.util.filesystem.open_write")
+  @mock.patch("dgf.src.io.graph_in_memory.read_graph")
+  def test_read_bigquery_graph_remove_dangling_edges(
+      self,
+      mock_read_graph,
+      mock_open_write,
+      mock_write_schema,
+      mock_create_export_sql,
+      mock_execute_query,
+      mock_load_metadata,
+  ):
+    del mock_open_write, mock_write_schema, mock_create_export_sql  # Unused.
+    metadata = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
+        infoschema_query_response_json
+    )
+    mock_load_metadata.return_value = metadata
+    mock_execute_query.return_value = mock.Mock()
+    mock_read_graph.return_value = (mock.Mock(), mock.Mock())
+
+    bigquery_graph.read_bigquery_graph(
+        "project",
+        "dataset",
+        "graph",
+        work_dir="gs://bucket/prefix",
+        remove_dangling_edges=True,
+    )
+
+    self.assertTrue(mock_read_graph.call_args[1]["remove_dangling_edges"])
+
+  @mock.patch("dgf.src.io.gcp.bigquery_graph.get_metadata")
+  def test_read_bigquery_graph_schema(self, mock_load_metadata):
+    metadata = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
+        infoschema_query_response_json
+    )
+    mock_load_metadata.return_value = metadata
+
+    schema = bigquery_graph.read_bigquery_graph_schema(
+        "project", "dataset", "graph"
+    )
+
+    self.assertIn("nodes", schema.node_sets)
+    self.assertIn("biggraphs-poc.ogbn_arxiv_2.edges", schema.edge_sets)
+    mock_load_metadata.assert_called_once_with("project", "dataset", "graph")
+
+  @mock.patch("dgf.src.io.gcp.bigquery_graph.get_metadata")
+  @mock.patch("dgf.src.io.gcp.bigquery_graph._execute_query")
+  @mock.patch("dgf.src.io.gcp.parquet_export.create_export_sql")
+  @mock.patch("dgf.src.io.schema.write_schema")
+  @mock.patch("dgf.src.util.filesystem.open_write")
+  def test_export_bigquery_to_disk(
+      self,
+      mock_open_write,
+      mock_write_schema,
+      mock_create_export_sql,
+      mock_execute_query,
+      mock_load_metadata,
+  ):
+    metadata = bigquery_graph_metadata_lib.BigQueryGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
+        infoschema_query_response_json
+    )
+    mock_load_metadata.return_value = metadata
+    mock_execute_query.return_value = mock.Mock()
+    mock_create_export_sql.return_value = "EXPORT DATA SQL"
+
+    bigquery_graph.export_bigquery_to_disk(
+        "gs://bucket/prefix", "project", "dataset", "graph"
+    )
+
+    mock_load_metadata.assert_called_once_with("project", "dataset", "graph")
+    self.assertEqual(mock_execute_query.call_count, 2)
+    mock_create_export_sql.assert_called()
+    mock_write_schema.assert_called_once()
+    mock_open_write.assert_called_once()
 
 
 if __name__ == "__main__":
