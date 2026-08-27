@@ -1,0 +1,3 @@
+# DGF Integration with GBBS
+
+[GBBS](https://github.com/ParAlg/gbbs) is a suite of efficient parallized graph algorithms original built to support the ["Theoretically Efficient Parallel Graph Algorithms Can Be Fast and Scalable" (SPAA'18)](https://arxiv.org/abs/1805.05208) publication. It leverages [ParlayLib](https://www.cs.cmu.edu/~guyb/papers/3350755.3400254.pdf) for shared-memory multicore systems.
