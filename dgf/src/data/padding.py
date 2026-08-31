@@ -15,17 +15,24 @@
 """Padding of graphs."""
 
 import dataclasses
-from typing import Dict
+from typing import Dict, Optional
+
+
+@dataclasses.dataclass
+class FeaturePadding:
+  max_timeseries_len: Optional[int] = None
 
 
 @dataclasses.dataclass
 class NodeSetPadding:
-  num_nodes: int
+  num_nodes: Optional[int] = None
+  features: Dict[str, FeaturePadding] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass
 class EdgeSetPadding:
-  num_edges: int
+  num_edges: Optional[int] = None
+  features: Dict[str, FeaturePadding] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass

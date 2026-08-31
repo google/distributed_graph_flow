@@ -28,10 +28,12 @@ py_library(
     name = "merge",
     srcs = ["merge.py"],
     deps = [
+        ":timeseries_padding",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:padding",
         "//dgf/src/data:schema",
         "//dgf/src/data:tf_in_memory_graph",
+        "//dgf/src/util:temporal",
         "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # numpy dep,
     ],
@@ -118,6 +120,19 @@ py_library(
 )
 
 py_library(
+    name = "timeseries_padding",
+    srcs = ["timeseries_padding.py"],
+    deps = [
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:padding",
+        "//dgf/src/data:schema",
+        "//dgf/src/io:feature_format",
+        "//dgf/src/util:temporal",
+        # numpy dep,
+    ],
+)
+
+py_library(
     name = "timeseries",
     srcs = ["timeseries.py"],
     deps = [
@@ -154,8 +169,10 @@ py_test(
         # apache_beam dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:padding",
+        "//dgf/src/data:schema",
         "//dgf/src/data:tf_in_memory_graph",
         "//dgf/src/util:gen_test_graph",
+        "//dgf/src/util:temporal",
         "//dgf/src/util:test_util",
         # numpy dep,
         # tensorflow:tensorflow_no_contrib dep,
@@ -256,6 +273,21 @@ py_test(
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/util:test_util",
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "timeseries_padding_test",
+    srcs = ["timeseries_padding_test.py"],
+    deps = [
+        ":timeseries_padding",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:padding",
         "//dgf/src/data:schema",
         "//dgf/src/util:test_util",
         # numpy dep,

@@ -24,7 +24,6 @@ from dgf.src.io import tf_graph_sample
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import merge as merge_lib
-from dgf.src.transform import timeseries as timeseries_transform
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 import numpy as np
