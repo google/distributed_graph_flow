@@ -68,7 +68,7 @@ class GNNDatasetPreparator:
     `dgf.analyse.feature_statistics_from_graphs` and
     `dgf.transform.AutoNormalizer`.
   - Padding graphs using `dgf.analyse.padding_from_graph_generator`.
-  - Merging of batches of graphs using `dgf.transform.merge_graphs`.
+  - Merging of batches of graphs using `dgf.transform.GraphMerger`.
 
   This class is intended for basic GNN pipelines. For advanced GNN pipelines,
   users should apply those transformations manually.

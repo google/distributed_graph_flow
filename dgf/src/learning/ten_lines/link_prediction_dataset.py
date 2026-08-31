@@ -23,7 +23,7 @@ Mirrors the in_memory_gnn_dataset_preparator.py utility.
 import copy
 import dataclasses
 import itertools
-from typing import Dict, Iterator, Literal, Optional, Tuple, Union
+from typing import Dict, Iterator, Literal, Optional
 from dgf.src.analyse import in_process_feature_statistics as in_process_feature_statistics_lib
 from dgf.src.analyse import padding as padding_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -129,7 +129,7 @@ class GNNLinkDatasetPreparator:
     `dgf.analyse.feature_statistics_from_graphs` and
     `dgf.transform.AutoNormalizer`.
   - Padding graphs using `dgf.analyse.padding_from_graph_generator`.
-  - Merging of batches of graphs using `dgf.transform.merge_graphs`.
+  - Merging of batches of graphs using `dgf.transform.GraphMerger`.
 
   Attributes:
     graph: One of the graph format defined in data.Graph e.g. in-memory graph,
@@ -609,6 +609,10 @@ class GNNLinkDatasetPreparator:
     # processed independently for padding, requiring separate padding
     # calculations.
 
+    graph_merger = merge_lib.GraphMerger(
+        schema=sampling_schema, padding=None, sentinel_offset=True
+    )
+
     def gen_normalized_merged_positive_source_samples() -> (
         Iterator[in_memory_graph_lib.InMemoryGraph]
     ):
@@ -624,9 +628,7 @@ class GNNLinkDatasetPreparator:
               masked_edge_idxs=masked_edge_idxs,
               seed_timestamps=batch_seed.seed_timestamps,
           )
-          merged_samples, _ = merge_lib.merge_graphs(
-              samples, sampling_schema, padding=None, sentinel_offset=True
-          )
+          merged_samples, _ = graph_merger(samples)
           yield source_normalizer.normalize_numpy(merged_samples)
 
     def gen_normalized_merged_positive_target_samples() -> (
@@ -644,9 +646,7 @@ class GNNLinkDatasetPreparator:
               masked_edge_idxs=masked_edge_idxs,
               seed_timestamps=batch_seed.seed_timestamps,
           )
-          merged_samples, _ = merge_lib.merge_graphs(
-              samples, sampling_schema, padding=None, sentinel_offset=True
-          )
+          merged_samples, _ = graph_merger(samples)
           yield target_normalizer.normalize_numpy(merged_samples)
 
     def gen_normalized_merged_negative_target_samples() -> (
@@ -669,9 +669,7 @@ class GNNLinkDatasetPreparator:
               masked_edge_idxs=neg_masked_edge_idxs,
               seed_timestamps=neg_seed_timestamps,
           )
-          merged_samples, _ = merge_lib.merge_graphs(
-              samples, sampling_schema, padding=None, sentinel_offset=True
-          )
+          merged_samples, _ = graph_merger(samples)
           yield target_normalizer.normalize_numpy(merged_samples)
 
     gen_normalized_merged_positive_source_samples_iter = (
@@ -817,12 +815,11 @@ class GNNLinkDatasetPreparator:
         masked_edge_idxs=masked_edge_idxs,
         seed_timestamps=batch_seed.seed_timestamps,
     )
-    pos_src_merged, pos_src_offsets = merge_lib.merge_graphs(
-        pos_src_samples,
-        merge_schema,
+    pos_src_merged, pos_src_offsets = merge_lib.GraphMerger(
+        schema=merge_schema,
         padding=live.positive_source_padding if padding else None,
         sentinel_offset=True,
-    )
+    )(pos_src_samples)
 
     # Positive target
     pos_trg_samples = live.target_sampler.sample(
@@ -830,12 +827,11 @@ class GNNLinkDatasetPreparator:
         masked_edge_idxs=masked_edge_idxs,
         seed_timestamps=batch_seed.seed_timestamps,
     )
-    pos_trg_merged, pos_trg_offsets = merge_lib.merge_graphs(
-        pos_trg_samples,
-        merge_schema,
+    pos_trg_merged, pos_trg_offsets = merge_lib.GraphMerger(
+        schema=merge_schema,
         padding=live.positive_target_padding if padding else None,
         sentinel_offset=True,
-    )
+    )(pos_trg_samples)
 
     # Negative target
     neg_seed_timestamps = (
@@ -853,12 +849,11 @@ class GNNLinkDatasetPreparator:
         masked_edge_idxs=neg_masked_edge_idxs,
         seed_timestamps=neg_seed_timestamps,
     )
-    neg_trg_merged, neg_trg_offsets = merge_lib.merge_graphs(
-        neg_trg_samples,
-        merge_schema,
+    neg_trg_merged, neg_trg_offsets = merge_lib.GraphMerger(
+        schema=merge_schema,
         padding=live.negative_target_padding if padding else None,
         sentinel_offset=True,
-    )
+    )(neg_trg_samples)
 
     return GNNLinkDatasetPreparatorSample(
         positive_source_graph=pos_src_merged,

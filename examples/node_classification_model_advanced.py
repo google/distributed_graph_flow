@@ -103,6 +103,11 @@ def main(argv) -> None:
       also_return_merge_offsets=False,
       batch_size=32,
   ):
+    graph_merger = dgf.transform.GraphMerger(
+        schema=schema,
+        padding=padding,
+        sentinel_offset=False,
+    )
     for seed_node_idxs in dgf.transform.batch_indices_generator(
         seed_node_idxs,
         batch_size=batch_size,
@@ -114,12 +119,7 @@ def main(argv) -> None:
 
       try:
         # Merge the graph samples into a single graph.
-        merged_samples, merge_offsets = dgf.transform.merge_graphs(
-            graphs=samples,
-            schema=schema,
-            padding=padding,
-            sentinel_offset=False,
-        )
+        merged_samples, merge_offsets = graph_merger(samples)
       except dgf.exception.InsufficientPaddingError:
         # Skip if the number of nodes is too large for the padding.
         continue

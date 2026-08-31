@@ -20,7 +20,6 @@ import os
 import tempfile
 from typing import Tuple
 import unittest
-from unittest import mock
 from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -566,22 +565,25 @@ class NodePredictionRealLooking(parameterized.TestCase):
   def test_predict_batch_insufficient_padding(self):
     """Tests that predict_batch handles InsufficientPaddingError by splitting."""
 
-    original_merge_graphs = node_prediction_model.merge_lib.merge_graphs
+    original_graph_merger = node_prediction_model.merge_lib.GraphMerger
     call_count = 0
 
-    def mock_merge_graphs(*args, **kwargs):
-      nonlocal call_count
-      call_count += 1
-      if call_count == 1:
-        raise node_prediction_model.merge_lib.InsufficientPaddingError(
-            "Simulated insufficient padding"
-        )
-      return original_merge_graphs(*args, **kwargs)
+    def mock_graph_merger(*args, **kwargs):
+      real_graph_merger = original_graph_merger(*args, **kwargs)
+      def graph_merger_wrapper(*call_args, **call_kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+          raise node_prediction_model.merge_lib.InsufficientPaddingError(
+              "Simulated insufficient padding"
+          )
+        return real_graph_merger(*call_args, **call_kwargs)
+      return graph_merger_wrapper
 
     with unittest.mock.patch.object(
         node_prediction_model.merge_lib,
-        "merge_graphs",
-        side_effect=mock_merge_graphs,
+        "GraphMerger",
+        side_effect=mock_graph_merger,
     ):
       # In test, batch_size is 5 (from RAPID_TRAINING_KWARGS).
       # We need to call predict with at least 2 examples to trigger splitting.

@@ -523,22 +523,25 @@ class LinkPredictionToyTest(parameterized.TestCase):
   def test_predict_batch_insufficient_padding(self):
     """Tests that predict_batch handles InsufficientPaddingError by splitting."""
 
-    original_merge_graphs = link_prediction_model.merge_lib.merge_graphs
+    original_graph_merger = link_prediction_model.merge_lib.GraphMerger
     call_count = 0
 
-    def mock_merge_graphs(*args, **kwargs):
-      nonlocal call_count
-      call_count += 1
-      if call_count == 1:
-        raise link_prediction_model.merge_lib.InsufficientPaddingError(
-            "Simulated insufficient padding"
-        )
-      return original_merge_graphs(*args, **kwargs)
+    def mock_graph_merger(*args, **kwargs):
+      real_graph_merger = original_graph_merger(*args, **kwargs)
+      def graph_merger_wrapper(*call_args, **call_kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+          raise link_prediction_model.merge_lib.InsufficientPaddingError(
+              "Simulated insufficient padding"
+          )
+        return real_graph_merger(*call_args, **call_kwargs)
+      return graph_merger_wrapper
 
     with unittest.mock.patch.object(
         link_prediction_model.merge_lib,
-        "merge_graphs",
-        side_effect=mock_merge_graphs,
+        "GraphMerger",
+        side_effect=mock_graph_merger,
     ):
       probs = self.model.predict(
           self.graph,

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import math
-from typing import Iterator, List, Optional
+from typing import Iterator, Optional
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import padding as padding_lib
 from dgf.src.data import schema as schema_lib
@@ -38,11 +38,10 @@ def padding_from_graph_generator(
   padding = padding_from_graph_generator(schema, graphs)
 
   # Later, the padding can be used to merge graphs
-  merged_graph_samples, nodeset_offsets = dgf.transform.merge_graphs(
-      [<some graph samples>],
+  merged_graph_samples, nodeset_offsets = dgf.transform.GraphMerger(
       schema,
       padding=padding,
-  )
+  )([<some graph samples>])
   ```
 
   The padding size is:

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
-from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Tuple
 
 import dataclasses_json
 from dgf.src.data import in_memory_graph
@@ -601,6 +601,17 @@ class LinkPredictionModel(common.Model):
           ),
       )
 
+    source_graph_merger = merge_lib.GraphMerger(
+        schema=self._data.schema,
+        padding=self._data.positive_source_padding,
+        sentinel_offset=False,
+    )
+    target_graph_merger = merge_lib.GraphMerger(
+        schema=self._data.schema,
+        padding=self._data.positive_target_padding,
+        sentinel_offset=False,
+    )
+
     def merge_and_predict(
         sub_src: np.ndarray,
         sub_trg: np.ndarray,
@@ -608,18 +619,8 @@ class LinkPredictionModel(common.Model):
         sub_trg_samples: List[in_memory_graph.InMemoryGraph],
     ):
 
-      source_merged, source_offsets = merge_lib.merge_graphs(
-          sub_src_samples,
-          self._data.schema,
-          padding=self._data.positive_source_padding,
-          sentinel_offset=False,
-      )
-      target_merged, target_offsets = merge_lib.merge_graphs(
-          sub_trg_samples,
-          self._data.schema,
-          padding=self._data.positive_target_padding,
-          sentinel_offset=False,
-      )
+      source_merged, source_offsets = source_graph_merger(sub_src_samples)
+      target_merged, target_offsets = target_graph_merger(sub_trg_samples)
 
       source_normalized = live.source_normalizer.normalize_numpy(source_merged)
       target_normalized = live.target_normalizer.normalize_numpy(target_merged)
@@ -797,14 +798,15 @@ class LinkPredictionModel(common.Model):
           ),
       )
 
+    graph_merger = merge_lib.GraphMerger(
+        schema=self._data.schema,
+        padding=padding,
+        sentinel_offset=False,
+    )
+
     def merge_and_predict_emb(sub_samples: List[in_memory_graph.InMemoryGraph]):
 
-      merged, offsets = merge_lib.merge_graphs(
-          sub_samples,
-          self._data.schema,
-          padding=padding,
-          sentinel_offset=False,
-      )
+      merged, offsets = graph_merger(sub_samples)
 
       normalized = normalizer.normalize_numpy(merged)
       jax_graph = jax_lib.graph_to_jax_graph(normalized)

@@ -46,9 +46,9 @@ class BatchTest(absltest.TestCase):
             "e2": padding_lib.EdgeSetPadding(num_edges=6),
         },
     )
-    merged_graph, offsets = merge_lib.merge_graphs(
-        graphs, schema, padding=padding
-    )
+    merged_graph, offsets = merge_lib.GraphMerger(
+        schema=schema, padding=padding
+    )(graphs)
     expected_merged_graph = in_memory_graph_lib.InMemoryGraph(
         node_sets={
             "n1": in_memory_graph_lib.InMemoryNodeSet(
@@ -108,7 +108,9 @@ class BatchTest(absltest.TestCase):
         gen_test_graph.generate_in_memory_graph(False, False),
     ]
     schema = gen_test_graph.generate_schema(False, False, variable_length=False)
-    merged_graph, offsets = merge_lib.merge_graphs(graphs, schema, padding=None)
+    merged_graph, offsets = merge_lib.GraphMerger(
+        schema=schema, padding=None
+    )(graphs)
     expected_merged_graph = in_memory_graph_lib.InMemoryGraph(
         node_sets={
             "n1": in_memory_graph_lib.InMemoryNodeSet(
@@ -182,7 +184,7 @@ class BatchTest(absltest.TestCase):
         r"Required at least 5 nodes \(including the sentinel node\), but the"
         r" padder only defines 4.",
     ):
-      _ = merge_lib.merge_graphs(graphs, schema, padding=padding)
+      _ = merge_lib.GraphMerger(schema=schema, padding=padding)(graphs)
 
   def test_batch_with_padding_no_sentinel_offset(self):
     graphs = [
@@ -200,12 +202,12 @@ class BatchTest(absltest.TestCase):
             "e2": padding_lib.EdgeSetPadding(num_edges=6),
         },
     )
-    merged_graph, offsets = merge_lib.merge_graphs(
-        graphs, schema, sentinel_offset=False, padding=padding
-    )
-    expected_merged_graph, _ = merge_lib.merge_graphs(
-        graphs, schema, sentinel_offset=True, padding=padding
-    )
+    merged_graph, offsets = merge_lib.GraphMerger(
+        schema=schema, sentinel_offset=False, padding=padding
+    )(graphs)
+    expected_merged_graph, _ = merge_lib.GraphMerger(
+        schema=schema, sentinel_offset=True, padding=padding
+    )(graphs)
     test_util.assert_are_equal(self, merged_graph, expected_merged_graph)
     test_util.assert_are_equal(
         self, offsets, {"n2": np.array([0, 2]), "n1": np.array([0, 2])}
@@ -217,12 +219,12 @@ class BatchTest(absltest.TestCase):
         gen_test_graph.generate_in_memory_graph(False, False),
     ]
     schema = gen_test_graph.generate_schema(False, False, variable_length=False)
-    merged_graph, offsets = merge_lib.merge_graphs(
-        graphs, schema, padding=None, sentinel_offset=False
-    )
-    expected_merged_graph, _ = merge_lib.merge_graphs(
-        graphs, schema, padding=None, sentinel_offset=True
-    )
+    merged_graph, offsets = merge_lib.GraphMerger(
+        schema=schema, padding=None, sentinel_offset=False
+    )(graphs)
+    expected_merged_graph, _ = merge_lib.GraphMerger(
+        schema=schema, padding=None, sentinel_offset=True
+    )(graphs)
     test_util.assert_are_equal(self, merged_graph, expected_merged_graph)
     test_util.assert_are_equal(
         self, offsets, {"n2": np.array([0, 2]), "n1": np.array([0, 2])}
@@ -372,16 +374,16 @@ class BatchTest(absltest.TestCase):
             "e2": padding_lib.EdgeSetPadding(num_edges=6),
         },
     )
-    merged_graph, offsets = merge_lib.merge_graphs(
-        graphs, schema, padding=padding
-    )
+    merged_graph, offsets = merge_lib.GraphMerger(
+        schema=schema, padding=padding
+    )(graphs)
     unpadded_graph = merge_lib.remove_padding_sentinels(
         merged_graph, schema, offsets
     )
 
-    expected_unpadded_graph, _ = merge_lib.merge_graphs(
-        graphs, schema, padding=None
-    )
+    expected_unpadded_graph, _ = merge_lib.GraphMerger(
+        schema=schema, padding=None
+    )(graphs)
     test_util.assert_are_equal(self, unpadded_graph, expected_unpadded_graph)
 
   def test_batch_with_timeseries_padding(self):
@@ -439,16 +441,15 @@ class BatchTest(absltest.TestCase):
         edge_sets={},
     )
     # Check that schema cache is no longer required and can be omitted.
-    merged_graph_no_cache, _ = merge_lib.merge_graphs(
-        [g1, g2], schema, padding=padding, schema_cache=None
-    )
+    merged_graph_no_cache, _ = merge_lib.GraphMerger(
+        schema=schema, padding=padding, schema_cache=None
+    )([g1, g2])
     schema_cache = temporal_util.extract_timeseries_schema_cache(schema)
-    merged_graph, _ = merge_lib.merge_graphs(
-        [g1, g2],
-        schema,
+    merged_graph, _ = merge_lib.GraphMerger(
+        schema=schema,
         padding=padding,
         schema_cache=schema_cache,
-    )
+    )([g1, g2])
     test_util.assert_are_equal(self, merged_graph_no_cache, merged_graph)
     # Total real nodes: 2 + 1 = 3. Sentinel nodes: 5 - 3 = 2. Total nodes: 5.
     self.assertEqual(merged_graph.node_sets["n1"].num_nodes, 5)
@@ -535,12 +536,11 @@ class BatchTest(absltest.TestCase):
         },
     )
     schema_cache = temporal_util.extract_timeseries_schema_cache(schema)
-    merged_graph, _ = merge_lib.merge_graphs(
-        [g1, g2],
-        schema,
+    merged_graph, _ = merge_lib.GraphMerger(
+        schema=schema,
         padding=padding,
         schema_cache=schema_cache,
-    )
+    )([g1, g2])
     # Total real edges: 1 + 1 = 2. Total edges with padding: 3.
     edge_set = merged_graph.edge_sets["e1"]
     self.assertEqual(edge_set.adjacency.shape, (2, 3))
@@ -612,12 +612,11 @@ class BatchTest(absltest.TestCase):
         edge_sets={},
     )
     schema_cache = temporal_util.extract_timeseries_schema_cache(schema)
-    merged_graph, offsets = merge_lib.merge_graphs(
-        [g1, g2],
-        schema,
+    merged_graph, offsets = merge_lib.GraphMerger(
+        schema=schema,
         padding=padding,
         schema_cache=schema_cache,
-    )
+    )([g1, g2])
     # Total real nodes: 2 + 1 = 3. No sentinel nodes added.
     self.assertEqual(merged_graph.node_sets["n1"].num_nodes, 3)
     ts_feat = merged_graph.node_sets["n1"].features["ts"]
@@ -690,23 +689,16 @@ class BatchTest(absltest.TestCase):
         },
         edge_sets={},
     )
-    merger = merge_lib.GraphMerger(schema=schema, padding=padding)
-    output_schema = merger.output_schema()
+    graph_merger = merge_lib.GraphMerger(schema=schema, padding=padding)
+    output_schema = graph_merger.output_schema()
     self.assertIn("ts", output_schema.node_sets["n1"].features)
     self.assertIn("ts_mask", output_schema.node_sets["n1"].features)
     self.assertEqual(
         output_schema.node_sets["n1"].features["ts"].shape, (3,)
     )
 
-    merged_graph, offsets = merger([g1, g2])
+    merged_graph, _ = graph_merger([g1, g2])
     self.assertEqual(merged_graph.node_sets["n1"].num_nodes, 5)
-
-    # Test merge_graph function alias
-    merged_graph_alias, offsets_alias = merge_lib.merge_graph(
-        [g1, g2], schema=schema, padding=padding
-    )
-    test_util.assert_are_equal(self, merged_graph, merged_graph_alias)
-    test_util.assert_are_equal(self, offsets, offsets_alias)
 
   def test_unknown_padding_keys_raise_value_error(self):
     schema = schema_lib.GraphSchema(

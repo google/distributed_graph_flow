@@ -391,6 +391,12 @@ class NodePredictionModel(common.Model):
           ),
       )
 
+    graph_merger = merge_lib.GraphMerger(
+        schema=schema,
+        padding=self._data.padding,
+        sentinel_offset=False,
+    )
+
     for batch_seed_node_idxs in batch_seed_node_idxs_generator:
 
       # TODO(gbm): The sampler should consume np array directly.
@@ -410,23 +416,21 @@ class NodePredictionModel(common.Model):
         graph_samples = sampler.sample(batch_seed_node_idxs)
 
       yield from self._predict_sub_batch(
-          live, schema, batch_seed_node_idxs, graph_samples
+          live,
+          batch_seed_node_idxs,
+          graph_samples,
+          graph_merger=graph_merger,
       )
 
   def _predict_sub_batch(
       self,
       live,
-      schema: schema_lib.GraphSchema,
       sub_seed_idxs: np.ndarray,
       sub_samples: List[in_memory_graph.InMemoryGraph],
+      graph_merger: merge_lib.GraphMerger,
   ) -> Iterator[BatchPrediction]:
     try:
-      merged_graph, merge_offsets = merge_lib.merge_graphs(
-          sub_samples,
-          schema,
-          padding=self._data.padding,
-          sentinel_offset=False,
-      )
+      merged_graph, merge_offsets = graph_merger(sub_samples)
     except merge_lib.InsufficientPaddingError:
       # The graph is too large to fit in the padding. Let's split it in two
       # and try again.
@@ -434,10 +438,16 @@ class NodePredictionModel(common.Model):
         raise
       mid = len(sub_samples) // 2
       yield from self._predict_sub_batch(
-          live, schema, sub_seed_idxs[:mid], sub_samples[:mid]
+          live,
+          sub_seed_idxs[:mid],
+          sub_samples[:mid],
+          graph_merger=graph_merger,
       )
       yield from self._predict_sub_batch(
-          live, schema, sub_seed_idxs[mid:], sub_samples[mid:]
+          live,
+          sub_seed_idxs[mid:],
+          sub_samples[mid:],
+          graph_merger=graph_merger,
       )
       return
 
@@ -473,12 +483,11 @@ class NodePredictionModel(common.Model):
     live = self._get_live()
     schema = schema_to_input_feature_schema(self._data.schema, self._data.task)
 
-    merged_graph, merge_offsets = merge_lib.merge_graphs(
-        graph_samples,
-        schema,
+    merged_graph, merge_offsets = merge_lib.GraphMerger(
+        schema=schema,
         padding=self._data.padding,
         sentinel_offset=False,
-    )
+    )(graph_samples)
     normalized_merged = live.normalizer.normalize_numpy(merged_graph)
     normalized_merged_jax = jax_lib.graph_to_jax_graph(normalized_merged)
     seed_node_idxs = merge_offsets[self._data.task.target_nodeset]
@@ -591,7 +600,11 @@ class NodePredictionModel(common.Model):
 
     def batch_prediction_generator():
       live = self._get_live()
-      schema = self._data.schema
+      graph_merger = merge_lib.GraphMerger(
+          schema=self._data.schema,
+          padding=self._data.padding,
+          sentinel_offset=False,
+      )
       iterator = graph_samples
       if verbose >= 2:
         iterator = tqdm.tqdm(iterator, desc="Evaluation", total=num_eval_steps)
@@ -601,12 +614,18 @@ class NodePredictionModel(common.Model):
         batch.append(sample)
         if len(batch) == batch_size:
           yield from self._predict_sub_batch(
-              live, schema, np.zeros(len(batch), dtype=np.int32), batch
+              live,
+              np.zeros(len(batch), dtype=np.int32),
+              batch,
+              graph_merger=graph_merger,
           )
           batch = []
       if batch:
         yield from self._predict_sub_batch(
-            live, schema, np.zeros(len(batch), dtype=np.int32), batch
+            live,
+            np.zeros(len(batch), dtype=np.int32),
+            batch,
+            graph_merger=graph_merger,
         )
 
     if verbose >= 1:

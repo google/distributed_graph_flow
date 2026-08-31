@@ -166,6 +166,11 @@ def main(argv: typing.Sequence[str]) -> None:
   )
 
   def batch_generator(seed_node_idxs, batch_size):
+    graph_merger = dgf.transform.GraphMerger(
+        schema=schema,
+        padding=None,
+        sentinel_offset=False,
+    )
     for indices in dgf.transform.batch_indices_generator(
         seed_node_idxs,
         batch_size=batch_size,
@@ -175,12 +180,7 @@ def main(argv: typing.Sequence[str]) -> None:
       samples = sampler.sample(indices.tolist())
 
       try:
-        merged_samples, merge_offsets = dgf.transform.merge_graphs(
-            graphs=samples,
-            schema=schema,
-            padding=None,
-            sentinel_offset=False,
-        )
+        merged_samples, merge_offsets = graph_merger(samples)
       except dgf.exception.InsufficientPaddingError:
         continue
 

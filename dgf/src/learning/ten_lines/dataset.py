@@ -286,9 +286,11 @@ class SampleGeneratorFromAnything:
         if self.sampler_returns_node_idxs_only
         else self.output_schema()
     )
-
     def batch_generator():
       assert self.in_memory_sampler is not None
+      graph_merger = merge_lib.GraphMerger(
+          schema=merge_schema, padding=self.padding
+      )
       for node_idxs in util.batch_indices_generator(
           self.seed_node_idxs  # pyrefly: ignore[bad-argumet-type]
           if self.seed_node_idxs is not None
@@ -309,9 +311,7 @@ class SampleGeneratorFromAnything:
           graph_samples = self.in_memory_sampler.sample(node_idxs)
 
         try:
-          yield merge_lib.merge_graphs(
-              graph_samples, merge_schema, padding=self.padding
-          )
+          yield graph_merger(graph_samples)
         except merge_lib.InsufficientPaddingError as e:
           if not self.skip_overflow_padding_error:
             raise e
@@ -352,6 +352,9 @@ class SampleGeneratorFromAnything:
       it = tf_graph_sample.read_tfgnn_graphs(
           self.graph, self.schema, container_type=container_type
       )
+      graph_merger = merge_lib.GraphMerger(
+          schema=self.schema, padding=self.padding
+      )
       while True:
         batch = []
         try:
@@ -360,15 +363,13 @@ class SampleGeneratorFromAnything:
         except StopIteration:
           if batch and not self.drop_remainder:
             try:
-              yield merge_lib.merge_graphs(
-                  batch, self.schema, padding=self.padding
-              )
+              yield graph_merger(batch)
             except merge_lib.InsufficientPaddingError as e:
               if not self.skip_overflow_padding_error:
                 raise e
           return
         try:
-          yield merge_lib.merge_graphs(batch, self.schema, padding=self.padding)
+          yield graph_merger(batch)
         except merge_lib.InsufficientPaddingError as e:
           if not self.skip_overflow_padding_error:
             raise e

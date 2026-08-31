@@ -302,7 +302,7 @@ py_test(
     timeout = "long",
     srcs = ["node_prediction_test.py"],
     data = ["//test_data"],
-    shard_count = 4,
+    shard_count = 8,
     tags = [
         #"requires-gpu-nvidia",
     ],

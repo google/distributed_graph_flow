@@ -340,26 +340,7 @@ class GraphMerger:
     )
 
 
-def merge_graph(
-    graphs: List[in_memory_graph.InMemoryGraph],
-    schema: schema_lib.GraphSchema,
-    padding: Optional[padding_lib.Padding] = None,
-    sentinel_offset: bool = True,
-    schema_cache: Optional[temporal_util.TimeseriesSchemaCache] = None,
-) -> Tuple[in_memory_graph.InMemoryGraph, Dict[str, np.ndarray]]:
-  """Merges multiple `InMemoryGraph` instances into a single graph.
 
-  Temporary wrapper around the `GraphMerger` class.
-  """
-  return GraphMerger(
-      schema=schema,
-      padding=padding,
-      sentinel_offset=sentinel_offset,
-      schema_cache=schema_cache,
-  )(graphs)
-
-
-merge_graphs = merge_graph
 
 
 def create_padding_item(value, num_padding_items):
@@ -398,7 +379,7 @@ def pad_graph_tensorflow(
 ) -> tf_in_memory_graph.TFInMemoryGraph:
   """Pads a TFInMemoryGraph with sentinels according to the padding.
 
-  Similar to the padding implemented in merge_graphs with sentinel_offsets and
+  Similar to the padding implemented in GraphMerger with sentinel_offsets and
   padder, but work on TFInMemoryGraph instead of
   (Numpy)InMemoryGraphs.
 
@@ -520,18 +501,19 @@ def remove_padding_sentinels(
     schema: schema_lib.GraphSchema,
     offsets: Dict[str, np.ndarray],
 ) -> in_memory_graph.InMemoryGraph:
-  """Removes the sentinel nodes and edges added by `merge_graphs`.
+  """Removes the sentinel nodes and edges added by `GraphMerger`.
 
   The `graph` and `offsets` arguments are the two return values from
-  `merge_graphs`. This method requires `merge_graphs` to have been called with
+  `GraphMerger`. This method requires `GraphMerger` to have been called with
   `sentinel_offset=True`.
 
   Usage example:
 
   ```python
-    padded_graph, offsets = merge_graphs([graph], schema, padding,
-    sentinel_offset=True)
-    unpadded_graph = remove_padding_sentinels(merged_graph, schema, offsets)
+    padded_graph, offsets = GraphMerger(
+        schema, padding, sentinel_offset=True
+    )([graph])
+    unpadded_graph = remove_padding_sentinels(padded_graph, schema, offsets)
     assert unpadded_graph == graph
   ```
 
@@ -541,7 +523,7 @@ def remove_padding_sentinels(
   Args:
     graph: The padded graph.
     schema: Graph schema.
-    offsets: Node set offsets returned by `merge_graphs`.
+    offsets: Node set offsets returned by `GraphMerger`.
 
   Returns:
     A new `InMemoryGraph` with sentinel nodes and edges removed.
