@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for padding and capping timeseries sequence features."""
+"""Tests for temporal and timeseries feature extractors."""
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -80,521 +80,6 @@ def _ts_schema(
 
 class TimeseriesTest(parameterized.TestCase):
 
-  def test_capping_and_padding(self):
-    # Both 'time' and 'signal' are variable-length sequence object arrays.
-    graph, schema = _make_graph_and_schema(
-        values={
-            "time": np.array(
-                [np.array([10, 20, 30, 40, 50]), np.array([5, 15])],
-                dtype=np.object_,
-            ),
-            "signal": np.array(
-                [
-                    np.array([1.0, 2.0, 3.0, 4.0, 5.0], dtype=np.float32),
-                    np.array([0.5, 1.5], dtype=np.float32),
-                ],
-                dtype=np.object_,
-            ),
-            "id": np.array([101, 102]),
-        },
-        schemas={
-            "time": _ts_schema(
-                fmt=schema_lib.FeatureFormat.INTEGER_64,
-                sem=schema_lib.FeatureSemantic.TIMESTAMP,
-                is_creation_time=True,
-                group="time",
-            ),
-            "signal": _ts_schema(group="time"),
-            "id": schema_lib.FeatureSchema(
-                format=schema_lib.FeatureFormat.INTEGER_64,
-                semantic=schema_lib.FeatureSemantic.NUMERICAL,
-            ),
-        },
-        num_nodes=2,
-    )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema,
-        timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
-    )
-    new_graph = pad_and_cap(graph)
-    new_schema = pad_and_cap.output_schema()
-    hw_val = new_graph.node_sets["hardware"]
-    hw_sch = new_schema.node_sets["hardware"]
-
-    expected_features = {
-        "time": np.array([[30, 40, 50], [0, 5, 15]], dtype=np.int64),
-        "signal": np.array(
-            [[3.0, 4.0, 5.0], [0.0, 0.5, 1.5]], dtype=np.float32
-        ),
-        "time_mask": np.array([[True, True, True], [False, True, True]]),
-        "id": np.array([101, 102]),
-    }
-    test_util.assert_are_equal(self, hw_val.features, expected_features)
-
-    self.assertEqual(hw_sch.features["time"].shape, (3,))
-    self.assertTrue(hw_sch.features["time"].is_timeseries)
-    self.assertTrue(hw_sch.features["time_mask"].is_timeseries)
-    self.assertEqual(
-        hw_sch.features["time_mask"].semantic, schema_lib.FeatureSemantic.MASK
-    )
-
-  def test_edge_sets_and_non_timeseries(self):
-    graph = in_memory_graph.InMemoryGraph(
-        node_sets={
-            "user": in_memory_graph.InMemoryNodeSet(
-                num_nodes=1, features={"age": np.array([30], dtype=np.int64)}
-            ),
-        },
-        edge_sets={
-            "clicks": in_memory_graph.InMemoryEdgeSet(
-                adjacency=np.array([[0], [0]], dtype=np.int64),
-                features={
-                    "time": np.array([np.array([100, 200])], dtype=np.object_)
-                },
-            ),
-            "static_edge": in_memory_graph.InMemoryEdgeSet(
-                adjacency=np.array([[0], [0]], dtype=np.int64),
-                features={"weight": np.array([1.0], dtype=np.float32)},
-            ),
-        },
-    )
-    schema = schema_lib.GraphSchema(
-        node_sets={
-            "user": schema_lib.NodeSchema(
-                features={
-                    "age": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.INTEGER_64,
-                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
-                    )
-                }
-            )
-        },
-        edge_sets={
-            "clicks": schema_lib.EdgeSchema(
-                source="user",
-                target="user",
-                features={
-                    "time": _ts_schema(
-                        fmt=schema_lib.FeatureFormat.INTEGER_64,
-                        sem=schema_lib.FeatureSemantic.TIMESTAMP,
-                        group="time",
-                    )
-                },
-            ),
-            "static_edge": schema_lib.EdgeSchema(
-                source="user",
-                target="user",
-                features={
-                    "weight": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.FLOAT_32,
-                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
-                    )
-                },
-            ),
-        },
-    )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema,
-        timeseries.PadAndCapTimeseriesConfig(sequence_length=2),
-    )
-    new_graph = pad_and_cap(graph)
-    new_schema = pad_and_cap.output_schema()
-
-    np.testing.assert_array_equal(
-        new_graph.node_sets["user"].features["age"], [30]
-    )
-    np.testing.assert_array_equal(
-        new_graph.edge_sets["clicks"].features["time"][0], [100, 200]
-    )
-    self.assertTrue(
-        new_schema.edge_sets["clicks"].features["time"].is_timeseries
-    )
-
-  def test_multidimensional_sequence(self):
-    graph, schema = _make_graph_and_schema(
-        values={
-            "emb": np.array(
-                [np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)],
-                dtype=np.object_,
-            )
-        },
-        schemas={
-            "emb": _ts_schema(
-                sem=schema_lib.FeatureSemantic.EMBEDDING,
-                group="emb",
-                shape=(None, 2),
-            )
-        },
-    )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema,
-        timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
-    )
-    new_graph = pad_and_cap(graph)
-    new_schema = pad_and_cap.output_schema()
-    hw_val = new_graph.node_sets["hardware"]
-    hw_sch = new_schema.node_sets["hardware"]
-
-    expected_features = {
-        "emb": np.array(
-            [[[0.0, 0.0], [1.0, 2.0], [3.0, 4.0]]], dtype=np.float32
-        ),
-        "emb_mask": np.array([[False, True, True]]),
-    }
-    test_util.assert_are_equal(self, hw_val.features, expected_features)
-    self.assertEqual(hw_sch.features["emb"].shape, (3, 2))
-    self.assertEqual(hw_sch.features["emb_mask"].shape, (3,))
-    self.assertEqual(
-        hw_sch.features["emb_mask"].semantic, schema_lib.FeatureSemantic.MASK
-    )
-
-  def test_custom_mask_name_is_reused(self):
-    graph, schema = _make_graph_and_schema(
-        values={
-            "emb": np.array(
-                [np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)],
-                dtype=np.object_,
-            ),
-            "my_custom_mask": np.array(
-                [np.array([True, True], dtype=bool)],
-                dtype=np.object_,
-            ),
-        },
-        schemas={
-            "emb": schema_lib.FeatureSchema(
-                format=schema_lib.FeatureFormat.FLOAT_32,
-                semantic=schema_lib.FeatureSemantic.EMBEDDING,
-                is_timeseries=True,
-                shape=(None, 2),
-                group="emb_group",
-            ),
-            "my_custom_mask": schema_lib.FeatureSchema(
-                format=schema_lib.FeatureFormat.BOOL,
-                semantic=schema_lib.FeatureSemantic.MASK,
-                is_timeseries=True,
-                shape=(None,),
-                group="emb_group",
-            ),
-        },
-    )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema,
-        timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
-    )
-    new_graph = pad_and_cap(graph)
-    new_schema = pad_and_cap.output_schema()
-    hw_val = new_graph.node_sets["hardware"]
-    hw_sch = new_schema.node_sets["hardware"]
-
-    expected_features = {
-        "emb": np.array(
-            [[[0.0, 0.0], [1.0, 2.0], [3.0, 4.0]]], dtype=np.float32
-        ),
-        "my_custom_mask": np.array([[False, True, True]]),
-    }
-    test_util.assert_are_equal(self, hw_val.features, expected_features)
-    self.assertEqual(hw_sch.features["emb"].shape, (3, 2))
-    self.assertEqual(hw_sch.features["my_custom_mask"].shape, (3,))
-    self.assertNotIn("emb_mask", hw_sch.features)
-
-  def test_clashing_mask_name_raises(self):
-    _, schema = _make_graph_and_schema(
-        values={
-            "emb": np.array(
-                [np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)],
-                dtype=np.object_,
-            ),
-            "emb_mask": np.array(
-                [np.array([42.0], dtype=np.float32)],
-                dtype=np.object_,
-            ),
-        },
-        schemas={
-            "emb": schema_lib.FeatureSchema(
-                format=schema_lib.FeatureFormat.FLOAT_32,
-                semantic=schema_lib.FeatureSemantic.EMBEDDING,
-                is_timeseries=True,
-                shape=(None, 2),
-                group="emb",
-            ),
-            # This feature is named "emb_mask", which is the fallback mask name
-            # for the group "emb", but its semantic is not MASK.
-            "emb_mask": schema_lib.FeatureSchema(
-                format=schema_lib.FeatureFormat.FLOAT_32,
-                semantic=schema_lib.FeatureSemantic.NUMERICAL,
-                is_timeseries=True,
-                shape=(None, 1),
-                group="emb",
-            ),
-        },
-    )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema,
-        timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
-    )
-    with self.assertRaisesRegex(
-        ValueError, "clashes with an existing feature"
-    ):
-      pad_and_cap.output_schema()
-
-  def test_pad_and_cap_timeseries_features_auto_assigns_group_when_none(self):
-    graph, schema = _make_graph_and_schema(
-        values={
-            "signal": np.array(
-                [np.array([1.0, 2.0], dtype=np.float32)], dtype=object
-            )
-        },
-        schemas={
-            "signal": schema_lib.FeatureSchema(
-                format=schema_lib.FeatureFormat.FLOAT_32,
-                semantic=schema_lib.FeatureSemantic.NUMERICAL,
-                is_timeseries=True,
-                shape=(None,),
-                group=None,
-            ),
-        },
-        num_nodes=1,
-    )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema,
-        timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
-    )
-    new_graph = pad_and_cap(graph)
-    new_schema = pad_and_cap.output_schema()
-    hw_sch = new_schema.node_sets["hardware"]
-    self.assertEqual(hw_sch.features["signal"].group, "signal")
-    self.assertIn("signal_mask", new_graph.node_sets["hardware"].features)
-
-  def test_empty_sequence(self):
-    graph, schema = _make_graph_and_schema(
-        values={"time": np.array([np.array([])], dtype=np.object_)},
-        schemas={
-            "time": _ts_schema(
-                fmt=schema_lib.FeatureFormat.INTEGER_64,
-                sem=schema_lib.FeatureSemantic.TIMESTAMP,
-                group="time",
-            )
-        },
-    )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema,
-        timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
-    )
-    new_graph = pad_and_cap(graph)
-    hw_val = new_graph.node_sets["hardware"]
-    np.testing.assert_array_equal(hw_val.features["time"][0], [0, 0, 0])
-    np.testing.assert_array_equal(hw_val.features["time_mask"][0], [0, 0, 0])
-
-  def test_no_timeseries_in_graph(self):
-    graph, schema = _make_graph_and_schema(
-        values={"age": np.array([30])},
-        schemas={
-            "age": schema_lib.FeatureSchema(
-                format=schema_lib.FeatureFormat.INTEGER_64,
-                semantic=schema_lib.FeatureSemantic.NUMERICAL,
-            )
-        },
-    )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema, timeseries.PadAndCapTimeseriesConfig()
-    )
-    new_graph = pad_and_cap(graph)
-    self.assertEqual(new_graph.node_sets["hardware"].features["age"][0], 30)
-    self.assertNotIn("age_mask", new_graph.node_sets["hardware"].features)
-
-  def test_empty_entity_set(self):
-    graph = in_memory_graph.InMemoryGraph(
-        node_sets={
-            "user": in_memory_graph.InMemoryNodeSet(
-                num_nodes=0, features={"time": np.array([], dtype=np.object_)}
-            ),
-        },
-        edge_sets={},
-    )
-    schema = schema_lib.GraphSchema(
-        node_sets={
-            "user": schema_lib.NodeSchema(
-                features={
-                    "time": _ts_schema(
-                        fmt=schema_lib.FeatureFormat.INTEGER_64,
-                        sem=schema_lib.FeatureSemantic.TIMESTAMP,
-                        group="time",
-                    )
-                }
-            ),
-        },
-        edge_sets={},
-    )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema, timeseries.PadAndCapTimeseriesConfig(sequence_length=3)
-    )
-    new_graph = pad_and_cap(graph)
-    new_schema = pad_and_cap.output_schema()
-    user_val = new_graph.node_sets["user"]
-    user_sch = new_schema.node_sets["user"]
-    self.assertEqual(user_val.num_nodes, 0)
-    self.assertEqual(user_val.features["time"].shape, (0, 3))
-    self.assertEqual(user_val.features["time_mask"].shape, (0, 3))
-    self.assertEqual(user_sch.features["time"].shape, (3,))
-    self.assertTrue(user_sch.features["time"].is_timeseries)
-    self.assertTrue(user_sch.features["time_mask"].is_timeseries)
-    self.assertEqual(
-        user_sch.features["time_mask"].semantic, schema_lib.FeatureSemantic.MASK
-    )
-
-  def test_missing_entity_set_raises(self):
-    graph = in_memory_graph.InMemoryGraph(
-        node_sets={},
-        edge_sets={},
-    )
-    schema = schema_lib.GraphSchema(
-        node_sets={
-            "absent": schema_lib.NodeSchema(
-                features={
-                    "time": _ts_schema(fmt=schema_lib.FeatureFormat.INTEGER_64)
-                }
-            ),
-        },
-        edge_sets={},
-    )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema, timeseries.PadAndCapTimeseriesConfig(sequence_length=3)
-    )
-    with self.assertRaises(KeyError):
-      pad_and_cap(graph)
-    extractor = timeseries.CalendarFeatureExtractor(schema)
-    with self.assertRaises(KeyError):
-      extractor(graph)
-
-  def test_missing_feature_raises(self):
-    graph, schema = _make_graph_and_schema(
-        values={},
-        schemas={
-            "absent_feature": _ts_schema(
-                fmt=schema_lib.FeatureFormat.INTEGER_64,
-                sem=schema_lib.FeatureSemantic.TIMESTAMP,
-            )
-        },
-    )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema,
-        timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
-    )
-    with self.assertRaises(KeyError):
-      pad_and_cap(graph)
-    extractor = timeseries.CalendarFeatureExtractor(schema)
-    with self.assertRaises(KeyError):
-      extractor(graph)
-
-  def test_custom_padding_value(self):
-    graph, schema = _make_graph_and_schema(
-        values={
-            "time": np.array([np.array([10])], dtype=np.object_),
-            "signal": np.array(
-                [np.array([2.0], dtype=np.float32)], dtype=np.object_
-            ),
-        },
-        schemas={
-            "time": _ts_schema(
-                fmt=schema_lib.FeatureFormat.INTEGER_64,
-                sem=schema_lib.FeatureSemantic.TIMESTAMP,
-                group="time",
-            ),
-            "signal": _ts_schema(group="time"),
-        },
-        num_nodes=1,
-    )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema,
-        timeseries.PadAndCapTimeseriesConfig(
-            sequence_length=3, padding_value=-1
-        ),
-    )
-    new_graph = pad_and_cap(graph)
-    hw_val = new_graph.node_sets["hardware"]
-    expected_features = {
-        "time": np.array([[-1, -1, 10]], dtype=np.int64),
-        "signal": np.array([[-1.0, -1.0, 2.0]], dtype=np.float32),
-        "time_mask": np.array([[False, False, True]]),
-    }
-    test_util.assert_are_equal(self, hw_val.features, expected_features)
-
-  def test_fixed_shape_vectorized_path_capping(self):
-    # Dense 2D array where all 2 nodes have fixed length T=5 >= K=3
-    graph, schema = _make_graph_and_schema(
-        values={
-            "time": np.array(
-                [[10, 20, 30, 40, 50], [100, 200, 300, 400, 500]],
-                dtype=np.int64,
-            ),
-        },
-        schemas={
-            "time": _ts_schema(
-                fmt=schema_lib.FeatureFormat.INTEGER_64,
-                sem=schema_lib.FeatureSemantic.TIMESTAMP,
-                group="time",
-                shape=(5,),
-            ),
-        },
-        num_nodes=2,
-    )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema,
-        timeseries.PadAndCapTimeseriesConfig(sequence_length=3),
-    )
-    new_graph = pad_and_cap(graph)
-    hw_val = new_graph.node_sets["hardware"]
-    expected_features = {
-        "time": np.array([[30, 40, 50], [300, 400, 500]], dtype=np.int64),
-        "time_mask": np.array([[True, True, True], [True, True, True]]),
-    }
-    test_util.assert_are_equal(self, hw_val.features, expected_features)
-
-  def test_fixed_shape_vectorized_path_padding(self):
-    # Dense 3D array where all 2 nodes have fixed length T=2 < K=3 and feature
-    # dim 2
-    graph, schema = _make_graph_and_schema(
-        values={
-            "emb": np.array(
-                [
-                    [[1.0, 1.1], [2.0, 2.2]],
-                    [[10.0, 10.1], [20.0, 20.2]],
-                ],
-                dtype=np.float32,
-            ),
-        },
-        schemas={
-            "emb": _ts_schema(
-                sem=schema_lib.FeatureSemantic.EMBEDDING,
-                group="emb",
-                shape=(2, 2),
-            ),
-        },
-        num_nodes=2,
-    )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema,
-        timeseries.PadAndCapTimeseriesConfig(
-            sequence_length=3, padding_value=-1.0
-        ),
-    )
-    new_graph = pad_and_cap(graph)
-    hw_val = new_graph.node_sets["hardware"]
-    expected_features = {
-        "emb": np.array(
-            [
-                [[-1.0, -1.0], [1.0, 1.1], [2.0, 2.2]],
-                [[-1.0, -1.0], [10.0, 10.1], [20.0, 20.2]],
-            ],
-            dtype=np.float32,
-        ),
-        "emb_mask": np.array([
-            [False, True, True],
-            [False, True, True],
-        ]),
-    }
-    test_util.assert_are_equal(self, hw_val.features, expected_features)
-
   def test_compute_calendar_feature(self):
     ts = np.array([65, 3665, 1680000015], dtype=np.int64)
     computed = {
@@ -624,26 +109,26 @@ class TimeseriesTest(parameterized.TestCase):
     test_util.assert_are_equal(self, computed, expected)
 
   def test_extract_calendar_features(self):
-    graph, schema = _make_graph_and_schema(
+    padded_graph, padded_schema = _make_graph_and_schema(
         values={
-            "time": np.array(
-                [np.array([65, 1680000015], dtype=np.int64)], dtype=np.object_
-            )
+            "time": np.array([[65, 1680000015]], dtype=np.int64),
+            "time_mask": np.array([[True, True]], dtype=np.bool_),
         },
         schemas={
             "time": _ts_schema(
                 fmt=schema_lib.FeatureFormat.INTEGER_64,
                 sem=schema_lib.FeatureSemantic.TIMESTAMP,
                 group="time",
-            )
+                shape=(2,),
+            ),
+            "time_mask": _ts_schema(
+                fmt=schema_lib.FeatureFormat.BOOL,
+                sem=schema_lib.FeatureSemantic.MASK,
+                group="time",
+                shape=(2,),
+            ),
         },
     )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema,
-        timeseries.PadAndCapTimeseriesConfig(sequence_length=2),
-    )
-    padded_graph = pad_and_cap(graph)
-    padded_schema = pad_and_cap.output_schema()
 
     cal_extractor = timeseries.CalendarFeatureExtractor(padded_schema)
     cal_graph = cal_extractor(padded_graph)
@@ -822,25 +307,26 @@ class TimeseriesTest(parameterized.TestCase):
     )
 
   def test_extract_timestamp_features(self):
-    graph, schema = _make_graph_and_schema(
+    padded_graph, padded_schema = _make_graph_and_schema(
         values={
-            "time": np.array(
-                [np.array([100, 250, 300], dtype=np.int64)], dtype=np.object_
-            )
+            "time": np.array([[0, 100, 250, 300]], dtype=np.int64),
+            "time_mask": np.array([[False, True, True, True]], dtype=np.bool_),
         },
         schemas={
             "time": _ts_schema(
                 fmt=schema_lib.FeatureFormat.INTEGER_64,
                 sem=schema_lib.FeatureSemantic.TIMESTAMP,
-            )
+                group="time",
+                shape=(4,),
+            ),
+            "time_mask": _ts_schema(
+                fmt=schema_lib.FeatureFormat.BOOL,
+                sem=schema_lib.FeatureSemantic.MASK,
+                group="time",
+                shape=(4,),
+            ),
         },
     )
-    pad_and_cap = timeseries.PadAndCapTimeseries(
-        schema,
-        timeseries.PadAndCapTimeseriesConfig(sequence_length=4),
-    )
-    padded_graph = pad_and_cap(graph)
-    padded_schema = pad_and_cap.output_schema()
 
     ts_extractor = timeseries.TimestampFeatureExtractor(
         padded_schema, config=timeseries.TimestampFeatureExtractorConfig()

@@ -53,8 +53,6 @@ from dgf.src.transform.table_2_graph import table2graph
 from dgf.src.transform.timeseries import CalendarFeature
 from dgf.src.transform.timeseries import CalendarFeatureExtractor
 from dgf.src.transform.timeseries import CalendarFeatureExtractorConfig
-from dgf.src.transform.timeseries import PadAndCapTimeseries
-from dgf.src.transform.timeseries import PadAndCapTimeseriesConfig
 from dgf.src.transform.timeseries import TimestampFeatureExtractor
 from dgf.src.transform.timeseries import TimestampFeatureExtractorConfig
 
