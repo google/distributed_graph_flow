@@ -1038,6 +1038,193 @@ class TimedeltaNormalizerTest(parameterized.TestCase):
       normalize_lib.TimedeltaNormalizer.create("time", schema)
 
 
+class SequentialNormalizerTest(parameterized.TestCase):
+
+  def test_sequential_normalizer_numpy_and_tensorflow(self):
+    ts_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(2,),
+        is_timeseries=True,
+    )
+    stage1 = normalize_lib.TimedeltaNormalizer.create("time", ts_schema)
+    delta_schema = stage1.output_schema()["time_seed_delta"]
+    stage2 = normalize_lib.SinusoidTimedeltaNormalizer.create(
+        "time_seed_delta", delta_schema, embedding_dim=4
+    )
+    sequential = normalize_lib.SequentialNormalizer.create([stage1, stage2])
+
+    # Output schema should only contain final stage output.
+    out_schema = sequential.output_schema()
+    self.assertLen(out_schema, 1)
+    self.assertIn("time_seed_delta_SINUSOID", out_schema)
+    self.assertNotIn("time_seed_delta", out_schema)
+    self.assertEqual(out_schema["time_seed_delta_SINUSOID"].shape, (2, 4))
+
+    raw_np = np.array([[100, 200], [300, 400]], dtype=np.int64)
+    seeds_np = np.array([500, 1000], dtype=np.int64)
+
+    # NumPy normalization.
+    out_np = sequential.normalize_numpy(raw_np, seed_timestamps=seeds_np)
+    self.assertEqual(list(out_np.keys()), ["time_seed_delta_SINUSOID"])
+    self.assertEqual(out_np["time_seed_delta_SINUSOID"].shape, (2, 2, 4))
+
+    # TensorFlow normalization.
+    raw_tf = tf.constant(raw_np)
+    seeds_tf = tf.constant(seeds_np)
+    out_tf = sequential.normalize_tensorflow(raw_tf, seed_timestamps=seeds_tf)
+    self.assertEqual(list(out_tf.keys()), ["time_seed_delta_SINUSOID"])
+    np.testing.assert_allclose(
+        out_tf["time_seed_delta_SINUSOID"].numpy(),
+        out_np["time_seed_delta_SINUSOID"],
+        rtol=1e-5,
+    )
+
+  def test_sequential_normalizer_json_serialization(self):
+    ts_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(),
+    )
+    stage1 = normalize_lib.TimedeltaNormalizer.create("time", ts_schema)
+    delta_schema = stage1.output_schema()["time_seed_delta"]
+    stage2 = normalize_lib.SinusoidTimedeltaNormalizer.create(
+        "time_seed_delta", delta_schema, embedding_dim=4
+    )
+    sequential = normalize_lib.SequentialNormalizer.create([stage1, stage2])
+
+    json_str = sequential.to_json()  # pyrefly: ignore[missing-attribute]
+    # pyrefly: ignore[missing-attribute]
+    reconstructed = normalize_lib.SequentialNormalizer.from_json(json_str)
+    self.assertLen(reconstructed.stages, 2)
+    self.assertEqual(reconstructed.input_feature, "time")
+    self.assertIn("time_seed_delta_SINUSOID", reconstructed.output_schema())
+    # Verify execution on reconstructed normalizer.
+    out = reconstructed.normalize_numpy(
+        np.array([100], dtype=np.int64),
+        seed_timestamps=np.array([500], dtype=np.int64),
+    )
+    self.assertIn("time_seed_delta_SINUSOID", out)
+
+  def test_validate_stages(self):
+    ts_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(),
+    )
+    stage1 = normalize_lib.TimedeltaNormalizer.create("time", ts_schema)
+    delta_schema = stage1.output_schema()["time_seed_delta"]
+    stage2 = normalize_lib.SinusoidTimedeltaNormalizer.create(
+        "time_seed_delta", delta_schema, embedding_dim=4
+    )
+
+    # Valid stages.
+    normalize_lib._validate_stages("time", [stage1, stage2])
+
+    # Empty stages raises.
+    with self.assertRaisesRegex(ValueError, "at least one stage"):
+      normalize_lib._validate_stages("time", [])
+
+    # Mismatched input feature raises.
+    with self.assertRaisesRegex(ValueError, "does not match first stage"):
+      normalize_lib._validate_stages("other_feature", [stage1, stage2])
+
+    # Missing intermediate feature raises.
+    unconnected_stage = normalize_lib.SinusoidTimedeltaNormalizer.create(
+        "non_existent_feature", delta_schema, embedding_dim=4
+    )
+    with self.assertRaisesRegex(ValueError, "expects input feature"):
+      normalize_lib._validate_stages("time", [stage1, unconnected_stage])
+
+  def test_sequential_normalizer_empty_stages_raises(self):
+    with self.assertRaisesRegex(ValueError, "at least one stage"):
+      normalize_lib.SequentialNormalizer.create([])
+
+  def test_sequential_normalizer_mismatched_input_feature_raises(self):
+    ts_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(),
+    )
+    stage = normalize_lib.TimedeltaNormalizer.create("time", ts_schema)
+    with self.assertRaisesRegex(ValueError, "does not match first stage"):
+      normalize_lib.SequentialNormalizer(
+          input_feature="mismatched_feature",
+          stages=[stage],
+      )
+
+  def test_sequential_normalizer_missing_intermediate_feature_raises(self):
+    ts_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(),
+    )
+    stage1 = normalize_lib.TimedeltaNormalizer.create("time", ts_schema)
+    delta_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMEDELTA,
+        shape=(),
+    )
+    # Stage 2 expects "non_existent_feature" which stage 1 does not output.
+    stage2 = normalize_lib.SinusoidTimedeltaNormalizer.create(
+        "non_existent_feature", delta_schema, embedding_dim=4
+    )
+    with self.assertRaisesRegex(ValueError, "expects input feature"):
+      normalize_lib.SequentialNormalizer.create([stage1, stage2])
+
+  def test_sequential_normalizer_nested(self):
+    ts_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(),
+    )
+    stage1 = normalize_lib.TimedeltaNormalizer.create("time", ts_schema)
+    delta_schema = stage1.output_schema()["time_seed_delta"]
+    stage2 = normalize_lib.SinusoidTimedeltaNormalizer.create(
+        "time_seed_delta", delta_schema, embedding_dim=4
+    )
+    inner = normalize_lib.SequentialNormalizer.create([stage1])
+    outer = normalize_lib.SequentialNormalizer.create([inner, stage2])
+    out = outer.normalize_numpy(
+        np.array([100], dtype=np.int64),
+        seed_timestamps=np.array([500], dtype=np.int64),
+    )
+    self.assertIn("time_seed_delta_SINUSOID", out)
+
+  def test_sequential_normalizer_tensorflow_resources(self):
+    ts_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(),
+    )
+    stage1 = normalize_lib.TimedeltaNormalizer.create("time", ts_schema)
+    delta_schema = stage1.output_schema()["time_seed_delta"]
+    stage2 = normalize_lib.SinusoidTimedeltaNormalizer.create(
+        "time_seed_delta", delta_schema, embedding_dim=4
+    )
+    sequential = normalize_lib.SequentialNormalizer.create([stage1, stage2])
+    self.assertEmpty(sequential.tensorflow_resources())
+
+  def test_sequential_normalizer_extra_kwargs_ignored(self):
+    ts_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(),
+    )
+    stage1 = normalize_lib.TimedeltaNormalizer.create("time", ts_schema)
+    delta_schema = stage1.output_schema()["time_seed_delta"]
+    stage2 = normalize_lib.SinusoidTimedeltaNormalizer.create(
+        "time_seed_delta", delta_schema, embedding_dim=4
+    )
+    sequential = normalize_lib.SequentialNormalizer.create([stage1, stage2])
+    out = sequential.normalize_numpy(
+        np.array([100], dtype=np.int64),
+        seed_timestamps=np.array([500], dtype=np.int64),
+        unrelated_kwarg="ignored",
+    )
+    self.assertIn("time_seed_delta_SINUSOID", out)
+
+
 if __name__ == "__main__":
   absltest.main()
 

@@ -17,9 +17,11 @@
 from __future__ import annotations
 
 import abc
+import collections.abc
 import copy
 import dataclasses
-from typing import Any, Dict, List, Optional, Set, Tuple
+import inspect
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import dataclasses_json
 from dgf.src.data import in_memory_graph
@@ -660,6 +662,138 @@ class TimedeltaNormalizer(AbstractFeatureNormalizer):
 
     deltas = tf.subtract(seed_tensor, value)
     return {self.output_feature_name: deltas}
+
+
+@normalizer_registry.register
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass(kw_only=True)
+class SequentialNormalizer(AbstractFeatureNormalizer):
+  """Applies multiple AbstractFeatureNormalizers in sequence.
+
+  Executes normalizer stages sequentially and emits only the final stage output.
+  """
+
+  stages: List[AbstractFeatureNormalizer] = normalizer_registry.field_list()
+  type: str = dataclasses.field(
+      default="SequentialNormalizer", init=False
+  )
+  _stage_kwargs: List[frozenset[str]] = dataclasses.field(
+      default_factory=list,
+      init=False,
+      metadata=dataclasses_json.config(exclude=dataclasses_json.Exclude.ALWAYS),
+  )
+
+  def __post_init__(self):
+    _validate_stages(self.input_feature, self.stages)
+    self._stage_kwargs: List[frozenset[str]] = [
+        _accepted_kwargs(s) for s in self.stages
+    ]
+
+  @classmethod
+  def create(
+      cls,
+      stages: Sequence[AbstractFeatureNormalizer],
+  ) -> "SequentialNormalizer":
+    if not stages:
+      raise ValueError("SequentialNormalizer requires at least one stage.")
+    return SequentialNormalizer(
+        input_feature=stages[0].input_feature,
+        stages=list(stages),
+    )
+
+  def output_schema(self) -> schema_lib.FeatureSetSchema:
+    return self.stages[-1].output_schema()
+
+  def _normalize(
+      self,
+      stage_fn_getter: collections.abc.Callable[
+          [AbstractFeatureNormalizer], Any
+      ],
+      value: Any,
+      **kwargs: Any,
+  ) -> Dict[str, Any]:
+    current_features: Dict[str, Any] = {self.input_feature: value}
+    stage_output: Dict[str, Any] = {}
+    for stage, accepted_kwargs in zip(self.stages, self._stage_kwargs):
+      assert stage.input_feature in current_features, (
+          f"Stage '{stage.type}' expects input feature '{stage.input_feature}',"
+          f" but available features are {list(current_features.keys())}."
+      )
+      stage_input = current_features[stage.input_feature]
+      stage_output = _filter_and_call(
+          stage_fn_getter(stage), stage_input, accepted_kwargs, kwargs
+      )
+      current_features.update(stage_output)
+    return stage_output
+
+  def normalize_numpy(
+      self,
+      value: np.ndarray,
+      **kwargs: Any,
+  ) -> Dict[str, np.ndarray]:
+    return self._normalize(lambda s: s.normalize_numpy, value, **kwargs)
+
+  def normalize_tensorflow(
+      self,
+      value: tf.Tensor,
+      **kwargs: Any,
+  ) -> Dict[str, tf.Tensor]:
+    return self._normalize(lambda s: s.normalize_tensorflow, value, **kwargs)
+
+  def tensorflow_resources(self) -> List[tf.Tensor]:
+    resources = []
+    for stage in self.stages:
+      resources.extend(stage.tensorflow_resources())
+    return resources
+
+
+def _validate_stages(
+    input_feature: str,
+    stages: Sequence[AbstractFeatureNormalizer],
+) -> None:
+  """Validates that stages form a valid, connected sequential pipeline."""
+  if not stages:
+    raise ValueError("SequentialNormalizer requires at least one stage.")
+  if input_feature != stages[0].input_feature:
+    raise ValueError(
+        f"SequentialNormalizer input_feature '{input_feature}' does not"
+        f" match first stage input_feature '{stages[0].input_feature}'."
+    )
+  available = {input_feature}
+  for stage in stages:
+    if stage.input_feature not in available:
+      raise ValueError(
+          f"Stage '{stage.type}' expects input feature"
+          f" '{stage.input_feature}', but available features up to this stage"
+          f" are {sorted(available)}."
+      )
+    available.update(stage.output_schema().keys())
+
+
+def _accepted_kwargs(stage: AbstractFeatureNormalizer) -> frozenset[str]:
+  """Returns the set of accepted keyword argument names."""
+  if isinstance(stage, SequentialNormalizer):
+    return frozenset().union(*stage._stage_kwargs)
+  np_params = list(inspect.signature(stage.normalize_numpy).parameters)[1:]
+  tf_params = list(inspect.signature(stage.normalize_tensorflow).parameters)[1:]
+  if set(np_params) != set(tf_params):
+    raise ValueError(
+        f"Stage '{stage.type}' has mismatched kwargs between normalize_numpy "
+        f"({np_params}) and normalize_tensorflow ({tf_params})."
+    )
+  return frozenset(np_params)
+
+
+def _filter_and_call(
+    method: Any,
+    value: Any,
+    accepted_kwargs: collections.abc.Set[str],
+    kwargs: Dict[str, Any],
+) -> Any:
+  if not accepted_kwargs:
+    return method(value)
+  filtered = {k: kwargs[k] for k in accepted_kwargs if k in kwargs}
+  return method(value, **filtered)
 
 
 @dataclasses_json.dataclass_json
