@@ -899,5 +899,145 @@ Edge Sets:
     )
 
 
+class TimedeltaNormalizerTest(parameterized.TestCase):
+
+  def test_output_schema(self):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(3,),
+        is_timeseries=True,
+        group="sensor",
+    )
+    normalizer = normalize_lib.TimedeltaNormalizer.create("time", schema)
+    expected_schema = {
+        "time_seed_delta": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.INTEGER_64,
+            semantic=schema_lib.FeatureSemantic.TIMEDELTA,
+            shape=(3,),
+            is_timeseries=True,
+            group="sensor",
+        )
+    }
+    self.assertEqual(normalizer.output_schema(), expected_schema)
+
+  def test_timedelta_normalizer_numpy_1d(self):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(),
+    )
+    normalizer = normalize_lib.TimedeltaNormalizer.create("created_at", schema)
+    raw_val = np.array([100, 300], dtype=np.int64)
+    seed_timestamps = np.array([500, 500], dtype=np.int64)
+    out = normalizer.normalize_numpy(raw_val, seed_timestamps=seed_timestamps)
+    self.assertIn("created_at_seed_delta", out)
+    np.testing.assert_array_equal(
+        out["created_at_seed_delta"], np.array([400, 200], dtype=np.int64)
+    )
+
+  def test_timedelta_normalizer_numpy_timeseries(self):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(3,),
+        is_timeseries=True,
+        group="time",
+    )
+    normalizer = normalize_lib.TimedeltaNormalizer.create("time", schema)
+    raw_val = np.array([[100, 200, 300], [400, 450, 500]], dtype=np.int64)
+    seed_timestamps = np.array([500, 600], dtype=np.int64)
+    out = normalizer.normalize_numpy(raw_val, seed_timestamps=seed_timestamps)
+    expected = np.array(
+        [[400, 300, 200], [200, 150, 100]], dtype=np.int64
+    )
+    np.testing.assert_array_equal(out["time_seed_delta"], expected)
+
+  def test_timedelta_normalizer_tensorflow(self):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(2,),
+        is_timeseries=True,
+    )
+    normalizer = normalize_lib.TimedeltaNormalizer.create("time", schema)
+    raw_np = np.array([[100, 200], [300, 400]], dtype=np.int64)
+    seeds_np = np.array([500, 1000], dtype=np.int64)
+    raw_tf = tf.constant(raw_np)
+    seeds_tf = tf.constant(seeds_np)
+
+    out_tf = normalizer.normalize_tensorflow(raw_tf, seed_timestamps=seeds_tf)
+    out_np = normalizer.normalize_numpy(raw_np, seed_timestamps=seeds_np)
+    expected = np.array([[400, 300], [700, 600]], dtype=np.int64)
+
+    np.testing.assert_array_equal(out_np["time_seed_delta"], expected)
+    np.testing.assert_array_equal(
+        out_tf["time_seed_delta"].numpy(), out_np["time_seed_delta"]
+    )
+
+  def test_timedelta_normalizer_missing_seed_timestamps_asserts(self):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(),
+    )
+    normalizer = normalize_lib.TimedeltaNormalizer.create("time", schema)
+    raw_val = np.array([100], dtype=np.int64)
+    with self.assertRaises(AssertionError):
+      normalizer.normalize_numpy(raw_val, seed_timestamps=None)
+
+    with self.assertRaises(AssertionError):
+      normalizer.normalize_tensorflow(tf.constant([100]), seed_timestamps=None)
+
+  def test_timedelta_normalizer_object_array_raises(self):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(2,),
+    )
+    normalizer = normalize_lib.TimedeltaNormalizer.create("time", schema)
+    with self.assertRaisesRegex(AssertionError, "requires fixed-length"):
+      normalizer.normalize_numpy(
+          np.array([np.array([100])], dtype=object),
+          seed_timestamps=np.array([500]),
+      )
+
+  def test_timedelta_normalizer_tensorflow_unknown_rank_asserts(self):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(2,),
+    )
+    normalizer = normalize_lib.TimedeltaNormalizer.create("time", schema)
+
+    @tf.function(input_signature=[tf.TensorSpec(shape=None, dtype=tf.int64)])
+    def normalize_fn(val):
+      return normalizer.normalize_tensorflow(
+          val, seed_timestamps=tf.constant([500], dtype=tf.int64)
+      )
+
+    with self.assertRaisesRegex(AssertionError, "unknown rank"):
+      normalize_fn(tf.constant([100, 200], dtype=tf.int64))
+
+  def test_timedelta_normalizer_invalid_semantic_raises(self):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    with self.assertRaisesRegex(ValueError, "only supports TIMESTAMP"):
+      normalize_lib.TimedeltaNormalizer.create("num", schema)
+
+  def test_timedelta_normalizer_dynamic_shape_raises(self):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(None,),
+    )
+    with self.assertRaisesRegex(ValueError, "requires fixed-length"):
+      normalize_lib.TimedeltaNormalizer.create("time", schema)
+
+
 if __name__ == "__main__":
   absltest.main()
+

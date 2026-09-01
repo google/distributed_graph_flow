@@ -560,6 +560,108 @@ class SinusoidTimedeltaNormalizer(AbstractFeatureNormalizer):
     return {self.output_feature_name: emb}
 
 
+@normalizer_registry.register
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass(kw_only=True)
+class TimedeltaNormalizer(AbstractFeatureNormalizer):
+  """Normalizes a TIMESTAMP feature into a TIMEDELTA feature relative to seed timestamps.
+
+  Subtracts the timestamp value from the node's seed timestamp:
+  delta = seed_timestamp - t_i
+  """
+
+  input_schema: schema_lib.FeatureSchema
+  output_feature_name: str
+  type: str = dataclasses.field(default="TimedeltaNormalizer", init=False)
+
+  @classmethod
+  def create(
+      cls,
+      feature_name: str,
+      input_schema: schema_lib.FeatureSchema,
+  ) -> "TimedeltaNormalizer":
+    if input_schema.semantic != schema_lib.FeatureSemantic.TIMESTAMP:
+      raise ValueError(
+          f"Feature '{feature_name}' has semantic '{input_schema.semantic}',"
+          " but TimedeltaNormalizer only supports TIMESTAMP features."
+      )
+
+    if not input_schema.is_static_shape():
+      raise ValueError(
+          "TimedeltaNormalizer requires fixed-length feature tensors,"
+          f" but feature '{feature_name}' has a dynamic shape"
+          f" ({input_schema.shape}). Please run padding first."
+      )
+
+    return TimedeltaNormalizer(
+        input_feature=feature_name,
+        input_schema=input_schema,
+        output_feature_name=f"{feature_name}_seed_delta",
+    )
+
+  def output_schema(self) -> schema_lib.FeatureSetSchema:
+    ts_group = self.input_schema.group or (
+        self.input_feature if self.input_schema.is_timeseries else None
+    )
+    return {
+        self.output_feature_name: schema_lib.FeatureSchema(
+            format=self.input_schema.format,
+            semantic=schema_lib.FeatureSemantic.TIMEDELTA,
+            shape=self.input_schema.shape,
+            is_timeseries=self.input_schema.is_timeseries,
+            group=ts_group,
+        )
+    }
+
+  def normalize_numpy(
+      self,
+      value: np.ndarray,
+      seed_timestamps: Optional[np.ndarray] = None,
+  ) -> Dict[str, np.ndarray]:
+    assert seed_timestamps is not None, (
+        "seed_timestamps must be provided to normalize timestamp feature"
+        f" '{self.input_feature}'."
+    )
+
+    assert value.dtype != np.object_, (
+        "TimedeltaNormalizer requires fixed-length feature tensors,"
+        f" but feature '{self.input_feature}' is a variable-length object"
+        " array. Please run padding first."
+    )
+
+    seed_arr = seed_timestamps
+    if value.ndim > 1:
+      seed_arr = seed_arr.reshape(seed_arr.shape + (1,) * (value.ndim - 1))
+
+    deltas = seed_arr - value
+    return {self.output_feature_name: deltas}
+
+  def normalize_tensorflow(
+      self,
+      value: tf.Tensor,
+      seed_timestamps: Optional[tf.Tensor] = None,
+  ) -> Dict[str, tf.Tensor]:
+    assert seed_timestamps is not None, (
+        "seed_timestamps must be provided to normalize timestamp feature"
+        f" '{self.input_feature}'."
+    )
+
+    assert value.shape.rank is not None, (
+        "TimedeltaNormalizer requires fixed-length feature tensors,"
+        f" but feature '{self.input_feature}' has unknown rank."
+        " Please run padding first."
+    )
+
+    seed_tensor = tf.cast(seed_timestamps, value.dtype)
+    if value.shape.rank > 1:
+      seed_tensor = tf.reshape(
+          seed_tensor, (-1,) + (1,) * (value.shape.rank - 1)
+      )
+
+    deltas = tf.subtract(seed_tensor, value)
+    return {self.output_feature_name: deltas}
+
+
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass
 class AutoNormalizeConfig:

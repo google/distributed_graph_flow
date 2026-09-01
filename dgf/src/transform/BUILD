@@ -140,7 +140,6 @@ py_library(
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/io:feature_format",
-        "//dgf/src/util:temporal",
         # numpy dep,
     ],
 )
