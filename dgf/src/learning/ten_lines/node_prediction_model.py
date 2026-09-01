@@ -25,7 +25,7 @@ import enum
 import itertools
 import os
 import textwrap
-from typing import Callable, Dict, Iterator, List, Optional, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Union
 
 import dataclasses_json
 from dgf.src.data import in_memory_graph
@@ -227,6 +227,25 @@ class NodePredictionModel(common.Model):
     self._data.model_params = checkpointer.restore(
         os.path.join(path, FILENAME_PARAMS)  # , ocp.args.StandardRestore(None)
     )
+
+  def _extract_serving_schemata(
+      self,
+  ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Extracts (instance_schema, prediction_schema) dicts for Vertex AI serving."""
+    model_uuid = self.metadata.uuid or "unknown"
+    instance_schema = io_tf_lib.schema_to_serving_signature_dict(
+        schema_=self.data().schema,
+        target_nodeset=self.data().task.target_nodeset,
+        model_name=self.name(),
+        model_uuid=model_uuid,
+        sampling_plan=self.data().sampling_plan,
+    )
+    task_type = str(self.data().task.task_type)
+    if "REGRESSION" in task_type:
+      prediction_schema = {"type": "number"}
+    else:
+      prediction_schema = {"type": "array", "items": {"type": "number"}}
+    return instance_schema, prediction_schema
 
   def describe(self) -> util.RichDisplay:
     # TODO(gbm): Make a good rich report.

@@ -144,6 +144,7 @@ def graph_schema(
   return schema_lib.GraphSchema(
       node_sets=node_sets,
       edge_sets=edge_sets,
+      graph_name=metadata.name,
   )
 
 
