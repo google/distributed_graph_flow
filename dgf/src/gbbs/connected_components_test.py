@@ -54,6 +54,23 @@ def _make_single_node_graph(symmetric: bool) -> loader.GbbsGraphHandle:
   )
 
 
+def _make_directed_cycle_with_tail() -> loader.GbbsGraphHandle:
+  """Creates a directed graph with one SCC cycle and an outgoing tail.
+
+  Edges: 0→1, 1→2, 2→0, 2→3.
+
+  Strongly connected components:
+    SCC 1: {0, 1, 2}  (cycle)
+    SCC 2: {3}         (reachable from SCC 1 but cannot reach back)
+  """
+  sources = np.array([0, 1, 2, 2], dtype=np.int64)
+  targets = np.array([1, 2, 0, 3], dtype=np.int64)
+  adjacency = np.stack([sources, targets])
+  return loader.create_gbbs_graph_handle(
+      num_nodes=4, adjacency=adjacency, symmetric=False
+  )
+
+
 class ValidateGraphParamsTest(parameterized.TestCase):
 
   def setUp(self):
@@ -69,10 +86,14 @@ class ValidateGraphParamsTest(parameterized.TestCase):
           testcase_name="shiloach_vishkin",
           params=connected_components.ShiloachVishkinCCParams(),
       ),
+      dict(
+          testcase_name="scc",
+          params=connected_components.StronglyConnectedComponentsParams(),
+      ),
   )
-  def test_union_find_params_accept_asymmetric_graph(self, params):
+  def test_directed_capable_params_accept_asymmetric_graph(self, params):
     graph = _make_chain_graph(num_nodes=4, symmetric=False)
-    # Should not raise — union-find works on directed graphs.
+    # Should not raise — these algorithms work on directed graphs.
     connected_components.validate_graph_params(graph, params)
 
   @parameterized.named_parameters(
@@ -84,8 +105,12 @@ class ValidateGraphParamsTest(parameterized.TestCase):
           testcase_name="shiloach_vishkin",
           params=connected_components.ShiloachVishkinCCParams(),
       ),
+      dict(
+          testcase_name="scc",
+          params=connected_components.StronglyConnectedComponentsParams(),
+      ),
   )
-  def test_union_find_params_accept_symmetric_graph(self, params):
+  def test_directed_capable_params_accept_symmetric_graph(self, params):
     graph = _make_chain_graph(num_nodes=4, symmetric=True)
     # Should not raise.
     connected_components.validate_graph_params(graph, params)
@@ -290,6 +315,90 @@ class ConnectedComponentsTest(parameterized.TestCase):
     self.assertEqual(
         result_no_progress.num_components, result_progress.num_components
     )
+
+
+class StronglyConnectedComponentsTest(parameterized.TestCase):
+  """Tests for the SCC algorithm via connected_components()."""
+
+  def setUp(self):
+    super().setUp()
+    loader.set_num_parlay_workers(1)
+
+  def test_scc_finds_cycle_and_tail(self):
+    """Directed cycle 0→1→2→0 with tail 2→3 yields 2 SCCs."""
+    graph = _make_directed_cycle_with_tail()
+    result = connected_components.connected_components(
+        graph,
+        params=connected_components.StronglyConnectedComponentsParams(),
+        progress=False,
+    )
+    self.assertEqual(result.num_components, 2)
+    # The cycle {0, 1, 2} is the largest SCC.
+    self.assertEqual(result.largest_component_size, 3)
+    # Nodes in the cycle share a label.
+    self.assertEqual(result.labels[0], result.labels[1])
+    self.assertEqual(result.labels[0], result.labels[2])
+    # Node 3 is in a different SCC.
+    self.assertNotEqual(result.labels[0], result.labels[3])
+
+  def test_scc_directed_chain_has_singleton_components(self):
+    """A directed chain 0→1→2→3 has no cycles, so each node is its own SCC."""
+    graph = _make_chain_graph(num_nodes=4, symmetric=False)
+    result = connected_components.connected_components(
+        graph,
+        params=connected_components.StronglyConnectedComponentsParams(),
+        progress=False,
+    )
+    self.assertEqual(result.num_components, 4)
+    self.assertEqual(result.largest_component_size, 1)
+    # All labels are distinct.
+    unique_labels = set(result.labels.tolist())
+    self.assertLen(unique_labels, 4)
+
+  def test_scc_single_node(self):
+    """A single isolated node is one SCC."""
+    graph = _make_single_node_graph(symmetric=False)
+    result = connected_components.connected_components(
+        graph,
+        params=connected_components.StronglyConnectedComponentsParams(),
+        progress=False,
+    )
+    self.assertEqual(result.num_components, 1)
+    self.assertEqual(result.largest_component_size, 1)
+    self.assertLen(result.labels, 1)
+
+  def test_scc_on_symmetric_graph(self):
+    """On an undirected (symmetric) graph, SCC = WCC — every edge is a cycle."""
+    graph = _make_two_component_graph(symmetric=True)
+    result = connected_components.connected_components(
+        graph,
+        params=connected_components.StronglyConnectedComponentsParams(),
+        progress=False,
+    )
+    # Same result as weakly connected components on undirected graph.
+    self.assertEqual(result.num_components, 2)
+    self.assertEqual(result.largest_component_size, 3)
+
+  def test_scc_custom_beta(self):
+    """SCC with a non-default beta parameter still produces correct results."""
+    graph = _make_directed_cycle_with_tail()
+    result = connected_components.connected_components(
+        graph,
+        params=connected_components.StronglyConnectedComponentsParams(beta=2.0),
+        progress=False,
+    )
+    self.assertEqual(result.num_components, 2)
+    self.assertEqual(result.largest_component_size, 3)
+
+  def test_scc_labels_length_matches_num_nodes(self):
+    """Labels array length should match graph node count."""
+    graph = _make_directed_cycle_with_tail()
+    result = connected_components.connected_components(
+        graph,
+        params=connected_components.StronglyConnectedComponentsParams(),
+        progress=False,
+    )
+    self.assertLen(result.labels, 4)
 
 
 class IsSymmetricTest(absltest.TestCase):

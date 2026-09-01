@@ -38,6 +38,7 @@ cc_library(
         "//third_party/gbbs/benchmarks/Connectivity/ShiloachVishkin:Connectivity",
         "//third_party/gbbs/benchmarks/Connectivity/SimpleUnionAsync:Connectivity",
         "//third_party/gbbs/benchmarks/Connectivity/WorkEfficientSDB14:Connectivity",
+        "//third_party/gbbs/benchmarks/StronglyConnectedComponents/RandomGreedyBGSS16:StronglyConnectedComponents",
         "//third_party/gbbs/gbbs:bridge",
         "//third_party/parlay/include/parlay:monoid",
         "//third_party/parlay/include/parlay:parallel",
@@ -56,6 +57,7 @@ nanobind_extension(
         "//third_party/gbbs/gbbs:macros",
         "//third_party/parlay/include/parlay:parallel",
         "//third_party/parlay/include/parlay:scheduler",
+        "//third_party/parlay/include/parlay:sequence",
         "//dgf/src/util:status_caster",
     ],
 )
@@ -86,6 +88,18 @@ py_library(
     ],
 )
 
+py_test(
+    name = "connected_components_test",
+    srcs = ["connected_components_test.py"],
+    deps = [
+        ":connected_components_py",
+        ":loader",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        # numpy dep,
+    ],
+)
+
 py_library(
     name = "gbbs",
     srcs = ["__init__.py"],
@@ -101,18 +115,6 @@ py_test(
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/io:graph_in_memory",
-        # numpy dep,
-    ],
-)
-
-py_test(
-    name = "connected_components_test",
-    srcs = ["connected_components_test.py"],
-    deps = [
-        ":connected_components_py",
-        ":loader",
-        # absl/testing:absltest dep,
-        # absl/testing:parameterized dep,
         # numpy dep,
     ],
 )

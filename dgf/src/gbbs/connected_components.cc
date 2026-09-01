@@ -16,6 +16,7 @@
 #include "third_party/gbbs/benchmarks/Connectivity/SimpleUnionAsync/Connectivity.h"
 #include "third_party/gbbs/benchmarks/Connectivity/WorkEfficientSDB14/Connectivity.h"
 #include "third_party/gbbs/benchmarks/Connectivity/common.h"
+#include "third_party/gbbs/benchmarks/StronglyConnectedComponents/RandomGreedyBGSS16/StronglyConnectedComponents.h"
 #include "third_party/gbbs/gbbs/bridge.h"
 #include "third_party/parlay/include/parlay/monoid.h"
 #include "third_party/parlay/include/parlay/parallel.h"
@@ -110,14 +111,16 @@ ConnectedComponentsResult BuildResult(sequence<parent> labels,
 // incorrect weakly connected components on directed graphs: vertices
 // reachable only via incoming edges are placed in separate components.
 bool RequiresSymmetricGraph(const CCParams& params) {
-  return std::visit(overloaded{
-                        [](const SimpleUnionAsyncCCParams&) { return false; },
-                        [](const ShiloachVishkinCCParams&) { return false; },
-                        [](const BfsCCParams&) { return true; },
-                        [](const LabelPropagationCCParams&) { return true; },
-                        [](const WorkEfficientCCParams&) { return true; },
-                    },
-                    params);
+  return std::visit(
+      overloaded{
+          [](const SimpleUnionAsyncCCParams&) { return false; },
+          [](const ShiloachVishkinCCParams&) { return false; },
+          [](const StronglyConnectedComponentsParams&) { return false; },
+          [](const BfsCCParams&) { return true; },
+          [](const LabelPropagationCCParams&) { return true; },
+          [](const WorkEfficientCCParams&) { return true; },
+      },
+      params);
 }
 
 absl::StatusOr<ConnectedComponentsResult> RunConnectedComponents(
@@ -162,6 +165,14 @@ absl::StatusOr<ConnectedComponentsResult> RunConnectedComponents(
                   n, [](size_t i) { return static_cast<parent>(i); });
               sv.initialize(parents);
               sv.template compute_components<::gbbs::no_sampling>(parents);
+              return parents;
+            },
+
+            [&](const StronglyConnectedComponentsParams& p) {
+              auto scc_labels = ::gbbs::StronglyConnectedComponents(g, p.beta);
+              auto parents = sequence<parent>::from_function(
+                  scc_labels.size(),
+                  [&](size_t i) { return static_cast<parent>(scc_labels[i]); });
               return parents;
             },
         },
