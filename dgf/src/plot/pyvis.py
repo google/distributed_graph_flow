@@ -12,12 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Plotting of graph elements using the pyvis library."""
+"""Plotting utilities for graph schemas using pyvis."""
 
-from typing import Any, Dict
+from typing import Any
 
 from dgf.src.data import schema as schema_lib
+from dgf.src.util import options as options_lib
 from pyvis import network as pyvis_network
+
+Context = options_lib.Context
+options = options_lib.Manager("pyvis_options")
+default_options = options.default_options
+option_context = options.context
 
 
 def _html_label(name: str, features: list[str]) -> str:
@@ -31,7 +37,7 @@ def plot_schema(
     schema: schema_lib.GraphSchema,
     features: bool = True,
     *,
-    pyvis_kwargs: Dict[Any, Any] = {},
+    pyvis_kwargs: dict[Any, Any] | None = None,
 ) -> pyvis_network.Network:
   """Plots the graph schema's meta-graph (i.e., its nodesets and edgesets).
 
@@ -39,12 +45,20 @@ def plot_schema(
     schema: The `GraphSchema` object to plot.
     features: If true, display the node and edges features in the title (hover).
     pyvis_kwargs: Additional keyword arguments to pass to the
-      `pyvis.network.Network` constructor.
+      `pyvis.network.Network` constructor. These override any default or
+      contextual pyvis options.
 
   Returns:
     A `pyvis.network.Network` object representing the graph schema.
   """
-  net = pyvis_network.Network(directed=True, **pyvis_kwargs)
+  final_kwargs: dict[str, Any] = {"directed": True}
+  final_kwargs.update(options.to_dict())
+
+  if pyvis_kwargs is not None:
+    final_kwargs.update(pyvis_kwargs)
+
+  clean_kwargs = {k: v for k, v in final_kwargs.items() if v is not None}
+  net = pyvis_network.Network(**clean_kwargs)
 
   # Add nodes
   for node_set_name in sorted(schema.node_sets.keys()):

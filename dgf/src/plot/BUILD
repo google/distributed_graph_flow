@@ -27,6 +27,7 @@ py_library(
     srcs = ["pyvis.py"],
     deps = [
         "//dgf/src/data:schema",
+        "//dgf/src/util:options",
         "//third_party/py/pyvis",
     ],
 )

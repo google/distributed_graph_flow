@@ -387,3 +387,17 @@ py_test(
         # numpy dep,
     ],
 )
+
+py_library(
+    name = "options",
+    srcs = ["options.py"],
+)
+
+py_test(
+    name = "options_test",
+    srcs = ["options_test.py"],
+    deps = [
+        ":options",
+        # absl/testing:absltest dep,
+    ],
+)
