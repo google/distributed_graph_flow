@@ -868,6 +868,159 @@ Edge Sets:
     out_schema = normalizer.output_schema()
     self.assertIn("ts_delta_SINUSOID", out_schema.node_sets["nodes"].features)
 
+  def test_auto_normalize_timestamp(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "nodes": schema_lib.NodeSchema(
+                features={
+                    "created_at": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        shape=(),
+                    )
+                }
+            )
+        },
+        edge_sets={},
+    )
+    stats = statistics_lib.GraphFeatureStatistics(
+        node_sets={
+            "nodes": statistics_lib.FeatureSetStatistics(
+                features={
+                    "created_at": statistics_lib.FeatureStatistics(
+                        count=2, minimum=100.0, maximum=200.0
+                    )
+                },
+            )
+        }
+    )
+    normalizer = normalize_lib.auto_normalize(
+        schema,
+        stats,
+        config=normalize_lib.AutoNormalizeConfig(timestamp_normalize=True),
+    )
+    out_schema = normalizer.output_schema()
+    self.assertIn(
+        "created_at_seed_delta_SINUSOID",
+        out_schema.node_sets["nodes"].features,
+    )
+    self.assertEqual(
+        out_schema.node_sets["nodes"]
+        .features["created_at_seed_delta_SINUSOID"]
+        .shape,
+        (32,),
+    )
+
+    # End-to-end normalization execution
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "nodes": in_memory_graph_lib.InMemoryNodeSet(
+                features={"created_at": np.array([100, 200], dtype=np.int64)},
+                num_nodes=2,
+            )
+        },
+        edge_sets={},
+    )
+    out_graph = normalizer.normalize_numpy(
+        graph, seed_timestamps=np.array([500, 500], dtype=np.int64)
+    )
+    self.assertIn(
+        "created_at_seed_delta_SINUSOID",
+        out_graph.node_sets["nodes"].features,
+    )
+    out_feature = out_graph.node_sets["nodes"].features[
+        "created_at_seed_delta_SINUSOID"
+    ]
+    self.assertEqual(out_feature.shape, (2, 32))
+    # Sinusoidal embeddings satisfy sin^2(x) + cos^2(x) == 1, ensuring non-zero
+    # values that respect sinusoidal bounds.
+    sin_part = out_feature[:, :16]
+    cos_part = out_feature[:, 16:]
+    np.testing.assert_allclose(
+        sin_part**2 + cos_part**2, np.ones((2, 16)), atol=1e-5
+    )
+    # Distinct input timestamps produce distinct embeddings
+    self.assertFalse(np.allclose(out_feature[0], out_feature[1]))
+
+    # Single broadcast timestamp array produces the same result
+    out_graph_single = normalizer.normalize_numpy(
+        graph, seed_timestamps=np.array([500], dtype=np.int64)
+    )
+    np.testing.assert_allclose(
+        out_graph_single.node_sets["nodes"].features[
+            "created_at_seed_delta_SINUSOID"
+        ],
+        out_feature,
+    )
+
+  def test_auto_normalize_timestamp_disabled_by_default(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "nodes": schema_lib.NodeSchema(
+                features={
+                    "created_at": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        shape=(),
+                    )
+                }
+            )
+        },
+        edge_sets={},
+    )
+    stats = statistics_lib.GraphFeatureStatistics(
+        node_sets={
+            "nodes": statistics_lib.FeatureSetStatistics(
+                features={
+                    "created_at": statistics_lib.FeatureStatistics(
+                        count=2, minimum=100.0, maximum=200.0
+                    )
+                },
+            )
+        }
+    )
+    normalizer = normalize_lib.auto_normalize(schema, stats)
+    out_schema = normalizer.output_schema()
+    self.assertNotIn(
+        "created_at_seed_delta_SINUSOID",
+        out_schema.node_sets["nodes"].features,
+    )
+
+  def test_auto_normalize_timestamp_dynamic_shape_skipped(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "nodes": schema_lib.NodeSchema(
+                features={
+                    "created_at": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        shape=(None,),
+                    )
+                }
+            )
+        },
+        edge_sets={},
+    )
+    stats = statistics_lib.GraphFeatureStatistics(
+        node_sets={
+            "nodes": statistics_lib.FeatureSetStatistics(
+                features={
+                    "created_at": statistics_lib.FeatureStatistics(count=2)
+                },
+            )
+        }
+    )
+    normalizer = normalize_lib.auto_normalize(
+        schema,
+        stats,
+        config=normalize_lib.AutoNormalizeConfig(timestamp_normalize=True),
+    )
+    out_schema = normalizer.output_schema()
+    self.assertNotIn(
+        "created_at_seed_delta_SINUSOID",
+        out_schema.node_sets["nodes"].features,
+    )
+
   def test_auto_normalize_mask(self):
     schema = schema_lib.GraphSchema(
         node_sets={
@@ -1223,6 +1376,25 @@ class SequentialNormalizerTest(parameterized.TestCase):
         unrelated_kwarg="ignored",
     )
     self.assertIn("time_seed_delta_SINUSOID", out)
+
+
+class CreateTimestampNormalizerTest(absltest.TestCase):
+
+  def test_create_timestamp_normalizer(self):
+    ts_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(2,),
+    )
+    normalizer = normalize_lib._create_timestamp_normalizer(
+        "time", ts_schema, embedding_dim=4
+    )
+    self.assertLen(normalizer.stages, 2)
+    self.assertEqual(normalizer.input_feature, "time")
+    self.assertIn("time_seed_delta_SINUSOID", normalizer.output_schema())
+    self.assertEqual(
+        normalizer.output_schema()["time_seed_delta_SINUSOID"].shape, (2, 4)
+    )
 
 
 class GraphNormalizerKwargsTest(parameterized.TestCase):

@@ -796,6 +796,24 @@ def _filter_and_call(
   return method(value, **filtered)
 
 
+def _create_timestamp_normalizer(
+    feature_name: str,
+    feature_schema: schema_lib.FeatureSchema,
+    embedding_dim: int = 32,
+) -> SequentialNormalizer:
+  """Creates a sequential normalizer for TIMESTAMP features."""
+  timedelta_norm = TimedeltaNormalizer.create(feature_name, feature_schema)
+  delta_schema = timedelta_norm.output_schema()[
+      timedelta_norm.output_feature_name
+  ]
+  sinusoid_norm = SinusoidTimedeltaNormalizer.create(
+      timedelta_norm.output_feature_name,
+      delta_schema,
+      embedding_dim=embedding_dim,
+  )
+  return SequentialNormalizer.create([timedelta_norm, sinusoid_norm])
+
+
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass
 class AutoNormalizeConfig:
@@ -817,10 +835,13 @@ class AutoNormalizeConfig:
       normalized. If false, primary key features are skipped.
     primary_keys_num_hash_buckets: Number of hash buckets to use when
       normalizing primary key features.
-    timedelta_sinusoid: If True, features with TIMEDELTA semantic will be
+    timestamp_normalize: If True, features with TIMESTAMP semantic will be
+      normalized into a sinusoidal embedding relative to seed timestamps using a
+      sequential `TimedeltaNormalizer` -> `SinusoidTimedeltaNormalizer`.
+    timedelta_normalize: If True, features with TIMEDELTA semantic will be
       normalized using `SinusoidTimedeltaNormalizer`.
     timedelta_embedding_dim: Embedding dimension to use when normalizing
-      TIMEDELTA features with `SinusoidTimedeltaNormalizer`.
+      TIMESTAMP or TIMEDELTA features with sinusoidal embeddings.
   """
 
   categorical_bytes_to_index: bool = True
@@ -831,7 +852,10 @@ class AutoNormalizeConfig:
   ignore_features_without_stats: bool = False
   consume_primary_keys: bool = False
   primary_keys_num_hash_buckets: int = 256
-  timedelta_sinusoid: bool = True
+  # TODO(simonmeierhans): Enable by default after updating callers to pass
+  # timestamps to the normalizer.
+  timestamp_normalize: bool = False
+  timedelta_normalize: bool = True
   timedelta_embedding_dim: int = 32
 
 
@@ -987,7 +1011,7 @@ def auto_normalize(
 
       # Timedelta
       if (
-          config.timedelta_sinusoid
+          config.timedelta_normalize
           and feature_schema.semantic == schema_lib.FeatureSemantic.TIMEDELTA
       ):
         nodeset_normalizers.append(
@@ -998,6 +1022,27 @@ def auto_normalize(
             )
         )
         feature_has_normalized = True
+
+      # Timestamp
+      if (
+          config.timestamp_normalize
+          and feature_schema.semantic == schema_lib.FeatureSemantic.TIMESTAMP
+      ):
+        if not feature_schema.is_static_shape():
+          log.warning(
+              f"Feature '{feature_name}' in node set '{nodeset_name}' is a"
+              " TIMESTAMP with dynamic shape and cannot be normalized with"
+              " sinusoidal timestamp embeddings. Please run padding first."
+          )
+        else:
+          nodeset_normalizers.append(
+              _create_timestamp_normalizer(
+                  feature_name,
+                  feature_schema,
+                  embedding_dim=config.timedelta_embedding_dim,
+              )
+          )
+          feature_has_normalized = True
 
       # Embedding
       if feature_schema.semantic == schema_lib.FeatureSemantic.EMBEDDING:
@@ -1142,6 +1187,11 @@ class GraphNormalizer:
     for accepted_kwargs_list in self._edgeset_kwargs.values():
       all_accepted_kwargs.update(*accepted_kwargs_list)
     self._all_accepted_kwargs: frozenset[str] = frozenset(all_accepted_kwargs)
+
+  @property
+  def accepted_kwargs(self) -> frozenset[str]:
+    """Returns the set of accepted keyword arguments for this normalizer."""
+    return self._all_accepted_kwargs
 
   def _validate_kwargs(self, kwargs: Dict[str, Any]) -> None:
     # If no keyword arguments are provided, we return early.
