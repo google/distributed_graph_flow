@@ -43,7 +43,7 @@ else:
   except ImportError:
     pass
 
-from dgf.src.learning import early_stopping_monitor
+from dgf.src.learning import early_stopping_monitor  # pylint: disable=g-import-not-at-top
 from dgf.src.learning.jax import common
 from dgf.src.learning.ten_lines import common as ten_lines_common
 from dgf.src.util import log
@@ -186,6 +186,62 @@ class TrainResult:
   num_train_step: int
 
 
+@dataclasses.dataclass(frozen=True)
+class CheckpointState:
+  """State saved to or restored from a checkpoint.
+
+  Attributes:
+    model_params: Model parameters.
+    opt_state: Optimizer state.
+    step: Training step index of the checkpoint.
+  """
+
+  model_params: optax.Params
+  opt_state: optax.OptState
+  step: int = 0
+
+
+def _save_checkpoint(
+    checkpoint_manager: ocp.CheckpointManager,
+    state: CheckpointState,
+) -> None:
+  """Saves model parameters and optimizer state."""
+  checkpoint_manager.save(
+      state.step,
+      {"params": state.model_params, "opt_state": state.opt_state},
+  )
+
+
+def _restore_checkpoint(
+    checkpoint_manager: ocp.CheckpointManager,
+) -> Optional[CheckpointState]:
+  """Restores model and optimizer state from the latest checkpoint if present."""
+  log.info(f"Checking for existing checkpoints {checkpoint_manager.directory}")
+  latest_step: int | None = checkpoint_manager.latest_step()
+  if latest_step is None:
+    log.info(
+        "No existing checkpoint found in %s.", checkpoint_manager.directory
+    )
+    return None
+
+  log.info(
+      "Restoring state from step %d found in %s.",
+      latest_step,
+      checkpoint_manager.directory,
+  )
+  restored_state = checkpoint_manager.restore(latest_step)
+  if "params" not in restored_state:
+    raise ValueError("Restored state does not contain 'params'.")
+  if "opt_state" not in restored_state:
+    raise ValueError("Restored state does not contain 'opt_state'.")
+
+  return CheckpointState(
+      model_params=restored_state["params"],
+      opt_state=restored_state["opt_state"],
+      step=latest_step,
+  )
+
+
 # TODO(bmayer): Support user-defined best_step fns?
 def train(
     model: nn.Module,
@@ -277,6 +333,9 @@ def train(
       logging interval.
     print_initial_model_params: If `True`, the shapes of the initial model
       parameters and optimizer state will be logged.
+    max_training_time_seconds: If specified, the maximum time in seconds to
+      train for.
+    export_metrics_to_xm: If `True`, metrics will be exported to XManager.
     early_stopping: If specified, enables early stopping using the "loss" metric
       of the validation dataset.
     early_stopping_keep_best_param: If true, and if early stopping is enabled,
@@ -318,37 +377,55 @@ def train(
     else:
       checkpoint_manager = None
 
-  if checkpoint_manager is not None:
-    log.info(
-        f"Checking for existing checkpoints {checkpoint_manager.directory}"
-    )
-    # TODO(bmayer): Figure out if we want to support iterator catchup.
-    latest_step: int | None = checkpoint_manager.latest_step()
-    if latest_step is not None:
-      log.info(
-          "Restoring state from step %D found in %s.",
-          latest_step,
-          checkpoint_manager.directory,
-      )
-      restored_state = checkpoint_manager.restore(latest_step)
-      if "params" not in restored_state:
-        raise ValueError("Restored state does not contain 'params'.")
-      if "opt_state" not in restored_state:
-        raise ValueError("Restored state does not contain 'opt_state'.")
-      model_params = restored_state["params"]
-      opt_state = restored_state["opt_state"]
-      start_step = latest_step + 1
-    else:
-      log.info(
-          "No existing checkpoint found in %s.", checkpoint_manager.directory
-      )
-      start_step = 0
+  if checkpoint_manager is not None and (
+      restored := _restore_checkpoint(checkpoint_manager)
+  ) is not None:
+    state = restored
   else:
-    start_step = 0
+    # If we didn't find an existing checkpoint and the user didn't supply
+    # `model_params` or `opt_state`, we instantiate using either supplied
+    # `dummy_data` or first datum on iterator.
+    if model_params is None:
+      if dummy_data is None:
+        log.info("Generate first batch to initialize model")
+        if dummy_data_fn is not None:
+          dummy_data = dummy_data_fn(next(dataset_iterator))
+        else:
+          dummy_data = next(dataset_iterator)
 
-  # If we didn"t find an existing checkpoint and the user didn"t supply
-  # `model_params` or `opt_state`, we instantiate using either supplied
-  # `dummy_data` or first datum on iterator.
+      with util.print_timer("Create model variables", True):
+        rng_key, model_key = jax.random.split(rng_key, 2)
+        model_params = model.init(model_key, dummy_data, training=True)
+        # WARNING: "model_params" is a dictionary containing the model params in
+        # the "params" key. It is not the model param directly.
+
+      if display_model_structure:
+        model_structure = model.tabulate(
+            model_key,
+            dummy_data,
+            training=True,
+            console_kwargs={"width": 800, "force_terminal": False},
+        )
+        log.info(f"Model structure:\n{model_structure}")
+
+      if print_initial_model_params:
+        common.log_info_shape("Initial model parameters", model_params)
+
+    if opt_state is None:
+      model_params_without_batch_stats = {
+          k: v for k, v in model_params.items() if k != "batch_stats"  # pyrefly: ignore[missing-attribute]
+      }
+      opt_state = opt.init(model_params_without_batch_stats)
+
+      if print_initial_model_params:
+        common.log_info_shape("Initial opt parameters", opt_state)
+
+    state = CheckpointState(
+        model_params=model_params,
+        opt_state=opt_state,
+        step=0,
+    )
+
   if metric_writer is None:
     writers = [metric_writers.LoggingWriter()]
     if working_path is not None:
@@ -357,46 +434,10 @@ def train(
       )
     if export_metrics_to_xm:
       try:
-        from clu.metric_writers import XmMeasurementsWriter
-
-        writers.append(XmMeasurementsWriter(asynchronous=True))  # pyrefly: ignore[bad-argument-type]
+        writers.append(metric_writers.XmMeasurementsWriter(asynchronous=True))  # pyrefly: ignore[bad-argument-type]
       except ImportError:
         pass
     metric_writer = metric_writers.MultiWriter(writers)
-  if model_params is None:
-    if dummy_data is None:
-      log.info("Generate first batch to initialize model")
-      if dummy_data_fn is not None:
-        dummy_data = dummy_data_fn(next(dataset_iterator))
-      else:
-        dummy_data = next(dataset_iterator)
-
-    with util.print_timer("Create model variables", True):
-      rng_key, model_key = jax.random.split(rng_key, 2)
-      model_params = model.init(model_key, dummy_data, training=True)
-      # WARNING: "model_params" is a dictionary containing the model params in the
-      # "params" key. It is not the model param directly.
-
-    if display_model_structure:
-      model_structure = model.tabulate(
-          model_key,
-          dummy_data,
-          training=True,
-          console_kwargs={"width": 800, "force_terminal": False},
-      )
-      log.info(f"Model structure:\n{model_structure}")
-
-    if print_initial_model_params:
-      common.log_info_shape("Initial model parameters", model_params)
-
-  if opt_state is None:
-    model_params_without_batch_stats = {
-        k: v for k, v in model_params.items() if k != "batch_stats"  # pyrefly: ignore[missing-attribute]
-    }
-    opt_state = opt.init(model_params_without_batch_stats)
-
-    if print_initial_model_params:
-      common.log_info_shape("Initial opt parameters", opt_state)
 
   if early_stopping is not None:
     es_monitor = early_stopping_monitor.EarlyStoppingMonitor(early_stopping)
@@ -419,15 +460,7 @@ def train(
   train_logs = []
   valid_logs = []
 
-  def run_check_point():
-    """Create a new checkpoint."""
-    if checkpoint_manager is None:
-      return
-    checkpoint_manager.save(
-        step, {"params": model_params, "opt_state": opt_state}
-    )
-
-  def run_valid_logs():
+  def run_valid_logs(step: int):
     """Compute and prints the logs on the validation dataset."""
     # TODO(gbm): Reword code so we don't need nonlocal.
     nonlocal last_valid_metrics
@@ -442,8 +475,8 @@ def train(
       for batch in valid_dataset_iterator_fn():  # pyrefly: ignore[not-callable]
         with jax.profiler.TraceAnnotation("valid step"):
           step_valid_metrics = valid_step(
-              params=model_params,
-              opt_state=opt_state,
+              params=state.model_params,
+              opt_state=state.opt_state,
               batch=batch,
           )
           valid_metric_accumulator.add(step_valid_metrics)
@@ -488,7 +521,9 @@ def train(
   log.info("Start training. The first two steps are generally slow.")
   start_time = time.time()
   pbar = tqdm.tqdm(
-      range(start_step, num_train_steps),
+      range(state.step + 1, num_train_steps + 1),
+      total=num_train_steps,
+      initial=state.step,
       disable=disable_progress_bar,
       desc="Training",
   )
@@ -512,11 +547,17 @@ def train(
         break
 
       with jax.profiler.TraceAnnotation("train step"):
-        model_params, opt_state, metrics = train_step(
-            model_params,
-            opt_state,
+        new_params, new_opt_state, metrics = train_step(
+            state.model_params,
+            state.opt_state,
             batch,
             step_key,
+        )
+        state = dataclasses.replace(
+            state,
+            model_params=new_params,
+            opt_state=new_opt_state,
+            step=step,
         )
         train_metric_accumulator.add(metrics)
 
@@ -544,30 +585,38 @@ def train(
         pbar.set_postfix(display_dict)
         list_display_dict = display_dict
 
-      # Checkpointing
-      if (
-          checkpoint_every_n_steps is not None
-          and step > 0
-          and step % checkpoint_every_n_steps == 0
-      ):
-        run_check_point()
-
       # Validation metrics + logging
-      # Note: We skip the validation at step 0.
-      if step > 0 and step % valid_every_n_steps == 0:
-        run_valid_logs()
+      if valid_every_n_steps is not None and step % valid_every_n_steps == 0:
+        run_valid_logs(step)
         if es_monitor is not None and "loss" in last_valid_metrics:
-          es_monitor.add_loss(step, last_valid_metrics["loss"], model_params)
+          es_monitor.add_loss(
+              step, last_valid_metrics["loss"], state.model_params
+          )
           if es_monitor.should_stop():
             log.info("Early stopping triggered at step %s.", step)
             break
+
+      # Checkpointing
+      if (
+          checkpoint_manager is not None
+          and checkpoint_every_n_steps is not None
+          and step % checkpoint_every_n_steps == 0
+      ):
+        _save_checkpoint(
+            checkpoint_manager=checkpoint_manager,
+            state=state,
+        )
       effective_num_train_steps += 1
   # Final logging
-  if es_monitor is None or not es_monitor.should_stop():
-    step = num_train_steps
-    run_valid_logs()
-    if es_monitor is not None and "loss" in last_valid_metrics:
-      es_monitor.add_loss(step, last_valid_metrics["loss"], model_params)
+  if (
+      es_monitor is None or not es_monitor.should_stop()
+  ) and state.step > 0:
+    if valid_every_n_steps is None or state.step % valid_every_n_steps != 0:
+      run_valid_logs(state.step)
+      if es_monitor is not None and "loss" in last_valid_metrics:
+        es_monitor.add_loss(
+            state.step, last_valid_metrics["loss"], state.model_params
+        )
 
   # Restore best parameters if enabled and early stopping was requested
   if es_monitor is not None and early_stopping_keep_best_param:
@@ -578,17 +627,20 @@ def train(
           es_monitor.best_loss,
           es_monitor.best_step,
       )
-      model_params = es_monitor.best_params
+      state = dataclasses.replace(state, model_params=es_monitor.best_params)
       assert es_monitor.best_step is not None
       effective_num_train_steps = es_monitor.best_step
 
-  # Final checkpoing
-  if checkpoint_manager is not None:
+  # Final checkpointing
+  if checkpoint_manager is not None and state.step > 0:
     pbar.write("Saving final checkpoint...")
-    run_check_point()
+    _save_checkpoint(
+        checkpoint_manager=checkpoint_manager,
+        state=state,
+    )
     checkpoint_manager.wait_until_finished()
     pbar.write(
-        f"Training complete. Final model saved at step {num_train_steps}.",
+        f"Training complete. Final model saved at step {state.step}.",
     )
 
   if metric_writer is not None:
@@ -596,8 +648,8 @@ def train(
 
   log.info(f"Final metrics: {list_display_dict}")
   return TrainResult(
-      model_params=model_params,
-      opt_state=opt_state,
+      model_params=state.model_params,
+      opt_state=state.opt_state,
       train_logs=train_logs,
       valid_logs=valid_logs,
       num_train_step=effective_num_train_steps,

@@ -108,7 +108,7 @@ class FlaxTrainTest(parameterized.TestCase):
         os.path.exists(os.path.join(work_dir.full_path, "checkpoints"))
     )
 
-    self.assertEqual([l.step for l in result.train_logs], [0, 3, 6, 9])
+    self.assertEqual([l.step for l in result.train_logs], [3, 6, 9])
     self.assertEqual(
         set(result.train_logs[-1].metrics.keys()), set(["accuracy", "loss"])
     )
