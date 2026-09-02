@@ -127,6 +127,7 @@ py_test(
         # jax dep,
         # numpy dep,
         # optax dep,
+        # orbax/checkpoint dep,
     ],
 )
 

@@ -25,6 +25,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
+import orbax.checkpoint as ocp
 
 
 class SimpleModel(nn.Module):
@@ -195,6 +196,233 @@ class FlaxTrainTest(parameterized.TestCase):
           valid_step=valid_step,
           valid_dataset_iterator_fn=lambda: dataset_iterator(num_steps=2),
       )
+
+  def test_resume_from_checkpoint(self):
+    work_dir = self.create_tempdir()
+
+    def train_step(params, opt_state, batch, rng_key):
+      def loss_fn(params, x, y, rng_key):
+        logits = model.apply(
+            params, x, training=True, rngs={"dropout": rng_key}
+        )
+        loss = optax.softmax_cross_entropy_with_integer_labels(logits, y)
+        return jnp.mean(loss)
+
+      loss, grads = jax.value_and_grad(loss_fn, has_aux=False)(
+          params, batch["data"], batch["label"], rng_key
+      )
+      updates, opt_state = opt.update(grads, opt_state, params)
+      params = optax.apply_updates(params, updates)
+      return params, opt_state, {"loss": loss, "accuracy": jnp.array(1.0)}
+
+    train_step = jax.jit(train_step)
+
+    model = SimpleModel(hidden_dim=8)
+    opt = optax.adam(1e-3)
+
+    # First run: train 5 steps
+    flax_train.train(
+        model=model,
+        opt=opt,
+        train_step=train_step,
+        dataset_iterator=dataset_iterator(num_steps=None, batch_size=4),
+        dummy_data_fn=lambda x: x["data"],
+        num_train_steps=5,
+        working_path=work_dir.full_path,
+        rng_key=jax.random.PRNGKey(42),
+    )
+
+    # Second run: resume from checkpoint and train to step 10
+    result_resumed = flax_train.train(
+        model=model,
+        opt=opt,
+        train_step=train_step,
+        dataset_iterator=dataset_iterator(num_steps=None, batch_size=4),
+        dummy_data_fn=lambda x: x["data"],
+        num_train_steps=10,
+        working_path=work_dir.full_path,
+        rng_key=jax.random.PRNGKey(42),
+    )
+
+    self.assertIsNotNone(result_resumed.model_params)
+    self.assertIsNotNone(result_resumed.opt_state)
+
+  def test_resume_from_old_checkpoint_format(self):
+    """Verifies backward compatibility with old checkpoints (only params and opt_state)."""
+    work_dir = self.create_tempdir()
+    ckpt_dir = os.path.join(work_dir.full_path, "checkpoints")
+
+    model = SimpleModel(hidden_dim=8)
+    opt = optax.adam(1e-3)
+    dummy_input = np.random.normal(size=(4, 8)).astype(np.float32)
+    init_params = model.init(jax.random.PRNGKey(0), dummy_input)
+    init_opt_state = opt.init(init_params["params"])
+
+    # Simulate an old checkpoint containing ONLY 'params' and 'opt_state'
+    mngr = ocp.CheckpointManager(
+        ckpt_dir,
+        ocp.PyTreeCheckpointer(),
+        options=ocp.CheckpointManagerOptions(max_to_keep=3, create=True),
+    )
+    mngr.save(5, {"params": init_params, "opt_state": init_opt_state})
+    mngr.wait_until_finished()
+
+    def train_step(params, opt_state, batch, rng_key):
+      return params, opt_state, {"loss": jnp.array(0.5)}
+
+    es_config = early_stopping_monitor.EarlyStoppingMonitorConfig(patience=5)
+
+    result = flax_train.train(
+        model=model,
+        opt=opt,
+        train_step=train_step,
+        dataset_iterator=dataset_iterator(num_steps=None, batch_size=4),
+        dummy_data_fn=lambda x: x["data"],
+        num_train_steps=10,
+        working_path=work_dir.full_path,
+        rng_key=jax.random.PRNGKey(42),
+        early_stopping=es_config,
+    )
+
+    self.assertIsNotNone(result.model_params)
+    self.assertIsNotNone(result.opt_state)
+
+  def test_resume_with_early_stopping(self):
+    work_dir = self.create_tempdir()
+
+    def train_step(params, opt_state, batch, rng_key):
+      return params, opt_state, {"loss": jnp.array(1.0)}
+
+    # Valid step returns loss 1.0 (no improvement)
+    def valid_step(params, opt_state, batch):
+      return {"loss": jnp.array(1.0)}
+
+    model = SimpleModel(hidden_dim=8)
+    opt = optax.adam(1e-3)
+
+    es_config = early_stopping_monitor.EarlyStoppingMonitorConfig(
+        patience=4, min_improvement=0.1
+    )
+
+    # First run: train 4 steps with checkpoint at step 2 and validation every 2 steps
+    # At step 2: valid loss = 1.0 (best_loss=1.0, patience=0), checkpoint saved with es_state.
+    # At step 4: valid loss = 1.0 (patience=1), checkpoint saved with es_state.
+    # At completion of run 1: final validation at step 4 runs (patience=2).
+    flax_train.train(
+        model=model,
+        opt=opt,
+        train_step=train_step,
+        dataset_iterator=dataset_iterator(num_steps=None),
+        dummy_data_fn=lambda x: x["data"],
+        num_train_steps=4,
+        working_path=work_dir.full_path,
+        rng_key=jax.random.PRNGKey(42),
+        checkpoint_every_n_steps=2,
+        valid_every_n_steps=2,
+        valid_step=valid_step,
+        valid_dataset_iterator_fn=lambda: dataset_iterator(num_steps=2),
+        early_stopping=es_config,
+    )
+
+    # Second run: resume from step 4 (resuming patience=2).
+    # At step 6: valid loss = 1.0 (patience=3).
+    # At step 8: valid loss = 1.0 (patience=4 >= patience limit -> triggers early stopping).
+    result_resumed = flax_train.train(
+        model=model,
+        opt=opt,
+        train_step=train_step,
+        dataset_iterator=dataset_iterator(num_steps=None),
+        dummy_data_fn=lambda x: x["data"],
+        num_train_steps=20,
+        working_path=work_dir.full_path,
+        rng_key=jax.random.PRNGKey(42),
+        checkpoint_every_n_steps=2,
+        valid_every_n_steps=2,
+        valid_step=valid_step,
+        valid_dataset_iterator_fn=lambda: dataset_iterator(num_steps=2),
+        early_stopping=es_config,
+    )
+
+    # Early stopping should have triggered at step 10 with validations at steps 6, 8, 10
+    self.assertEqual([l.step for l in result_resumed.valid_logs], [6, 8, 10])
+
+  def test_restore_checkpoint_empty_manager(self):
+    work_dir = self.create_tempdir()
+    ckpt_dir = os.path.join(work_dir.full_path, "checkpoints")
+    mngr = ocp.CheckpointManager(
+        ckpt_dir,
+        ocp.PyTreeCheckpointer(),
+        options=ocp.CheckpointManagerOptions(max_to_keep=3, create=True),
+    )
+    model = SimpleModel(hidden_dim=8)
+    opt = optax.adam(1e-3)
+    dummy_input = np.random.normal(size=(4, 8)).astype(np.float32)
+    init_params = model.init(jax.random.PRNGKey(0), dummy_input)
+    init_opt_state = opt.init(init_params["params"])
+    rng_key = jax.random.PRNGKey(42)
+
+    target_state = flax_train.CheckpointState(
+        model_params=init_params,
+        opt_state=init_opt_state,
+        rng_key=rng_key,
+        step=0,
+    )
+    restored = flax_train._restore_checkpoint(
+        checkpoint_manager=mngr,
+        target=target_state,
+    )
+    self.assertIsNone(restored)
+
+  def test_save_and_restore_checkpoint(self):
+    work_dir = self.create_tempdir()
+    ckpt_dir = os.path.join(work_dir.full_path, "checkpoints")
+    mngr = ocp.CheckpointManager(
+        ckpt_dir,
+        ocp.PyTreeCheckpointer(),
+        options=ocp.CheckpointManagerOptions(max_to_keep=3, create=True),
+    )
+    model = SimpleModel(hidden_dim=8)
+    opt = optax.adam(1e-3)
+    dummy_input = np.random.normal(size=(4, 8)).astype(np.float32)
+    init_params = model.init(jax.random.PRNGKey(0), dummy_input)
+    init_opt_state = opt.init(init_params["params"])
+    rng_key = jax.random.PRNGKey(123)
+
+    es_monitor = early_stopping_monitor.EarlyStoppingMonitor(
+        early_stopping_monitor.EarlyStoppingMonitorConfig(patience=5)
+    )
+    es_monitor.add_loss(5, 0.42, init_params)
+
+    save_state = flax_train.CheckpointState(
+        model_params=init_params,
+        opt_state=init_opt_state,
+        rng_key=rng_key,
+        step=5,
+        es_state=es_monitor.get_state(),
+    )
+    flax_train._save_checkpoint(
+        checkpoint_manager=mngr,
+        state=save_state,
+    )
+    mngr.wait_until_finished()
+
+    target_state = flax_train.CheckpointState(
+        model_params=init_params,
+        opt_state=init_opt_state,
+        rng_key=jax.random.PRNGKey(0),
+        step=0,
+        es_state=es_monitor.get_template_state(init_params),
+    )
+    restored = flax_train._restore_checkpoint(
+        checkpoint_manager=mngr,
+        target=target_state,
+    )
+    self.assertIsNotNone(restored)
+    self.assertEqual(restored.step, 5)
+    self.assertTrue(jnp.array_equal(restored.rng_key, rng_key))
+    self.assertIsNotNone(restored.es_state)
+    self.assertEqual(restored.es_state["best_loss"], 0.42)
+    self.assertEqual(restored.es_state["best_step"], 5)
 
 
 if __name__ == "__main__":

@@ -193,29 +193,38 @@ class CheckpointState:
   Attributes:
     model_params: Model parameters.
     opt_state: Optimizer state.
+    rng_key: PRNG key for reproducibility.
     step: Training step index of the checkpoint.
+    es_state: Optional early stopping monitor state.
   """
 
   model_params: optax.Params
   opt_state: optax.OptState
+  rng_key: Any
   step: int = 0
+  es_state: Optional[Dict[str, Any]] = None
 
 
 def _save_checkpoint(
     checkpoint_manager: ocp.CheckpointManager,
     state: CheckpointState,
 ) -> None:
-  """Saves model parameters and optimizer state."""
-  checkpoint_manager.save(
-      state.step,
-      {"params": state.model_params, "opt_state": state.opt_state},
-  )
+  """Saves model parameters, optimizer state, PRNG key, and monitor state."""
+  save_item = {
+      "params": state.model_params,
+      "opt_state": state.opt_state,
+      "rng_key": state.rng_key,
+  }
+  if state.es_state is not None:
+    save_item["es_state"] = state.es_state
+  checkpoint_manager.save(state.step, save_item)
 
 
 def _restore_checkpoint(
     checkpoint_manager: ocp.CheckpointManager,
+    target: CheckpointState,
 ) -> Optional[CheckpointState]:
-  """Restores model and optimizer state from the latest checkpoint if present."""
+  """Restores model parameters, optimizer state, PRNG key, and monitor state."""
   log.info(f"Checking for existing checkpoints {checkpoint_manager.directory}")
   latest_step: int | None = checkpoint_manager.latest_step()
   if latest_step is None:
@@ -229,16 +238,34 @@ def _restore_checkpoint(
       latest_step,
       checkpoint_manager.directory,
   )
-  restored_state = checkpoint_manager.restore(latest_step)
+  target_item = {
+      "params": target.model_params,
+      "opt_state": target.opt_state,
+      "rng_key": target.rng_key,
+  }
+  if target.es_state is not None:
+    target_item["es_state"] = target.es_state
+
+  restored_state = checkpoint_manager.restore(
+      latest_step,
+      args=ocp.args.PyTreeRestore(item=target_item, partial_restore=True),
+  )
   if "params" not in restored_state:
     raise ValueError("Restored state does not contain 'params'.")
   if "opt_state" not in restored_state:
     raise ValueError("Restored state does not contain 'opt_state'.")
 
+  if "rng_key" in restored_state and restored_state["rng_key"] is not None:
+    rng_key = restored_state["rng_key"]
+  else:
+    rng_key = jax.random.fold_in(target.rng_key, latest_step)
+
   return CheckpointState(
       model_params=restored_state["params"],
       opt_state=restored_state["opt_state"],
+      rng_key=rng_key,
       step=latest_step,
+      es_state=restored_state.get("es_state"),
   )
 
 
@@ -365,67 +392,6 @@ def train(
         " provided or both be None."
     )
 
-  # Check for existing checkpoints (pre-emption tolerance).
-  if checkpoint_manager is None:
-    if working_path is not None:
-      options = ocp.CheckpointManagerOptions(max_to_keep=3, create=True)
-      checkpoint_manager = ocp.CheckpointManager(
-          os.path.join(working_path, "checkpoints"),
-          ocp.PyTreeCheckpointer(),
-          options=options,
-      )
-    else:
-      checkpoint_manager = None
-
-  if checkpoint_manager is not None and (
-      restored := _restore_checkpoint(checkpoint_manager)
-  ) is not None:
-    state = restored
-  else:
-    # If we didn't find an existing checkpoint and the user didn't supply
-    # `model_params` or `opt_state`, we instantiate using either supplied
-    # `dummy_data` or first datum on iterator.
-    if model_params is None:
-      if dummy_data is None:
-        log.info("Generate first batch to initialize model")
-        if dummy_data_fn is not None:
-          dummy_data = dummy_data_fn(next(dataset_iterator))
-        else:
-          dummy_data = next(dataset_iterator)
-
-      with util.print_timer("Create model variables", True):
-        rng_key, model_key = jax.random.split(rng_key, 2)
-        model_params = model.init(model_key, dummy_data, training=True)
-        # WARNING: "model_params" is a dictionary containing the model params in
-        # the "params" key. It is not the model param directly.
-
-      if display_model_structure:
-        model_structure = model.tabulate(
-            model_key,
-            dummy_data,
-            training=True,
-            console_kwargs={"width": 800, "force_terminal": False},
-        )
-        log.info(f"Model structure:\n{model_structure}")
-
-      if print_initial_model_params:
-        common.log_info_shape("Initial model parameters", model_params)
-
-    if opt_state is None:
-      model_params_without_batch_stats = {
-          k: v for k, v in model_params.items() if k != "batch_stats"  # pyrefly: ignore[missing-attribute]
-      }
-      opt_state = opt.init(model_params_without_batch_stats)
-
-      if print_initial_model_params:
-        common.log_info_shape("Initial opt parameters", opt_state)
-
-    state = CheckpointState(
-        model_params=model_params,
-        opt_state=opt_state,
-        step=0,
-    )
-
   if metric_writer is None:
     writers = [metric_writers.LoggingWriter()]
     if working_path is not None:
@@ -439,10 +405,79 @@ def train(
         pass
     metric_writer = metric_writers.MultiWriter(writers)
 
+  if model_params is None:
+    if dummy_data is None:
+      log.info("Generate first batch to initialize model")
+      if dummy_data_fn is not None:
+        dummy_data = dummy_data_fn(next(dataset_iterator))
+      else:
+        dummy_data = next(dataset_iterator)
+
+    with util.print_timer("Create model variables", True):
+      rng_key, model_key = jax.random.split(rng_key, 2)
+      model_params = model.init(model_key, dummy_data, training=True)
+      # WARNING: "model_params" is a dictionary containing the model params in
+      # the "params" key. It is not the model param directly.
+
+    if display_model_structure:
+      model_structure = model.tabulate(
+          model_key,
+          dummy_data,
+          training=True,
+          console_kwargs={"width": 800, "force_terminal": False},
+      )
+      log.info(f"Model structure:\n{model_structure}")
+
+    if print_initial_model_params:
+      common.log_info_shape("Initial model parameters", model_params)
+
+  if opt_state is None:
+    model_params_without_batch_stats = {
+        k: v for k, v in model_params.items() if k != "batch_stats"  # pyrefly: ignore[missing-attribute]
+    }
+    opt_state = opt.init(model_params_without_batch_stats)
+
+    if print_initial_model_params:
+      common.log_info_shape("Initial opt parameters", opt_state)
+
   if early_stopping is not None:
     es_monitor = early_stopping_monitor.EarlyStoppingMonitor(early_stopping)
   else:
     es_monitor = None
+
+  state = CheckpointState(
+      model_params=model_params,
+      opt_state=opt_state,
+      rng_key=rng_key,
+      step=0,
+      es_state=(
+          es_monitor.get_template_state(model_params)
+          if es_monitor is not None
+          else None
+      ),
+  )
+
+  # Check for existing checkpoints (pre-emption tolerance).
+  if checkpoint_manager is None:
+    if working_path is not None:
+      options = ocp.CheckpointManagerOptions(max_to_keep=3, create=True)
+      checkpoint_manager = ocp.CheckpointManager(
+          os.path.join(working_path, "checkpoints"),
+          ocp.PyTreeCheckpointer(),
+          options=options,
+      )
+    else:
+      checkpoint_manager = None
+
+  if checkpoint_manager is not None:
+    restored = _restore_checkpoint(
+        checkpoint_manager=checkpoint_manager,
+        target=state,
+    )
+    if restored is not None:
+      state = restored
+      if es_monitor is not None and state.es_state is not None:
+        es_monitor.set_state(state.es_state)
 
   # Accumulate training metrics until the next log.
   train_metric_accumulator = MetricAccumulator()
@@ -539,7 +574,7 @@ def train(
           )
           break
 
-      rng_key, step_key = jax.random.split(rng_key, 2)
+      rng_key, step_key = jax.random.split(state.rng_key, 2)
       with jax.profiler.TraceAnnotation("gen batch"):
         batch = next(dataset_iterator, None)
       if batch is None:
@@ -557,7 +592,9 @@ def train(
             state,
             model_params=new_params,
             opt_state=new_opt_state,
+            rng_key=rng_key,
             step=step,
+            es_state=es_monitor.get_state() if es_monitor is not None else None,
         )
         train_metric_accumulator.add(metrics)
 
@@ -592,6 +629,10 @@ def train(
           es_monitor.add_loss(
               step, last_valid_metrics["loss"], state.model_params
           )
+          state = dataclasses.replace(
+              state,
+              es_state=es_monitor.get_state(),
+          )
           if es_monitor.should_stop():
             log.info("Early stopping triggered at step %s.", step)
             break
@@ -608,14 +649,16 @@ def train(
         )
       effective_num_train_steps += 1
   # Final logging
-  if (
-      es_monitor is None or not es_monitor.should_stop()
-  ) and state.step > 0:
+  if (es_monitor is None or not es_monitor.should_stop()) and state.step > 0:
     if valid_every_n_steps is None or state.step % valid_every_n_steps != 0:
       run_valid_logs(state.step)
       if es_monitor is not None and "loss" in last_valid_metrics:
         es_monitor.add_loss(
             state.step, last_valid_metrics["loss"], state.model_params
+        )
+        state = dataclasses.replace(
+            state,
+            es_state=es_monitor.get_state(),
         )
 
   # Restore best parameters if enabled and early stopping was requested
@@ -627,7 +670,11 @@ def train(
           es_monitor.best_loss,
           es_monitor.best_step,
       )
-      state = dataclasses.replace(state, model_params=es_monitor.best_params)
+      state = dataclasses.replace(
+          state,
+          model_params=es_monitor.best_params,
+          es_state=es_monitor.get_state(),
+      )
       assert es_monitor.best_step is not None
       effective_num_train_steps = es_monitor.best_step
 

@@ -69,6 +69,44 @@ class EarlyStoppingMonitor:
     """Returns True if training should stop."""
     return self._should_stop
 
+  def get_state(self) -> dict[str, Any]:
+    """Returns the serializable state of the monitor."""
+    return {
+        # We don't save the config, as it is provided at initialization.
+        "patience_counter": self._patience_counter,
+        "should_stop": self._should_stop,
+        "best_loss": self.best_loss,
+        "best_params": self.best_params,
+        "best_step": self.best_step,
+    }
+
+  def get_template_state(self, model_params: Any = None) -> dict[str, Any]:
+    """Returns a template state for checkpoint restoration."""
+    return {
+        "patience_counter": 0,
+        "should_stop": False,
+        "best_loss": 0.0,
+        "best_params": model_params,
+        "best_step": 0,
+    }
+
+  def set_state(self, state: dict[str, Any]) -> None:
+    """Restores the monitor state from a serialized dictionary."""
+    # TODO(dtl): Possibly emit a warning if keys are not found?
+    if (patience_counter := state.get("patience_counter", None)) is not None:
+      self._patience_counter = int(patience_counter)
+    else:
+      self._patience_counter = 0
+
+    if (should_stop := state.get("should_stop", None)) is not None:
+      self._should_stop = bool(should_stop)
+    else:
+      self._should_stop = False
+
+    self.best_loss = state.get("best_loss", None)
+    self.best_params = state.get("best_params", None)
+    self.best_step = state.get("best_step", None)
+
 
 def normalize_early_stopping_config(
     value: Union[bool, int],
