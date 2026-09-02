@@ -1225,6 +1225,209 @@ class SequentialNormalizerTest(parameterized.TestCase):
     self.assertIn("time_seed_delta_SINUSOID", out)
 
 
+class GraphNormalizerKwargsTest(parameterized.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    self.ts_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(),
+    )
+    self.id_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+        shape=(),
+    )
+    self.timedelta_normalizer = normalize_lib.TimedeltaNormalizer.create(
+        "time", self.ts_schema
+    )
+    self.identity_normalizer = normalize_lib.IdentityNormalizer(
+        input_feature="id", input_schema=self.id_schema
+    )
+    self.graph_normalizer = normalize_lib.GraphNormalizer(
+        config=normalize_lib.GraphNormalizerConfig(
+            nodesets={
+                "n": normalize_lib.NodeSetNormalizerConfig([
+                    self.timedelta_normalizer,
+                    self.identity_normalizer,
+                ])
+            },
+            edgesets={},
+        )
+    )
+    self.graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "n": in_memory_graph_lib.InMemoryNodeSet(
+                features={
+                    "time": np.array([100, 200], dtype=np.int64),
+                    "id": np.array([1, 2], dtype=np.int64),
+                },
+                num_nodes=2,
+            )
+        },
+        edge_sets={},
+    )
+
+  def test_normalize_numpy_with_kwargs(self):
+    seed_ts = np.array([500, 500], dtype=np.int64)
+    out_graph = self.graph_normalizer.normalize_numpy(
+        self.graph, seed_timestamps=seed_ts
+    )
+    expected_deltas = np.array([400, 300], dtype=np.int64)
+    np.testing.assert_array_equal(
+        out_graph.node_sets["n"].features["time_seed_delta"], expected_deltas
+    )
+    np.testing.assert_array_equal(
+        out_graph.node_sets["n"].features["id"],
+        np.array([1, 2], dtype=np.int64),
+    )
+
+  def test_normalize_tensorflow_with_kwargs(self):
+    tf_graph = tf_io.graph_to_tf_graph(self.graph)
+    seed_ts = tf.constant([500, 500], dtype=tf.int64)
+    out_graph = self.graph_normalizer.normalize_tensorflow(
+        tf_graph, seed_timestamps=seed_ts
+    )
+    expected_deltas = np.array([400, 300], dtype=np.int64)
+    np.testing.assert_array_equal(
+        out_graph.node_sets["n"].features["time_seed_delta"].numpy(),
+        expected_deltas,
+    )
+
+  def test_normalize_numpy_to_jax_with_kwargs(self):
+    seed_ts = np.array([500, 500], dtype=np.int64)
+    out_graph = self.graph_normalizer.normalize_numpy_to_jax(
+        self.graph, seed_timestamps=seed_ts
+    )
+    expected_deltas = np.array([400, 300], dtype=np.int64)
+    np.testing.assert_array_equal(
+        np.asarray(out_graph.node_sets["n"].features["time_seed_delta"]),
+        expected_deltas,
+    )
+
+  def test_unexpected_kwargs_raises(self):
+    with self.assertRaisesRegex(
+        ValueError,
+        "Unexpected keyword arguments for GraphNormalizer.*bad_kwarg",
+    ):
+      self.graph_normalizer.normalize_numpy(self.graph, bad_kwarg="val")
+
+    tf_graph = tf_io.graph_to_tf_graph(self.graph)
+    with self.assertRaisesRegex(
+        ValueError,
+        "Unexpected keyword arguments for GraphNormalizer.*bad_kwarg",
+    ):
+      self.graph_normalizer.normalize_tensorflow(tf_graph, bad_kwarg="val")
+
+    with self.assertRaisesRegex(
+        ValueError,
+        "Unexpected keyword arguments for GraphNormalizer.*bad_kwarg",
+    ):
+      self.graph_normalizer.normalize_numpy_to_jax(self.graph, bad_kwarg="val")
+
+  def test_chained_normalizer_in_graph_with_kwargs(self):
+    delta_schema = self.timedelta_normalizer.output_schema()["time_seed_delta"]
+    sinusoid_normalizer = normalize_lib.SinusoidTimedeltaNormalizer.create(
+        "time_seed_delta", delta_schema, embedding_dim=4
+    )
+    seq = normalize_lib.SequentialNormalizer.create(
+        [self.timedelta_normalizer, sinusoid_normalizer]
+    )
+    normalizer = normalize_lib.GraphNormalizer(
+        config=normalize_lib.GraphNormalizerConfig(
+            nodesets={"n": normalize_lib.NodeSetNormalizerConfig([seq])},
+            edgesets={},
+        )
+    )
+    seed_ts = np.array([500, 500], dtype=np.int64)
+    out_graph = normalizer.normalize_numpy(self.graph, seed_timestamps=seed_ts)
+    self.assertIn("time_seed_delta_SINUSOID", out_graph.node_sets["n"].features)
+    self.assertEqual(
+        out_graph.node_sets["n"].features["time_seed_delta_SINUSOID"].shape,
+        (2, 4),
+    )
+
+    tf_graph = tf_io.graph_to_tf_graph(self.graph)
+    tf_seed_ts = tf.constant([500, 500], dtype=tf.int64)
+    tf_out_graph = normalizer.normalize_tensorflow(
+        tf_graph, seed_timestamps=tf_seed_ts
+    )
+    self.assertIn(
+        "time_seed_delta_SINUSOID", tf_out_graph.node_sets["n"].features
+    )
+    self.assertEqual(
+        tf_out_graph.node_sets["n"].features["time_seed_delta_SINUSOID"].shape,
+        (2, 4),
+    )
+
+    jax_out_graph = normalizer.normalize_numpy_to_jax(
+        self.graph, seed_timestamps=seed_ts
+    )
+    self.assertIn(
+        "time_seed_delta_SINUSOID", jax_out_graph.node_sets["n"].features
+    )
+    self.assertEqual(
+        jax_out_graph.node_sets["n"].features["time_seed_delta_SINUSOID"].shape,
+        (2, 4),
+    )
+
+  def test_normalize_with_edgeset_kwargs(self):
+    edge_normalizer = normalize_lib.GraphNormalizer(
+        config=normalize_lib.GraphNormalizerConfig(
+            nodesets={},
+            edgesets={
+                "e": normalize_lib.EdgeSetNormalizerConfig(
+                    source="n",
+                    target="n",
+                    normalizers=[self.timedelta_normalizer],
+                )
+            },
+        )
+    )
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "n": in_memory_graph_lib.InMemoryNodeSet(
+                features={}, num_nodes=2
+            )
+        },
+        edge_sets={
+            "e": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array([[0, 1], [1, 0]]),
+                features={"time": np.array([100, 200], dtype=np.int64)},
+            )
+        },
+    )
+    seed_ts = np.array([500, 500], dtype=np.int64)
+    expected_deltas = np.array([400, 300], dtype=np.int64)
+
+    # NumPy
+    out_graph = edge_normalizer.normalize_numpy(graph, seed_timestamps=seed_ts)
+    np.testing.assert_array_equal(
+        out_graph.edge_sets["e"].features["time_seed_delta"], expected_deltas
+    )
+
+    # TensorFlow
+    tf_graph = tf_io.graph_to_tf_graph(graph)
+    tf_seed_ts = tf.constant([500, 500], dtype=tf.int64)
+    tf_out_graph = edge_normalizer.normalize_tensorflow(
+        tf_graph, seed_timestamps=tf_seed_ts
+    )
+    np.testing.assert_array_equal(
+        tf_out_graph.edge_sets["e"].features["time_seed_delta"].numpy(),
+        expected_deltas,
+    )
+
+    # JAX
+    jax_out_graph = edge_normalizer.normalize_numpy_to_jax(
+        graph, seed_timestamps=seed_ts
+    )
+    np.testing.assert_array_equal(
+        np.asarray(jax_out_graph.edge_sets["e"].features["time_seed_delta"]),
+        expected_deltas,
+    )
+
+
 if __name__ == "__main__":
   absltest.main()
 

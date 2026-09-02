@@ -1112,11 +1112,48 @@ class GraphNormalizerConfig:
 class GraphNormalizer:
   """Applies a collection of individual AbstractFeatureNormalizer on a graph.
 
-  A graph normalier prepares features values before they can be consumed by a
+  A graph normalizer prepares feature values before they can be consumed by a
   core GNN model.
   """
 
   config: GraphNormalizerConfig
+  _nodeset_kwargs: Dict[str, List[collections.abc.Set[str]]] = (
+      dataclasses.field(default_factory=dict, init=False)
+  )
+  _edgeset_kwargs: Dict[str, List[collections.abc.Set[str]]] = (
+      dataclasses.field(default_factory=dict, init=False)
+  )
+  _all_accepted_kwargs: frozenset[str] = dataclasses.field(
+      default_factory=frozenset, init=False
+  )
+
+  def __post_init__(self):
+    self._nodeset_kwargs: Dict[str, List[collections.abc.Set[str]]] = {
+        name: [_accepted_kwargs(s) for s in cfg.normalizers]
+        for name, cfg in self.config.nodesets.items()
+    }
+    self._edgeset_kwargs: Dict[str, List[collections.abc.Set[str]]] = {
+        name: [_accepted_kwargs(s) for s in cfg.normalizers]
+        for name, cfg in self.config.edgesets.items()
+    }
+    all_accepted_kwargs = set()
+    for accepted_kwargs_list in self._nodeset_kwargs.values():
+      all_accepted_kwargs.update(*accepted_kwargs_list)
+    for accepted_kwargs_list in self._edgeset_kwargs.values():
+      all_accepted_kwargs.update(*accepted_kwargs_list)
+    self._all_accepted_kwargs: frozenset[str] = frozenset(all_accepted_kwargs)
+
+  def _validate_kwargs(self, kwargs: Dict[str, Any]) -> None:
+    # If no keyword arguments are provided, we return early.
+    if not kwargs:
+      return
+    unexpected_kwargs = set(kwargs) - self._all_accepted_kwargs
+    if unexpected_kwargs:
+      raise ValueError(
+          f"Unexpected keyword arguments for GraphNormalizer: "
+          f"{sorted(unexpected_kwargs)}. "
+          f"Accepted arguments: {sorted(self._all_accepted_kwargs)}."
+      )
 
   def output_schema(self) -> schema_lib.GraphSchema:
     """Returns the schema of the graph after normalization.
@@ -1170,25 +1207,40 @@ class GraphNormalizer:
     ]
 
   def normalize_numpy(
-      self, graph: in_memory_graph.InMemoryGraph
+      self,
+      graph: in_memory_graph.InMemoryGraph,
+      **kwargs: Any,
   ) -> in_memory_graph.InMemoryGraph:
     """Normalizes the features of the input graph.
 
     Args:
       graph: The input `InMemoryGraph` with raw feature values.
+      **kwargs: Additional keyword arguments forwarded to feature normalizers
+        (e.g., `seed_timestamps`).
 
     Returns:
       A new `InMemoryGraph` with normalized feature values.
     """
+    # Raises an error if a keyword argument is not accepted by any normalizer.
+    self._validate_kwargs(kwargs)
 
     # Normalize edgeset features
     dst_graph_edge_sets = {}
     for edgeset_name, edgeset in self.config.edgesets.items():
       input_edgeset = graph.edge_sets[edgeset_name]
       output_features = {}
-      for normalizer in edgeset.normalizers:
+      for normalizer, accepted_kwargs in zip(
+          edgeset.normalizers, self._edgeset_kwargs[edgeset_name]
+      ):
         input_feature_value = input_edgeset.features[normalizer.input_feature]
-        output_features.update(normalizer.normalize_numpy(input_feature_value))
+        output_features.update(
+            _filter_and_call(
+                normalizer.normalize_numpy,
+                input_feature_value,
+                accepted_kwargs,
+                kwargs,
+            )
+        )
       dst_graph_edge_sets[edgeset_name] = in_memory_graph.InMemoryEdgeSet(
           adjacency=input_edgeset.adjacency,
           features=output_features,
@@ -1199,11 +1251,20 @@ class GraphNormalizer:
     for nodeset_name, nodeset in self.config.nodesets.items():
       input_nodeset = graph.node_sets[nodeset_name]
       output_features = {}
-      for normalizer in nodeset.normalizers:
+      for normalizer, accepted_kwargs in zip(
+          nodeset.normalizers, self._nodeset_kwargs[nodeset_name]
+      ):
         if normalizer.input_feature not in input_nodeset.features:
           continue
         input_feature_value = input_nodeset.features[normalizer.input_feature]
-        output_features.update(normalizer.normalize_numpy(input_feature_value))
+        output_features.update(
+            _filter_and_call(
+                normalizer.normalize_numpy,
+                input_feature_value,
+                accepted_kwargs,
+                kwargs,
+            )
+        )
       dst_graph_node_sets[nodeset_name] = in_memory_graph.InMemoryNodeSet(
           features=output_features,
           num_nodes=input_nodeset.num_nodes,
@@ -1226,26 +1287,38 @@ class GraphNormalizer:
     return resources
 
   def normalize_tensorflow(
-      self, graph: tf_in_memory_graph.TFInMemoryGraph
+      self,
+      graph: tf_in_memory_graph.TFInMemoryGraph,
+      **kwargs: Any,
   ) -> tf_in_memory_graph.TFInMemoryGraph:
     """Normalizes the features of the input graph using tensorflow.
 
     Args:
       graph: The input `InMemoryGraph` with raw feature values.
+      **kwargs: Additional keyword arguments forwarded to feature normalizers
+        (e.g., `seed_timestamps`).
 
     Returns:
       A new `InMemoryGraph` with normalized feature values.
     """
+    self._validate_kwargs(kwargs)
 
     # Normalize edgeset features
     dst_graph_edge_sets = {}
     for edgeset_name, edgeset in self.config.edgesets.items():
       input_edgeset = graph.edge_sets[edgeset_name]
       output_features = {}
-      for normalizer in edgeset.normalizers:
+      for normalizer, accepted_kwargs in zip(
+          edgeset.normalizers, self._edgeset_kwargs[edgeset_name]
+      ):
         input_feature_value = input_edgeset.features[normalizer.input_feature]
         output_features.update(
-            normalizer.normalize_tensorflow(input_feature_value)  # pyrefly: ignore[bad-argument-type]
+            _filter_and_call(
+                normalizer.normalize_tensorflow,
+                input_feature_value,
+                accepted_kwargs,
+                kwargs,
+            )
         )
       dst_graph_edge_sets[edgeset_name] = tf_in_memory_graph.TFInMemoryEdgeSet(
           adjacency=input_edgeset.adjacency,
@@ -1257,12 +1330,19 @@ class GraphNormalizer:
     for nodeset_name, nodeset in self.config.nodesets.items():
       input_nodeset = graph.node_sets[nodeset_name]
       output_features = {}
-      for normalizer in nodeset.normalizers:
+      for normalizer, accepted_kwargs in zip(
+          nodeset.normalizers, self._nodeset_kwargs[nodeset_name]
+      ):
         if normalizer.input_feature not in input_nodeset.features:
           continue
         input_feature_value = input_nodeset.features[normalizer.input_feature]
         output_features.update(
-            normalizer.normalize_tensorflow(input_feature_value)  # pyrefly: ignore[bad-argument-type]
+            _filter_and_call(
+                normalizer.normalize_tensorflow,
+                input_feature_value,
+                accepted_kwargs,
+                kwargs,
+            )
         )
       dst_graph_node_sets[nodeset_name] = tf_in_memory_graph.TFInMemoryNodeSet(
           features=output_features,
@@ -1277,6 +1357,7 @@ class GraphNormalizer:
       self,
       graph: in_memory_graph.InMemoryGraph,
       include_adjacencies: bool = True,
+      **kwargs: Any,
   ) -> jax_in_memory_graph.JaxInMemoryGraph:
     """Normalizes graph features using numpy and returns jax arrays.
 
@@ -1288,10 +1369,13 @@ class GraphNormalizer:
       include_adjacencies: If True, the adjacency information from the input
         graph will be included in the output `JaxInMemoryGraph`. Otherwise, the
         output graph's edge sets will have `None` for adjacency.
+      **kwargs: Additional keyword arguments forwarded to feature normalizers
+        (e.g., `seed_timestamps`).
 
     Returns:
       A new `JaxInMemoryGraph` with normalized feature values.
     """
+    self._validate_kwargs(kwargs)
 
     def asarray(x):
       return jnp.asarray(x)
@@ -1301,11 +1385,18 @@ class GraphNormalizer:
     for edgeset_name, edgeset in self.config.edgesets.items():
       input_edgeset = graph.edge_sets[edgeset_name]
       output_features = {}
-      for normalizer in edgeset.normalizers:
+      for normalizer, accepted_kwargs in zip(
+          edgeset.normalizers, self._edgeset_kwargs[edgeset_name]
+      ):
         input_feature_value = input_edgeset.features[normalizer.input_feature]
         output_features.update({
             k: asarray(v)
-            for k, v in normalizer.normalize_numpy(input_feature_value).items()
+            for k, v in _filter_and_call(
+                normalizer.normalize_numpy,
+                input_feature_value,
+                accepted_kwargs,
+                kwargs,
+            ).items()
         })
       dst_graph_edge_sets[edgeset_name] = (
           jax_in_memory_graph.JaxInMemoryEdgeSet(
@@ -1323,13 +1414,20 @@ class GraphNormalizer:
     for nodeset_name, nodeset in self.config.nodesets.items():
       input_nodeset = graph.node_sets[nodeset_name]
       output_features = {}
-      for normalizer in nodeset.normalizers:
+      for normalizer, accepted_kwargs in zip(
+          nodeset.normalizers, self._nodeset_kwargs[nodeset_name]
+      ):
         if normalizer.input_feature not in input_nodeset.features:
           continue
         input_feature_value = input_nodeset.features[normalizer.input_feature]
         output_features.update({
             k: asarray(v)
-            for k, v in normalizer.normalize_numpy(input_feature_value).items()
+            for k, v in _filter_and_call(
+                normalizer.normalize_numpy,
+                input_feature_value,
+                accepted_kwargs,
+                kwargs,
+            ).items()
         })
       dst_graph_node_sets[nodeset_name] = (
           jax_in_memory_graph.JaxInMemoryNodeSet(
