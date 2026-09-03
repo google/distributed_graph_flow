@@ -1200,10 +1200,17 @@ class GraphNormalizer:
     unexpected_kwargs = set(kwargs) - self._all_accepted_kwargs
     if unexpected_kwargs:
       raise ValueError(
-          f"Unexpected keyword arguments for GraphNormalizer: "
+          "Unexpected keyword arguments for GraphNormalizer: "
           f"{sorted(unexpected_kwargs)}. "
           f"Accepted arguments: {sorted(self._all_accepted_kwargs)}."
       )
+    for kwarg_name, entity_dict in kwargs.items():
+      if not isinstance(entity_dict, collections.abc.Mapping):
+        raise ValueError(
+            f"Keyword argument '{kwarg_name}' to GraphNormalizer must be a dict"
+            " mapping entity names (nodeset and edgeset names) to"
+            f" arrays/tensors, got {type(entity_dict).__name__}."
+        )
 
   def output_schema(self) -> schema_lib.GraphSchema:
     """Returns the schema of the graph after normalization.
@@ -1266,7 +1273,8 @@ class GraphNormalizer:
     Args:
       graph: The input `InMemoryGraph` with raw feature values.
       **kwargs: Additional keyword arguments forwarded to feature normalizers
-        (e.g., `seed_timestamps`).
+        (e.g., `seed_timestamps`). Each keyword argument must be a `Dict[str,
+        np.ndarray]` keyed by entity (node set or edge set) name.
 
     Returns:
       A new `InMemoryGraph` with normalized feature values.
@@ -1279,6 +1287,11 @@ class GraphNormalizer:
     for edgeset_name, edgeset in self.config.edgesets.items():
       input_edgeset = graph.edge_sets[edgeset_name]
       output_features = {}
+      entity_kwargs = {
+          kwarg_name: entity_dict[edgeset_name]
+          for kwarg_name, entity_dict in kwargs.items()
+          if edgeset_name in entity_dict
+      }
       for normalizer, accepted_kwargs in zip(
           edgeset.normalizers, self._edgeset_kwargs[edgeset_name]
       ):
@@ -1288,7 +1301,7 @@ class GraphNormalizer:
                 normalizer.normalize_numpy,
                 input_feature_value,
                 accepted_kwargs,
-                kwargs,
+                entity_kwargs,
             )
         )
       dst_graph_edge_sets[edgeset_name] = in_memory_graph.InMemoryEdgeSet(
@@ -1301,6 +1314,11 @@ class GraphNormalizer:
     for nodeset_name, nodeset in self.config.nodesets.items():
       input_nodeset = graph.node_sets[nodeset_name]
       output_features = {}
+      entity_kwargs = {
+          kwarg_name: entity_dict[nodeset_name]
+          for kwarg_name, entity_dict in kwargs.items()
+          if nodeset_name in entity_dict
+      }
       for normalizer, accepted_kwargs in zip(
           nodeset.normalizers, self._nodeset_kwargs[nodeset_name]
       ):
@@ -1312,7 +1330,7 @@ class GraphNormalizer:
                 normalizer.normalize_numpy,
                 input_feature_value,
                 accepted_kwargs,
-                kwargs,
+                entity_kwargs,
             )
         )
       dst_graph_node_sets[nodeset_name] = in_memory_graph.InMemoryNodeSet(
@@ -1346,7 +1364,8 @@ class GraphNormalizer:
     Args:
       graph: The input `InMemoryGraph` with raw feature values.
       **kwargs: Additional keyword arguments forwarded to feature normalizers
-        (e.g., `seed_timestamps`).
+        (e.g., `seed_timestamps`). Each keyword argument must be a `Dict[str,
+        tf.Tensor]` keyed by entity (node set or edge set) name.
 
     Returns:
       A new `InMemoryGraph` with normalized feature values.
@@ -1358,6 +1377,11 @@ class GraphNormalizer:
     for edgeset_name, edgeset in self.config.edgesets.items():
       input_edgeset = graph.edge_sets[edgeset_name]
       output_features = {}
+      entity_kwargs = {
+          kwarg_name: entity_dict[edgeset_name]
+          for kwarg_name, entity_dict in kwargs.items()
+          if edgeset_name in entity_dict
+      }
       for normalizer, accepted_kwargs in zip(
           edgeset.normalizers, self._edgeset_kwargs[edgeset_name]
       ):
@@ -1367,7 +1391,7 @@ class GraphNormalizer:
                 normalizer.normalize_tensorflow,
                 input_feature_value,
                 accepted_kwargs,
-                kwargs,
+                entity_kwargs,
             )
         )
       dst_graph_edge_sets[edgeset_name] = tf_in_memory_graph.TFInMemoryEdgeSet(
@@ -1380,6 +1404,11 @@ class GraphNormalizer:
     for nodeset_name, nodeset in self.config.nodesets.items():
       input_nodeset = graph.node_sets[nodeset_name]
       output_features = {}
+      entity_kwargs = {
+          kwarg_name: entity_dict[nodeset_name]
+          for kwarg_name, entity_dict in kwargs.items()
+          if nodeset_name in entity_dict
+      }
       for normalizer, accepted_kwargs in zip(
           nodeset.normalizers, self._nodeset_kwargs[nodeset_name]
       ):
@@ -1391,7 +1420,7 @@ class GraphNormalizer:
                 normalizer.normalize_tensorflow,
                 input_feature_value,
                 accepted_kwargs,
-                kwargs,
+                entity_kwargs,
             )
         )
       dst_graph_node_sets[nodeset_name] = tf_in_memory_graph.TFInMemoryNodeSet(
@@ -1420,7 +1449,8 @@ class GraphNormalizer:
         graph will be included in the output `JaxInMemoryGraph`. Otherwise, the
         output graph's edge sets will have `None` for adjacency.
       **kwargs: Additional keyword arguments forwarded to feature normalizers
-        (e.g., `seed_timestamps`).
+        (e.g., `seed_timestamps`). Each keyword argument must be a `Dict[str,
+        np.ndarray]` keyed by entity (node set or edge set) name.
 
     Returns:
       A new `JaxInMemoryGraph` with normalized feature values.
@@ -1435,6 +1465,11 @@ class GraphNormalizer:
     for edgeset_name, edgeset in self.config.edgesets.items():
       input_edgeset = graph.edge_sets[edgeset_name]
       output_features = {}
+      entity_kwargs = {
+          kwarg_name: entity_dict[edgeset_name]
+          for kwarg_name, entity_dict in kwargs.items()
+          if edgeset_name in entity_dict
+      }
       for normalizer, accepted_kwargs in zip(
           edgeset.normalizers, self._edgeset_kwargs[edgeset_name]
       ):
@@ -1445,7 +1480,7 @@ class GraphNormalizer:
                 normalizer.normalize_numpy,
                 input_feature_value,
                 accepted_kwargs,
-                kwargs,
+                entity_kwargs,
             ).items()
         })
       dst_graph_edge_sets[edgeset_name] = (
@@ -1464,6 +1499,11 @@ class GraphNormalizer:
     for nodeset_name, nodeset in self.config.nodesets.items():
       input_nodeset = graph.node_sets[nodeset_name]
       output_features = {}
+      entity_kwargs = {
+          kwarg_name: entity_dict[nodeset_name]
+          for kwarg_name, entity_dict in kwargs.items()
+          if nodeset_name in entity_dict
+      }
       for normalizer, accepted_kwargs in zip(
           nodeset.normalizers, self._nodeset_kwargs[nodeset_name]
       ):
@@ -1476,7 +1516,7 @@ class GraphNormalizer:
                 normalizer.normalize_numpy,
                 input_feature_value,
                 accepted_kwargs,
-                kwargs,
+                entity_kwargs,
             ).items()
         })
       dst_graph_node_sets[nodeset_name] = (
