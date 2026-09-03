@@ -69,7 +69,6 @@ def distributed_read_beam(
     dataset_id: str,
     graph_id: str,
     p: beam.pvalue.PBegin,
-    combine_as_json: bool = False,
 ) -> distributed_graph_lib.Graph:
   """Read BigQuery Graph via Beam and return a distributed GraphFlow graph.
 
@@ -78,13 +77,12 @@ def distributed_read_beam(
     dataset_id: The BQ dataset ID of the BigQuery Graph.
     graph_id: The ID of the BigQuery Graph.
     p: The Beam pipeline.
-    combine_as_json: Whether to combine the features as JSON.
 
   Returns:
     A distributed GraphFlow graph.
   """
   metadata = bigquery_graph.get_metadata(project_id, dataset_id, graph_id)
-  schema = bigquery_graph.metadata_to_schema(metadata, combine_as_json)
+  schema = bigquery_graph.metadata_to_schema(metadata)
 
   node_sets = {}
   for node_table in metadata.node_tables:
