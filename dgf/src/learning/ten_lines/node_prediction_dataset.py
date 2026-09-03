@@ -35,6 +35,7 @@ from dgf.src.learning.ten_lines import dataset
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import temporal as sampling_temporal_lib
 from dgf.src.transform import normalize as normalize_lib
+from dgf.src.transform import timeseries_padding
 from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
@@ -242,6 +243,17 @@ class GNNDatasetPreparator:
         ),
     )
 
+    # If the normalizer accepts seed timestamps or the schema has timeseries
+    # features, we cannot cache the normalized features.
+    if (
+        self.cache_normalized_features
+        and (
+            "seed_timestamps" in other_live.normalizer.accepted_kwargs
+            or temporal_util.schema_has_timeseries_features(self.schema)
+        )
+    ):
+      self.cache_normalized_features = False
+
     if self.cache_normalized_features:
       if isinstance(self.graph, in_memory_graph_lib.InMemoryGraph):
         sample_generator.set_sampler_returns_node_idxs_only(True)
@@ -317,22 +329,11 @@ class GNNDatasetPreparator:
     )
     if self.verbose_preparation:
       log.info("  %s", feature_stats)
-    normalizer = normalize_lib.auto_normalize(
-        schema=self.schema,
-        stats=feature_stats,
-        config=self.auto_normalize_config,
-    )
 
-    # A generator of normalized, non-padded graph samples.
-    def gen_normalized_samples():
-      for sample, _ in sample_generator.batch_iterator():
-        normalized_merged = normalizer.normalize_numpy(sample)
-        yield normalized_merged
-
-    gen_normalized_samples_iter = gen_normalized_samples()
+    gen_raw_samples_iter = gen_raw_samples()
     if self.num_samples_for_stats is not None:
-      gen_normalized_samples_iter = itertools.islice(
-          gen_normalized_samples_iter,
+      gen_raw_samples_iter = itertools.islice(
+          gen_raw_samples_iter,
           self.num_samples_for_stats // self.batch_size,
       )
 
@@ -340,7 +341,11 @@ class GNNDatasetPreparator:
     if self.verbose_preparation:
       log.info("Compute graph statistics for padding")
     padding = padding_lib.padding_from_graph_generator(
-        self.schema, gen_normalized_samples_iter
+        self.schema,
+        gen_raw_samples_iter,
+        max_timeseries_len=getattr(
+            sample_generator.sampling_config, "max_timeseries_len", None
+        ),
     )
     if self.verbose_preparation:
       log.info(
@@ -348,6 +353,18 @@ class GNNDatasetPreparator:
           padding_lib.print_padding(padding, return_output=True, header=False),
       )
     sample_generator.padding = padding
+
+    padded_schema = (
+        timeseries_padding.pad_timeseries_schema(self.schema, padding=padding)
+        if timeseries_padding.has_timeseries_padding(padding)
+        else self.schema
+    )
+
+    normalizer = normalize_lib.auto_normalize(
+        schema=padded_schema,
+        stats=feature_stats,
+        config=self.auto_normalize_config,
+    )
 
     self.live = LiveData(
         feature_stats=feature_stats,
@@ -360,6 +377,15 @@ class GNNDatasetPreparator:
             self.schema
         ),
     )
+
+    if (
+        self.cache_normalized_features
+        and (
+            "seed_timestamps" in normalizer.accepted_kwargs
+            or temporal_util.schema_has_timeseries_features(self.schema)
+        )
+    ):
+      self.cache_normalized_features = False
 
     if self.cache_normalized_features:
       if isinstance(self.graph, in_memory_graph_lib.InMemoryGraph):
@@ -392,6 +418,10 @@ class GNNDatasetPreparator:
     """
 
     live = self.get_live()
+    target_nodeset, timestamp_feature = (
+        _get_target_nodeset_and_timestamp_feature(live, self.schema)
+    )
+
     for sample, merge_offsets in live.sample_generator.batch_iterator():
       if self.cache_normalized_features:
         if live.normalized_graph is None:
@@ -405,7 +435,14 @@ class GNNDatasetPreparator:
             live.timeseries_schema_cache or self.schema,
         )
       else:
-        normalized_sample = live.normalizer.normalize_numpy(sample)
+        normalized_sample = _normalize_batch_sample(
+            sample=sample,
+            merge_offsets=merge_offsets,
+            live=live,
+            schema=self.schema,
+            target_nodeset=target_nodeset,
+            timestamp_feature=timestamp_feature,
+        )
       yield normalized_sample, merge_offsets
 
   def generate_jax(
@@ -421,6 +458,10 @@ class GNNDatasetPreparator:
     """
 
     live = self.get_live()
+    target_nodeset, timestamp_feature = (
+        _get_target_nodeset_and_timestamp_feature(live, self.schema)
+    )
+
     for sample, merge_offsets in live.sample_generator.batch_iterator():
 
       if self.cache_normalized_features:
@@ -437,11 +478,72 @@ class GNNDatasetPreparator:
               live.normalized_graph, sample  # pyrefly: ignore[bad-argument-type]
           )
       else:
-        normalized_sample = live.normalizer.normalize_numpy(sample)
+        normalized_sample = _normalize_batch_sample(
+            sample=sample,
+            merge_offsets=merge_offsets,
+            live=live,
+            schema=self.schema,
+            target_nodeset=target_nodeset,
+            timestamp_feature=timestamp_feature,
+        )
         jax_normalized_sample = jax_lib.graph_to_jax_graph(normalized_sample)
 
       jax_merge_offsets = {k: jnp.asarray(v) for k, v in merge_offsets.items()}
       yield jax_normalized_sample, jax_merge_offsets
+
+
+def _get_target_nodeset_and_timestamp_feature(
+    live: LiveData,
+    schema: schema_lib.GraphSchema,
+) -> Tuple[Optional[str], Optional[str]]:
+  """Resolves target nodeset and timestamp feature if normalizer requires seed_timestamps."""
+  target_nodeset = None
+  timestamp_feature = None
+  if "seed_timestamps" in live.normalizer.accepted_kwargs:
+    target_nodeset = live.sampling_plan.root.nodeset
+    timestamp_feature = temporal_util.creation_time_feature_name(
+        schema.node_sets[target_nodeset].features
+    )
+    if timestamp_feature is None:
+      raise ValueError(
+          f"The target nodeset '{target_nodeset}' must have a creation time"
+          " feature when the normalizer requires seed_timestamps."
+      )
+  return target_nodeset, timestamp_feature
+
+
+def _normalize_batch_sample(
+    sample: in_memory_graph_lib.InMemoryGraph,
+    merge_offsets: Dict[str, np.ndarray],
+    live: LiveData,
+    schema: schema_lib.GraphSchema,
+    target_nodeset: Optional[str] = None,
+    timestamp_feature: Optional[str] = None,
+) -> in_memory_graph_lib.InMemoryGraph:
+  """Normalizes a merged batch sample, expanding root timestamps if supported."""
+  normalizer_kwargs = {}
+  if "seed_timestamps" in live.normalizer.accepted_kwargs:
+    if target_nodeset is None or timestamp_feature is None:
+      target_nodeset, timestamp_feature = (
+          _get_target_nodeset_and_timestamp_feature(live, schema)
+      )
+    assert target_nodeset is not None
+    assert timestamp_feature is not None
+    root_indices = merge_offsets[target_nodeset][:-1]
+    seed_timestamps = np.asarray(
+        sample.node_sets[target_nodeset].features[timestamp_feature][
+            root_indices
+        ]
+    ).reshape(-1)
+    normalizer_kwargs["seed_timestamps"] = (
+        temporal_util.expand_batch_seed_timestamps(
+            sample=sample,
+            merge_offsets=merge_offsets,
+            schema=schema,
+            seed_timestamps=seed_timestamps,
+        )
+    )
+  return live.normalizer.normalize_numpy(sample, **normalizer_kwargs)
 
 
 def attach_features_from_numpy_graph(
@@ -638,6 +740,7 @@ def prepare_datasets(
     auto_normalize_config = normalize_lib.AutoNormalizeConfig(
         keep_raw_features=keep_raw_features or set(),
         ignore_features_without_stats=True,
+        timestamp_normalize=temporal_sampling,
     )
   elif keep_raw_features is not None:
     auto_normalize_config.keep_raw_features.update(keep_raw_features)

@@ -394,21 +394,28 @@ class NodePredictionModel(common.Model):
     graph_merger = merge_lib.GraphMerger(
         schema=schema,
         padding=self._data.padding,
-        sentinel_offset=False,
     )
+
+    target_nodeset = self._data.task.target_nodeset
+    timestamp_feature = None
+    if self._data.temporal_sampling:
+      timestamp_feature = temporal_util.creation_time_feature_name(
+          self._data.schema.node_sets[target_nodeset].features
+      )
+      if timestamp_feature is None:
+        raise ValueError(
+            f"The target nodeset '{target_nodeset}' must have a creation time"
+            " feature when temporal_sampling=True."
+        )
 
     for batch_seed_node_idxs in batch_seed_node_idxs_generator:
 
       # TODO(gbm): The sampler should consume np array directly.
+      seed_timestamps = None
       if self._data.temporal_sampling:
-        target_nodeset = self._data.task.target_nodeset
-        ts_feature = temporal_util.creation_time_feature_name(
-            self._data.schema.node_sets[target_nodeset].features
-        )
-        seed_timestamps = None
-        if ts_feature is not None:
-          timestamps = graph.node_sets[target_nodeset].features[ts_feature]
-          seed_timestamps = timestamps[batch_seed_node_idxs]
+        assert timestamp_feature is not None
+        timestamps = graph.node_sets[target_nodeset].features[timestamp_feature]
+        seed_timestamps = np.asarray(timestamps[batch_seed_node_idxs]).reshape(-1)
         graph_samples = sampler.sample(
             batch_seed_node_idxs, seed_timestamps=seed_timestamps
         )
@@ -451,10 +458,38 @@ class NodePredictionModel(common.Model):
       )
       return
 
-    normalized_merged = live.normalizer.normalize_numpy(merged_graph)
+    # sentinel_offset=True produces N+1 offsets; omit trailing sentinel offset.
+    seed_node_idxs = merge_offsets[self._data.task.target_nodeset][:-1]
+
+    normalizer_kwargs = {}
+    if "seed_timestamps" in live.normalizer.accepted_kwargs:
+      target_nodeset = self._data.task.target_nodeset
+      timestamp_feature = temporal_util.creation_time_feature_name(
+          self._data.schema.node_sets[target_nodeset].features
+      )
+      if timestamp_feature is None:
+        raise ValueError(
+            f"The target nodeset '{target_nodeset}' must have a creation time"
+            " feature when the normalizer requires seed_timestamps."
+        )
+      seed_timestamps = np.asarray(
+          merged_graph.node_sets[target_nodeset].features[timestamp_feature][
+              seed_node_idxs
+          ]
+      ).reshape(-1)
+      normalizer_kwargs["seed_timestamps"] = (
+          temporal_util.expand_batch_seed_timestamps(
+              sample=merged_graph,
+              merge_offsets=merge_offsets,
+              schema=self._data.schema,
+              seed_timestamps=seed_timestamps,
+          )
+      )
+    normalized_merged = live.normalizer.normalize_numpy(
+        merged_graph, **normalizer_kwargs
+    )
     normalized_merged_jax = jax_lib.graph_to_jax_graph(normalized_merged)
 
-    seed_node_idxs = merge_offsets[self._data.task.target_nodeset]
     jax_seed_node_idxs = jnp.asarray(seed_node_idxs)
     probabilities = live.apply_core_model(
         (normalized_merged_jax, jax_seed_node_idxs)
@@ -486,11 +521,39 @@ class NodePredictionModel(common.Model):
     merged_graph, merge_offsets = merge_lib.GraphMerger(
         schema=schema,
         padding=self._data.padding,
-        sentinel_offset=False,
     )(graph_samples)
-    normalized_merged = live.normalizer.normalize_numpy(merged_graph)
+
+    # sentinel_offset=True produces N+1 offsets; omit trailing sentinel offset.
+    seed_node_idxs = merge_offsets[self._data.task.target_nodeset][:-1]
+
+    normalizer_kwargs = {}
+    if "seed_timestamps" in live.normalizer.accepted_kwargs:
+      target_nodeset = self._data.task.target_nodeset
+      timestamp_feature = temporal_util.creation_time_feature_name(
+          self._data.schema.node_sets[target_nodeset].features
+      )
+      if timestamp_feature is None:
+        raise ValueError(
+            f"The target nodeset '{target_nodeset}' must have a creation time"
+            " feature when the normalizer requires seed_timestamps."
+        )
+      seed_timestamps = np.asarray(
+          merged_graph.node_sets[target_nodeset].features[timestamp_feature][
+              seed_node_idxs
+          ]
+      ).reshape(-1)
+      normalizer_kwargs["seed_timestamps"] = (
+          temporal_util.expand_batch_seed_timestamps(
+              sample=merged_graph,
+              merge_offsets=merge_offsets,
+              schema=self._data.schema,
+              seed_timestamps=seed_timestamps,
+          )
+      )
+    normalized_merged = live.normalizer.normalize_numpy(
+        merged_graph, **normalizer_kwargs
+    )
     normalized_merged_jax = jax_lib.graph_to_jax_graph(normalized_merged)
-    seed_node_idxs = merge_offsets[self._data.task.target_nodeset]
     jax_seed_node_idxs = jnp.asarray(seed_node_idxs)
     probabilities = live.apply_core_model(
         (normalized_merged_jax, jax_seed_node_idxs)
@@ -603,7 +666,6 @@ class NodePredictionModel(common.Model):
       graph_merger = merge_lib.GraphMerger(
           schema=self._data.schema,
           padding=self._data.padding,
-          sentinel_offset=False,
       )
       iterator = graph_samples
       if verbose >= 2:
