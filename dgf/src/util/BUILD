@@ -176,6 +176,7 @@ py_library(
     name = "temporal",
     srcs = ["temporal.py"],
     deps = [
+        "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         # numpy dep,
     ],
@@ -383,6 +384,7 @@ py_test(
     deps = [
         ":temporal",
         # absl/testing:absltest dep,
+        "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         # numpy dep,
     ],

@@ -18,6 +18,7 @@ import collections
 import dataclasses
 from typing import Dict, List, Optional, Tuple
 
+from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 import numpy as np
 
@@ -291,3 +292,50 @@ def expand_mask_dims(mask: np.ndarray, target: np.ndarray) -> np.ndarray:
   if mask.ndim < target.ndim:
     return np.expand_dims(mask, axis=tuple(range(mask.ndim, target.ndim)))
   return mask
+
+
+def expand_batch_seed_timestamps(
+    sample: in_memory_graph_lib.InMemoryGraph,
+    merge_offsets: Dict[str, np.ndarray],
+    schema: schema_lib.GraphSchema,
+    seed_timestamps: np.ndarray,
+) -> Dict[str, np.ndarray]:
+  """Expands 1D batch seed timestamps across all node and edge sets in a merged graph.
+
+  Args:
+    sample: The merged `InMemoryGraph` batch sample.
+    merge_offsets: Mapping from node set name to node offset array [0, o_1, ...,
+      o_J, (sentinel)].
+    schema: The graph schema.
+    seed_timestamps: 1D array of shape (J,) containing the seed timestamp for
+      each subgraph in the batch.
+
+  Returns:
+    A dictionary mapping each entity name (node set and edge set) to an array of
+    seed timestamps matching that entity's length in `sample`.
+  """
+  assert seed_timestamps.ndim == 1
+  num_subgraphs = len(seed_timestamps)
+  result: Dict[str, np.ndarray] = {}
+
+  for node_set_name in schema.node_sets:
+    offsets = merge_offsets[node_set_name]
+    assert len(offsets) >= num_subgraphs + 1
+    counts = np.diff(offsets[: num_subgraphs + 1])
+    subgraph_ids = np.repeat(np.arange(num_subgraphs), counts)
+    total_nodes = sample.node_sets[node_set_name].num_nodes
+    # In padded graphs, total_nodes includes padding/sentinel dummy nodes at the
+    # end. We assign them index 0 (giving them seed_timestamps[0]) so
+    # downstream transforms receive valid values before padding masks are
+    # applied.
+    if total_nodes is not None and (d := total_nodes - len(subgraph_ids)) > 0:
+      subgraph_ids = np.pad(subgraph_ids, (0, d), constant_values=0)
+    result[node_set_name] = seed_timestamps[subgraph_ids]
+
+  for edge_set_name, edge_set_schema in schema.edge_sets.items():
+    src_nodeset = edge_set_schema.source
+    edge_set = sample.edge_sets[edge_set_name]
+    src_indices = edge_set.adjacency[0]
+    result[edge_set_name] = result[src_nodeset][src_indices]
+
+  return result

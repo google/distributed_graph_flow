@@ -15,6 +15,7 @@
 """Tests for temporal schema cache extraction utilities."""
 
 from absl.testing import absltest
+from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.util import temporal
 import numpy as np
@@ -320,6 +321,7 @@ class TemporalTest(absltest.TestCase):
     self.assertEqual(
         temporal.nodeset_timestamp_features(schema), {"n1": "ts_n"}
     )
+
   def test_schema_has_timeseries_features(self):
     schema_no_ts = schema_lib.GraphSchema(
         node_sets={
@@ -428,6 +430,165 @@ class TemporalTest(absltest.TestCase):
     self.assertTrue(
         temporal.schema_has_dynamic_timeseries_features(schema_dynamic_edge_ts)
     )
+
+  def test_expand_batch_seed_timestamps_heterogeneous(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "nodes_a": schema_lib.NodeSchema(features={}),
+            "nodes_b": schema_lib.NodeSchema(features={}),
+        },
+        edge_sets={
+            "edges": schema_lib.EdgeSchema(
+                source="nodes_a", target="nodes_b", features={}
+            ),
+        },
+    )
+    sample = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "nodes_a": in_memory_graph_lib.InMemoryNodeSet(
+                features={}, num_nodes=5
+            ),
+            "nodes_b": in_memory_graph_lib.InMemoryNodeSet(
+                features={}, num_nodes=3
+            ),
+        },
+        edge_sets={
+            "edges": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array([[0, 1, 3, 4], [0, 0, 1, 2]]),
+                features={},
+            ),
+        },
+    )
+    # Batch of 2 subgraphs:
+    # Subgraph 0 has 2 nodes_a and 1 nodes_b.
+    # Subgraph 1 has 3 nodes_a and 2 nodes_b.
+    merge_offsets = {
+        "nodes_a": np.array([0, 2, 5], dtype=np.int32),
+        "nodes_b": np.array([0, 1, 3], dtype=np.int32),
+    }
+    seed_timestamps = np.array([1000, 2000], dtype=np.int64)
+
+    expanded = temporal.expand_batch_seed_timestamps(
+        sample=sample,
+        merge_offsets=merge_offsets,
+        schema=schema,
+        seed_timestamps=seed_timestamps,
+    )
+
+    expected_nodes_a = np.array([1000, 1000, 2000, 2000, 2000], dtype=np.int64)
+    expected_nodes_b = np.array([1000, 2000, 2000], dtype=np.int64)
+    # Edges connect nodes_a [0, 1, 3, 4] -> timestamps [1000, 1000, 2000, 2000]
+    expected_edges = np.array([1000, 1000, 2000, 2000], dtype=np.int64)
+
+    np.testing.assert_array_equal(expanded["nodes_a"], expected_nodes_a)
+    np.testing.assert_array_equal(expanded["nodes_b"], expected_nodes_b)
+    np.testing.assert_array_equal(expanded["edges"], expected_edges)
+
+  def test_expand_batch_seed_timestamps_padded_and_empty_edge(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={"nodes": schema_lib.NodeSchema(features={})},
+        edge_sets={
+            "empty_edges": schema_lib.EdgeSchema(
+                source="nodes", target="nodes", features={}
+            ),
+        },
+    )
+    # Total 4 nodes (2 real + 2 padding)
+    sample = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "nodes": in_memory_graph_lib.InMemoryNodeSet(
+                features={}, num_nodes=4
+            )
+        },
+        edge_sets={
+            "empty_edges": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.zeros((2, 0), dtype=np.int32),
+                features={},
+            ),
+        },
+    )
+    # 2 subgraphs: Subgraph 0 has 1 node, Subgraph 1 has 1 node, plus padding
+    merge_offsets = {
+        "nodes": np.array([0, 1, 2, 4], dtype=np.int32),
+    }
+    seed_timestamps = np.array([100, 200], dtype=np.int64)
+
+    expanded = temporal.expand_batch_seed_timestamps(
+        sample=sample,
+        merge_offsets=merge_offsets,
+        schema=schema,
+        seed_timestamps=seed_timestamps,
+    )
+
+    # 2 real nodes get [100, 200], padding nodes get 0-th timestamp [100, 100]
+    expected_nodes = np.array([100, 200, 100, 100], dtype=np.int64)
+    expected_empty_edges = np.zeros((0,), dtype=np.int64)
+
+    np.testing.assert_array_equal(expanded["nodes"], expected_nodes)
+    np.testing.assert_array_equal(expanded["empty_edges"], expected_empty_edges)
+
+  def test_expand_batch_seed_timestamps_insufficient_offsets(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={"nodes": schema_lib.NodeSchema(features={})},
+        edge_sets={},
+    )
+    sample = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "nodes": in_memory_graph_lib.InMemoryNodeSet(
+                features={}, num_nodes=4
+            )
+        },
+        edge_sets={},
+    )
+    # 2 subgraphs requires at least 3 offsets (e.g. [0, 2, 4]), but provide
+    # only 2 offsets.
+    merge_offsets = {
+        "nodes": np.array([0, 2], dtype=np.int32),
+    }
+    seed_timestamps = np.array([100, 200], dtype=np.int64)
+
+    with self.assertRaises(AssertionError):
+      temporal.expand_batch_seed_timestamps(
+          sample=sample,
+          merge_offsets=merge_offsets,
+          schema=schema,
+          seed_timestamps=seed_timestamps,
+      )
+
+  def test_expand_batch_seed_timestamps_invalid_ndim(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={"nodes": schema_lib.NodeSchema(features={})},
+        edge_sets={},
+    )
+    sample = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "nodes": in_memory_graph_lib.InMemoryNodeSet(
+                features={}, num_nodes=4
+            )
+        },
+        edge_sets={},
+    )
+    merge_offsets = {
+        "nodes": np.array([0, 2, 4], dtype=np.int32),
+    }
+
+    # 2D array should trigger assertion error
+    with self.assertRaises(AssertionError):
+      temporal.expand_batch_seed_timestamps(
+          sample=sample,
+          merge_offsets=merge_offsets,
+          schema=schema,
+          seed_timestamps=np.array([[100], [200]], dtype=np.int64),
+      )
+
+    # 0D scalar should trigger assertion error
+    with self.assertRaises(AssertionError):
+      temporal.expand_batch_seed_timestamps(
+          sample=sample,
+          merge_offsets=merge_offsets,
+          schema=schema,
+          seed_timestamps=np.array(100, dtype=np.int64),
+      )
 
 
 if __name__ == "__main__":
