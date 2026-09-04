@@ -57,6 +57,7 @@ py_library(
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:padding",
         "//dgf/src/data:schema",
+        # numpy dep,
     ],
 )
 
@@ -183,9 +184,12 @@ py_test(
     deps = [
         ":padding",
         # absl/testing:absltest dep,
+        "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:padding",
+        "//dgf/src/data:schema",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
+        # numpy dep,
     ],
 )
 
