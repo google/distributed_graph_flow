@@ -340,7 +340,11 @@ class GNNDatasetPreparator:
     if self.verbose_preparation:
       log.info("Compute graph statistics for padding")
     padding = padding_lib.padding_from_graph_generator(
-        self.schema, gen_normalized_samples_iter
+        self.schema,
+        gen_normalized_samples_iter,
+        max_timeseries_len=getattr(
+            sample_generator.sampling_config, "max_timeseries_len", None
+        ),
     )
     if self.verbose_preparation:
       log.info(

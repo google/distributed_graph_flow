@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import math
-from typing import Iterator, Optional
+from typing import Dict, Iterator, Optional
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import padding as padding_lib
 from dgf.src.data import schema as schema_lib
@@ -21,11 +21,27 @@ from dgf.src.data import schema as schema_lib
 # TODO(gbm): Implement Beam version.
 
 
+def _feature_padding_from_schema(
+    features_schema: schema_lib.FeatureSetSchema,
+    max_timeseries_len: Optional[int] = None,
+) -> Dict[str, padding_lib.FeaturePadding]:
+  """Creates feature padding for timeseries features from a feature schema."""
+  features = {}
+  if max_timeseries_len is not None:
+    for feat_name, feat_schema in features_schema.items():
+      if feat_schema.is_timeseries:
+        features[feat_name] = padding_lib.FeaturePadding(
+            max_timeseries_len=max_timeseries_len
+        )
+  return features
+
+
 def padding_from_graph_generator(
     schema: schema_lib.GraphSchema,
     graphs: Iterator[in_memory_graph_lib.InMemoryGraph],
     relative_margin: float = 0.1,
     absolute_margin: int = 1,
+    max_timeseries_len: Optional[int] = None,
 ) -> padding_lib.Padding:
   """Creates a padding configuration from a set of in-memory graphs.
 
@@ -55,6 +71,8 @@ def padding_from_graph_generator(
     graphs: An iterator over in-memory heterogeneous graphs.
     relative_margin: A relative margin.
     absolute_margin: An absolute margin.
+    max_timeseries_len: Optional maximum sequence length for timeseries
+      features.
 
   Returns:
     Padding configuration compatible with the graphs.
@@ -86,16 +104,24 @@ def padding_from_graph_generator(
   padded_node_sets = {}
   for node_set_name, max_n in max_nodes.items():
     padded_n = math.ceil((max_n + absolute_margin) * (1.0 + relative_margin))
+    node_set_schema = schema.node_sets[node_set_name]
     padded_node_sets[node_set_name] = padding_lib.NodeSetPadding(
-        num_nodes=padded_n
+        num_nodes=padded_n,
+        features=_feature_padding_from_schema(
+            node_set_schema.features, max_timeseries_len
+        ),
     )
 
   # Create the padding with a margin.
   padded_edge_sets = {}
   for edge_set_name, max_e in max_edges.items():
     padded_e = math.ceil((max_e + absolute_margin) * (1.0 + relative_margin))
+    edge_set_schema = schema.edge_sets[edge_set_name]
     padded_edge_sets[edge_set_name] = padding_lib.EdgeSetPadding(
-        num_edges=padded_e
+        num_edges=padded_e,
+        features=_feature_padding_from_schema(
+            edge_set_schema.features, max_timeseries_len
+        ),
     )
 
   return padding_lib.Padding(
