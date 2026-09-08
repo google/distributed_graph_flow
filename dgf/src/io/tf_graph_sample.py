@@ -20,12 +20,13 @@ from collections.abc import Mapping
 import enum
 import os
 import typing
-from typing import Dict, Generator, List, Optional, Sequence
+from typing import Any, Dict, Generator, List, Optional, Sequence
 
 from dgf.src.data import distributed_graph as distributed_graph_lib
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import feature_format as feature_format_lib
+from dgf.src.io import tf as io_tf_lib
 from dgf.src.io import tf_graph_sample_ext
 from dgf.src.util import shard as shard_lib
 from dgf.src.util.weak_dep.weak_dep_apache_beam import PTransform, beam
@@ -61,66 +62,171 @@ def tfgnn_graph_to_graph(
   )
 
 
+def _check_at_most_one_ragged_dim(
+    feature_key: str, shape: List[Optional[int]]
+) -> None:
+  """Fails if the feature has more than one variable-length dimension.
+
+  Nesting the arrays of objects that encode a ragged dimension would need a
+  convention DGF does not define. The TensorFlow conversions use
+  `tf.RaggedTensor` and have no such limit.
+
+  Args:
+    feature_key: The feature name, used in the error message.
+    shape: The feature shape, excluding the item dimension.
+
+  Raises:
+    ValueError: If more than one dimension is variable-length.
+  """
+  num_ragged_dims = sum(1 for dim in shape if dim is None)
+  if num_ragged_dims > 1:
+    raise ValueError(
+        f"The feature '{feature_key}' has {num_ragged_dims} variable-length"
+        f" dimensions (shape {tuple(shape)}). The NumPy in-memory format"
+        " supports at most one. Use the TensorFlow conversion"
+        " (`serialized_tfgnn_graph_to_tf_graph` or"
+        " `tfgnn_graph_dict_to_tf_graph`) for such a feature."
+    )
+
+
+def _split_ragged_dim(
+    values: np.ndarray, row_lengths: np.ndarray
+) -> np.ndarray:
+  """Splits the outer-most dimension of `values` into rows.
+
+  Args:
+    values: An array (possibly an array of objects) of shape [total_rows, ...].
+    row_lengths: The length of each of the returned rows. Sums to `total_rows`.
+
+  Returns:
+    An array of objects of length `len(row_lengths)`.
+  """
+  offsets = np.cumsum(row_lengths)
+  if offsets.size and offsets[-1] != len(values):
+    raise ValueError(
+        f"The row lengths sum to {offsets[-1]} while the value contains"
+        f" {len(values)} rows."
+    )
+  rows = np.split(values, offsets[:-1]) if offsets.size else []
+  # Note: Make sure numpy does not merge the arrays.
+  result = np.empty(len(rows), dtype=np.object_)
+  result[:] = rows
+  return result
+
+
+def _group_static_dims(values: np.ndarray, dims: List[int]) -> np.ndarray:
+  """Groups the outer-most dimension of `values` into the `dims` dimensions.
+
+  For example, if `values` is of shape [12] and `dims` is [3], the result is of
+  shape [4, 3].
+
+  Args:
+    values: An array (possibly an array of objects).
+    dims: The static dimensions to extract from the outer-most dimension of
+      `values`, from the outer-most to the inner-most one.
+
+  Returns:
+    The re-grouped array.
+  """
+  if not dims:
+    return values
+  if values.dtype == np.object_:
+    # The values are ragged: group them without merging the sub-arrays.
+    num_items = len(values) // int(np.prod(dims))
+    result = np.empty([num_items] + list(dims), dtype=np.object_)
+    result[:] = values.reshape([num_items] + list(dims))
+    return result
+  return values.reshape([-1] + list(dims))
+
+
+def _tfgnn_feature_to_array(
+    example: Dict[str, np.ndarray],
+    feature_key: str,
+    feature_schema: schema_lib.FeatureSchema,
+    num_items: int,
+) -> np.ndarray:
+  """Converts a TF GNN Graph Sample feature into a numpy array."""
+
+  values = np.asarray(example[feature_key])
+  target_dtype = feature_format_lib.FEATURE_FORMAT_TO_NP_DTYPE[
+      feature_schema.format
+  ]
+  if values.dtype != target_dtype:
+    values = values.astype(target_dtype)
+
+  shape = list(feature_schema.shape) if feature_schema.shape else []
+  if feature_schema.is_static_shape():
+    static_shape = typing.cast(List[int], shape)
+    return values.reshape([num_items] + static_shape)
+
+  _check_at_most_one_ragged_dim(feature_key, shape)
+
+  # Re-build the feature values, from the inner-most dimension to the outer-most
+  # one. `pending_static_dims` contains the static dimensions that are not yet
+  # applied on the accumulated `result`.
+  result = values
+  pending_static_dims: List[int] = []
+  for dim_idx in range(len(shape), 0, -1):
+    dim = shape[dim_idx - 1]
+    if dim is None:
+      result = _group_static_dims(result, pending_static_dims)
+      pending_static_dims = []
+      # Note: The 0-th dimension of a feature value is the item dimension.
+      row_lengths = example[
+          io_tf_lib.tfgnn_ragged_dim_key(feature_key, dim_idx)
+      ]
+      result = _split_ragged_dim(result, row_lengths)
+    else:
+      pending_static_dims.insert(0, dim)
+  # Note: The remaining outer-most dimension is the item dimension.
+  result = _group_static_dims(result, pending_static_dims)
+  if len(result) != num_items:
+    raise ValueError(
+        f"The feature '{feature_key}' contains {len(result)} items while the"
+        f" node/edge set contains {num_items} items."
+    )
+  return result
+
+
 def graph_dict_to_graph(
     example: Dict[str, np.ndarray],
     schema: schema_lib.GraphSchema,
     import_node_ids: Optional[str] = None,
     import_edge_ids: Optional[str] = None,
 ) -> in_memory_graph.InMemoryGraph:
-  """Converts a TF GNN Graph Sample Dict to an InMemoryGraph."""
+  """Converts a TF GNN Graph Sample Dict to an InMemoryGraph.
+
+  This function is the NumPy equivalent of
+  `dgf.convert.tfgnn_graph_dict_to_tf_graph` (which only uses TensorFlow
+  operations, and can therefore be exported in a TF SavedModel).
+
+  Args:
+    example: A TF GNN Graph Sample Dict i.e. a dictionary of flat numpy arrays.
+    schema: The schema of the graph.
+    import_node_ids: If set, name of the node feature containing the node ids.
+    import_edge_ids: If set, name of the edge feature containing the edge ids.
+
+  Returns:
+    An `InMemoryGraph`.
+  """
   node_sets = {}
   edge_sets = {}
 
-  def _parse_feature(
-      src_feature_name: str,
-      dst_feature_name: str,
-      feature_schema: schema_lib.FeatureSchema,
-      num_items: int,
-      dst_dict: Dict[str, np.ndarray],
-  ) -> None:
-    feature_value = example[src_feature_name]
-
-    if feature_schema.is_static_shape():
-      feature_value = feature_value.reshape(  # pyrefly: ignore[no-matching-overload]
-          (num_items,) + (feature_schema.shape or ())
-      )
-      dst_dict[dst_feature_name] = feature_value
-    else:
-      # TODO(gbm): Add support for more than one ragged dimension.
-      dim_value = example[f"{src_feature_name}.d1"]
-      assert len(dim_value) == num_items
-      list_values = []
-      begin_idx = 0
-      num_sclars_per_item = feature_schema.static_size()
-      target_shape = feature_schema.shape or ()
-      target_shape = tuple([x if x is not None else -1 for x in target_shape])
-      for item_idx in range(num_items):
-        end_idx = begin_idx + dim_value[item_idx] * num_sclars_per_item
-        list_values.append(
-            feature_value[begin_idx:end_idx].reshape(target_shape)
-        )
-        begin_idx = end_idx
-
-      # Note: Make sure numpy does not merge the arrays.
-      array_of_object = np.empty(len(list_values), dtype=np.object_)
-      array_of_object[:] = list_values
-
-      dst_dict[dst_feature_name] = array_of_object
-
   for node_set_name, node_set in schema.node_sets.items():
     node_features = {}
-    num_nodes = example[f"nodes/{node_set_name}.#size"][0].item()
+    num_nodes = example[
+        io_tf_lib.tfgnn_node_key(node_set_name, io_tf_lib.TFGNN_SIZE_KEY)
+    ][0].item()
     for feature_name, feature_schema in node_set.features.items():
-      _parse_feature(
-          f"nodes/{node_set_name}.{feature_name}",
-          feature_name,
+      node_features[feature_name] = _tfgnn_feature_to_array(
+          example,
+          io_tf_lib.tfgnn_node_key(node_set_name, feature_name),
           feature_schema,
           num_nodes,
-          node_features,
       )
     if import_node_ids:
       node_features[import_node_ids] = example[
-          f"nodes/{node_set_name}.{import_node_ids}"
+          io_tf_lib.tfgnn_node_key(node_set_name, import_node_ids)
       ]
     node_sets[node_set_name] = in_memory_graph.InMemoryNodeSet(
         features=node_features,
@@ -128,24 +234,28 @@ def graph_dict_to_graph(
     )
 
   for edge_set_name, edge_set in schema.edge_sets.items():
-    source_feature_key = f"edges/{edge_set_name}.#source"
-    target_feature_key = f"edges/{edge_set_name}.#target"
-    adjacency = np.array(
-        [example[source_feature_key], example[target_feature_key]]
-    )
+    adjacency = np.array([
+        example[
+            io_tf_lib.tfgnn_edge_key(edge_set_name, io_tf_lib.TFGNN_SOURCE_KEY)
+        ],
+        example[
+            io_tf_lib.tfgnn_edge_key(edge_set_name, io_tf_lib.TFGNN_TARGET_KEY)
+        ],
+    ])
     edge_features = {}
-    num_edges = example[f"edges/{edge_set_name}.#size"][0].item()
+    num_edges = example[
+        io_tf_lib.tfgnn_edge_key(edge_set_name, io_tf_lib.TFGNN_SIZE_KEY)
+    ][0].item()
     for feature_name, feature_schema in edge_set.features.items():
-      _parse_feature(
-          f"edges/{edge_set_name}.{feature_name}",
-          feature_name,
+      edge_features[feature_name] = _tfgnn_feature_to_array(
+          example,
+          io_tf_lib.tfgnn_edge_key(edge_set_name, feature_name),
           feature_schema,
           num_edges,
-          edge_features,
       )
     if import_edge_ids:
       edge_features[import_edge_ids] = example[
-          f"edges/{edge_set_name}.{import_edge_ids}"
+          io_tf_lib.tfgnn_edge_key(edge_set_name, import_edge_ids)
       ]
     edge_sets[edge_set_name] = in_memory_graph.InMemoryEdgeSet(
         adjacency=adjacency, features=edge_features
@@ -174,81 +284,141 @@ def graph_to_tfgnn_graph(
   return example
 
 
+def _flatten_feature_value(value: Any, np_dtype: Any) -> np.ndarray:
+  """Flattens a (possibly nested) feature value into a 1D array of `np_dtype`."""
+  array = np.asarray(value)
+  if array.dtype == np.object_:
+    # Note: The nested arrays are merged (which is only possible if the nested
+    # values all have the same shape).
+    array = np.asarray(array.tolist(), dtype=np_dtype)
+  return np.ravel(array).astype(np_dtype, copy=False)
+
+
+def _feature_to_tfgnn_values(
+    feature_value: np.ndarray,
+    feature_schema: schema_lib.FeatureSchema,
+    feature_key: str,
+) -> Dict[str, np.ndarray]:
+  """Converts a feature of an InMemoryGraph into TF GNN Graph Sample values.
+
+  Args:
+    feature_value: The feature values of shape [num_items, *shape].
+    feature_schema: The schema of the feature.
+    feature_key: The key of the feature in the TF GNN Graph Sample e.g.
+      "nodes/n1.f1".
+
+  Returns:
+    A dictionary containing the flat feature values and, for variable-length
+    features, the row lengths of each of the ragged dimensions.
+  """
+  np_dtype = feature_format_lib.FEATURE_FORMAT_TO_TFGNN_NP_DTYPE[
+      feature_schema.format
+  ]
+
+  if feature_schema.is_static_shape():
+    return {feature_key: _flatten_feature_value(feature_value, np_dtype)}
+
+  if feature_value.dtype != np.object_:
+    raise ValueError(
+        f"The feature '{feature_key}' has a dynamic shape"
+        f" {feature_schema.shape} but its values are not a numpy array of"
+        f" dtype object. Found dtype: {feature_value.dtype}."
+    )
+
+  shape = list(feature_schema.shape or [])
+  flat_values: List[np.ndarray] = []
+  row_lengths: Dict[int, List[int]] = {}
+
+  def collect(rows: Any, dim_idx: int) -> None:
+    """Collects the row lengths and flat values of the `dim_idx`-th dim."""
+    # Note: The 0-th dimension of a feature value is the item dimension, so
+    # `dim_idx` is in [1, len(shape)].
+    dim = shape[dim_idx - 1]
+    if dim is None:
+      row_lengths.setdefault(dim_idx, []).extend(len(row) for row in rows)
+    else:
+      for row in rows:
+        if len(row) != dim:
+          raise ValueError(
+              f"The dimension {dim_idx} of the feature '{feature_key}' is"
+              f" expected to be of size {dim}, but a value of size"
+              f" {len(row)} was found."
+          )
+    if all(sub_dim is not None for sub_dim in shape[dim_idx:]):
+      # All the deeper dimensions are static: the rows can be flattened.
+      for row in rows:
+        flat_values.append(_flatten_feature_value(row, np_dtype))
+      return
+    collect([item for row in rows for item in row], dim_idx + 1)
+
+  _check_at_most_one_ragged_dim(feature_key, shape)
+  collect(feature_value, 1)
+
+  result = {
+      feature_key: (
+          np.concatenate(flat_values, axis=0, dtype=np_dtype)
+          if flat_values
+          else np.array([], dtype=np_dtype)
+      )
+  }
+  for dim_idx, lengths in row_lengths.items():
+    result[io_tf_lib.tfgnn_ragged_dim_key(feature_key, dim_idx)] = np.array(
+        lengths, dtype=np.int64
+    )
+  return result
+
+
 def graph_to_tfgnn_graph_dict(
     graph: in_memory_graph.InMemoryGraph, schema: schema_lib.GraphSchema
 ) -> Dict[str, np.ndarray]:
-  """Converts an InMemoryGraph to a TF GNN Graph Sample Dict."""
+  """Converts an InMemoryGraph to a TF GNN Graph Sample Dict.
+
+  The values are stored with the dtype used in a `tf.train.Example` proto (i.e.
+  int64, float32 or bytes), and not with the dtype of the schema (e.g. int32,
+  bool). Multi-dimensional features are flattened, and variable-length features
+  are accompanied by the row lengths of each of their ragged dimensions.
+
+  Args:
+    graph: The graph to convert.
+    schema: The schema of the graph.
+
+  Returns:
+    A TF GNN Graph Sample Dict i.e. a dictionary of flat numpy arrays.
+  """
   feature_dict = {}
   for nodeset_name, nodeset_schema in schema.node_sets.items():
     node_set = graph.node_sets[nodeset_name]
-    feature_dict[f"nodes/{nodeset_name}.#size"] = np.array(
-        [node_set.num_nodes], dtype=np.int64
-    )
+    feature_dict[
+        io_tf_lib.tfgnn_node_key(nodeset_name, io_tf_lib.TFGNN_SIZE_KEY)
+    ] = np.array([node_set.num_nodes], dtype=np.int64)
     for feature_name, feature_schema in nodeset_schema.features.items():
-      feature_value = node_set.features[feature_name]
-      tf_feature_name = f"nodes/{nodeset_name}.{feature_name}"
-      if feature_schema.is_static_shape():
-        feature_dict[tf_feature_name] = feature_value
-      else:
-        if feature_value.dtype != object:
-          raise ValueError(
-              f"Feature '{feature_name}' in node set '{nodeset_name}' has a "
-              "dynamic shape but is not a numpy array of dtype object. "
-              f"Found type: {type(feature_value)}, dtype: {feature_value.dtype}"
+      feature_dict.update(
+          _feature_to_tfgnn_values(
+              node_set.features[feature_name],
+              feature_schema,
+              io_tf_lib.tfgnn_node_key(nodeset_name, feature_name),
           )
-
-        feature_dict[tf_feature_name] = np.concatenate(
-            [
-                np.ravel(
-                    np.asarray(
-                        value.tolist(),
-                        dtype=feature_format_lib.FEATURE_FORMAT_TO_NP_DTYPE[
-                            feature_schema.format
-                        ],
-                    )
-                )
-                if isinstance(value, np.ndarray) and value.dtype == object
-                else value.flatten()
-                for value in feature_value
-            ],
-            axis=0,
-            dtype=feature_format_lib.FEATURE_FORMAT_TO_NP_DTYPE[
-                feature_schema.format
-            ],
-        )
-
-        # TODO(gbm): Add support for more than one "ragged" dimension.
-        feature_dict[f"nodes/{nodeset_name}.{feature_name}.d1"] = np.array(
-            [len(value) for value in feature_value],
-            dtype=np.int64,
-        )
+      )
 
   for edge_set_name, edge_set_schema in schema.edge_sets.items():
     edge_set = graph.edge_sets[edge_set_name]
-    feature_dict[f"edges/{edge_set_name}.#size"] = np.array(
-        [edge_set.adjacency.shape[1]], dtype=np.int64
-    )
-    feature_dict[f"edges/{edge_set_name}.#source"] = edge_set.adjacency[0]
-    feature_dict[f"edges/{edge_set_name}.#target"] = edge_set.adjacency[1]
+    feature_dict[
+        io_tf_lib.tfgnn_edge_key(edge_set_name, io_tf_lib.TFGNN_SIZE_KEY)
+    ] = np.array([edge_set.adjacency.shape[1]], dtype=np.int64)
+    feature_dict[
+        io_tf_lib.tfgnn_edge_key(edge_set_name, io_tf_lib.TFGNN_SOURCE_KEY)
+    ] = np.asarray(edge_set.adjacency[0], dtype=np.int64)
+    feature_dict[
+        io_tf_lib.tfgnn_edge_key(edge_set_name, io_tf_lib.TFGNN_TARGET_KEY)
+    ] = np.asarray(edge_set.adjacency[1], dtype=np.int64)
     for feature_name, feature_schema in edge_set_schema.features.items():
-      feature_value = edge_set.features[feature_name]
-      tf_feature_name = f"edges/{edge_set_name}.{feature_name}"
-      if feature_schema.is_static_shape():
-        feature_dict[tf_feature_name] = feature_value
-      else:
-        if feature_value.dtype != object:
-          raise ValueError(
-              f"Feature '{feature_name}' in edge set '{edge_set_name}' has a "
-              "dynamic shape but is not a numpy array of dtype object. "
-              f"Found type: {type(feature_value)}, dtype: {feature_value.dtype}"
+      feature_dict.update(
+          _feature_to_tfgnn_values(
+              edge_set.features[feature_name],
+              feature_schema,
+              io_tf_lib.tfgnn_edge_key(edge_set_name, feature_name),
           )
-        feature_dict[tf_feature_name] = np.concatenate(
-            [value.flatten() for value in feature_value], axis=0
-        )
-        # TODO(gbm): Add support for more than one "ragged" dimension.
-        feature_dict[f"edges/{edge_set_name}.{feature_name}.d1"] = np.array(
-            [len(value) for value in feature_value]
-        )
+      )
 
   return feature_dict
 
@@ -563,39 +733,12 @@ def write_tfgnn_graphs_single_file(
     writer.close()
 
 
-def build_tfgnn_feature_spec(
-    schema: schema_lib.GraphSchema,
-) -> Dict[str, tf.io.VarLenFeature]:
-  """Builds the tf parsing spec from the graph schema."""
-  feature_spec = {}
-
-  def add_feature_to_spec(key: str, feature_schema: schema_lib.FeatureSchema):
-    tf_dtype = feature_format_lib.FEATURE_FORMAT_TO_TF_DTYPE[
-        feature_schema.format
-    ]
-    feature_spec[key] = tf.io.VarLenFeature(tf_dtype)
-    if not feature_schema.is_static_shape():
-      feature_spec[f"{key}.d1"] = tf.io.VarLenFeature(tf.int64)
-
-  for node_set_name, node_set_schema in schema.node_sets.items():
-    feature_spec[f"nodes/{node_set_name}.#size"] = tf.io.VarLenFeature(tf.int64)
-    for feature_name, feature_schema in node_set_schema.features.items():
-      add_feature_to_spec(
-          f"nodes/{node_set_name}.{feature_name}", feature_schema
-      )
-  for edge_set_name, edge_set_schema in schema.edge_sets.items():
-    feature_spec[f"edges/{edge_set_name}.#source"] = tf.io.VarLenFeature(
-        tf.int64
-    )
-    feature_spec[f"edges/{edge_set_name}.#target"] = tf.io.VarLenFeature(
-        tf.int64
-    )
-    feature_spec[f"edges/{edge_set_name}.#size"] = tf.io.VarLenFeature(tf.int64)
-    for feature_name, feature_schema in edge_set_schema.features.items():
-      add_feature_to_spec(
-          f"edges/{edge_set_name}.{feature_name}", feature_schema
-      )
-  return feature_spec
+# The parsing spec of a TF GNN Graph Sample is defined in `dgf.src.io.tf` (so
+# that it can be used for model inference without depending on this module and
+# its heavy dependencies e.g. beam).
+schema_to_tfgnn_graph_parsing_spec = (
+    io_tf_lib.schema_to_tfgnn_graph_parsing_spec
+)
 
 
 def read_tfgnn_graphs(
@@ -651,7 +794,7 @@ def read_tfgnn_graphs(
   path_dataset = tf.data.Dataset.from_tensor_slices(paths)  # pyrefly: ignore[bad-argument-type]
 
   # Build the tf parsing spec.
-  feature_spec = build_tfgnn_feature_spec(schema)
+  feature_spec = schema_to_tfgnn_graph_parsing_spec(schema)
 
   if container_type == TFGraphSampleContainerType.TF_RECORD:
 

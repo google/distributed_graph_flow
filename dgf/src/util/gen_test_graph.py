@@ -1339,7 +1339,7 @@ def generate_in_memory_graph(
 
 def generate_tf_in_memory_graph(
     variable_length: bool,
-    tensor_type: Literal["DENSE", "SPARSE", "RAGGED"],
+    tensor_type: Literal["DENSE", "SPARSE", "RAGGED", "NATURAL"],
     num_nodes_as_tensor: bool,
     node_ids: bool = False,
     edge_ids: bool = False,
@@ -1351,8 +1351,10 @@ def generate_tf_in_memory_graph(
   Args:
     node_ids: bool = if true, adds the "#id" features for nodes.
     edge_ids: if true, adds the "#id" features for edges.
-    variable_length: Generate the f5 variable len feature.
-    tensor_type: The tensor type for all features and adjacencies.
+    variable_length: Generate the f5 and f6 variable len features.
+    tensor_type: The tensor type for all features and adjacencies. "NATURAL"
+      keeps the natural representation of each feature i.e. dense tensors for
+      the fixed-shape features and ragged tensors for the variable-length ones.
     num_nodes_as_tensor: If true, num_nodes is a tf.Tensor. Otherwise, an int.
 
   Returns:
@@ -1374,6 +1376,8 @@ def generate_tf_in_memory_graph(
       if len(tensor.shape) > 1:
         return tf.RaggedTensor.from_tensor(tensor)
       return tensor
+    elif tensor_type == "NATURAL":
+      return tensor
     else:
       raise ValueError(f"Unknown tensor_type: {tensor_type}")
 
@@ -1391,6 +1395,16 @@ def generate_tf_in_memory_graph(
   if variable_length:
     n2_features["f5"] = _convert(
         tf.ragged.constant([[11, 12], [12, 13, 14]], dtype=tf.int64)
+    )
+    n2_features["f6"] = _convert(
+        tf.ragged.constant(
+            [
+                [[11, 12], [13, 14]],
+                [[15, 16], [17, 18], [19, 20]],
+            ],
+            dtype=tf.int64,
+            ragged_rank=1,
+        )
     )
 
   e1_features = {}

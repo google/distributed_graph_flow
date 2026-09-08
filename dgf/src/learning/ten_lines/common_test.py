@@ -145,6 +145,62 @@ class TenLines(parameterized.TestCase):
           )
       )
 
+  @parameterized.named_parameters(
+      ("tf_graph", "TF_GRAPH", common.TFFunctionInputFormat.TF_GRAPH),
+      ("lower", "tf_graph_dict", common.TFFunctionInputFormat.TF_GRAPH_DICT),
+      (
+          "serialized",
+          "SERIALIZED_TFGNN_GRAPHS",
+          common.TFFunctionInputFormat.SERIALIZED_TFGNN_GRAPHS,
+      ),
+      (
+          "enum",
+          common.TFFunctionInputFormat.TF_GRAPH_DICT,
+          common.TFFunctionInputFormat.TF_GRAPH_DICT,
+      ),
+  )
+  def test_parse_tf_function_input_format_success(self, input_val, expected):
+    self.assertEqual(common.parse_tf_function_input_format(input_val), expected)
+
+  def test_parse_tf_function_input_format_invalid_fails(self):
+    with self.assertRaisesRegex(ValueError, "Unknown input format: invalid"):
+      common.parse_tf_function_input_format("invalid")
+
+    with self.assertRaisesRegex(
+        TypeError, "Expected TFFunctionInputFormat or str"
+    ):
+      common.parse_tf_function_input_format(123)  # pytype: disable=wrong-arg-types
+
+  def test_resolve_tf_function_input_format_default(self):
+    self.assertEqual(
+        common.resolve_tf_function_input_format(None, None),
+        common.DEFAULT_TF_FUNCTION_INPUT_FORMAT,
+    )
+
+  def test_resolve_tf_function_input_format(self):
+    self.assertEqual(
+        common.resolve_tf_function_input_format("TF_GRAPH_DICT", None),
+        common.TFFunctionInputFormat.TF_GRAPH_DICT,
+    )
+
+  @parameterized.named_parameters(
+      ("true", True, common.TFFunctionInputFormat.TF_GRAPH_DICT),
+      ("false", False, common.TFFunctionInputFormat.TF_GRAPH),
+  )
+  def test_resolve_tf_function_input_format_deprecated(
+      self, consume_tf_graph_dict, expected
+  ):
+    with log.capture_logs(log_info=True, log_warning=True) as captured:
+      self.assertEqual(
+          common.resolve_tf_function_input_format(None, consume_tf_graph_dict),
+          expected,
+      )
+    self.assertTrue(any("deprecated" in msg.text for msg in captured))
+
+  def test_resolve_tf_function_input_format_conflict_fails(self):
+    with self.assertRaisesRegex(ValueError, "cannot be set at the same time"):
+      common.resolve_tf_function_input_format("TF_GRAPH", True)
+
 
 if __name__ == "__main__":
   absltest.main()

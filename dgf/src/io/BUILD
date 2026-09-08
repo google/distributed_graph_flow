@@ -106,6 +106,7 @@ py_library(
     srcs = ["tf_graph_sample.py"],
     deps = [
         ":feature_format",
+        ":tf",
         ":tf_graph_sample_ext",
         # apache_beam dep,
         # bagz dep,
@@ -486,8 +487,11 @@ py_test(
         # apache_beam dep,
         # bagz/beam:bag_io dep,
         "//dgf/src/data:distributed_graph",
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
+        # numpy dep,
         # tensorflow:tensorflow_no_contrib dep,
     ],
 )
@@ -555,12 +559,15 @@ py_test(
     srcs = ["tf_test.py"],
     deps = [
         ":tf",
+        ":tf_graph_sample",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
+        "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/data:tf_in_memory_graph",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
+        # numpy dep,
         # tensorflow:tensorflow_no_contrib dep,
     ],
 )
