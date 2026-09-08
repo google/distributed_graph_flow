@@ -908,5 +908,139 @@ class NodePredictionTemporalValidationTest(absltest.TestCase):
     self.assertEmpty(model.data().sampling_plan.edgeset_timestamp_features)
 
 
+class NodePredictionTimeseriesTest(absltest.TestCase):
+
+  def _create_timeseries_graph_and_schema(
+      self,
+  ) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+    """Creates 1 sensor node with a timeseries and 2 query nodes with different creation times."""
+
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "query": schema_lib.NodeSchema(
+                features={
+                    "creation_time": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_creation_time=True,
+                    ),
+                    "label": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                    ),
+                }
+            ),
+            "sensor": schema_lib.NodeSchema(
+                features={
+                    "time": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_timeseries=True,
+                        is_creation_time=True,
+                        shape=(None,),
+                        group="sensor_ts",
+                    ),
+                }
+            ),
+        },
+        edge_sets={
+            "query_to_sensor": schema_lib.EdgeSchema(
+                source="query",
+                target="sensor",
+                features={},
+            ),
+            "sensor_to_query": schema_lib.EdgeSchema(
+                source="sensor",
+                target="query",
+                features={},
+            ),
+        },
+    )
+
+    time_data = np.empty(1, dtype=object)
+    time_data[0] = np.array([100, 300], dtype=np.int64)
+
+    sensor_nodes = in_memory_graph_lib.InMemoryNodeSet(
+        num_nodes=1,
+        features={"time": time_data},
+    )
+
+    # Query 0: creation_time = 120 -> sees t=100 (timedelta = 20), label = 1.0
+    # Query 1: creation_time = 180 -> sees t=100 (timedelta = 80), label = 2.0
+    query_nodes = in_memory_graph_lib.InMemoryNodeSet(
+        num_nodes=2,
+        features={
+            "creation_time": np.array([120, 180], dtype=np.int64),
+            "label": np.array([1.0, 2.0], dtype=np.float32),
+        },
+    )
+
+    query_to_sensor = in_memory_graph_lib.InMemoryEdgeSet(
+        adjacency=np.array([[0, 1], [0, 0]], dtype=np.int64),
+        features={},
+    )
+    sensor_to_query = in_memory_graph_lib.InMemoryEdgeSet(
+        adjacency=np.array([[0, 0], [0, 1]], dtype=np.int64),
+        features={},
+    )
+
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={"query": query_nodes, "sensor": sensor_nodes},
+        edge_sets={
+            "query_to_sensor": query_to_sensor,
+            "sensor_to_query": sensor_to_query,
+        },
+    )
+    return graph, schema
+
+  def test_train_and_predict_with_timeseries(self):
+    graph, schema = self._create_timeseries_graph_and_schema()
+
+    model = node_prediction_lib.train_node_model(
+        graph=graph,
+        valid_graph=graph,
+        schema=schema,
+        target_nodeset="query",
+        target_column="label",
+        time_aware=True,
+        num_train_steps=100,
+        batch_size=2,
+        sampling_width=2,
+        num_sampling_hops=1,
+        node_embedding_dim=16,
+        num_layers=1,
+        learning_rate=0.01,
+        verbose=0,
+    )
+
+    predictions = model.predict(graph, seed_node_idxs=np.array([0, 1]))
+    self.assertEqual(predictions.shape, (2,))
+    self.assertTrue(np.all(np.isfinite(predictions)))
+    # Both queries see the same event at t=100 with no other features.
+    # The only differentiator is the timedelta to creation_time (-20 vs -80).
+    self.assertGreater(predictions[1], predictions[0])
+    self.assertAlmostEqual(predictions[0], 1.0, delta=0.3)
+    self.assertAlmostEqual(predictions[1], 2.0, delta=0.3)
+
+    # Verify predict_on_graph_sample_batch produces matching predictions
+    sampler = in_memory_sampler_lib.create_sampler(
+        graph=graph,
+        plan=model.data().sampling_plan,
+        schema=schema,
+        batch_size=2,
+    )
+    samples = sampler.sample(
+        np.array([0, 1]), seed_timestamps=np.array([120, 180], dtype=np.int64)
+    )
+    sample_batch_predictions = model.predict_on_graph_sample_batch(samples)
+    self.assertEqual(sample_batch_predictions.shape, (2,))
+    np.testing.assert_allclose(sample_batch_predictions, predictions, atol=1e-5)
+
+    eval_result = model.evaluate(graph)
+    self.assertEqual(eval_result.num_examples, 2)
+    self.assertIsNotNone(eval_result.rmse)
+    self.assertLess(eval_result.rmse, 0.5)  # pyrefly: ignore[no-matching-overload]
+
+
 if __name__ == "__main__":
   absltest.main()
