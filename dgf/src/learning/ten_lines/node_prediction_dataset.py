@@ -358,6 +358,15 @@ class GNNDatasetPreparator:
         else self.schema
     )
 
+    target_nodeset = self.sampling_plan.root.nodeset
+    target_has_creation_time = (
+        temporal_util.creation_time_feature_name(
+            self.schema.node_sets[target_nodeset].features
+        )
+        is not None
+    )
+    self.auto_normalize_config.has_seed_timestamps = target_has_creation_time
+
     normalizer = normalize_lib.auto_normalize(
         schema=padded_schema,
         stats=feature_stats,
@@ -732,14 +741,23 @@ def prepare_datasets(
         sampling_config, schema
     )
 
+  target_has_creation_time = (
+      temporal_util.creation_time_feature_name(
+          schema.node_sets[target_nodeset].features
+      )
+      is not None
+  )
   if auto_normalize_config is None:
     auto_normalize_config = normalize_lib.AutoNormalizeConfig(
         keep_raw_features=keep_raw_features or set(),
         ignore_features_without_stats=True,
         timestamp_normalize=temporal_sampling,
+        has_seed_timestamps=target_has_creation_time,
     )
-  elif keep_raw_features is not None:
-    auto_normalize_config.keep_raw_features.update(keep_raw_features)
+  else:
+    auto_normalize_config.has_seed_timestamps = target_has_creation_time
+    if keep_raw_features is not None:
+      auto_normalize_config.keep_raw_features.update(keep_raw_features)
 
   common_kwargs = {
       "format": graph_format,

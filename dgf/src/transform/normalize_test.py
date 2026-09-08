@@ -891,7 +891,9 @@ Edge Sets:
     normalizer = normalize_lib.auto_normalize(
         schema,
         stats,
-        config=normalize_lib.AutoNormalizeConfig(timestamp_normalize=True),
+        config=normalize_lib.AutoNormalizeConfig(
+            timestamp_normalize=True, has_seed_timestamps=True
+        ),
     )
     out_schema = normalizer.output_schema()
     self.assertIn(
@@ -903,6 +905,19 @@ Edge Sets:
         .features["created_at_seed_delta_SINUSOID"]
         .shape,
         (32,),
+    )
+
+    # Without seed timestamps, timestamp normalization is skipped.
+    normalizer_no_seed = normalize_lib.auto_normalize(
+        schema,
+        stats,
+        config=normalize_lib.AutoNormalizeConfig(
+            timestamp_normalize=True, has_seed_timestamps=False
+        ),
+    )
+    self.assertNotIn(
+        "created_at_seed_delta_SINUSOID",
+        normalizer_no_seed.output_schema().node_sets["nodes"].features,
     )
 
     # End-to-end normalization execution
@@ -1008,7 +1023,9 @@ Edge Sets:
     normalizer = normalize_lib.auto_normalize(
         schema,
         stats,
-        config=normalize_lib.AutoNormalizeConfig(timestamp_normalize=True),
+        config=normalize_lib.AutoNormalizeConfig(
+            timestamp_normalize=True, has_seed_timestamps=True
+        ),
     )
     out_schema = normalizer.output_schema()
     self.assertNotIn(

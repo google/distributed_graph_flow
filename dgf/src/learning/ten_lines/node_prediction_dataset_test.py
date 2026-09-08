@@ -243,6 +243,48 @@ class GNNDatasetPreparatorTest(parameterized.TestCase):
       )
     self.assertEqual(jax_batches, 2)
 
+  def test_prepare_target_no_creation_time_other_nodesets_have_timestamps(self):
+    graph = gen_test_graph.generate_in_memory_graph(True, False)
+    schema = gen_test_graph.generate_schema(True, False, True, False)
+    # n1 (target) has no timestamp; add a timestamp feature to n2.
+    schema.node_sets["n2"].features["ts"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+    )
+    num_nodes = graph.node_sets["n2"].num_nodes
+    assert num_nodes is not None
+    graph.node_sets["n2"].features["ts"] = np.zeros(num_nodes, dtype=np.int64)
+    sampling_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
+        sampling_config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1", num_hops=1, hop_width=1
+        ),
+        schema,
+    )
+    preparator = node_prediction_dataset.GNNDatasetPreparator(
+        graph=graph,
+        schema=schema,
+        sampling_plan=sampling_plan,
+        batch_size=2,
+        drop_remainder=True,
+        shuffle=True,
+        auto_normalize_config=normalize_lib.AutoNormalizeConfig(
+            timestamp_normalize=True
+        ),
+    )
+    with self.assertLogs(level="WARNING") as cm:
+      preparator.prepare()
+
+    self.assertFalse(preparator.auto_normalize_config.has_seed_timestamps)
+    self.assertTrue(preparator.auto_normalize_config.timestamp_normalize)
+    self.assertNotIn(
+        "seed_timestamps",
+        preparator.get_live().normalizer.accepted_kwargs,
+    )
+    self.assertTrue(
+        any("cannot be autonormalized" in text for text in cm.output),
+        f"Expected warning not found in: {cm.output}",
+    )
+
   def test_get_target_nodeset_and_timestamp_feature(self):
     live = unittest.mock.MagicMock()
     live.normalizer.accepted_kwargs = set()
@@ -370,7 +412,8 @@ class GNNDatasetPreparatorTest(parameterized.TestCase):
     self.assertIsNotNone(normalizer_without_ts.received_kwargs)
     self.assertEqual(normalizer_without_ts.received_kwargs, {})
 
-    # 3. Normalizer accepts seed_timestamps but target nodeset has no creation time
+    # 3. Normalizer accepts seed_timestamps but target nodeset has no creation 
+    # time
     schema_without_ts = schema_lib.GraphSchema(
         node_sets={"n1": schema_lib.NodeSchema(features={})},
         edge_sets={},

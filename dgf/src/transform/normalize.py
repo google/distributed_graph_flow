@@ -674,9 +674,7 @@ class SequentialNormalizer(AbstractFeatureNormalizer):
   """
 
   stages: List[AbstractFeatureNormalizer] = normalizer_registry.field_list()
-  type: str = dataclasses.field(
-      default="SequentialNormalizer", init=False
-  )
+  type: str = dataclasses.field(default="SequentialNormalizer", init=False)
   _stage_kwargs: List[frozenset[str]] = dataclasses.field(
       default_factory=list,
       init=False,
@@ -842,6 +840,9 @@ class AutoNormalizeConfig:
       normalized using `SinusoidTimedeltaNormalizer`.
     timedelta_embedding_dim: Embedding dimension to use when normalizing
       TIMESTAMP or TIMEDELTA features with sinusoidal embeddings.
+    has_seed_timestamps: Whether seed timestamps will be provided at runtime for
+      timestamp normalization. If False, timestamp features will not be
+      normalized using relative timedelta embeddings.
   """
 
   categorical_bytes_to_index: bool = True
@@ -857,6 +858,7 @@ class AutoNormalizeConfig:
   timestamp_normalize: bool = False
   timedelta_normalize: bool = True
   timedelta_embedding_dim: int = 32
+  has_seed_timestamps: bool = False
 
 
 def auto_normalize(
@@ -1033,6 +1035,12 @@ def auto_normalize(
               f"Feature '{feature_name}' in node set '{nodeset_name}' is a"
               " TIMESTAMP with dynamic shape and cannot be normalized with"
               " sinusoidal timestamp embeddings. Please run padding first."
+          )
+        elif not config.has_seed_timestamps:
+          log.warning(
+              f"Feature '{feature_name}' in node set '{nodeset_name}' is a "
+              "TIMESTAMP but cannot be autonormalized because no seed "
+              "timestamps are available."
           )
         else:
           nodeset_normalizers.append(
