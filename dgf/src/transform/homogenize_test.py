@@ -222,8 +222,8 @@ class HomogenizeTest(absltest.TestCase):
     dst_graph, dst_schema = homogenize_lib.apply_feature(
         graph,
         schema,
-        process_nodesets={"n1": process_n1, "n2": process_n2},  # pyrefly: ignore[bad-argument-type]
-        process_edgesets={"e1": process_e1},  # pyrefly: ignore[bad-argument-type]
+        process_nodesets={"n1": process_n1, "n2": process_n2},  # pyrefly: ignore[bad-argument-type, bad-assignment]
+        process_edgesets={"e1": process_e1},  # pyrefly: ignore[bad-argument-type, bad-assignment]
     )
     in_memory_graph_validate_lib.validate_graph(
         dst_graph, dst_schema, raise_on_warning=False  # pyrefly: ignore[bad-argument-type]
@@ -265,8 +265,8 @@ class HomogenizeTest(absltest.TestCase):
     dst_jax_graph, dst_schema = homogenize_lib.apply_feature(
         jax_graph,
         schema,
-        process_nodesets={"n1": process_n1, "n2": process_n2},  # pyrefly: ignore[bad-argument-type]
-        process_edgesets={"e1": process_e1},  # pyrefly: ignore[bad-argument-type]
+        process_nodesets={"n1": process_n1, "n2": process_n2},  # pyrefly: ignore[bad-argument-type, bad-assignment]
+        process_edgesets={"e1": process_e1},  # pyrefly: ignore[bad-argument-type, bad-assignment]
     )
     dst_numpy_graph = jax_lib.jax_graph_to_graph(dst_jax_graph)  # pyrefly: ignore[bad-argument-type]
     in_memory_graph_validate_lib.validate_graph(

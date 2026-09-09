@@ -895,8 +895,8 @@ def generate_avro_graph(
       {"name": "f4", "type": "long"},
   ]
   if variable_length:
-    n2_fields.append({"name": "f5", "type": {"type": "array", "items": "long"}})  # pyrefly: ignore[bad-argument-type]
-    n2_fields.append({"name": "f6", "type": {"type": "array", "items": {"type": "array", "items": "long"}}})  # pyrefly: ignore[bad-argument-type]
+    n2_fields.append({"name": "f5", "type": {"type": "array", "items": "long"}})  # pyrefly: ignore[bad-argument-type, bad-assignment]
+    n2_fields.append({"name": "f6", "type": {"type": "array", "items": {"type": "array", "items": "long"}}})  # pyrefly: ignore[bad-argument-type, bad-assignment]
   n2_schema_dict = {"type": "record", "name": "n2", "fields": n2_fields}
   n2_schema = parse_schema(n2_schema_dict)
 
