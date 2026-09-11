@@ -294,6 +294,8 @@ py_test(
         ":common",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
+        "//dgf/src/util:log",
+        # jax dep,
         # numpy dep,
     ],
 )

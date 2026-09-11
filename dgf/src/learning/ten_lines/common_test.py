@@ -17,6 +17,8 @@
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.learning.ten_lines import common
+from dgf.src.util import log
+import jax
 import numpy as np
 
 
@@ -123,6 +125,24 @@ class TenLines(parameterized.TestCase):
     ):
       common.check_number_of_seeds(
           batch_size=10, num_training=15, num_validation=5, key="edge"
+      )
+
+  def test_log_jax_backend(self):
+    with log.capture_logs(log_info=True, log_warning=True) as captured:
+      common.log_jax_backend(verbose=2)
+    self.assertTrue(
+        any(
+            "Using" in msg.text and "JAX backend" in msg.text
+            for msg in captured
+        )
+    )
+    if jax.default_backend().lower() == "cpu":
+      self.assertTrue(
+          any(
+              msg.severity == log.Severity.WARNING
+              and "Using CPU JAX backend" in msg.text
+              for msg in captured
+          )
       )
 
 

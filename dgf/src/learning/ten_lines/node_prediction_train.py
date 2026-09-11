@@ -279,8 +279,7 @@ def train_node_model(
     if diagnostic_dir is not None:
       fs.makedirs(diagnostic_dir)
 
-    if verbose >= 2:
-      log.info("Using %s JAX backend", jax.default_backend())
+    common.log_jax_backend(verbose)
 
     if target_nodeset is None:
       if len(schema.node_sets) == 1:

@@ -444,3 +444,21 @@ def check_number_of_seeds(
         f" than the batch size ({batch_size}). Increase the number of"
         f" validation seed {key}s or decrease the batch size."
     )
+
+
+def log_jax_backend(verbose: int = 2) -> None:
+  """Logs the active JAX backend and issues a warning if running on CPU.
+
+  Args:
+    verbose: The verbosity level. If >= 2, logs an info message with the
+      backend.
+  """
+  backend = jax.default_backend()
+  if verbose >= 2:
+    log.info("Using %s JAX backend", backend)
+
+  if backend.lower() == "cpu":
+    log.warning(
+        "Using CPU JAX backend. Training will be slow. Consider using a GPU"
+        " or TPU."
+    )

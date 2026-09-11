@@ -434,8 +434,7 @@ def train_link_model(
     if diagnostic_dir is not None:
       fs.makedirs(diagnostic_dir)
 
-    if verbose >= 2:
-      log.info("Using %s JAX backend", jax.default_backend())
+    common.log_jax_backend(verbose)
 
     if target_edgeset is None:
       if len(schema.edge_sets) == 1:
