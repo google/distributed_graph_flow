@@ -91,6 +91,11 @@ py_library(
 py_test(
     name = "connected_components_test",
     srcs = ["connected_components_test.py"],
+    # Parlay sizes its thread pool from std::thread::hardware_concurrency(),
+    # which reports the machine's core count rather than the CPUs this test is
+    # actually allocated. The resulting oversubscription makes the test time
+    # out, so pin the pool size here.
+    env = {"PARLAY_NUM_THREADS": "1"},
     deps = [
         ":connected_components_py",
         ":loader",
@@ -108,6 +113,8 @@ py_library(
 py_test(
     name = "loader_test",
     srcs = ["loader_test.py"],
+    # See the note on :connected_components_test above.
+    env = {"PARLAY_NUM_THREADS": "1"},
     deps = [
         ":loader",
         # absl/testing:absltest dep,
