@@ -252,8 +252,6 @@ py_library(
         "//dgf/src/data:schema",
         "//dgf/src/util/weak_dep:weak_dep_base",
         # numpy dep,
-        "//third_party/py/torch:pytorch",
-        "//third_party/py/torch_geometric",
     ],
 )
 

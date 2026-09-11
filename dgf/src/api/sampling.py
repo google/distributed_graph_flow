@@ -33,3 +33,4 @@ from dgf.src.sampling.beam_semi_distributed_sampler_v2 import sample_with_beam_s
 
 from dgf.src.sampling.gcp.spanner_graph_sampler import create_graph_spanner_sampler
 from dgf.src.sampling.gcp.spanner_graph_sampler import SpannerGraphSampler
+from dgf.src.sampling.offline_distributed.offline_distributed_gcp import offline_distributed_sampler_gcp

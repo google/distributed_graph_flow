@@ -116,8 +116,19 @@ py_binary(
         # matplotlib dep,
         # numpy dep,
         "//third_party/py/torch:pytorch",
+        "//third_party/py/torch_geometric",
         "//third_party/py/torch_geometric:data",
         "//third_party/py/torch_geometric:nn",
         # tqdm dep,
+    ],
+)
+
+py_binary(
+    name = "create_graph_samples_offline_distributed_gcp",
+    srcs = ["create_graph_samples_offline_distributed_gcp.py"],
+    deps = [
+        # absl:app dep,
+        # absl/flags dep,
+        "//dgf",
     ],
 )
