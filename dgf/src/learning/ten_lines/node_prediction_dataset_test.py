@@ -429,6 +429,117 @@ class GNNDatasetPreparatorTest(parameterized.TestCase):
           schema=schema_without_ts,
       )
 
+  def test_compute_train_and_valid_node_idxs(self):
+    graph, _ = gen_test_graph.generate_temporal_in_memory_graph(False)
+    # 1. Temporal split
+    train_idx, valid_idx = (
+        node_prediction_dataset.compute_train_and_valid_node_idxs(
+            graph=graph,
+            valid_graph=None,
+            graph_format="IN_MEMORY_GRAPH",
+            target_nodeset="n1",
+            random_seed=42,
+            validation_ratio=0.5,
+            train_seed_nodes=None,
+            valid_seed_nodes=None,
+            max_num_valid_examples=None,
+            temporal_split=True,
+            ts_feature="timestamp",
+        )
+    )
+    self.assertIsNotNone(train_idx)
+    self.assertIsNotNone(valid_idx)
+    np.testing.assert_array_equal(train_idx, np.array([0, 1]))
+    np.testing.assert_array_equal(valid_idx, np.array([2, 3]))
+
+    # 2. Random split (temporal_split=False)
+    train_idx, valid_idx = (
+        node_prediction_dataset.compute_train_and_valid_node_idxs(
+            graph=graph,
+            valid_graph=None,
+            graph_format="IN_MEMORY_GRAPH",
+            target_nodeset="n1",
+            random_seed=42,
+            validation_ratio=0.5,
+            train_seed_nodes=None,
+            valid_seed_nodes=None,
+            max_num_valid_examples=None,
+            temporal_split=False,
+        )
+    )
+    self.assertIsNotNone(train_idx)
+    self.assertIsNotNone(valid_idx)
+    self.assertLen(train_idx, 2)
+    self.assertLen(valid_idx, 2)
+
+    # 3. Error when temporal_split=True but ts_feature is None
+    with self.assertRaises(ValueError):
+      node_prediction_dataset.compute_train_and_valid_node_idxs(
+          graph=graph,
+          valid_graph=None,
+          graph_format="IN_MEMORY_GRAPH",
+          target_nodeset="n1",
+          random_seed=42,
+          validation_ratio=0.5,
+          train_seed_nodes=None,
+          valid_seed_nodes=None,
+          max_num_valid_examples=None,
+          temporal_split=True,
+          ts_feature=None,
+      )
+
+    # 4. Error when temporal_split=True but ts_feature is not found in graph
+    with self.assertRaises(ValueError):
+      node_prediction_dataset.compute_train_and_valid_node_idxs(
+          graph=graph,
+          valid_graph=None,
+          graph_format="IN_MEMORY_GRAPH",
+          target_nodeset="n1",
+          random_seed=42,
+          validation_ratio=0.5,
+          train_seed_nodes=None,
+          valid_seed_nodes=None,
+          max_num_valid_examples=None,
+          temporal_split=True,
+          ts_feature="non_existent_feature",
+      )
+
+  def test_prepare_datasets_automatic_temporal_split(self):
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(False)
+    train_dataset, valid_dataset = node_prediction_dataset.prepare_datasets(
+        graph=graph,
+        valid_graph=None,  # pyrefly: ignore[bad-argument-type]
+        schema=schema,
+        target_nodeset="n1",
+        random_seed=42,
+        batch_size=2,
+        num_sampling_hops=1,
+        sampling_width=3,
+        verbose=0,
+        graph_format="IN_MEMORY_GRAPH",
+        validation_ratio=0.5,
+        train_seed_nodes=None,
+        valid_seed_nodes=None,
+        temporal_sampling=True,
+        nodeset_timestamp_features={"n1": "timestamp"},
+        edgeset_timestamp_features={"e1": "timestamp"},
+        num_valid_steps=None,
+        cache_valid_dataset=False,
+        cache_normalized_features=False,
+        cache_normalized_features_device="host",
+        sampling_plan=None,
+    )
+    self.assertIsNotNone(train_dataset.seed_node_idxs)
+    self.assertIsNotNone(valid_dataset)
+    assert valid_dataset is not None
+    self.assertIsNotNone(valid_dataset.seed_node_idxs)
+    np.testing.assert_array_equal(
+        np.sort(train_dataset.seed_node_idxs), np.array([0, 1])
+    )
+    np.testing.assert_array_equal(
+        np.sort(valid_dataset.seed_node_idxs), np.array([2, 3])
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

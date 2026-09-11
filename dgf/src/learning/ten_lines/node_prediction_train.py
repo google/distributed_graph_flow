@@ -195,8 +195,10 @@ def train_node_model(
     verbose: The verbosity level. Higher values provide more output.
     validation_ratio: Ratio of the training dataset used to create the
       validation dataset in case no validation dataset is manually provided
-      e.g., train_seed_nodes and valid_seed_nodes are provided. If set to 0, the
-      entire dataset is used for training, and the tree is not pruned.
+      e.g., train_seed_nodes and valid_seed_nodes are provided. If `time_aware`
+      is True, the split is temporal (past nodes for training, future nodes for
+      validation) instead of random. If set to 0, the entire dataset is used
+      for training, and the tree is not pruned.
     train_seed_nodes: Optional. A np.ndarray or list of integer indices
       specifying the subset of nodes within the `target_nodeset` to be used for
       training. If None, the training nodes are determined based on
@@ -227,7 +229,9 @@ def train_node_model(
       time-consuming, but it will increase memory usage.
     time_aware: Enables temporal-aware training. If `False` (default), no
       temporal masking is applied. If `True`, timestamp features are inferred
-      from the schema (via features marked as creation timestamps).
+      from the schema (via features marked as creation timestamps), the target
+      nodeset is required to have a creation timestamp, and the train and
+      validation sets are split temporally instead of randomly.
     message_pooling: The pooling method to use for aggregating messages.
     experimental_preprocess_core_model_config: Advanced option. An optional
       callable to modify the `CoreModelConfig` before it is used to build the

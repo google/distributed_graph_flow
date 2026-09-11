@@ -625,6 +625,8 @@ def compute_train_and_valid_node_idxs(
     train_seed_nodes: Optional[common.SeedNodeIdxs],
     valid_seed_nodes: Optional[common.SeedNodeIdxs],
     max_num_valid_examples: Optional[int],
+    temporal_split: bool = False,
+    ts_feature: Optional[str] = None,
 ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
   """Computes the training and validation seed node indices."""
   if not isinstance(graph, in_memory_graph_lib.InMemoryGraph) or (
@@ -670,12 +672,39 @@ def compute_train_and_valid_node_idxs(
     )
     return None, None
 
-  train_seed_node_idxs, valid_seed_node_idxs = util.split_train_valid(
-      num_graph_seed_nodes,
-      validation_ratio,
-      random_seed,
-      max_num_valid_examples=max_num_valid_examples,
-  )
+  if temporal_split:
+    if ts_feature is None:
+      raise ValueError(
+          "`ts_feature` must be specified when `temporal_split` is True."
+      )
+    if ts_feature not in graph.node_sets[target_nodeset].features:
+      raise ValueError(
+          f"Timestamp feature '{ts_feature}' not found in"
+          f" target nodeset '{target_nodeset}'."
+      )
+    log.info(
+        "Splitting the train and validation sets temporally on the creation"
+        " timestamp feature %r of nodeset %r: the oldest nodes are used for"
+        " training and the most recent ones for validation (instead of a"
+        " random split).",
+        ts_feature,
+        target_nodeset,
+    )
+    timestamps = graph.node_sets[target_nodeset].features[ts_feature]
+    train_seed_node_idxs, valid_seed_node_idxs = (
+        util.split_train_valid_temporal(
+            creation_times=timestamps,
+            validation_ratio=validation_ratio,
+            max_num_valid_examples=max_num_valid_examples,
+        )
+    )
+  else:
+    train_seed_node_idxs, valid_seed_node_idxs = util.split_train_valid(
+        num_graph_seed_nodes,
+        validation_ratio,
+        random_seed,
+        max_num_valid_examples=max_num_valid_examples,
+    )
   log.info(
       "Num. training seed nodes: %d, Num. validation seed nodes: %d",
       len(train_seed_node_idxs),
@@ -715,6 +744,11 @@ def prepare_datasets(
   else:
     max_num_valid_examples = num_valid_steps * batch_size
 
+  target_ts_feature = temporal_util.creation_time_feature_name(
+      schema.node_sets[target_nodeset].features
+  )
+  target_has_creation_time = target_ts_feature is not None
+
   train_seed_node_idxs, valid_seed_node_idxs = (
       compute_train_and_valid_node_idxs(
           graph,
@@ -726,6 +760,8 @@ def prepare_datasets(
           train_seed_nodes=train_seed_nodes,
           valid_seed_nodes=valid_seed_nodes,
           max_num_valid_examples=max_num_valid_examples,
+          temporal_split=temporal_sampling and target_has_creation_time,
+          ts_feature=target_ts_feature,
       )
   )
 
@@ -740,13 +776,6 @@ def prepare_datasets(
     sampling_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
         sampling_config, schema
     )
-
-  target_has_creation_time = (
-      temporal_util.creation_time_feature_name(
-          schema.node_sets[target_nodeset].features
-      )
-      is not None
-  )
   if auto_normalize_config is None:
     auto_normalize_config = normalize_lib.AutoNormalizeConfig(
         keep_raw_features=keep_raw_features or set(),
