@@ -587,6 +587,7 @@ py_test(
         "//dgf/src/util:test_util",
         "//dgf/src/validate:in_memory_graph",
         # numpy dep,
+        # pandas dep,
     ],
 )
 

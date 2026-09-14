@@ -64,6 +64,7 @@ class Repo(str, enum.Enum):
   OGB = "OGB"
   CNS = "CNS"
   ZENODO = "ZENODO"
+  WEB = "WEB"
 
 
 def download_ogb_graph(name: str) -> Tuple[Any, Any, Any]:
@@ -728,3 +729,383 @@ def fetch_graphland_graph(
     return load_graph()
   else:
     return cache_lib.cache(cache_graph_path, load_graph)
+
+
+JENA_CLIMATE_URL = (
+    "https://storage.googleapis.com/tensorflow/tf-keras-datasets/jena_climate_2009_2016.csv.zip"
+)
+
+JENA_CLIMATE_COLUMN_RENAME_MAP = {
+    "p (mbar)": "p_mbar",
+    "T (degC)": "t_degc",
+    "Tpot (K)": "tpot_k",
+    "Tdew (degC)": "tdew_degc",
+    "rh (%)": "rh_percent",
+    "VPmax (mbar)": "vpmax_mbar",
+    "VPact (mbar)": "vpact_mbar",
+    "VPdef (mbar)": "vpdef_mbar",
+    "sh (g/kg)": "sh_g_per_kg",
+    "H2OC (mmol/mol)": "h2oc_mmol_per_mol",
+    "rho (g/m**3)": "rho_g_per_cubic_m",
+    "wv (m/s)": "wv_m_per_s",
+    "max. wv (m/s)": "max_wv_m_per_s",
+    "wd (deg)": "wd_deg",
+}
+
+JENA_WEATHER_FEATURE_NAMES = list(JENA_CLIMATE_COLUMN_RENAME_MAP.values())
+
+
+def download_jena_climate_csv(source: Optional[str] = None) -> pd.DataFrame:
+  """Downloads and parses the Jena Climate CSV.
+
+  Cleans sentinel values (-9999.0 in wind velocities) and parses timestamps.
+
+  Args:
+    source: Optional URL or file path. If None, downloads from the official
+      TensorFlow datasets public GCS archive.
+
+  Returns:
+    A cleaned pandas DataFrame with timestamps and renamed columns.
+  """
+  url_or_path = source or JENA_CLIMATE_URL
+  if url_or_path.startswith("http://") or url_or_path.startswith("https://"):
+    log.info("Downloading Jena Climate dataset from %s", url_or_path)
+    request = urllib.request.Request(
+        url_or_path, headers={"User-Agent": "Mozilla/5.0"}
+    )
+    with urllib.request.urlopen(request) as response:
+      content = response.read()
+    with zipfile.ZipFile(io.BytesIO(content)) as zip_file:
+      csv_names = [
+          name for name in zip_file.namelist() if name.endswith(".csv")
+      ]
+      if not csv_names:
+        raise ValueError(f"No CSV file found in archive from {url_or_path}")
+      with zip_file.open(csv_names[0]) as csv_file:
+        climate_df = pd.read_csv(csv_file)
+  else:
+    if url_or_path.endswith(".zip"):
+      with zipfile.ZipFile(url_or_path) as zip_file:
+        csv_names = [
+            name for name in zip_file.namelist() if name.endswith(".csv")
+        ]
+        if not csv_names:
+          raise ValueError(f"No CSV file found in {url_or_path}")
+        with zip_file.open(csv_names[0]) as csv_file:
+          climate_df = pd.read_csv(csv_file)
+    else:
+      climate_df = pd.read_csv(url_or_path)
+
+  missing_columns = [
+      column
+      for column in ["Date Time", *JENA_CLIMATE_COLUMN_RENAME_MAP]
+      if column not in climate_df.columns
+  ]
+  if missing_columns:
+    raise ValueError(
+        f"Jena Climate data from {url_or_path} is missing the columns"
+        f" {missing_columns}."
+    )
+
+  # Clean sentinel values: wv (m/s) and max. wv (m/s) have -9999.0 for missing
+  for column in ["wv (m/s)", "max. wv (m/s)"]:
+    climate_df[column] = climate_df[column].replace(-9999.0, 0.0)
+
+  # Parse Date Time to unix timestamp (seconds)
+  date_times = pd.to_datetime(
+      climate_df["Date Time"], format="%d.%m.%Y %H:%M:%S"
+  )
+  climate_df["timestamp"] = (date_times.astype("int64") // 10**9).astype(
+      np.int64
+  )
+
+  return climate_df.rename(columns=JENA_CLIMATE_COLUMN_RENAME_MAP)
+
+
+def build_jena_climate_graph(
+    climate_df: pd.DataFrame,
+    forecast_horizon_seconds: int = 3600,
+    query_step: int = 6,
+    subsample_station_step: int = 1,
+) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+  """Constructs a DGF InMemoryGraph and GraphSchema from Jena Climate data.
+
+  Graph structure:
+    - Single station node containing 14 time series weather metrics.
+    - Query nodes at chronological intervals, each with `creation_time`
+      and regression label `temperature` (at `creation_time + horizon`).
+    - Bidirectional edges between query nodes and the single station node.
+
+  Args:
+    climate_df: Jena Climate pandas DataFrame, as returned by
+      `download_jena_climate_csv`.
+    forecast_horizon_seconds: Horizon into the future to predict (default: 3600s
+      = 1 hour).
+    query_step: Stride for sampling query nodes (default: 6, i.e. 1 query/hour
+      for 10-minute data).
+    subsample_station_step: Stride for station time series observations
+      (default: 1).
+
+  Returns:
+    A tuple of (InMemoryGraph, GraphSchema).
+  """
+  missing_columns = [
+      column
+      for column in ["timestamp", *JENA_WEATHER_FEATURE_NAMES]
+      if column not in climate_df.columns
+  ]
+  if missing_columns:
+    raise ValueError(
+        f"climate_df is missing the columns {missing_columns}. Expected the"
+        " output of download_jena_climate_csv."
+    )
+
+  all_timestamps = climate_df["timestamp"].to_numpy(dtype=np.int64)
+  all_temperatures = climate_df["t_degc"].to_numpy(dtype=np.float32)
+
+  # Subsample station observations if requested
+  station_timestamps = all_timestamps[::subsample_station_step]
+
+  # Station features schema and data
+  station_node_features: dict[str, np.ndarray] = {
+      "#id": np.array([b"station_0"], dtype=np.bytes_),
+  }
+  station_schema_features: dict[str, schema_lib.FeatureSchema] = {
+      "#id": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.BYTES,
+          semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+      ),
+  }
+
+  station_times = np.empty(1, dtype=object)
+  station_times[0] = station_timestamps
+  station_node_features["time"] = station_times
+  station_schema_features["time"] = schema_lib.FeatureSchema(
+      format=schema_lib.FeatureFormat.INTEGER_64,
+      semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+      is_timeseries=True,
+      is_creation_time=True,
+      group="weather_ts",
+      shape=(None,),
+  )
+
+  for column_name in JENA_WEATHER_FEATURE_NAMES:
+    station_values = np.empty(1, dtype=object)
+    station_values[0] = (
+        climate_df[column_name]
+        .iloc[::subsample_station_step]
+        .to_numpy(dtype=np.float32)
+    )
+    station_node_features[column_name] = station_values
+    station_schema_features[column_name] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        is_timeseries=True,
+        group="weather_ts",
+        shape=(None,),
+    )
+
+  station_node_set = in_memory_graph_lib.InMemoryNodeSet(
+      num_nodes=1,
+      features=station_node_features,
+  )
+
+  # Query nodes construction
+  candidate_query_indices = np.arange(0, len(climate_df), query_step)
+  candidate_query_times = all_timestamps[candidate_query_indices]
+  target_times = candidate_query_times + forecast_horizon_seconds
+
+  target_indices = np.searchsorted(all_timestamps, target_times)
+  valid_mask = (target_indices < len(all_timestamps)) & (
+      all_timestamps[np.minimum(target_indices, len(all_timestamps) - 1)]
+      == target_times
+  )
+
+  valid_query_times = candidate_query_times[valid_mask]
+  valid_target_temperatures = all_temperatures[target_indices[valid_mask]]
+  num_queries = len(valid_query_times)
+
+  if num_queries == 0:
+    raise ValueError(
+        f"No valid query points found with horizon {forecast_horizon_seconds}s."
+    )
+
+  # Chronological split: 70% train, 20% valid, 10% test
+  num_train = int(num_queries * 0.7)
+  num_valid = int(num_queries * 0.2)
+  split_labels = np.full(num_queries, "n/a", dtype="S5")
+  split_labels[:num_train] = b"train"
+  split_labels[num_train : num_train + num_valid] = b"valid"
+  split_labels[num_train + num_valid :] = b"test"
+
+  query_ids = np.array(
+      [f"query_{i}".encode("utf-8") for i in range(num_queries)],
+      dtype=np.bytes_,
+  )
+  query_node_features: dict[str, np.ndarray] = {
+      "#id": query_ids,
+      "creation_time": valid_query_times,
+      "temperature": valid_target_temperatures,
+      "#split": split_labels,
+  }
+
+  query_schema_features: dict[str, schema_lib.FeatureSchema] = {
+      "#id": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.BYTES,
+          semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+      ),
+      "creation_time": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.INTEGER_64,
+          semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+          is_creation_time=True,
+      ),
+      "temperature": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.FLOAT_32,
+          semantic=schema_lib.FeatureSemantic.NUMERICAL,
+      ),
+      "#split": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.BYTES,
+          semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+      ),
+  }
+
+  query_node_set = in_memory_graph_lib.InMemoryNodeSet(
+      num_nodes=num_queries,
+      features=query_node_features,
+  )
+
+  # Edge sets: bidirectional between queries and station node (0)
+  query_indices = np.arange(num_queries, dtype=np.int64)
+  zero_indices = np.zeros(num_queries, dtype=np.int64)
+
+  query_to_station_edges = in_memory_graph_lib.InMemoryEdgeSet(
+      adjacency=np.stack([query_indices, zero_indices], axis=0),
+      features={},
+  )
+  station_to_query_edges = in_memory_graph_lib.InMemoryEdgeSet(
+      adjacency=np.stack([zero_indices, query_indices], axis=0),
+      features={},
+  )
+
+  graph = in_memory_graph_lib.InMemoryGraph(
+      node_sets={
+          "queries": query_node_set,
+          "station": station_node_set,
+      },
+      edge_sets={
+          "query_to_station": query_to_station_edges,
+          "station_to_query": station_to_query_edges,
+      },
+  )
+
+  schema = schema_lib.GraphSchema(
+      node_sets={
+          "queries": schema_lib.NodeSchema(features=query_schema_features),
+          "station": schema_lib.NodeSchema(features=station_schema_features),
+      },
+      edge_sets={
+          "query_to_station": schema_lib.EdgeSchema(
+              source="queries",
+              target="station",
+              features={},
+          ),
+          "station_to_query": schema_lib.EdgeSchema(
+              source="station",
+              target="queries",
+              features={},
+          ),
+      },
+  )
+
+  return graph, schema
+
+
+def fetch_jena_climate_graph(
+    name: str = "jena_climate_1h",
+    cache_dir: Optional[str] = "AUTO",
+    verbose: bool = True,
+    forecast_horizon_seconds: int = 3600,
+    query_step: int = 6,
+    subsample_station_step: int = 1,
+    repo: Union[Repo, str] = Repo.AUTO,
+    source: Optional[str] = None,
+) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+  """Downloads and loads the Jena Climate time series benchmark into memory.
+
+  This function loads the Jena Climate dataset
+  (https://www.bgc-jena.mpg.de/wetter/) and represents it as an in-memory graph
+  node prediction regression task with a single weather station node containing
+  14 meteorological time-series features and query nodes representing prediction
+  time points.
+
+  Usage example:
+
+  ```python
+  graph, schema = dgf.io.fetch_jena_climate_graph()
+  dgf.analyse.print_schema(schema)
+  ```
+
+  Args:
+    name: The name of the dataset under CNS fetch_repo (e.g. 'jena_climate_1h'
+      or 'jena_climate_24h').
+    cache_dir: Optional. Directory to cache the graph in order to avoid
+      re-downloading/re-parsing it each time. If "AUTO", uses OS default
+      temporary directory. If None, does not cache the graph.
+    verbose: Optional. Whether to print cache and download progress.
+    forecast_horizon_seconds: Forecasting horizon in seconds (default: 3600 for
+      1 hour ahead).
+    query_step: Step size to subsample query nodes (default: 6, i.e. 1 query per
+      hour for 10-minute data).
+    subsample_station_step: Optional step to subsample the station time series
+      (default: 1, full 10-minute resolution).
+    repo: Define the source of the data (Repo.AUTO, Repo.CNS, Repo.WEB).
+    source: Optional URL or file path to the Jena Climate zip/CSV.
+
+  Returns:
+    An InMemoryGraph instance and its GraphSchema.
+  """
+  if cache_dir == "AUTO":
+    cache_dir = os.path.join(tempfile.gettempdir(), "gf_fetch_jena_climate")
+
+  if cache_dir is not None:
+    fs.makedirs(cache_dir)
+    cache_key = (
+        f"{name}_h{forecast_horizon_seconds}_qs{query_step}_"
+        f"ss{subsample_station_step}.cache"
+    )
+    cache_graph_path = os.path.join(cache_dir, cache_key)
+    if verbose:
+      log.info("Caching Jena Climate graph at %s", cache_graph_path)
+  else:
+    cache_graph_path = None
+
+  if isinstance(repo, str):
+    repo = Repo(repo)
+
+  # Select the right repo.
+  if repo == Repo.AUTO:
+    repo = Repo.WEB
+
+  if repo == Repo.CNS:
+    loader = functools.partial(load_from_cns, name=name)
+  elif repo == Repo.WEB:
+
+    def loader():
+      if verbose:
+        log.info(
+            "Loading Jena Climate data from %s", source or JENA_CLIMATE_URL
+        )
+      climate_df = download_jena_climate_csv(source=source)
+      return build_jena_climate_graph(
+          climate_df=climate_df,
+          forecast_horizon_seconds=forecast_horizon_seconds,
+          query_step=query_step,
+          subsample_station_step=subsample_station_step,
+      )
+  else:
+    raise ValueError(f"Unsupported repo for Jena Climate: {repo}")
+
+  if cache_graph_path is None:
+    return loader()
+  else:
+    return cache_lib.cache(cache_graph_path, loader)
