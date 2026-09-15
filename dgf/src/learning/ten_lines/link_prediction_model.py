@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
-from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Tuple, Union
 
 import dataclasses_json
 from dgf.src.data import in_memory_graph
@@ -227,6 +227,23 @@ def _separate_positives_and_negatives(
   pos_probs = reshaped_probs[:, 0]
   neg_probs = reshaped_probs[:, 1:].flatten()
   return pos_probs, neg_probs
+
+
+def _rename_spec(spec: Any, name: str) -> Any:
+  """Returns a copy of a tensor spec with a new name.
+
+  `tf.RaggedTensorSpec`, unlike `tf.TensorSpec`, does not have a name. In this
+  case, the spec is returned as is.
+
+  Args:
+    spec: A `tf.TensorSpec` or `tf.RaggedTensorSpec`.
+    name: The new name of the spec.
+  """
+  if isinstance(spec, tf.TensorSpec):
+    return tf.TensorSpec(shape=spec.shape, dtype=spec.dtype, name=name)
+  if isinstance(spec, tf.RaggedTensorSpec):
+    return spec
+  raise ValueError(f"Unsupported spec type: {type(spec)}")
 
 
 class LinkPredictionModel(common.Model):
@@ -835,7 +852,8 @@ class LinkPredictionModel(common.Model):
       self,
       encoder: Literal["source", "target", "both"],
       *,
-      consume_tf_graph_dict: bool = False,
+      input_format: Optional[Union[common.TFFunctionInputFormat, str]] = None,
+      consume_tf_graph_dict: Optional[bool] = None,
   ) -> tf.Module:
     """Exports the model as a TensorFlow function without the sampling step.
 
@@ -875,14 +893,40 @@ class LinkPredictionModel(common.Model):
         encoder. Returns source embeddings. - "target": Export the target
         encoder. Returns target embeddings. - "both": Export the full model.
         Returns edge probabilities.
-      consume_tf_graph_dict: If `True`, the returned TensorFlow function will
-        expect flat dictionaries representing the graphs instead of
-        `TFInMemoryGraph` objects. For `encoder="both"`, the keys in the
-        dictionary must be prefixed with `source_` and `target_` respectively.
+      input_format: Format of the inputs consumed by the returned TensorFlow
+        function. See `dgf.learning.TFFunctionInputFormat`. With
+        `TF_GRAPH_DICT`, the returned TensorFlow function expects flat
+        dictionaries representing the graphs instead of `TFInMemoryGraph`
+        objects. For `encoder="both"`, the keys in the dictionary must be
+        prefixed with `source_` and `target_` respectively.
+        `SERIALIZED_TFGNN_GRAPHS` is not supported: a link prediction model
+        consumes two graph samples per prediction while a TF GNN Graph Sample
+        only contains one graph. Defaults to `TF_GRAPH`.
+      consume_tf_graph_dict: Deprecated. Use `input_format` instead.
+        `consume_tf_graph_dict=True` is equivalent to
+        `input_format="TF_GRAPH_DICT"`, and `consume_tf_graph_dict=False` is
+        equivalent to `input_format="TF_GRAPH"`.
 
     Returns:
       A `tf.Module` with a `__call__` method.
     """
+    input_format = common.resolve_tf_function_input_format(
+        input_format, consume_tf_graph_dict
+    )
+    if input_format == common.TFFunctionInputFormat.SERIALIZED_TFGNN_GRAPHS:
+      raise ValueError(
+          "The input format"
+          f" {common.TFFunctionInputFormat.SERIALIZED_TFGNN_GRAPHS.value} is"
+          " not supported by link prediction models: a prediction requires two"
+          " graph samples (source and target) while a TF GNN Graph Sample only"
+          " contains one graph. Use"
+          f" {common.TFFunctionInputFormat.TF_GRAPH_DICT.value} or"
+          f" {common.TFFunctionInputFormat.TF_GRAPH.value} instead."
+      )
+    consume_tf_graph_dict = (
+        input_format == common.TFFunctionInputFormat.TF_GRAPH_DICT
+    )
+
     live = self._get_live()
     schema = self.data().schema
 
@@ -980,7 +1024,7 @@ class LinkPredictionModel(common.Model):
       wrapper = wrapper_class(tf_apply, normalizer, schema, padding)
 
       if consume_tf_graph_dict:
-        spec_kwargs = {spec.name: spec for spec in graph_dict_spec}
+        spec_kwargs = dict(graph_dict_spec)
         spec_kwargs["seed_node_idxs"] = seed_node_idxs_spec
         wrapper.__call__ = wrapper.__call__.get_concrete_function(**spec_kwargs)
 
@@ -1192,12 +1236,12 @@ class LinkPredictionModel(common.Model):
 
       if consume_tf_graph_dict:
         spec_kwargs = {}
-        for spec in graph_dict_spec:
-          spec_kwargs[f"source_{spec.name}"] = tf.TensorSpec(
-              shape=spec.shape, dtype=spec.dtype, name=f"source_{spec.name}"
+        for spec_name, spec in graph_dict_spec.items():
+          spec_kwargs[f"source_{spec_name}"] = _rename_spec(
+              spec, f"source_{spec_name}"
           )
-          spec_kwargs[f"target_{spec.name}"] = tf.TensorSpec(
-              shape=spec.shape, dtype=spec.dtype, name=f"target_{spec.name}"
+          spec_kwargs[f"target_{spec_name}"] = _rename_spec(
+              spec, f"target_{spec_name}"
           )
         spec_kwargs["source_seed_node_idxs"] = source_seed_node_idxs_spec
         spec_kwargs["target_seed_node_idxs"] = target_seed_node_idxs_spec

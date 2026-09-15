@@ -19,9 +19,12 @@ from absl.testing import parameterized
 import apache_beam as beam
 from apache_beam.testing import util
 from dgf.src.data import distributed_graph as distributed_graph_lib
+from dgf.src.data import in_memory_graph
+from dgf.src.data import schema as schema_lib
 from dgf.src.io import tf_graph_sample
 from dgf.src.util import gen_test_graph
 from dgf.src.util import test_util
+import numpy as np
 import tensorflow as tf
 
 test_util.disable_diff_truncation()
@@ -237,6 +240,88 @@ class TfGnnGraphSampleTest(parameterized.TestCase):
         test_util.assert_are_equal(self, read_graph, graph)
         num_read_examples += 1
       self.assertEqual(num_read_examples, 3)
+
+  def test_bool_feature_round_trip(self):
+    """BOOL features are stored as int64s in a TF GNN Graph Sample."""
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "f1": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BOOL
+                    )
+                }
+            )
+        },
+        edge_sets={},
+    )
+    graph = in_memory_graph.InMemoryGraph(
+        node_sets={
+            "n1": in_memory_graph.InMemoryNodeSet(
+                num_nodes=3,
+                features={"f1": np.array([True, False, True])},
+            )
+        },
+        edge_sets={},
+    )
+
+    example = tf_graph_sample.graph_to_tfgnn_graph(graph, schema)
+
+    self.assertEqual(
+        list(example.features.feature["nodes/n1.f1"].int64_list.value),
+        [1, 0, 1],
+    )
+    test_util.assert_are_equal(
+        self, tf_graph_sample.tfgnn_graph_to_graph(example, schema), graph
+    )
+
+  def test_multi_ragged_feature_is_rejected(self):
+    """The NumPy format supports at most one variable-length dimension."""
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "f1": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        shape=(None, None),
+                    )
+                }
+            )
+        },
+        edge_sets={},
+    )
+
+    def as_object_array(rows):
+      result = np.empty(len(rows), dtype=np.object_)
+      result[:] = rows
+      return result
+
+    values = as_object_array([
+        as_object_array([np.array([1, 2]), np.array([3])]),
+        as_object_array([np.array([4, 5, 6])]),
+    ])
+    graph = in_memory_graph.InMemoryGraph(
+        node_sets={
+            "n1": in_memory_graph.InMemoryNodeSet(
+                num_nodes=2, features={"f1": values}
+            )
+        },
+        edge_sets={},
+    )
+
+    with self.assertRaisesRegex(ValueError, "has 2 variable-length dimensions"):
+      tf_graph_sample.graph_to_tfgnn_graph_dict(graph, schema)
+
+    with self.assertRaisesRegex(ValueError, "has 2 variable-length dimensions"):
+      tf_graph_sample.graph_dict_to_graph(
+          {
+              "nodes/n1.#size": np.array([2]),
+              "nodes/n1.f1": np.array([1, 2, 3, 4, 5, 6]),
+              "nodes/n1.f1.d1": np.array([2, 1]),
+              "nodes/n1.f1.d2": np.array([2, 1, 3]),
+          },
+          schema,
+      )
 
 
 if __name__ == "__main__":

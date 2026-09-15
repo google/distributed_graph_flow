@@ -24,7 +24,7 @@ import dataclasses
 import enum
 import itertools
 import os
-from typing import Callable, Dict, Iterator, List, Optional
+from typing import Callable, Dict, Iterator, List, Optional, Union
 
 import dataclasses_json
 from dgf.src.data import in_memory_graph
@@ -809,7 +809,10 @@ class NodePredictionModel(common.Model):
     return self._live
 
   def to_tensorflow_function(
-      self, *, consume_tf_graph_dict: bool = False
+      self,
+      *,
+      input_format: Optional[Union[common.TFFunctionInputFormat, str]] = None,
+      consume_tf_graph_dict: Optional[bool] = None,
   ) -> tf.Module:
     """Exports the model as a TensorFlow function without the sampling step.
 
@@ -817,24 +820,41 @@ class NodePredictionModel(common.Model):
     normalization and core prediction logic. It is designed to be used with
     pre-sampled subgraphs.
 
-    The returned TensorFlow function takes two arguments:
-      - graph: Either a `dgf.data.TFInMemoryGraph` or
-      `dgf.data.TFInMemoryGraphDict` graph (depending on consume_tf_graph_dict).
-      - seed_node_idxs: A 1D tensor of integers specifying the indices of the
-        nodes within the target nodeset for which to generate predictions.
+    Depending on `input_format`, the returned TensorFlow function takes:
+      - TF_GRAPH: A `dgf.data.TFInMemoryGraph` named `graph`, and a 1D tensor of
+        integers named `seed_node_idxs` specifying the indices of the nodes
+        within the target nodeset for which to generate predictions.
+      - TF_GRAPH_DICT: The items of a `dgf.data.TFInMemoryGraphDict` as keyword
+        arguments, and `seed_node_idxs`.
+      - SERIALIZED_TFGNN_GRAPHS: A 1D string tensor named `examples` containing
+        serialized TF GNN Graph Samples. One prediction is generated for each
+        graph sample, on the first node of the target nodeset (which is the
+        seed node of the DGF graph samplers).
+
+    Usage example:
+
+    ```python
+    # Consumes serialized TF GNN Graph Samples e.g. for a TFX BulkInferrer.
+    tf_predict_fn = model.to_tensorflow_function(
+        input_format="SERIALIZED_TFGNN_GRAPHS")
+    predictions = tf_predict_fn(tf.constant([serialized_example]))
+    ```
 
     Args:
-      consume_tf_graph_dict: If `True`, the returned TensorFlow function will
-        expect a `dgf.data.TFInMemoryGraphDict` as the `graph` argument. This
-        format is a flat dictionary, which is often easier to use with TF
-        SavedModel signatures. If `False` (default), the function will expect a
-        `dgf.data.TFInMemoryGraph` object. While more natural, this can lead to
-        more complex manual creation of TF SavedModel signatures.
+      input_format: Format of the inputs consumed by the returned TensorFlow
+        function. See `dgf.learning.TFFunctionInputFormat`. Defaults to
+        `TF_GRAPH`.
+      consume_tf_graph_dict: Deprecated. Use `input_format` instead.
+        `consume_tf_graph_dict=True` is equivalent to
+        `input_format="TF_GRAPH_DICT"`, and `consume_tf_graph_dict=False` is
+        equivalent to `input_format="TF_GRAPH"`.
 
     Returns:
-      A `tf.Module` with a `__call__` method that takes `graph` and
-      `seed_node_idxs` and returns a tensor of predictions for the seed nodes.
+      A `tf.Module` with a `__call__` method returning a tensor of predictions.
     """
+    input_format = common.resolve_tf_function_input_format(
+        input_format, consume_tf_graph_dict
+    )
 
     live = self._get_live()
     tf_apply_core_model = jax2tf.convert(
@@ -924,11 +944,51 @@ class NodePredictionModel(common.Model):
         graph = io_tf_lib.tf_graph_dict_to_tf_graph(kwargs)
         return self._predict(graph, seed_node_idxs)
 
-    wrapper_class = (
-        TfPredictWrapperTFGraphDict
-        if consume_tf_graph_dict
-        else TfPredictWrapperTFGraph
-    )
+    class TfPredictWrapperSerializedTFGNNGraphs(TfPredictWrapperBase):
+      """Consumes serialized TF GNN Graph Samples."""
+
+      def __init__(self, tf_apply_core_model, normalizer, schema, padding):
+        super().__init__(
+            "TfPredictWrapperSerializedTFGNNGraphs",
+            tf_apply_core_model,
+            normalizer,
+            schema,
+            padding,
+        )
+        self._parsing_spec = io_tf_lib.schema_to_tfgnn_graph_parsing_spec(
+            schema
+        )
+
+      @tf.function(
+          autograph=False,
+          input_signature=[
+              tf.TensorSpec(shape=[None], dtype=tf.string, name="examples")
+          ],
+      )
+      def __call__(self, examples: tf.Tensor) -> tf.Tensor:
+        def predict_one_example(serialized_example: tf.Tensor) -> tf.Tensor:
+          graph = io_tf_lib.tfgnn_graph_dict_to_tf_graph(
+              tf.io.parse_single_example(
+                  serialized_example, self._parsing_spec
+              ),
+              self._schema,
+          )
+          # Note: By convention, the seed node is the first node of the target
+          # nodeset of the graph sample.
+          predictions = self._predict(graph, tf.constant([0], dtype=tf.int32))
+          return predictions[0]
+
+        return tf.map_fn(
+            predict_one_example, examples, fn_output_signature=tf.float32
+        )
+
+    wrapper_class = {
+        common.TFFunctionInputFormat.TF_GRAPH: TfPredictWrapperTFGraph,
+        common.TFFunctionInputFormat.TF_GRAPH_DICT: TfPredictWrapperTFGraphDict,
+        common.TFFunctionInputFormat.SERIALIZED_TFGNN_GRAPHS: (
+            TfPredictWrapperSerializedTFGNNGraphs
+        ),
+    }[input_format]
     wrapper = wrapper_class(
         tf_apply_core_model,
         live.normalizer,
@@ -936,10 +996,8 @@ class NodePredictionModel(common.Model):
         self.data().padding,
     )
 
-    if consume_tf_graph_dict:
-      spec_kwargs = {}
-      for spec in graph_dict_spec:
-        spec_kwargs[spec.name] = spec
+    if input_format == common.TFFunctionInputFormat.TF_GRAPH_DICT:
+      spec_kwargs = dict(graph_dict_spec)
       spec_kwargs["seed_node_idxs"] = seed_node_idxs_spec
       wrapper.__call__ = wrapper.__call__.get_concrete_function(**spec_kwargs)
 

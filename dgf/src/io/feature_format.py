@@ -98,3 +98,40 @@ FEATURE_FORMAT_TO_PYARROW_DATA_TYPE: Dict[
     schema_lib.FeatureFormat.BYTES: pa.binary(),
     schema_lib.FeatureFormat.BOOL: pa.bool_(),
 }
+
+# Mapping from a FeatureFormat to the FeatureFormat used to store its values in
+# a `tf.train.Example` proto (i.e. in a TF GNN Graph Sample). A
+# `tf.train.Example` only supports three types of values: int64, float32 and
+# bytes. The conversion back to the schema format is done when converting a TF
+# GNN Graph Sample into a DGF object (e.g. `InMemoryGraph`, `TFInMemoryGraph`).
+FEATURE_FORMAT_TO_TFGNN_STORAGE_FORMAT: Dict[
+    schema_lib.FeatureFormat, schema_lib.FeatureFormat
+] = {
+    schema_lib.FeatureFormat.INTEGER_32: schema_lib.FeatureFormat.INTEGER_64,
+    schema_lib.FeatureFormat.INTEGER_64: schema_lib.FeatureFormat.INTEGER_64,
+    schema_lib.FeatureFormat.BOOL: schema_lib.FeatureFormat.INTEGER_64,
+    schema_lib.FeatureFormat.FLOAT_32: schema_lib.FeatureFormat.FLOAT_32,
+    schema_lib.FeatureFormat.FLOAT_64: schema_lib.FeatureFormat.FLOAT_32,
+    schema_lib.FeatureFormat.BYTES: schema_lib.FeatureFormat.BYTES,
+}
+
+# Mapping from a FeatureFormat to the NumPy dtype used to store its values in a
+# TF GNN Graph Sample.
+FEATURE_FORMAT_TO_TFGNN_NP_DTYPE: Dict[schema_lib.FeatureFormat, Any] = {
+    key: FEATURE_FORMAT_TO_NP_DTYPE[value]
+    for key, value in FEATURE_FORMAT_TO_TFGNN_STORAGE_FORMAT.items()
+}
+
+
+class _LazyFeatureFormatToTfgnnTfDtype:
+  """Mapping from a FeatureFormat to the TF dtype used in a TF GNN Graph."""
+
+  def __getitem__(self, key: schema_lib.FeatureFormat) -> "tf.DType":
+    return FEATURE_FORMAT_TO_TF_DTYPE[
+        FEATURE_FORMAT_TO_TFGNN_STORAGE_FORMAT[key]
+    ]
+
+
+# Mapping from a FeatureFormat to the TensorFlow dtype used to store its values
+# in a TF GNN Graph Sample.
+FEATURE_FORMAT_TO_TFGNN_TF_DTYPE = _LazyFeatureFormatToTfgnnTfDtype()

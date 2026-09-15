@@ -72,6 +72,89 @@ def parse_architecture(architecture: Union[Architecture, str]) -> Architecture:
     raise ValueError(f"Unknown architecture: {architecture}")
 
 
+class TFFunctionInputFormat(enum.Enum):
+  """Input format of a model exported with `to_tensorflow_function`.
+
+  Possible values:
+    TF_GRAPH: A `dgf.data.TFInMemoryGraph` and the indices of the seed nodes.
+    TF_GRAPH_DICT: A `dgf.data.TFInMemoryGraphDict` (i.e. a flat dictionary of
+      tensors) and the indices of the seed nodes.
+    SERIALIZED_TFGNN_GRAPHS: A 1D string tensor of serialized TF GNN Graph
+      Samples (i.e. `tf.train.Example` protos), with one graph sample per
+      prediction. The seed node is the first node of the target nodeset.
+  """
+
+  TF_GRAPH = "TF_GRAPH"
+  TF_GRAPH_DICT = "TF_GRAPH_DICT"
+  SERIALIZED_TFGNN_GRAPHS = "SERIALIZED_TFGNN_GRAPHS"
+
+
+DEFAULT_TF_FUNCTION_INPUT_FORMAT = TFFunctionInputFormat.TF_GRAPH
+
+
+def parse_tf_function_input_format(
+    input_format: Union[TFFunctionInputFormat, str],
+) -> TFFunctionInputFormat:
+  """Parses a string or TFFunctionInputFormat into a TFFunctionInputFormat."""
+  if isinstance(input_format, TFFunctionInputFormat):
+    return input_format
+  if not isinstance(input_format, str):
+    raise TypeError(
+        f"Expected TFFunctionInputFormat or str, got {type(input_format)}:"
+        f" {input_format}"
+    )
+  try:
+    return TFFunctionInputFormat[input_format.upper()]
+  except KeyError as exc:
+    raise ValueError(
+        f"Unknown input format: {input_format}. The supported values are:"
+        f" {[item.value for item in TFFunctionInputFormat]}."
+    ) from exc
+
+
+def resolve_tf_function_input_format(
+    input_format: Optional[Union[TFFunctionInputFormat, str]],
+    consume_tf_graph_dict: Optional[bool],
+) -> TFFunctionInputFormat:
+  """Resolves the input format of `to_tensorflow_function`.
+
+  Handles the deprecated `consume_tf_graph_dict` argument, which is superseded
+  by `input_format`.
+
+  Args:
+    input_format: The `input_format` argument, or None if not set by the user.
+    consume_tf_graph_dict: The deprecated `consume_tf_graph_dict` argument, or
+      None if not set by the user.
+
+  Returns:
+    The input format to use.
+  """
+  if consume_tf_graph_dict is None:
+    if input_format is None:
+      return DEFAULT_TF_FUNCTION_INPUT_FORMAT
+    return parse_tf_function_input_format(input_format)
+
+  if input_format is not None:
+    raise ValueError(
+        "The arguments `input_format` and `consume_tf_graph_dict` cannot be"
+        " set at the same time. `consume_tf_graph_dict` is deprecated: use"
+        f" input_format="
+        f'"{TFFunctionInputFormat.TF_GRAPH_DICT.value}" instead of'
+        " consume_tf_graph_dict=True."
+    )
+  log.warning(
+      "The argument `consume_tf_graph_dict` of `to_tensorflow_function` is"
+      ' deprecated. Use input_format="%s" (instead of'
+      ' consume_tf_graph_dict=True) or input_format="%s" (instead of'
+      " consume_tf_graph_dict=False).",
+      TFFunctionInputFormat.TF_GRAPH_DICT.value,
+      TFFunctionInputFormat.TF_GRAPH.value,
+  )
+  if consume_tf_graph_dict:
+    return TFFunctionInputFormat.TF_GRAPH_DICT
+  return TFFunctionInputFormat.TF_GRAPH
+
+
 @dataclasses.dataclass
 class LogItem:
   """A single log item.

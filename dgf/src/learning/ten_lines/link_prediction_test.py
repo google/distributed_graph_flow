@@ -577,18 +577,19 @@ class LinkPredictionToyTest(parameterized.TestCase):
     )
 
   @parameterized.parameters(
-      {"encoder": "source", "consume_tf_graph_dict": False},
-      {"encoder": "source", "consume_tf_graph_dict": True},
-      {"encoder": "target", "consume_tf_graph_dict": False},
-      {"encoder": "target", "consume_tf_graph_dict": True},
-      {"encoder": "both", "consume_tf_graph_dict": False},
-      {"encoder": "both", "consume_tf_graph_dict": True},
+      {"encoder": "source", "input_format": "TF_GRAPH"},
+      {"encoder": "source", "input_format": "TF_GRAPH_DICT"},
+      {"encoder": "target", "input_format": "TF_GRAPH"},
+      {"encoder": "target", "input_format": "TF_GRAPH_DICT"},
+      {"encoder": "both", "input_format": "TF_GRAPH"},
+      {"encoder": "both", "input_format": "TF_GRAPH_DICT"},
   )
   def test_to_tensorflow_function(
       self,
       encoder: Literal["source", "target", "both"],
-      consume_tf_graph_dict: bool,
+      input_format: str,
   ):
+    consume_tf_graph_dict = input_format == "TF_GRAPH_DICT"
     model = self.model
     graph = self.graph
     schema = model.data().schema
@@ -622,7 +623,7 @@ class LinkPredictionToyTest(parameterized.TestCase):
     tf_target_sample = tf_io.graph_to_tf_graph(target_sample, schema=schema)
 
     tf_predict_fn = model.to_tensorflow_function(
-        encoder=encoder, consume_tf_graph_dict=consume_tf_graph_dict
+        encoder=encoder, input_format=input_format
     )
 
     if encoder == "source":
@@ -781,6 +782,15 @@ class LinkPredictionToyTest(parameterized.TestCase):
             self.assertEqual(tensor.shape, ())
           else:
             self.assertEqual(tensor.shape.as_list(), expected_shape)
+
+  def test_to_tensorflow_function_serialized_tfgnn_graphs_fails(self):
+    """A TF GNN Graph Sample only contains one of the two required graphs."""
+    with self.assertRaisesRegex(
+        ValueError, "not supported by link prediction models"
+    ):
+      self.model.to_tensorflow_function(
+          encoder="both", input_format="SERIALIZED_TFGNN_GRAPHS"
+      )
 
 
 class LinkPredictionToyStandaloneTest(absltest.TestCase):

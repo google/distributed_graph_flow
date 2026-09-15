@@ -23,3 +23,4 @@ from dgf.src.learning.ten_lines.link_prediction_train import LinkPredictionModel
 from dgf.src.learning.ten_lines.link_prediction_train import train_link_model
 from dgf.src.learning.ten_lines.common import Model
 from dgf.src.learning.ten_lines.common import load_model
+from dgf.src.learning.ten_lines.common import TFFunctionInputFormat

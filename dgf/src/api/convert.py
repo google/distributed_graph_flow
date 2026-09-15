@@ -32,6 +32,10 @@ from dgf.src.io.tf import graph_to_tf_graph
 from dgf.src.io.tf import tf_graph_to_tf_graph_dict
 from dgf.src.io.tf import tf_graph_dict_to_tf_graph
 
+from dgf.src.io.tf import schema_to_tfgnn_graph_parsing_spec
+from dgf.src.io.tf import tfgnn_graph_dict_to_tf_graph
+from dgf.src.io.tf import serialized_tfgnn_graph_to_tf_graph
+
 from dgf.src.io.spanner import schema_to_spanner_ddl
 
 from dgf.src.io.networkx import graph_to_networkx

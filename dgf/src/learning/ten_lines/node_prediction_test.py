@@ -338,10 +338,11 @@ class NodePredictionRealLooking(parameterized.TestCase):
     )
 
   @parameterized.parameters(
-      {"consume_tf_graph_dict": False},
-      {"consume_tf_graph_dict": True},
+      {"input_format": "TF_GRAPH"},
+      {"input_format": "TF_GRAPH_DICT"},
   )
-  def test_to_tensorflow_function(self, consume_tf_graph_dict: bool):
+  def test_to_tensorflow_function(self, input_format: str):
+    consume_tf_graph_dict = input_format == "TF_GRAPH_DICT"
 
     sampler = in_memory_sampler_lib.create_sampler(
         graph=self.graph,
@@ -374,9 +375,7 @@ class NodePredictionRealLooking(parameterized.TestCase):
       kwargs_call_1 = {"graph": tf_sample_1, "seed_node_idxs": tf.constant([0])}
       kwargs_call_2 = {"graph": tf_sample_2, "seed_node_idxs": tf.constant([0])}
 
-    tf_predict_fn = self.model.to_tensorflow_function(
-        consume_tf_graph_dict=consume_tf_graph_dict
-    )
+    tf_predict_fn = self.model.to_tensorflow_function(input_format=input_format)
 
     prediction_sample_1 = tf_predict_fn(**kwargs_call_1)  # pyrefly: ignore[not-callable]
 
@@ -467,6 +466,85 @@ class NodePredictionRealLooking(parameterized.TestCase):
         expected_prediction_sample_2,
         atol=1e-5,
     )
+
+  def test_to_tensorflow_function_serialized_tfgnn_graphs(self):
+    schema = self.model.data().schema
+    sampler = in_memory_sampler_lib.create_sampler(
+        graph=self.graph,
+        plan=self.model.data().sampling_plan,
+        schema=schema,
+        batch_size=5,
+    )
+    # Note: We use different samples to test that the traced/frozen model can
+    # run on graph samples of different sizes.
+    samples = [sampler.sample(0), sampler.sample(1)]
+    serialized_samples = tf.constant([
+        tf_graph_sample_lib.graph_to_tfgnn_graph(
+            sample, schema=schema
+        ).SerializeToString()
+        for sample in samples
+    ])
+    # Note: By convention, the seed node is the first node of the target
+    # nodeset of a graph sample.
+    expected_predictions = np.concatenate(
+        [self.model.predict(sample, [0]) for sample in samples], axis=0
+    )
+
+    tf_predict_fn = self.model.to_tensorflow_function(
+        input_format="SERIALIZED_TFGNN_GRAPHS"
+    )
+
+    predictions = tf_predict_fn(serialized_samples)  # pyrefly: ignore[not-callable]
+    self.assertEqual(
+        predictions.shape.as_list(), list(expected_predictions.shape)
+    )
+    np.testing.assert_allclose(
+        predictions.numpy(), expected_predictions, atol=1e-5
+    )
+
+    # The exported function is a valid TF SavedModel.
+    with tempfile.TemporaryDirectory() as tmpdir:
+      tf.saved_model.save(tf_predict_fn, tmpdir)
+      loaded = tf.saved_model.load(tmpdir)
+      loaded_predictions = loaded(serialized_samples)
+
+    self.assertIn("serving_default", loaded.signatures)
+    input_names = [t.name for t in loaded.signatures["serving_default"].inputs]
+    self.assertTrue(
+        any("examples" in name for name in input_names),
+        f"examples not found in signature inputs: {input_names}",
+    )
+    np.testing.assert_allclose(
+        loaded_predictions.numpy(), expected_predictions, atol=1e-5
+    )
+
+  def test_to_tensorflow_function_deprecated_consume_tf_graph_dict(self):
+    """The deprecated `consume_tf_graph_dict` argument is still supported."""
+    sample = in_memory_sampler_lib.create_sampler(
+        graph=self.graph,
+        plan=self.model.data().sampling_plan,
+        schema=self.model.data().schema,
+        batch_size=5,
+    ).sample(0)
+    tf_sample = tf_io.graph_to_tf_graph(sample, schema=self.model.data().schema)
+    expected_prediction = self.model.predict(sample, [0])
+
+    tf_predict_fn = self.model.to_tensorflow_function(
+        consume_tf_graph_dict=True
+    )
+
+    prediction = tf_predict_fn(  # pyrefly: ignore[not-callable]
+        **tf_io.tf_graph_to_tf_graph_dict(tf_sample),
+        seed_node_idxs=tf.constant([0]),
+    )
+    np.testing.assert_allclose(
+        prediction.numpy(), expected_prediction, atol=1e-5
+    )
+
+    with self.assertRaisesRegex(ValueError, "cannot be set at the same time"):
+      self.model.to_tensorflow_function(
+          input_format="TF_GRAPH", consume_tf_graph_dict=True
+      )
 
   def test_evaluate(self):
 
