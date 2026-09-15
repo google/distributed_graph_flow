@@ -30,16 +30,16 @@ import jax.numpy as jnp
 # Linear, Einsum, (matrices) etc.
 # This will work well with CPU, TPU and modern GPUs. Older GPUs (e.g., v100)
 # don't support bf16.
-DEFAULT_MATRIX_PRECISION: jnp.dtype = jnp.bfloat16
+DEFAULT_MATRIX_PRECISION: jnp.dtype = jnp.bfloat16  # pyrefly: ignore[bad-assignment]
 
 # Full precision due to mean/var stats.
-DEFAULT_POINTWISE_NORM_PRECISION: jnp.dtype = jnp.float32
+DEFAULT_POINTWISE_NORM_PRECISION: jnp.dtype = jnp.float32  # pyrefly: ignore[bad-assignment]
 
 # Softmax
-DEFAULT_SOFTMAX_PRECISION: jnp.dtype = jnp.float32
+DEFAULT_SOFTMAX_PRECISION: jnp.dtype = jnp.float32  # pyrefly: ignore[bad-assignment]
 
 # Final loss reduction should be accumulated in full precision
-DEFAULT_LOSS_PRECISION: jnp.dtype = jnp.float32
+DEFAULT_LOSS_PRECISION: jnp.dtype = jnp.float32  # pyrefly: ignore[bad-assignment]
 
 # TODO(bmayer): Might be a good default value that could work for large or small
 # datasets?
