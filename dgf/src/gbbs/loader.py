@@ -74,11 +74,28 @@ def set_num_parlay_workers(num_workers: int) -> None:
 
   Calling this function is an optional user-exposed knob to customize or
   throttle thread concurrency. Typically, this value is set once per program
-  before executing graph operations.
+  before executing graph operations. Each call tears down the running thread
+  pool and starts a new one, so it must not be called while another thread is
+  executing a Parlay operation.
+
+  `PARLAY_NUM_THREADS` takes precedence over this function: Parlay reads it
+  every time a scheduler is created, so the worker count cannot be changed
+  programmatically while it is set.
 
   Args:
     num_workers: The desired number of worker threads.
+
+  Raises:
+    RuntimeError: If `PARLAY_NUM_THREADS` is set, which would make this call
+      silently ineffective.
   """
+  env_num_threads = os.environ.get("PARLAY_NUM_THREADS")
+  if env_num_threads is not None:
+    raise RuntimeError(
+        f"PARLAY_NUM_THREADS is set to {env_num_threads!r}, which takes"
+        " precedence over set_num_parlay_workers(). Unset it to set the worker"
+        " count programmatically."
+    )
   _gbbs_ext.set_num_parlay_workers(num_workers)
 
 

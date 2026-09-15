@@ -25,7 +25,6 @@ import numpy as np
 class LoaderTest(parameterized.TestCase):
 
   def test_read_gbbs_graph_from_parquet(self):
-    loader.set_num_parlay_workers(1)
     work_dir = self.create_tempdir().full_path
 
     # Create a small homogeneous graph schema

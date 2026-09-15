@@ -37,7 +37,11 @@ NB_MODULE(_gbbs_ext, m) {
   m.def(
       "set_num_parlay_workers",
       [](unsigned int num_workers) {
-        // Technically this resets the global scheduler with new threads.
+        // Drop the running scheduler first. `initialize_scheduler` returns the
+        // existing scheduler and ignores `num_workers` if one is already
+        // running, and `global_scheduler` keeps the scheduler created at module
+        // import alive for the lifetime of the module.
+        global_scheduler.shared.reset();
         global_scheduler = parlay::initialize_scheduler(num_workers);
       },
       nb::arg("num_workers"),

@@ -73,10 +73,6 @@ def _make_directed_cycle_with_tail() -> loader.GbbsGraphHandle:
 
 class ValidateGraphParamsTest(parameterized.TestCase):
 
-  def setUp(self):
-    super().setUp()
-    loader.set_num_parlay_workers(1)
-
   @parameterized.named_parameters(
       dict(
           testcase_name="simple_union_async",
@@ -164,10 +160,6 @@ class ValidateGraphParamsTest(parameterized.TestCase):
 
 class ConnectedComponentsTest(parameterized.TestCase):
   """Tests for the connected_components() dispatch function."""
-
-  def setUp(self):
-    super().setUp()
-    loader.set_num_parlay_workers(1)
 
   @parameterized.named_parameters(
       dict(
@@ -320,10 +312,6 @@ class ConnectedComponentsTest(parameterized.TestCase):
 class StronglyConnectedComponentsTest(parameterized.TestCase):
   """Tests for the SCC algorithm via connected_components()."""
 
-  def setUp(self):
-    super().setUp()
-    loader.set_num_parlay_workers(1)
-
   def test_scc_finds_cycle_and_tail(self):
     """Directed cycle 0→1→2→0 with tail 2→3 yields 2 SCCs."""
     graph = _make_directed_cycle_with_tail()
@@ -403,10 +391,6 @@ class StronglyConnectedComponentsTest(parameterized.TestCase):
 
 class IsSymmetricTest(absltest.TestCase):
   """Tests for the GbbsGraphHandle.is_symmetric() nanobind binding."""
-
-  def setUp(self):
-    super().setUp()
-    loader.set_num_parlay_workers(1)
 
   def test_symmetric_graph_reports_symmetric(self):
     graph = _make_chain_graph(num_nodes=3, symmetric=True)

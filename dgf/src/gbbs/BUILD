@@ -125,3 +125,16 @@ py_test(
         # numpy dep,
     ],
 )
+
+# Unlike the tests above, this target deliberately does not set
+# PARLAY_NUM_THREADS: the variable takes precedence over
+# set_num_parlay_workers(), so the worker count could not be exercised with it
+# set. This test only manipulates the scheduler and runs no graph algorithms.
+py_test(
+    name = "parlay_workers_test",
+    srcs = ["parlay_workers_test.py"],
+    deps = [
+        ":loader",
+        # absl/testing:absltest dep,
+    ],
+)
