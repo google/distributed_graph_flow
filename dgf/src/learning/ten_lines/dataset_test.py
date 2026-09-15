@@ -14,6 +14,7 @@
 
 import os
 from absl.testing import absltest
+from absl.testing import parameterized
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import tf_graph_sample
@@ -24,7 +25,7 @@ from dgf.src.validate import in_memory_graph as in_memory_graph_validate_lib
 import numpy as np
 
 
-class EvaluationTest(absltest.TestCase):
+class EvaluationTest(parameterized.TestCase):
 
   def test_in_memory_graph(self):
     graph = gen_test_graph.generate_in_memory_graph()
@@ -289,7 +290,6 @@ class EvaluationTest(absltest.TestCase):
       num_batches += 1
 
     self.assertEqual(num_batches, 2)
-
 
   def test_temporal_sampling_requires_seed_timestamps(self):
     graph = gen_test_graph.generate_in_memory_graph(True, False)

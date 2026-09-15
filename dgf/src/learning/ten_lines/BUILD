@@ -350,6 +350,7 @@ py_test(
     deps = [
         ":dataset",
         # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/io:tf_graph_sample",

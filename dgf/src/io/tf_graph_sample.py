@@ -38,6 +38,7 @@ class TFGraphSampleContainerType(enum.Enum):
   TF_RECORD = 1
   SSTABLE = 2
   BAGZ = 3
+  RECORDIO = 4
 
 
 def tfgnn_graph_to_graph(

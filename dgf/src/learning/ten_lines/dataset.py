@@ -54,6 +54,8 @@ class GraphFormat(enum.Enum):
   IN_MEMORY_GRAPH = "IN_MEMORY_GRAPH"
   PATH_TF_SAMPLE_BAGZ = "PATH_TF_SAMPLE_BAGZ"
   PATH_TF_SAMPLE_TF_RECORD = "PATH_TF_SAMPLE_TF_RECORD"
+  PATH_TF_SAMPLE_RECORDIO = "PATH_TF_SAMPLE_RECORDIO"
+  PATH_TF_SAMPLE_SSTABLE = "PATH_TF_SAMPLE_SSTABLE"
   # TODO(gbm): Add support for pygrain dataset / iter-dataset.
 
 
@@ -246,6 +248,13 @@ class SampleGeneratorFromAnything:
         return GraphFormat.PATH_TF_SAMPLE_BAGZ
       if ".tfrecord" in self.graph:
         return GraphFormat.PATH_TF_SAMPLE_TF_RECORD
+      if ".tfrecord.gz" in self.graph:
+        return GraphFormat.PATH_TF_SAMPLE_TF_RECORD
+      if ".recordio" in self.graph:
+        return GraphFormat.PATH_TF_SAMPLE_RECORDIO
+      if ".sstable" in self.graph or ".sst" in self.graph:
+        return GraphFormat.PATH_TF_SAMPLE_SSTABLE
+
       return GraphFormat.PATH_TF_SAMPLE_TF_RECORD
 
     options = [f.name for f in GraphFormat if f != GraphFormat.AUTO]
@@ -286,6 +295,7 @@ class SampleGeneratorFromAnything:
         if self.sampler_returns_node_idxs_only
         else self.output_schema()
     )
+
     def batch_generator():
       assert self.in_memory_sampler is not None
       graph_merger = merge_lib.GraphMerger(
@@ -398,6 +408,12 @@ class SampleGeneratorFromAnything:
 
     elif self.format == GraphFormat.PATH_TF_SAMPLE_TF_RECORD:
       return self._generator_from_path_tf_sample("TF_RECORD")
+
+    elif self.format == GraphFormat.PATH_TF_SAMPLE_RECORDIO:
+      return self._generator_from_path_tf_sample("RECORDIO")
+
+    elif self.format == GraphFormat.PATH_TF_SAMPLE_SSTABLE:
+      return self._generator_from_path_tf_sample("SSTABLE")
 
     else:
       raise ValueError(f"Unsupported format: {self.format}")
