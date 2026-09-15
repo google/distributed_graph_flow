@@ -24,6 +24,7 @@ import dataclasses
 import enum
 import itertools
 import os
+import textwrap
 from typing import Callable, Dict, Iterator, List, Optional, Union
 
 import dataclasses_json
@@ -150,7 +151,11 @@ class ModelData:
   schema: schema_lib.GraphSchema
   normalizer_config: normalize_lib.GraphNormalizerConfig
   padding: padding_data_lib.Padding
-  sampling_plan: sampling_config_lib.SamplingPlan
+  # None if the model was trained on already sampled graph samples without an
+  # explicit sampling plan: in this case, the sampling plan used to generate
+  # the training samples is unknown, and the model can only generate
+  # predictions from graph samples.
+  sampling_plan: Optional[sampling_config_lib.SamplingPlan]
   feature_stats: statistics_lib.GraphFeatureStatistics
   training_stats: TrainingStats
   temporal_sampling: bool
@@ -352,6 +357,19 @@ class NodePredictionModel(common.Model):
       verbose: int = 2,
   ) -> Iterator[BatchPrediction]:
     """Generate batches of predictions."""
+    sampling_plan = self._data.sampling_plan
+    if sampling_plan is None:
+      raise ValueError(textwrap.dedent("""\
+              This model cannot generate predictions from a full graph because
+              it does not have a sampling plan: it was trained on already
+              sampled graph samples without a `sampling_plan` argument, so the
+              sampling plan used to generate those samples is unknown. Instead,
+              generate predictions from graph samples (e.g.
+              `model.predict_on_graph_sample_batch`, `model.evaluate_generator`,
+              `model.to_tensorflow_function`), or re-train the model with the
+              `sampling_plan` argument.
+              """))
+
     live = self._get_live()
 
     if input_features_only:
@@ -366,7 +384,7 @@ class NodePredictionModel(common.Model):
 
     sampler = in_memory_sampler_lib.create_sampler(
         graph=graph,
-        plan=self._data.sampling_plan,
+        plan=sampling_plan,
         schema=schema,
         batch_size=batch_size,
     )

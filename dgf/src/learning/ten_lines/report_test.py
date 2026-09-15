@@ -144,6 +144,23 @@ class ReportTest(absltest.TestCase):
     self.assertIn("MyPadding", tabs_dict["Padding"])
     self.assertIn("edges: 20 edges", tabs_dict["Padding"])
 
+  def test_get_common_tabs_without_sampling_plan(self):
+    schema = schema_lib.GraphSchema(node_sets={}, edge_sets={})
+
+    tabs = report.get_common_tabs(
+        hparams={"lr": 0.01},
+        schemas={"MySchema": schema},
+        sampling_plans={"MyPlan": None},
+    )
+
+    tabs_dict = dict(tabs)
+
+    self.assertIn("Graph sampling", tabs_dict)
+    self.assertIn("MyPlan", tabs_dict["Graph sampling"])
+    self.assertIn(
+        "The sampling plan is not available", tabs_dict["Graph sampling"]
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

@@ -32,9 +32,11 @@ from dgf.src.learning.jax.layers import standard
 from dgf.src.learning.ten_lines import common as common_lib
 from dgf.src.learning.ten_lines import node_prediction_model
 from dgf.src.learning.ten_lines import node_prediction_train as node_prediction_lib
+from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.util import filesystem as fs
 from dgf.src.util import gen_test_graph
+from dgf.src.util import log
 from dgf.src.util import test_util
 import jax
 import jax.numpy as jnp
@@ -62,6 +64,15 @@ RAPID_TRAINING_KWARGS = {
 # part of the test isthe model training which will be cached between test calls.
 # Before submitting, set back TEST_LOCAL_CACHE to None.
 TEST_LOCAL_CACHE = None
+
+
+def _sampling_plan(
+    model: node_prediction_lib.NodePredictionModel,
+) -> sampling_config_lib.SamplingPlan:
+  """Returns the sampling plan of a model. Fails if it is not available."""
+  sampling_plan = model.data().sampling_plan
+  assert sampling_plan is not None
+  return sampling_plan
 
 
 def _gen_graph_real_looking(
@@ -321,7 +332,7 @@ class NodePredictionRealLooking(parameterized.TestCase):
     # Check that predictions on a pre-sampled graph are exactly equal
     sampler = in_memory_sampler_lib.create_sampler(
         graph=self.graph,
-        plan=self.model.data().sampling_plan,
+        plan=_sampling_plan(self.model),
         schema=self.model.data().schema,
         batch_size=5,
     )
@@ -346,7 +357,7 @@ class NodePredictionRealLooking(parameterized.TestCase):
 
     sampler = in_memory_sampler_lib.create_sampler(
         graph=self.graph,
-        plan=self.model.data().sampling_plan,
+        plan=_sampling_plan(self.model),
         schema=self.model.data().schema,
         batch_size=5,
     )
@@ -471,7 +482,7 @@ class NodePredictionRealLooking(parameterized.TestCase):
     schema = self.model.data().schema
     sampler = in_memory_sampler_lib.create_sampler(
         graph=self.graph,
-        plan=self.model.data().sampling_plan,
+        plan=_sampling_plan(self.model),
         schema=schema,
         batch_size=5,
     )
@@ -522,7 +533,7 @@ class NodePredictionRealLooking(parameterized.TestCase):
     """The deprecated `consume_tf_graph_dict` argument is still supported."""
     sample = in_memory_sampler_lib.create_sampler(
         graph=self.graph,
-        plan=self.model.data().sampling_plan,
+        plan=_sampling_plan(self.model),
         schema=self.model.data().schema,
         batch_size=5,
     ).sample(0)
@@ -639,6 +650,8 @@ class NodePredictionRealLooking(parameterized.TestCase):
     )
     self.assertIsNone(model.data().training_stats.num_train_seed_nodes)
     self.assertIsNone(model.data().training_stats.num_valid_seed_nodes)
+    # The sampling plan used to generate the samples is unknown.
+    self.assertIsNone(model.data().sampling_plan)
 
   def test_predict_batch_insufficient_padding(self):
     """Tests that predict_batch handles InsufficientPaddingError by splitting."""
@@ -679,6 +692,131 @@ class NodePredictionRealLooking(parameterized.TestCase):
         self.model.data().core_model_config.architecture(),
         "node_prediction_architecture.txt",
     )
+
+
+class NodePredictionGraphSamplesWithoutSamplingPlanTest(parameterized.TestCase):
+  """Trains on already sampled graph samples without a `sampling_plan`.
+
+  In this case, the sampling plan used to generate the samples is unknown: the
+  model does not contain any sampling plan, and it can only generate
+  predictions from graph samples.
+  """
+
+  @classmethod
+  def setUpClass(cls):
+    super().setUpClass()
+
+    cls.graph, cls.schema = _gen_graph_real_looking()
+
+    cls.sample = synthetic_lib.generate_synthetic_graph(
+        cls.schema,
+        synthetic_lib.SyntheticGraphConfig(num_nodes=5, num_edges=5),
+    )
+
+    cls.samples_path = os.path.join(tempfile.mkdtemp(), "samples@5.tfrecord")
+
+    def in_mem_graphs():
+      for _ in range(101):
+        yield cls.sample
+
+    tf_graph_sample_lib.write_tfgnn_graphs(
+        in_mem_graphs(),
+        cls.samples_path,
+        schema=cls.schema,
+        container_type="TF_RECORD",
+    )
+
+    cls.model = node_prediction_lib.train_node_model(
+        graph=cls.samples_path,
+        valid_graph=cls.samples_path,
+        schema=cls.schema,
+        target_nodeset="client",
+        target_column="categorical_label",
+        **RAPID_TRAINING_KWARGS,
+    )
+
+  def test_no_sampling_plan(self):
+    self.assertIsNone(self.model.data().sampling_plan)
+
+  def test_warning_in_logs(self):
+    captured_logs = self.model.metadata.captured_logs
+    self.assertIsNotNone(captured_logs)
+    warnings = [
+        message.text
+        for message in captured_logs  # pyrefly: ignore[bad-argument-type]
+        if message.severity == log.Severity.WARNING
+        and "`sampling_plan`" in message.text
+    ]
+    self.assertNotEmpty(warnings)
+
+  def test_describe(self):
+    html_description = self.model.describe()._repr_html_()  # pylint: disable=attribute-error
+    self.assertIn("The sampling plan is not available", html_description)
+
+  def test_predict_raises(self):
+    with self.assertRaisesRegex(ValueError, "does not have a sampling plan"):
+      self.model.predict(graph=self.graph, seed_node_idxs=[0, 1, 2])
+
+  def test_evaluate_raises(self):
+    with self.assertRaisesRegex(ValueError, "does not have a sampling plan"):
+      self.model.evaluate(self.graph)
+
+  def test_predict_on_graph_sample_batch(self):
+    predictions = self.model.predict_on_graph_sample_batch([self.sample])
+    self.assertEqual(predictions.shape, (1, self.model.num_label_classes()))
+    self.assertTrue(np.allclose(np.sum(predictions, axis=1), 1.0))
+
+  def test_evaluate_generator(self):
+    evaluation = self.model.evaluate_generator(iter([self.sample] * 4))
+    self.assertEqual(evaluation.num_examples, 4)
+
+  def test_to_tensorflow_function(self):
+    expected_predictions = self.model.predict_on_graph_sample_batch(
+        [self.sample]
+    )
+    serialized_samples = tf.constant([
+        tf_graph_sample_lib.graph_to_tfgnn_graph(
+            self.sample, schema=self.model.data().schema
+        ).SerializeToString()
+    ])
+
+    tf_predict_fn = self.model.to_tensorflow_function(
+        input_format="SERIALIZED_TFGNN_GRAPHS"
+    )
+    predictions = tf_predict_fn(serialized_samples)  # pyrefly: ignore[not-callable]
+    np.testing.assert_allclose(
+        predictions.numpy(), expected_predictions, atol=1e-5
+    )
+
+  def test_save_and_load(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      self.model.save(tmpdir)
+      restored_model = common_lib.load_model(tmpdir)
+
+    assert isinstance(restored_model, node_prediction_lib.NodePredictionModel)
+    self.assertIsNone(restored_model.data().sampling_plan)
+    with self.assertRaisesRegex(ValueError, "does not have a sampling plan"):
+      restored_model.predict(graph=self.graph, seed_node_idxs=[0, 1, 2])
+
+  def test_with_explicit_sampling_plan(self):
+    sampling_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
+        sampling_config_lib.SimpleSamplingConfig(
+            seed_nodeset="client", num_hops=1, hop_width=2
+        ),
+        self.schema,
+    )
+    model = node_prediction_lib.train_node_model(
+        graph=self.samples_path,
+        valid_graph=self.samples_path,
+        schema=self.schema,
+        target_nodeset="client",
+        target_column="categorical_label",
+        sampling_plan=sampling_plan,
+        **RAPID_TRAINING_KWARGS,
+    )
+    test_util.assert_are_equal(self, model.data().sampling_plan, sampling_plan)
+    predictions = model.predict(graph=self.graph, seed_node_idxs=[0, 1, 2])
+    self.assertEqual(predictions.shape, (3, model.num_label_classes()))
 
 
 class NodePredictionRealLookingStandaloneTest(parameterized.TestCase):
@@ -982,8 +1120,8 @@ class NodePredictionTemporalValidationTest(absltest.TestCase):
         verbose=0,
     )
     self.assertTrue(model.data().temporal_sampling)
-    self.assertTrue(model.data().sampling_plan.temporal_sampling)
-    self.assertEmpty(model.data().sampling_plan.edgeset_timestamp_features)
+    self.assertTrue(_sampling_plan(model).temporal_sampling)
+    self.assertEmpty(_sampling_plan(model).edgeset_timestamp_features)
 
 
 class NodePredictionTimeseriesTest(absltest.TestCase):
@@ -1103,7 +1241,7 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
     # Verify predict_on_graph_sample_batch produces matching predictions
     sampler = in_memory_sampler_lib.create_sampler(
         graph=graph,
-        plan=model.data().sampling_plan,
+        plan=_sampling_plan(model),
         schema=schema,
         batch_size=2,
     )

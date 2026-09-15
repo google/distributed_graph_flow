@@ -143,6 +143,17 @@ def predict_node_prediction_on_graph_path(
   model = ten_lines_common.load_model(model_path)
   assert isinstance(model, node_prediction_lib.NodePredictionModel)
 
+  sampling_plan = model.data().sampling_plan
+  if sampling_plan is None:
+    raise ValueError(
+        f"The model {model_path!r} cannot be applied on a graph because it does"
+        " not have a sampling plan: it was trained on already sampled graph"
+        " samples without a `sampling_plan` argument, so the sampling plan used"
+        " to generate those samples is unknown. Instead, generate predictions"
+        " from graph samples, or re-train the model with the `sampling_plan`"
+        " argument."
+    )
+
   if seed_node_ids is None:
     # List all the nodes as seeds if the user did not provide them.
     target_nodeset = model.data().task.target_nodeset
@@ -167,7 +178,7 @@ def predict_node_prediction_on_graph_path(
   graph_samples, _ = (
       beam_semi_distributed_sampler_v2.sample_with_beam_semi_distributed_sampler_v2(
           graph_path,
-          model.data().sampling_plan,
+          sampling_plan,
           seed_node_ids,
           beam_feature_collection=beam_feature_collection,
       )

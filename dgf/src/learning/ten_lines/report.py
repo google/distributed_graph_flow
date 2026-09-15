@@ -362,16 +362,24 @@ def _get_feature_stats_tab(
 
 
 def _get_graph_sampling_tab(
-    sampling_plans: dict[str, sampling_config_lib.SamplingPlan],
+    sampling_plans: dict[str, Optional[sampling_config_lib.SamplingPlan]],
 ) -> Tuple[str, str]:
   """Generates the Graph sampling tab."""
   txt_sampling_plan = ""
   for name, sampling_plan in sampling_plans.items():
-    txt_sampling_plan += f"<b>{name} sampling plan</b>\n<pre>"
-    txt_sampling_plan += analyse_sampling_lib.print_sampling_plan(  # pyrefly: ignore[unsupported-operation]
-        sampling_plan, return_output=True, header=False
-    )
-    txt_sampling_plan += "</pre>\n"
+    txt_sampling_plan += f"<b>{name} sampling plan</b>\n"
+    if sampling_plan is None:
+      txt_sampling_plan += (
+          "<p><i>The sampling plan is not available: the model was trained on"
+          " already sampled graph samples, and no sampling plan was"
+          " provided.</i></p>\n"
+      )
+    else:
+      txt_sampling_plan += "<pre>"
+      txt_sampling_plan += analyse_sampling_lib.print_sampling_plan(  # pyrefly: ignore[unsupported-operation]
+          sampling_plan, return_output=True, header=False
+      )
+      txt_sampling_plan += "</pre>\n"
   return "Graph sampling", txt_sampling_plan
 
 
@@ -412,7 +420,7 @@ def get_common_tabs(
         dict[str, statistics_lib.GraphFeatureStatistics]
     ] = None,
     sampling_plans: Optional[
-        dict[str, sampling_config_lib.SamplingPlan]
+        dict[str, Optional[sampling_config_lib.SamplingPlan]]
     ] = None,
     training_logs: Optional[common.TrainingLogs] = None,
     training_stats_summary: Optional[str] = None,

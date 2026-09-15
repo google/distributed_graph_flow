@@ -59,6 +59,56 @@ class GraphFormat(enum.Enum):
   # TODO(gbm): Add support for pygrain dataset / iter-dataset.
 
 
+def resolve_graph_format(
+    graph: Graph,
+    format: Union[GraphFormat, str] = GraphFormat.AUTO,  # pylint: disable=redefined-builtin
+) -> GraphFormat:
+  """Returns the format of a graph, inferring it if the format is AUTO.
+
+  Usage example:
+
+  ```python
+    format = dataset.resolve_graph_format("/path/to/samples@10.tfrecord")
+    # format == GraphFormat.PATH_TF_SAMPLE_TF_RECORD
+  ```
+
+  Args:
+    graph: The input graph.
+    format: The format of the input graph. If AUTO, the format is inferred from
+      the graph.
+
+  Returns:
+    The resolved format of the graph.
+  """
+
+  if isinstance(format, str):
+    format = GraphFormat[format.upper()]
+  if format != GraphFormat.AUTO:
+    return format
+
+  if isinstance(graph, in_memory_graph.InMemoryGraph):
+    return GraphFormat.IN_MEMORY_GRAPH
+  if isinstance(graph, str):
+    if ".bagz" in graph:
+      return GraphFormat.PATH_TF_SAMPLE_BAGZ
+    if ".tfrecord" in graph:
+      return GraphFormat.PATH_TF_SAMPLE_TF_RECORD
+    if ".tfrecord.gz" in graph:
+      return GraphFormat.PATH_TF_SAMPLE_TF_RECORD
+    if ".recordio" in graph:
+      return GraphFormat.PATH_TF_SAMPLE_RECORDIO
+    if ".sstable" in graph or ".sst" in graph:
+      return GraphFormat.PATH_TF_SAMPLE_SSTABLE
+
+    return GraphFormat.PATH_TF_SAMPLE_TF_RECORD
+
+  options = [f.name for f in GraphFormat if f != GraphFormat.AUTO]
+  raise ValueError(
+      "Could not infer format from graph. Specify it manually with 'format' ="
+      f" one of: {options}"
+  )
+
+
 # Generator of batched graph samples.
 BatchSampleGeneratorIteratorFn = Callable[
     [], Iterator[Tuple[in_memory_graph.InMemoryGraph, Dict[str, np.ndarray]]]
@@ -159,11 +209,7 @@ class SampleGeneratorFromAnything:
     if self.seed_node_idxs is not None:
       self.seed_node_idxs = np.asarray(self.seed_node_idxs, dtype=np.int64)
 
-    if isinstance(self.format, str):
-      self.format = GraphFormat[self.format.upper()]
-
-    if self.format == GraphFormat.AUTO:
-      self.format = self._infer_format()
+    self.format = resolve_graph_format(self.graph, self.format)
 
     if isinstance(
         self.sampling_config, sampling_config_lib.SimpleSamplingConfig
@@ -239,29 +285,6 @@ class SampleGeneratorFromAnything:
           return_node_idxs=self.sampler_returns_node_idxs_only,
       )
     self.batch_iterator, self.single_iterator = self.iterator_builder()
-
-  def _infer_format(self) -> GraphFormat:
-    if isinstance(self.graph, in_memory_graph.InMemoryGraph):
-      return GraphFormat.IN_MEMORY_GRAPH
-    if isinstance(self.graph, str):
-      if ".bagz" in self.graph:
-        return GraphFormat.PATH_TF_SAMPLE_BAGZ
-      if ".tfrecord" in self.graph:
-        return GraphFormat.PATH_TF_SAMPLE_TF_RECORD
-      if ".tfrecord.gz" in self.graph:
-        return GraphFormat.PATH_TF_SAMPLE_TF_RECORD
-      if ".recordio" in self.graph:
-        return GraphFormat.PATH_TF_SAMPLE_RECORDIO
-      if ".sstable" in self.graph or ".sst" in self.graph:
-        return GraphFormat.PATH_TF_SAMPLE_SSTABLE
-
-      return GraphFormat.PATH_TF_SAMPLE_TF_RECORD
-
-    options = [f.name for f in GraphFormat if f != GraphFormat.AUTO]
-    raise ValueError(
-        "Could not infer format from graph. Specify it manually with 'format' ="
-        f" one of: {options}"
-    )
 
   def _get_merge_schema(self) -> schema_lib.GraphSchema:
     """Creates schema for merging samples with only node indices."""
