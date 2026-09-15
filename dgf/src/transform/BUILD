@@ -43,7 +43,6 @@ py_library(
     name = "normalize",
     srcs = ["normalize.py"],
     deps = [
-        ":timeseries",
         # dataclasses_json dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:jax_in_memory_graph",
@@ -133,18 +132,6 @@ py_library(
     ],
 )
 
-py_library(
-    name = "timeseries",
-    srcs = ["timeseries.py"],
-    deps = [
-        # dataclasses_json dep,
-        "//dgf/src/data:in_memory_graph",
-        "//dgf/src/data:schema",
-        "//dgf/src/io:feature_format",
-        # numpy dep,
-    ],
-)
-
 # Tests
 # =====
 
@@ -184,7 +171,6 @@ py_test(
     srcs = ["normalize_test.py"],
     deps = [
         ":normalize",
-        ":timeseries",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         "//dgf/src/data:in_memory_graph",
@@ -259,20 +245,6 @@ py_test(
     deps = [
         ":temporal",
         # absl/testing:absltest dep,
-        "//dgf/src/data:in_memory_graph",
-        "//dgf/src/data:schema",
-        "//dgf/src/util:test_util",
-        # numpy dep,
-    ],
-)
-
-py_test(
-    name = "timeseries_test",
-    srcs = ["timeseries_test.py"],
-    deps = [
-        ":timeseries",
-        # absl/testing:absltest dep,
-        # absl/testing:parameterized dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/util:test_util",

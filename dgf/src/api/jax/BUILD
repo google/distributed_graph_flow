@@ -13,7 +13,6 @@ py_library(
     srcs = ["__init__.py"],
     deps = [
         ":layers",
-        "//dgf/src/learning/jax:common",
         "//dgf/src/learning/jax:flax_train",
     ],
 )

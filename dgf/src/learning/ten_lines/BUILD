@@ -118,7 +118,6 @@ py_library(
         "//dgf/src/sampling:config",
         "//dgf/src/sampling:in_memory_sampler",
         "//dgf/src/transform:merge",
-        "//dgf/src/transform:timeseries",
         "//dgf/src/util:temporal",
         "//dgf/src/util:util_py",
         # numpy dep,

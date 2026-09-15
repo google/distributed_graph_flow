@@ -20,10 +20,9 @@ import abc
 import collections.abc
 import copy
 import dataclasses
+import enum
 import inspect
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
-
-import enum
 
 import dataclasses_json
 from dgf.src.data import in_memory_graph
