@@ -782,6 +782,7 @@ def prepare_datasets(
         ignore_features_without_stats=True,
         timestamp_normalize=temporal_sampling,
         has_seed_timestamps=target_has_creation_time,
+        calendar_normalize=True,
     )
   else:
     auto_normalize_config.has_seed_timestamps = target_has_creation_time

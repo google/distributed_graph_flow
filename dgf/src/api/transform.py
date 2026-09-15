@@ -30,6 +30,8 @@ from dgf.src.transform.normalize import SoftQuantileNormalizer
 from dgf.src.transform.normalize import SinusoidTimedeltaNormalizer
 from dgf.src.transform.normalize import TimedeltaNormalizer
 from dgf.src.transform.normalize import SequentialNormalizer
+from dgf.src.transform.normalize import CalendarNormalizer
+from dgf.src.transform.normalize import CalendarFeature
 
 from dgf.src.transform.extract import filter_graph
 from dgf.src.transform.extract import drop_edge_features
@@ -52,7 +54,6 @@ from dgf.src.transform.homogenize import apply_feature
 from dgf.src.transform.temporal import propagate_timestamp_to_edges
 from dgf.src.transform.table_2_graph import table2graph
 
-from dgf.src.transform.timeseries import CalendarFeature
 from dgf.src.transform.timeseries import CalendarFeatureExtractor
 from dgf.src.transform.timeseries import CalendarFeatureExtractorConfig
 

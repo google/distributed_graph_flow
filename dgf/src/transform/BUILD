@@ -43,6 +43,7 @@ py_library(
     name = "normalize",
     srcs = ["normalize.py"],
     deps = [
+        ":timeseries",
         # dataclasses_json dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:jax_in_memory_graph",
@@ -183,6 +184,7 @@ py_test(
     srcs = ["normalize_test.py"],
     deps = [
         ":normalize",
+        ":timeseries",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         "//dgf/src/data:in_memory_graph",

@@ -25,6 +25,35 @@ import numpy as np
 import tensorflow as tf
 
 
+def _reference_calendar_feature(
+    timestamps: np.ndarray, calendar_feature: normalize_lib.CalendarFeature
+) -> np.ndarray:
+  """Computes a calendar component independently of `normalize`.
+
+  Uses numpy's datetime64 calendar for day-of-month and month instead of the
+  closed-form integer arithmetic under test, so the two disagree if either is wrong.
+  """
+  if calendar_feature == normalize_lib.CalendarFeature.SECOND:
+    return (timestamps % 60).astype(np.float32)
+  if calendar_feature == normalize_lib.CalendarFeature.MINUTE:
+    return ((timestamps // 60) % 60).astype(np.float32)
+  if calendar_feature == normalize_lib.CalendarFeature.HOUR:
+    return ((timestamps // 3600) % 24).astype(np.float32)
+  if calendar_feature == normalize_lib.CalendarFeature.DAY_OF_WEEK:
+    return (((timestamps // 86400) + 3) % 7).astype(np.float32)
+  if calendar_feature == normalize_lib.CalendarFeature.DAY_OF_MONTH:
+    dt = timestamps.astype("datetime64[s]")
+    return (
+        dt.astype("datetime64[D]").astype(int)
+        - dt.astype("datetime64[M]").astype("datetime64[D]").astype(int)
+        + 1
+    ).astype(np.float32)
+  if calendar_feature == normalize_lib.CalendarFeature.MONTH:
+    months = timestamps.astype("datetime64[s]").astype("datetime64[M]")
+    return (months.astype(int) % 12 + 1).astype(np.float32)
+  raise ValueError(f"Unsupported calendar feature: '{calendar_feature}'.")
+
+
 class DictionaryIndexNormalizerTest(absltest.TestCase):
 
   def test_basic(self):
@@ -547,6 +576,392 @@ class SinusoidTimedeltaNormalizerTest(parameterized.TestCase):
       normalizer.normalize_numpy(input_np)
 
 
+class CalendarNormalizerTest(parameterized.TestCase):
+
+  _ALL_FEATURES = tuple(normalize_lib._CALENDAR_FEATURE_RANGES)
+
+  def _timestamp_schema(self, **schema_kwargs):
+    schema_kwargs.setdefault("shape", ())
+    return schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        **schema_kwargs,
+    )
+
+  def _rescale(self, raw_value, calendar_feature):
+    """Maps a raw calendar component onto [-0.5, 0.5)."""
+    minimum, maximum = normalize_lib._CALENDAR_FEATURE_RANGES[calendar_feature]
+    return (np.asarray(raw_value, dtype=np.float64) - minimum) / (
+        maximum - minimum
+    ) - 0.5
+
+  def _timestamp_corpus(self, num_random: int = 10000) -> np.ndarray:
+    edge_cases = np.array(
+        [
+            -315619200,  # 1960-01-01 00:00:00, 10 years ago (leap year).
+            -310608000,  # 1960-02-28 00:00:00, day before leap day.
+            -310521600,  # 1960-02-29 00:00:00, leap day.
+            -310435201,  # 1960-02-29 23:59:59, last second of leap day.
+            -310435200,  # 1960-03-01 00:00:00, day after pre-epoch leap day.
+            -283996801,  # 1960-12-31 23:59:59, end of leap year.
+            -86401,  # 1969-12-30 23:59:59, pre-epoch.
+            0,  # 1970-01-01 00:00:00.
+            1,
+            5097600,  # 1970-03-01, the algorithm's March-based year start.
+            15638400,  # 1970-07-01, a month-formula rounding boundary.
+            28857600,  # 1970-12-01, the other rounding boundary.
+            68169600,  # 1972-02-29, a leap day.
+            1700000000,  # 2023-11-14 22:13:20.
+        ],
+        dtype=np.int64,
+    )
+    rng = np.random.default_rng(seed=0)
+    random_timestamps = rng.integers(
+        low=-631152000, high=2524608000, size=num_random, dtype=np.int64
+    )
+    return np.concatenate([edge_cases, random_timestamps])
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="scalar",
+          schema_kwargs=dict(shape=()),
+          expected_shape=(),
+          expected_group=None,
+          expected_is_ts=False,
+      ),
+      dict(
+          testcase_name="timeseries_creation_time",
+          schema_kwargs=dict(
+              is_timeseries=True, is_creation_time=True, shape=(2,)
+          ),
+          expected_shape=(2,),
+          expected_group="timestamp_feature",
+          expected_is_ts=True,
+      ),
+      dict(
+          testcase_name="timeseries_group",
+          schema_kwargs=dict(
+              is_timeseries=True,
+              is_creation_time=False,
+              group="custom_group",
+              shape=(2,),
+          ),
+          expected_shape=(2,),
+          expected_group="custom_group",
+          expected_is_ts=True,
+      ),
+  )
+  def test_output_schema(
+      self, schema_kwargs, expected_shape, expected_group, expected_is_ts
+  ):
+    normalizer = normalize_lib.CalendarNormalizer.create(
+        "timestamp_feature",
+        self._timestamp_schema(**schema_kwargs),
+        (normalize_lib.CalendarFeature.HOUR,),
+    )
+    out_schema = normalizer.output_schema()["timestamp_feature_hour_CALENDAR"]
+    self.assertEqual(out_schema.semantic, schema_lib.FeatureSemantic.EMBEDDING)
+    self.assertEqual(out_schema.format, schema_lib.FeatureFormat.FLOAT_32)
+    self.assertEqual(out_schema.shape, expected_shape)
+    self.assertEqual(out_schema.group, expected_group)
+    self.assertEqual(out_schema.is_timeseries, expected_is_ts)
+
+  def test_output_schema_emits_one_feature_per_component(self):
+    normalizer = normalize_lib.CalendarNormalizer.create(
+        "timestamp_feature", self._timestamp_schema(), self._ALL_FEATURES
+    )
+    expected_names = [
+        "timestamp_feature_second_CALENDAR",
+        "timestamp_feature_minute_CALENDAR",
+        "timestamp_feature_hour_CALENDAR",
+        "timestamp_feature_day_of_week_CALENDAR",
+        "timestamp_feature_day_of_month_CALENDAR",
+        "timestamp_feature_month_CALENDAR",
+    ]
+    self.assertEqual(list(normalizer.output_schema()), expected_names)
+    self.assertEqual(
+        [
+            normalizer.output_feature_name(calendar_feature)
+            for calendar_feature in self._ALL_FEATURES
+        ],
+        expected_names,
+    )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="wrong_semantic",
+          schema_kwargs=dict(semantic=schema_lib.FeatureSemantic.NUMERICAL),
+          calendar_features=(normalize_lib.CalendarFeature.HOUR,),
+          expected_regex="only supports TIMESTAMP features",
+      ),
+      dict(
+          testcase_name="dynamic_shape",
+          schema_kwargs=dict(shape=(None,)),
+          calendar_features=(normalize_lib.CalendarFeature.HOUR,),
+          expected_regex="requires fixed-length feature tensors",
+      ),
+      dict(
+          testcase_name="unsupported_year",
+          schema_kwargs=dict(),
+          calendar_features=(
+              normalize_lib.CalendarFeature.HOUR,
+              normalize_lib.CalendarFeature.YEAR,
+          ),
+          expected_regex="is not supported by CalendarNormalizer",
+      ),
+      dict(
+          testcase_name="no_features",
+          schema_kwargs=dict(),
+          calendar_features=(),
+          expected_regex="No calendar feature requested",
+      ),
+  )
+  def test_invalid_configuration_raises(
+      self, schema_kwargs, calendar_features, expected_regex
+  ):
+    schema_kwargs.setdefault(
+        "semantic", schema_lib.FeatureSemantic.TIMESTAMP
+    )
+    schema_kwargs.setdefault("shape", ())
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64, **schema_kwargs
+    )
+    with self.assertRaisesRegex(ValueError, expected_regex):
+      normalize_lib.CalendarNormalizer.create(
+          "timestamp_feature", schema, calendar_features
+      )
+
+    # The constructor must reject the same inputs: deserializing a config
+    # bypasses `create` entirely.
+    with self.assertRaisesRegex(ValueError, expected_regex):
+      normalize_lib.CalendarNormalizer(
+          input_feature="timestamp_feature",
+          calendar_features=calendar_features,
+          input_schema=schema,
+      )
+
+  @parameterized.named_parameters(
+      # (timestamp, second, minute, hour, day_of_week, day_of_month, month)
+      # 1960-01-01 00:00:00 UTC, a Friday. -10 years in the past (leap year).
+      ("pre_epoch_leap_year_start", -315619200, 0.0, 0.0, 0.0, 4.0, 1.0, 1.0),
+      # 1960-02-28 00:00:00 UTC, a Sunday. Day before pre-epoch leap day.
+      (
+          "pre_epoch_day_before_leap_day",
+          -310608000,
+          0.0,
+          0.0,
+          0.0,
+          6.0,
+          28.0,
+          2.0,
+      ),
+      # 1960-02-29 00:00:00 UTC, a Monday. Exercises pre-epoch leap day.
+      ("pre_epoch_leap_day", -310521600, 0.0, 0.0, 0.0, 0.0, 29.0, 2.0),
+      # 1960-02-29 23:59:59 UTC, a Monday.
+      (
+          "pre_epoch_last_second_of_leap_day",
+          -310435201,
+          59.0,
+          59.0,
+          23.0,
+          0.0,
+          29.0,
+          2.0,
+      ),
+      # 1960-03-01 00:00:00 UTC, a Tuesday. Day after pre-epoch leap day.
+      (
+          "pre_epoch_day_after_leap_day",
+          -310435200,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          1.0,
+          3.0,
+      ),
+      # 1960-12-31 23:59:59 UTC, a Saturday.
+      (
+          "pre_epoch_leap_year_end",
+          -283996801,
+          59.0,
+          59.0,
+          23.0,
+          5.0,
+          31.0,
+          12.0,
+      ),
+      # 1970-01-01 00:00:00 UTC, a Thursday.
+      ("epoch", 0, 0.0, 0.0, 0.0, 3.0, 1.0, 1.0),
+      ("epoch_plus_one_hour", 3600, 0.0, 0.0, 1.0, 3.0, 1.0, 1.0),
+      ("epoch_plus_ninety_seconds", 90, 30.0, 1.0, 0.0, 3.0, 1.0, 1.0),
+      ("last_second_of_first_day", 86399, 59.0, 59.0, 23.0, 3.0, 1.0, 1.0),
+      # 1970-01-02, a Friday.
+      ("second_day", 86400, 0.0, 0.0, 0.0, 4.0, 2.0, 1.0),
+      # 1969-12-31 23:59:59 UTC, a Wednesday. Exercises negative timestamps.
+      ("before_epoch", -1, 59.0, 59.0, 23.0, 2.0, 31.0, 12.0),
+      # 1970-03-01, a Sunday.
+      ("first_of_march", 5097600, 0.0, 0.0, 0.0, 6.0, 1.0, 3.0),
+      # 1972-02-29, a Tuesday. Exercises the leap day.
+      ("leap_day", 68169600, 0.0, 0.0, 0.0, 1.0, 29.0, 2.0),
+      # 1970-07-01, a Wednesday, and 1970-12-01, a Tuesday. These are the only
+      # two days of the year on which the month formula's rounding constant
+      # changes the answer, so they are the cases that pin it down.
+      ("first_of_july", 15638400, 0.0, 0.0, 0.0, 2.0, 1.0, 7.0),
+      ("first_of_december", 28857600, 0.0, 0.0, 0.0, 1.0, 1.0, 12.0),
+  )
+  def test_normalize_numpy_known_values(
+      self,
+      timestamp,
+      expected_second,
+      expected_minute,
+      expected_hour,
+      expected_day_of_week,
+      expected_day_of_month,
+      expected_month,
+  ):
+    expected_raw = {
+        normalize_lib.CalendarFeature.SECOND: expected_second,
+        normalize_lib.CalendarFeature.MINUTE: expected_minute,
+        normalize_lib.CalendarFeature.HOUR: expected_hour,
+        normalize_lib.CalendarFeature.DAY_OF_WEEK: expected_day_of_week,
+        normalize_lib.CalendarFeature.DAY_OF_MONTH: expected_day_of_month,
+        normalize_lib.CalendarFeature.MONTH: expected_month,
+    }
+    normalizer = normalize_lib.CalendarNormalizer.create(
+        "timestamp_feature", self._timestamp_schema(), self._ALL_FEATURES
+    )
+    got = normalizer.normalize_numpy(np.array([timestamp], dtype=np.int64))
+
+    for calendar_feature, raw_value in expected_raw.items():
+      np.testing.assert_allclose(
+          got[normalizer.output_feature_name(calendar_feature)],
+          np.array(
+              [self._rescale(raw_value, calendar_feature)], dtype=np.float32
+          ),
+          atol=1e-6,
+          err_msg=f"Mismatch for {calendar_feature}.",
+      )
+
+  def test_matches_reference_implementation(self):
+    """Pins the closed-form arithmetic against an independent implementation."""
+    timestamps = self._timestamp_corpus()
+    normalizer = normalize_lib.CalendarNormalizer.create(
+        "timestamp_feature", self._timestamp_schema(), self._ALL_FEATURES
+    )
+    got = normalizer.normalize_numpy(timestamps)
+
+    for calendar_feature in self._ALL_FEATURES:
+      reference = _reference_calendar_feature(timestamps, calendar_feature)
+      value = got[normalizer.output_feature_name(calendar_feature)]
+      np.testing.assert_allclose(
+          value,
+          self._rescale(reference, calendar_feature).astype(np.float32),
+          atol=1e-6,
+          err_msg=f"Mismatch for {calendar_feature}.",
+      )
+      # Rescaling maps every component onto [-0.5, 0.5).
+      self.assertGreaterEqual(value.min(), -0.5)
+      self.assertLess(value.max(), 0.5)
+
+  @parameterized.named_parameters(
+      ("scalar", False),
+      ("timeseries", True),
+  )
+  def test_numpy_tensorflow_parity(self, is_timeseries):
+    schema = self._timestamp_schema(
+        is_timeseries=is_timeseries, shape=(3,) if is_timeseries else ()
+    )
+    normalizer = normalize_lib.CalendarNormalizer.create(
+        "timestamp_feature", schema, self._ALL_FEATURES
+    )
+    timestamps = self._timestamp_corpus()
+    if is_timeseries:
+      timestamps = timestamps.reshape(-1, 3)
+
+    numpy_output = normalizer.normalize_numpy(timestamps)
+    tensorflow_output = normalizer.normalize_tensorflow(
+        tf.constant(timestamps)
+    )
+    self.assertEqual(
+        list(numpy_output), list(normalizer.output_schema())
+    )
+    for output_name, numpy_value in numpy_output.items():
+      np.testing.assert_allclose(
+          numpy_value,
+          tensorflow_output[output_name].numpy(),
+          atol=1e-6,
+          err_msg=f"Mismatch for {output_name}.",
+      )
+      self.assertEqual(numpy_value.shape, timestamps.shape)
+
+  @parameterized.named_parameters(
+      ("second", normalize_lib.CalendarFeature.SECOND),
+      ("minute", normalize_lib.CalendarFeature.MINUTE),
+      ("hour", normalize_lib.CalendarFeature.HOUR),
+      ("day_of_week", normalize_lib.CalendarFeature.DAY_OF_WEEK),
+      ("day_of_month", normalize_lib.CalendarFeature.DAY_OF_MONTH),
+      ("month", normalize_lib.CalendarFeature.MONTH),
+  )
+  def test_single_component_matches_all_components(self, calendar_feature):
+    timestamps = np.array(
+        [-310521600, -86401, 0, 1, 5097600, 68169600, 1700000000],
+        dtype=np.int64,
+    )
+    schema = self._timestamp_schema()
+    expected = normalize_lib.CalendarNormalizer.create(
+        "timestamp_feature", schema, self._ALL_FEATURES
+    ).normalize_numpy(timestamps)
+
+    normalizer = normalize_lib.CalendarNormalizer.create(
+        "timestamp_feature", schema, (calendar_feature,)
+    )
+    output_name = normalizer.output_feature_name(calendar_feature)
+
+    numpy_output = normalizer.normalize_numpy(timestamps)
+    self.assertEqual(list(numpy_output), [output_name])
+    np.testing.assert_array_equal(
+        numpy_output[output_name], expected[output_name]
+    )
+
+    tensorflow_output = normalizer.normalize_tensorflow(tf.constant(timestamps))
+    self.assertEqual(list(tensorflow_output), [output_name])
+    np.testing.assert_allclose(
+        tensorflow_output[output_name].numpy(),
+        expected[output_name],
+        atol=1e-6,
+    )
+
+  def test_normalize_numpy_object_array_raises(self):
+    normalizer = normalize_lib.CalendarNormalizer.create(
+        "timestamp_feature",
+        self._timestamp_schema(is_timeseries=True, shape=(2,)),
+        (normalize_lib.CalendarFeature.HOUR,),
+    )
+    input_np = np.array([np.array([0, 1]), np.array([2])], dtype=object)
+    with self.assertRaisesRegex(
+        ValueError, "requires fixed-length feature tensors"
+    ):
+      normalizer.normalize_numpy(input_np)
+
+  def test_accepts_no_kwargs(self):
+    """Unlike the timestamp chain, calendar needs no seed timestamps."""
+    normalizer = normalize_lib.CalendarNormalizer.create(
+        "timestamp_feature", self._timestamp_schema(), self._ALL_FEATURES
+    )
+    self.assertEmpty(normalize_lib._accepted_kwargs(normalizer))  # pylint: disable=protected-access
+
+  def test_deserializing_invalid_config_raises(self):
+    """A config with no components must not silently emit zero features."""
+    normalizer = normalize_lib.CalendarNormalizer.create(
+        "timestamp_feature", self._timestamp_schema(), self._ALL_FEATURES
+    )
+    serialized = normalizer.to_dict()  # pyrefly: ignore[missing-attribute]
+    serialized["calendar_features"] = []
+
+    with self.assertRaisesRegex(ValueError, "No calendar feature requested"):
+      normalize_lib.CalendarNormalizer.from_dict(serialized)  # pyrefly: ignore[missing-attribute]
+
+
 class AutoNormalierTest(absltest.TestCase):
 
   def setUp(self):
@@ -1031,6 +1446,192 @@ Edge Sets:
     self.assertNotIn(
         "created_at_seed_delta_SINUSOID",
         out_schema.node_sets["nodes"].features,
+    )
+
+  def _timestamp_schema_and_stats(self, shape=()):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "nodes": schema_lib.NodeSchema(
+                features={
+                    "created_at": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        shape=shape,
+                    )
+                }
+            )
+        },
+        edge_sets={},
+    )
+    stats = statistics_lib.GraphFeatureStatistics(
+        node_sets={
+            "nodes": statistics_lib.FeatureSetStatistics(
+                features={
+                    "created_at": statistics_lib.FeatureStatistics(count=2)
+                },
+            )
+        }
+    )
+    return schema, stats
+
+  def test_auto_normalize_calendar_disabled_by_default(self):
+    schema, stats = self._timestamp_schema_and_stats()
+    normalizer = normalize_lib.auto_normalize(schema, stats)
+    features = normalizer.output_schema().node_sets["nodes"].features
+    self.assertNotIn("created_at_hour_CALENDAR", features)
+    self.assertNotIn("created_at_day_of_week_CALENDAR", features)
+    self.assertNotIn("created_at_day_of_month_CALENDAR", features)
+    self.assertNotIn("created_at_month_CALENDAR", features)
+
+  def test_auto_normalize_calendar(self):
+    schema, stats = self._timestamp_schema_and_stats()
+    normalizer = normalize_lib.auto_normalize(
+        schema,
+        stats,
+        config=normalize_lib.AutoNormalizeConfig(calendar_normalize=True),
+    )
+    self.assertCountEqual(
+        normalizer.get_normalized_feature_names("nodes", "created_at"),
+        [
+            "created_at_hour_CALENDAR",
+            "created_at_day_of_week_CALENDAR",
+            "created_at_day_of_month_CALENDAR",
+            "created_at_month_CALENDAR",
+        ],
+    )
+
+    # Calendar normalization needs no seed timestamps.
+    self.assertEmpty(normalizer.accepted_kwargs)
+
+    # End-to-end normalization execution. 0 is 1970-01-01 00:00 UTC (Thursday),
+    # 45296 is 1970-01-01 12:34 UTC.
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "nodes": in_memory_graph_lib.InMemoryNodeSet(
+                features={"created_at": np.array([0, 45296], dtype=np.int64)},
+                num_nodes=2,
+            )
+        },
+        edge_sets={},
+    )
+    out_features = normalizer.normalize_numpy(graph).node_sets["nodes"].features
+    np.testing.assert_allclose(
+        out_features["created_at_hour_CALENDAR"],
+        np.array([0.0 / 24.0 - 0.5, 12.0 / 24.0 - 0.5], dtype=np.float32),
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        out_features["created_at_day_of_week_CALENDAR"],
+        np.array([3.0 / 7.0 - 0.5] * 2, dtype=np.float32),
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        out_features["created_at_day_of_month_CALENDAR"],
+        np.array([(1.0 - 1.0) / 31.0 - 0.5] * 2, dtype=np.float32),
+        atol=1e-6,
+    )
+    np.testing.assert_allclose(
+        out_features["created_at_month_CALENDAR"],
+        np.array([(1.0 - 1.0) / 12.0 - 0.5] * 2, dtype=np.float32),
+        atol=1e-6,
+    )
+
+  def test_auto_normalize_calendar_subset(self):
+    schema, stats = self._timestamp_schema_and_stats()
+    normalizer = normalize_lib.auto_normalize(
+        schema,
+        stats,
+        config=normalize_lib.AutoNormalizeConfig(
+            calendar_normalize=True,
+            calendar_features=(normalize_lib.CalendarFeature.HOUR,),
+        ),
+    )
+    self.assertEqual(
+        normalizer.get_normalized_feature_names("nodes", "created_at"),
+        ["created_at_hour_CALENDAR"],
+    )
+
+  def test_auto_normalize_calendar_and_timestamp_compose(self):
+    schema, stats = self._timestamp_schema_and_stats()
+    normalizer = normalize_lib.auto_normalize(
+        schema,
+        stats,
+        config=normalize_lib.AutoNormalizeConfig(
+            calendar_normalize=True,
+            timestamp_normalize=True,
+            has_seed_timestamps=True,
+        ),
+    )
+    self.assertCountEqual(
+        normalizer.get_normalized_feature_names("nodes", "created_at"),
+        [
+            "created_at_seed_delta_SINUSOID",
+            "created_at_hour_CALENDAR",
+            "created_at_day_of_week_CALENDAR",
+            "created_at_day_of_month_CALENDAR",
+            "created_at_month_CALENDAR",
+        ],
+    )
+
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "nodes": in_memory_graph_lib.InMemoryNodeSet(
+                features={"created_at": np.array([0, 45296], dtype=np.int64)},
+                num_nodes=2,
+            )
+        },
+        edge_sets={},
+    )
+    out_features = (
+        normalizer.normalize_numpy(
+            graph,
+            seed_timestamps={"nodes": np.array([86400, 86400], dtype=np.int64)},
+        )
+        .node_sets["nodes"]
+        .features
+    )
+    self.assertIn("created_at_seed_delta_SINUSOID", out_features)
+    self.assertIn("created_at_hour_CALENDAR", out_features)
+
+  def test_auto_normalize_calendar_dynamic_shape_raises(self):
+    schema, stats = self._timestamp_schema_and_stats(shape=(None,))
+    with self.assertRaisesRegex(
+        ValueError, "requires fixed-length feature tensors"
+    ):
+      normalize_lib.auto_normalize(
+          schema,
+          stats,
+          config=normalize_lib.AutoNormalizeConfig(calendar_normalize=True),
+      )
+
+  def test_auto_normalize_calendar_serialization_round_trip(self):
+    schema, stats = self._timestamp_schema_and_stats()
+    normalizer = normalize_lib.auto_normalize(
+        schema,
+        stats,
+        config=normalize_lib.AutoNormalizeConfig(calendar_normalize=True),
+    )
+    restored = normalize_lib.GraphNormalizerConfig.from_json(  # pyrefly: ignore[missing-attribute]
+        normalizer.config.to_json()  # pyrefly: ignore[missing-attribute]
+    ).make()
+    self.assertEqual(
+        restored.output_schema().node_sets["nodes"].features.keys(),
+        normalizer.output_schema().node_sets["nodes"].features.keys(),
+    )
+
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "nodes": in_memory_graph_lib.InMemoryNodeSet(
+                features={"created_at": np.array([0, 45296], dtype=np.int64)},
+                num_nodes=2,
+            )
+        },
+        edge_sets={},
+    )
+    test_util.assert_are_equal(
+        self,
+        restored.normalize_numpy(graph),
+        normalizer.normalize_numpy(graph),
     )
 
   def test_auto_normalize_mask(self):

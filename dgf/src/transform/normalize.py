@@ -23,6 +23,8 @@ import dataclasses
 import inspect
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+import enum
+
 import dataclasses_json
 from dgf.src.data import in_memory_graph
 from dgf.src.data import jax_in_memory_graph
@@ -562,6 +564,23 @@ class SinusoidTimedeltaNormalizer(AbstractFeatureNormalizer):
     return {self.output_feature_name: emb}
 
 
+def _output_timeseries_group(
+    input_feature: str, input_schema: schema_lib.FeatureSchema
+) -> Optional[str]:
+  """Returns the timeseries group a feature's normalized outputs belong to.
+
+  Falls back to the input feature name rather than leaving the group unset:
+  normalized outputs are renamed, so grouping them by their own name would
+  scatter the outputs of one input across separate groups.
+  """
+  if input_schema.group:
+    return input_schema.group
+  elif input_schema.is_timeseries:
+    return input_feature
+  else:
+    return None
+
+
 @normalizer_registry.register
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass(kw_only=True)
@@ -602,9 +621,7 @@ class TimedeltaNormalizer(AbstractFeatureNormalizer):
     )
 
   def output_schema(self) -> schema_lib.FeatureSetSchema:
-    ts_group = self.input_schema.group or (
-        self.input_feature if self.input_schema.is_timeseries else None
-    )
+    ts_group = _output_timeseries_group(self.input_feature, self.input_schema)
     return {
         self.output_feature_name: schema_lib.FeatureSchema(
             format=self.input_schema.format,
@@ -662,6 +679,361 @@ class TimedeltaNormalizer(AbstractFeatureNormalizer):
 
     deltas = tf.subtract(seed_tensor, value)
     return {self.output_feature_name: deltas}
+
+
+class CalendarFeature(str, enum.Enum):
+  """Supported calendar features to extract from timestamps."""
+
+  SECOND = "second"
+  MINUTE = "minute"
+  HOUR = "hour"
+  DAY_OF_WEEK = "day_of_week"
+  DAY_OF_MONTH = "day_of_month"
+  MONTH = "month"
+  YEAR = "year"
+
+
+# Analytically known support of each supported calendar component, as a
+# half-open `[minimum, maximum)` interval. Calendar values are derived inside
+# the normalizer and therefore have no entry in the graph feature statistics,
+# but their expected distribution is uniform and fully known a priori, so they
+# can be rescaled from the range alone.
+#
+# `CalendarFeature.YEAR` is the one member that cannot be supported this way: a
+# year has no a-priori range, so there is nothing to rescale from.
+_CALENDAR_FEATURE_RANGES: Dict[CalendarFeature, Tuple[float, float]] = {
+    CalendarFeature.SECOND: (0.0, 60.0),
+    CalendarFeature.MINUTE: (0.0, 60.0),
+    CalendarFeature.HOUR: (0.0, 24.0),
+    CalendarFeature.DAY_OF_WEEK: (0.0, 7.0),
+    CalendarFeature.DAY_OF_MONTH: (1.0, 32.0),
+    CalendarFeature.MONTH: (1.0, 13.0),
+}
+
+# `SECOND` and `MINUTE` are supported but not enabled by default
+# TODO(simonmeierhans): Automatically select features based on observed
+# timestamps.
+DEFAULT_CALENDAR_FEATURES: Tuple[CalendarFeature, ...] = (
+    CalendarFeature.HOUR,
+    CalendarFeature.DAY_OF_WEEK,
+    CalendarFeature.DAY_OF_MONTH,
+    CalendarFeature.MONTH,
+)
+
+# Shifts the unix epoch to 0000-03-01, i.e. the number of days between
+# 0000-03-01 and 1970-01-01. Starting the year in March moves the leap day to
+# the *end* of the year, which is what lets `_month_from_days_numpy` compute the
+# month with a single closed-form expression instead of a leap-year table. This
+# is intrinsic to the algorithm and is required for all dates, not just dates
+# before the unix epoch.
+_DAYS_FROM_CIVIL_EPOCH = 719468
+
+_SECONDS_PER_MINUTE = 60
+_SECONDS_PER_HOUR = 60 * 60
+_SECONDS_PER_DAY = 24 * _SECONDS_PER_HOUR
+
+# Unix epoch day 0 (1970-01-01) was a Thursday. Adding 3 shifts the week so that
+# Monday maps to 0.
+_EPOCH_WEEKDAY_OFFSET = 3
+
+
+@normalizer_registry.register
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass(kw_only=True)
+class CalendarNormalizer(AbstractFeatureNormalizer):
+  """Extracts normalized UTC calendar components from a TIMESTAMP feature.
+
+  The input is expected to be a unix timestamp in seconds (semantic=TIMESTAMP).
+  One output feature is emitted per requested calendar component, named
+  `{input_feature}_{component}_CALENDAR`. Each component is linearly rescaled
+  from its analytically known range (e.g. [0, 24) for the hour of the day) to
+  [-0.5, 0.5) and emitted with semantic EMBEDDING, so it can be fed to a model
+  directly.
+
+  Usage example:
+
+  ```python
+    normalizer = CalendarNormalizer.create(
+        "created_at",
+        schema,
+        (CalendarFeature.HOUR, CalendarFeature.DAY_OF_WEEK),
+    )
+    # {"created_at_hour_CALENDAR": ..., "created_at_day_of_week_CALENDAR": ...}
+    features = normalizer.normalize_numpy(timestamps)
+  ```
+
+  The rescaling uses the known support of each component instead of observed
+  statistics: the components are derived inside this normalizer, so they have
+  no entry in the graph feature statistics, and their distribution is uniform
+  and fully known a priori.
+
+  Note:
+    The rescaling is monotonic and therefore destroys cyclicity: hour 23 and
+    hour 0 are adjacent in time but are mapped to opposite ends of the output
+    range. Apply `SinusoidTimedeltaNormalizer` to the raw timestamp instead if
+    a cyclic encoding is required.
+
+  Attributes:
+    calendar_features: The calendar components to extract.
+    input_schema: The schema of the input TIMESTAMP feature.
+  """
+
+  calendar_features: Tuple[CalendarFeature, ...]
+  input_schema: schema_lib.FeatureSchema
+  type: str = dataclasses.field(default="CalendarNormalizer", init=False)
+
+  def __post_init__(self):
+    self.calendar_features = tuple(
+        CalendarFeature(calendar_feature)
+        for calendar_feature in self.calendar_features
+    )
+
+    if self.input_schema.semantic != schema_lib.FeatureSemantic.TIMESTAMP:
+      raise ValueError(
+          f"Feature '{self.input_feature}' has semantic"
+          f" '{self.input_schema.semantic}', but CalendarNormalizer only"
+          " supports TIMESTAMP features."
+      )
+
+    if not self.input_schema.is_static_shape():
+      raise ValueError(
+          "CalendarNormalizer requires fixed-length feature tensors, but"
+          f" feature '{self.input_feature}' has a dynamic shape"
+          f" ({self.input_schema.shape}). Please run padding first."
+      )
+
+    if not self.calendar_features:
+      raise ValueError(
+          f"No calendar feature requested for feature '{self.input_feature}'."
+      )
+
+    for calendar_feature in self.calendar_features:
+      if calendar_feature not in _CALENDAR_FEATURE_RANGES:
+        raise ValueError(
+            f"Calendar feature '{calendar_feature.value}' is not supported by"
+            " CalendarNormalizer. Supported features:"
+            f" {[f.value for f in _CALENDAR_FEATURE_RANGES]}."
+        )
+
+  @classmethod
+  def create(
+      cls,
+      feature_name: str,
+      input_schema: schema_lib.FeatureSchema,
+      calendar_features: Tuple[CalendarFeature, ...],
+  ) -> "CalendarNormalizer":
+    return CalendarNormalizer(
+        input_feature=feature_name,
+        calendar_features=tuple(calendar_features),
+        input_schema=input_schema,
+    )
+
+  def output_feature_name(self, calendar_feature: CalendarFeature) -> str:
+    """Returns the name of the output feature for one calendar component."""
+    return f"{self.input_feature}_{calendar_feature.value}_CALENDAR"
+
+  def output_schema(self) -> schema_lib.FeatureSetSchema:
+    calendar_group = _output_timeseries_group(
+        self.input_feature, self.input_schema
+    )
+    return {
+        self.output_feature_name(calendar_feature): schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=self.input_schema.shape or (),
+            is_timeseries=self.input_schema.is_timeseries,
+            group=calendar_group,
+        )
+        for calendar_feature in self.calendar_features
+    }
+
+  def normalize_numpy(self, value: np.ndarray) -> Dict[str, np.ndarray]:
+    if value.dtype == np.object_:
+      raise ValueError(
+          "CalendarNormalizer requires fixed-length feature tensors, but"
+          f" feature '{self.input_feature}' is a variable-length object array."
+          " Please run padding first."
+      )
+
+    timestamps = value.astype(np.int64)
+    # Only computed if a day-based component is requested.
+    days = None
+
+    output_features = {}
+    for calendar_feature in self.calendar_features:
+      if calendar_feature == CalendarFeature.SECOND:
+        component = timestamps % _SECONDS_PER_MINUTE
+      elif calendar_feature == CalendarFeature.MINUTE:
+        component = (timestamps // _SECONDS_PER_MINUTE) % 60
+      elif calendar_feature == CalendarFeature.HOUR:
+        component = (timestamps // _SECONDS_PER_HOUR) % 24
+      elif calendar_feature == CalendarFeature.DAY_OF_WEEK:
+        if days is None:
+          days = timestamps // _SECONDS_PER_DAY
+        component = (days + _EPOCH_WEEKDAY_OFFSET) % 7
+      elif calendar_feature == CalendarFeature.DAY_OF_MONTH:
+        if days is None:
+          days = timestamps // _SECONDS_PER_DAY
+        component = _day_of_month_from_days_numpy(days)
+      elif calendar_feature == CalendarFeature.MONTH:
+        if days is None:
+          days = timestamps // _SECONDS_PER_DAY
+        component = _month_from_days_numpy(days)
+      else:
+        raise ValueError(
+            f"Unsupported calendar feature '{calendar_feature.value}'."
+        )
+
+      minimum, maximum = _CALENDAR_FEATURE_RANGES[calendar_feature]
+      output_features[self.output_feature_name(calendar_feature)] = (
+          (component - minimum) / (maximum - minimum) - 0.5
+      ).astype(np.float32)
+
+    return output_features
+
+  def normalize_tensorflow(self, value: tf.Tensor) -> Dict[str, tf.Tensor]:
+    timestamps = tf.cast(value, tf.int64)
+    # Only computed if a day-based component is requested.
+    days = None
+
+    output_features = {}
+    for calendar_feature in self.calendar_features:
+      if calendar_feature == CalendarFeature.SECOND:
+        component = tf.math.floormod(timestamps, _SECONDS_PER_MINUTE)
+      elif calendar_feature == CalendarFeature.MINUTE:
+        component = tf.math.floormod(
+            tf.math.floordiv(timestamps, _SECONDS_PER_MINUTE), 60
+        )
+      elif calendar_feature == CalendarFeature.HOUR:
+        component = tf.math.floormod(
+            tf.math.floordiv(timestamps, _SECONDS_PER_HOUR), 24
+        )
+      elif calendar_feature == CalendarFeature.DAY_OF_WEEK:
+        if days is None:
+          days = tf.math.floordiv(timestamps, _SECONDS_PER_DAY)
+        component = tf.math.floormod(days + _EPOCH_WEEKDAY_OFFSET, 7)
+      elif calendar_feature == CalendarFeature.DAY_OF_MONTH:
+        if days is None:
+          days = tf.math.floordiv(timestamps, _SECONDS_PER_DAY)
+        component = _day_of_month_from_days_tensorflow(days)
+      elif calendar_feature == CalendarFeature.MONTH:
+        if days is None:
+          days = tf.math.floordiv(timestamps, _SECONDS_PER_DAY)
+        component = _month_from_days_tensorflow(days)
+      else:
+        raise ValueError(
+            f"Unsupported calendar feature '{calendar_feature.value}'."
+        )
+
+      minimum, maximum = _CALENDAR_FEATURE_RANGES[calendar_feature]
+      output_features[self.output_feature_name(calendar_feature)] = (
+          tf.cast(component, tf.float32) - minimum
+      ) / (maximum - minimum) - 0.5
+
+    return output_features
+
+
+def _month_from_days_numpy(days: np.ndarray) -> np.ndarray:
+  """Returns the 1-based civil month for days since the unix epoch.
+
+  Implements Howard Hinnant's `civil_from_days` algorithm using integer
+  arithmetic only.
+
+  Args:
+    days: Days since 1970-01-01, as integers. May be negative.
+
+  Returns:
+    The civil month, in [1, 12].
+  """
+  shifted_days = days + _DAYS_FROM_CIVIL_EPOCH
+  era = shifted_days // 146097
+  day_of_era = shifted_days - era * 146097
+  year_of_era = (
+      day_of_era
+      - day_of_era // 1460
+      + day_of_era // 36524
+      - day_of_era // 146096
+  ) // 365
+  day_of_year = day_of_era - (
+      365 * year_of_era + year_of_era // 4 - year_of_era // 100
+  )
+  # `shifted_month` is 0 for March and 11 for February of the following year.
+  shifted_month = (5 * day_of_year + 2) // 153
+  return shifted_month + 3 - 12 * (shifted_month >= 10)
+
+
+def _month_from_days_tensorflow(days: tf.Tensor) -> tf.Tensor:
+  """TensorFlow equivalent of `_month_from_days_numpy`."""
+  shifted_days = days + _DAYS_FROM_CIVIL_EPOCH
+  era = tf.math.floordiv(shifted_days, 146097)
+  day_of_era = shifted_days - era * 146097
+  year_of_era = tf.math.floordiv(
+      day_of_era
+      - tf.math.floordiv(day_of_era, 1460)
+      + tf.math.floordiv(day_of_era, 36524)
+      - tf.math.floordiv(day_of_era, 146096),
+      365,
+  )
+  day_of_year = day_of_era - (
+      365 * year_of_era
+      + tf.math.floordiv(year_of_era, 4)
+      - tf.math.floordiv(year_of_era, 100)
+  )
+  shifted_month = tf.math.floordiv(5 * day_of_year + 2, 153)
+  return (
+      shifted_month
+      + 3
+      - 12 * tf.cast(shifted_month >= 10, shifted_month.dtype)
+  )
+
+
+def _day_of_month_from_days_numpy(days: np.ndarray) -> np.ndarray:
+  """Returns the 1-based civil day of the month for days since the unix epoch.
+
+  Implements Howard Hinnant's `civil_from_days` algorithm using integer
+  arithmetic only.
+
+  Args:
+    days: Days since 1970-01-01, as integers. May be negative.
+
+  Returns:
+    The civil day of the month, in [1, 31].
+  """
+  shifted_days = days + _DAYS_FROM_CIVIL_EPOCH
+  era = shifted_days // 146097
+  day_of_era = shifted_days - era * 146097
+  year_of_era = (
+      day_of_era
+      - day_of_era // 1460
+      + day_of_era // 36524
+      - day_of_era // 146096
+  ) // 365
+  day_of_year = day_of_era - (
+      365 * year_of_era + year_of_era // 4 - year_of_era // 100
+  )
+  shifted_month = (5 * day_of_year + 2) // 153
+  return day_of_year - (153 * shifted_month + 2) // 5 + 1
+
+
+def _day_of_month_from_days_tensorflow(days: tf.Tensor) -> tf.Tensor:
+  """TensorFlow equivalent of `_day_of_month_from_days_numpy`."""
+  shifted_days = days + _DAYS_FROM_CIVIL_EPOCH
+  era = tf.math.floordiv(shifted_days, 146097)
+  day_of_era = shifted_days - era * 146097
+  year_of_era = tf.math.floordiv(
+      day_of_era
+      - tf.math.floordiv(day_of_era, 1460)
+      + tf.math.floordiv(day_of_era, 36524)
+      - tf.math.floordiv(day_of_era, 146096),
+      365,
+  )
+  day_of_year = day_of_era - (
+      365 * year_of_era
+      + tf.math.floordiv(year_of_era, 4)
+      - tf.math.floordiv(year_of_era, 100)
+  )
+  shifted_month = tf.math.floordiv(5 * day_of_year + 2, 153)
+  return day_of_year - tf.math.floordiv(153 * shifted_month + 2, 5) + 1
 
 
 @normalizer_registry.register
@@ -843,6 +1215,13 @@ class AutoNormalizeConfig:
     has_seed_timestamps: Whether seed timestamps will be provided at runtime for
       timestamp normalization. If False, timestamp features will not be
       normalized using relative timedelta embeddings.
+    calendar_normalize: If True, features with TIMESTAMP semantic additionally
+      produce one rescaled feature per entry in `calendar_features`, using a
+      `CalendarNormalizer`. This is independent of `timestamp_normalize`:
+      calendar features encode the absolute wall-clock position of a timestamp,
+      whereas `timestamp_normalize` encodes its recency relative to the seed.
+    calendar_features: The calendar components to extract when
+      `calendar_normalize` is True.
   """
 
   categorical_bytes_to_index: bool = True
@@ -859,6 +1238,9 @@ class AutoNormalizeConfig:
   timedelta_normalize: bool = True
   timedelta_embedding_dim: int = 32
   has_seed_timestamps: bool = False
+  # TODO(simonmeierhans): Consider enabling by default after benchmarking.
+  calendar_normalize: bool = False
+  calendar_features: Tuple[CalendarFeature, ...] = DEFAULT_CALENDAR_FEATURES
 
 
 def auto_normalize(
@@ -1051,6 +1433,18 @@ def auto_normalize(
               )
           )
           feature_has_normalized = True
+
+      # Calendar
+      if (
+          config.calendar_normalize
+          and feature_schema.semantic == schema_lib.FeatureSemantic.TIMESTAMP
+      ):
+        nodeset_normalizers.append(
+            CalendarNormalizer.create(
+                feature_name, feature_schema, config.calendar_features
+            )
+        )
+        feature_has_normalized = True
 
       # Embedding
       if feature_schema.semantic == schema_lib.FeatureSemantic.EMBEDDING:
