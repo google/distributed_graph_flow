@@ -16,7 +16,7 @@
 
 import dataclasses
 import enum
-from typing import Callable, Dict, Iterator, Optional, Tuple, TypeAlias, Union
+from typing import Callable, Dict, Iterator, Optional, Sequence, Tuple, TypeAlias, Union
 from dgf.src.data import in_memory_graph
 from dgf.src.data import padding as padding_lib
 from dgf.src.data import schema as schema_lib
@@ -32,6 +32,7 @@ import numpy as np
 Graph: TypeAlias = Union[
     in_memory_graph.InMemoryGraph,
     str,
+    Sequence[str],
 ]
 
 
@@ -86,6 +87,10 @@ def resolve_graph_format(
   if format != GraphFormat.AUTO:
     return format
 
+  if isinstance(graph, (list, tuple)):
+    if not graph:
+      raise ValueError("Cannot resolve graph format from empty sequence of paths.")
+    return resolve_graph_format(graph[0], format=format)
   if isinstance(graph, in_memory_graph.InMemoryGraph):
     return GraphFormat.IN_MEMORY_GRAPH
   if isinstance(graph, str):
@@ -378,7 +383,7 @@ class SampleGeneratorFromAnything:
       self, container_type
   ) -> Tuple[BatchSampleGeneratorIteratorFn, SingleSampleGeneratorIteratorFn]:
     """Creates a SampleGenerator from a path to a bagz file."""
-    assert isinstance(self.graph, str)
+    assert isinstance(self.graph, (str, list, tuple))
 
     def batch_generator():
       # TODO(gbm): Use pygrain and add shuffling?

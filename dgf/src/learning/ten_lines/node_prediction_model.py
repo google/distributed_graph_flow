@@ -997,7 +997,9 @@ class NodePredictionModel(common.Model):
           return predictions[0]
 
         return tf.map_fn(
-            predict_one_example, examples, fn_output_signature=tf.float32
+            predict_one_example,
+            examples,
+            fn_output_signature=tf.TensorSpec(shape=None, dtype=tf.float32),
         )
 
     wrapper_class = {

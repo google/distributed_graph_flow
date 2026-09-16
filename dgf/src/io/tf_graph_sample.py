@@ -742,7 +742,7 @@ schema_to_tfgnn_graph_parsing_spec = (
 
 
 def read_tfgnn_graphs(
-    path: str,
+    path: str | Sequence[str],
     schema: schema_lib.GraphSchema,
     import_node_ids: Optional[str] = None,
     import_edge_ids: Optional[str] = None,

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import math
 import re
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 
@@ -81,10 +81,11 @@ def expand_output_paths(path: str, num_shards: Optional[int]) -> List[str]:
       return [path]
 
 
-def expand_input_paths(path: str) -> List[str]:
+def expand_input_paths(path: str | Sequence[str]) -> List[str]:
   """Generates a list of concrete filenames from a path expression.
 
-  The input path can be a sharded path, a glob path, or a concrete path.
+  The input path can be a sharded path, a glob path, or a concrete path, or a
+  list of such paths.
 
   This function is only applicable for input path i.e. where then files already
   exist. For output path extension, use "expand_output_paths".
@@ -93,6 +94,7 @@ def expand_input_paths(path: str) -> List[str]:
 
   Examples:
     "/a/b" => ["/a/b"]
+    ["/a/b", "/c/d"] => ["/a/b", "/c/d"]
     "/a/b@2" => ["/a/b-00000-of-00002", "/a/b-00001-of-00002"]
     "/a/b@2.ext" => ["/a/b-00000-of-00002.ext", "/a/b-00001-of-00002.ext"]
     "/a/b@*.ext" => ["/a/b-00000-of-00002.ext", "/a/b-00001-of-00002.ext"]
@@ -103,13 +105,19 @@ def expand_input_paths(path: str) -> List[str]:
   If the expression contains @*, * or, ?, this function will scan the directory.
 
   Args:
-    path: Path, possibly sharded.
+    path: Path, possibly sharded, or list of paths.
 
   Returns:
     Returns the list of paths.
   """
+  if not isinstance(path, str):
+    res: list[str] = []
+    for p in path:
+      res.extend(expand_input_paths(p))
+    return sorted(list(dict.fromkeys(res)))
 
   sharding_spec = _match_sharded_path(path)
+
   if sharding_spec is not None:
     # This is a sharded path
     basename, num_shards_or_star, extension = sharding_spec
