@@ -17,7 +17,7 @@
 import logging
 import os
 import time
-from typing import Any, Tuple
+from typing import Any
 import unittest
 from unittest import mock
 from absl.testing import absltest
@@ -73,7 +73,7 @@ class LoadDatasetTest(parameterized.TestCase):
   def test_ogb(self, graph_name, mock_download_ogb_graph):
 
     # Mock the OGB downloader.
-    def download_ogb_graph_mock(name: str) -> Tuple[Any, Any, Any]:
+    def download_ogb_graph_mock(name: str) -> tuple[Any, Any, Any]:
       del name
       label = np.random.randint(0, 10, size=(3, 1))
       ogb_graph = {
@@ -97,6 +97,50 @@ class LoadDatasetTest(parameterized.TestCase):
         "Schema:\n%s", print_schema.print_schema(schema, return_output=True)
     )
     in_memory_graph_validate_lib.validate_graph(graph, schema)
+    self.assertTrue(os.path.exists(os.path.join(tmpdir, f"{graph_name}.cache")))
+
+  def test_download_ogb_graph_cache_dir(self):
+    mock_dataset = mock.MagicMock()
+    mock_dataset.__getitem__.return_value = ({"dummy": 1}, np.array([0]))
+    mock_dataset.get_idx_split.return_value = {"train": np.array([0])}
+    mock_node_prop = mock.MagicMock(return_value=mock_dataset)
+    mock_ogb = mock.MagicMock(NodePropPredDataset=mock_node_prop)
+
+    with mock.patch.object(
+        dataset_loader.weak_dep_ogb,
+        "ogb_nodeproppred",
+        mock_ogb,
+    ):
+      # 1. Custom cache_dir
+      custom_dir = self.create_tempdir().full_path
+      marker_file = os.path.join(custom_dir, "marker.txt")
+      with open(marker_file, "w") as f:
+        f.write("marker")
+      self.assertTrue(os.path.exists(marker_file))
+
+      def side_effect(name, root):
+        del name
+        os.makedirs(root, exist_ok=True)
+        return mock_dataset
+
+      mock_node_prop.side_effect = side_effect
+
+      graph, _, _ = dataset_loader.download_ogb_graph(
+          "ogbn-arxiv", cache_dir=custom_dir
+      )
+
+      mock_node_prop.assert_called_once_with(name="ogbn-arxiv", root=custom_dir)
+      self.assertEqual(graph, {"dummy": 1})
+      self.assertFalse(os.path.exists(custom_dir))
+
+      # 2. Default cache_dir=None
+      mock_node_prop.reset_mock()
+      with mock.patch.object(dataset_loader.fs, "rmtree") as mock_rmtree:
+        dataset_loader.download_ogb_graph("ogbn-arxiv", cache_dir=None)
+        mock_node_prop.assert_called_once_with(
+            name="ogbn-arxiv", root="/tmp/ogb_cache_dir"
+        )
+        mock_rmtree.assert_called_with("/tmp/ogb_cache_dir")
 
   @unittest.skipIf(
       os.environ.get("TEST_STRATEGY") != "local",
@@ -186,6 +230,64 @@ class LoadDatasetTest(parameterized.TestCase):
         print_schema.print_schema(schema, return_output=True),
     )
     in_memory_graph_validate_lib.validate_graph(graph, schema)
+
+  @mock.patch.object(dataset_loader, "download_graphland_graph", autospec=True)
+  def test_graphland_caching_masks(self, mock_download_graphland_graph):
+    def download_graphland_mock(
+        name: str, mask_name: str, repo: dataset_loader.Repo
+    ):
+      del name  # Unused.
+      del repo
+      edges = np.array([[0, 1, 2], [1, 2, 0]])
+      features = {
+          "feat_1": np.array([1.0, 2.0, 3.0]),
+      }
+      targets = np.array([0, 1, 0])
+      splits = np.array([mask_name, mask_name, mask_name], dtype="S5")
+      info = {
+          "task": "binary_classification",
+          "num_classes": 2,
+          "numerical_features_names": ["feat_1"],
+      }
+      return edges, features, targets, splits, info
+
+    mock_download_graphland_graph.side_effect = download_graphland_mock
+    tmpdir = self.create_tempdir().full_path
+    graph_rl, _ = dataset_loader.fetch_graphland_graph(
+        "hm-prices", cache_dir=tmpdir, mask_name="RL"
+    )
+    graph_rh, _ = dataset_loader.fetch_graphland_graph(
+        "hm-prices", cache_dir=tmpdir, mask_name="RH"
+    )
+
+    self.assertTrue(os.path.exists(os.path.join(tmpdir, "hm-prices_RL.cache")))
+    self.assertTrue(os.path.exists(os.path.join(tmpdir, "hm-prices_RH.cache")))
+    np.testing.assert_array_equal(
+        graph_rl.node_sets["nodes"].features["#split"],
+        np.array([b"RL", b"RL", b"RL"]),
+    )
+    np.testing.assert_array_equal(
+        graph_rh.node_sets["nodes"].features["#split"],
+        np.array([b"RH", b"RH", b"RH"]),
+    )
+    self.assertEqual(mock_download_graphland_graph.call_count, 2)
+
+    # Calling again should load from the respective caches without re-fetching.
+    graph_rl_cached, _ = dataset_loader.fetch_graphland_graph(
+        "hm-prices", cache_dir=tmpdir, mask_name="RL"
+    )
+    graph_rh_cached, _ = dataset_loader.fetch_graphland_graph(
+        "hm-prices", cache_dir=tmpdir, mask_name="RH"
+    )
+    self.assertEqual(mock_download_graphland_graph.call_count, 2)
+    np.testing.assert_array_equal(
+        graph_rl_cached.node_sets["nodes"].features["#split"],
+        np.array([b"RL", b"RL", b"RL"]),
+    )
+    np.testing.assert_array_equal(
+        graph_rh_cached.node_sets["nodes"].features["#split"],
+        np.array([b"RH", b"RH", b"RH"]),
+    )
 
   @unittest.skipIf(
       os.environ.get("TEST_STRATEGY") != "local",
@@ -302,9 +404,7 @@ class LoadDatasetTest(parameterized.TestCase):
 
     # Query node assertions
     expected_num_queries = num_rows - 2
-    self.assertEqual(
-        graph.node_sets["queries"].num_nodes, expected_num_queries
-    )
+    self.assertEqual(graph.node_sets["queries"].num_nodes, expected_num_queries)
     query_features = graph.node_sets["queries"].features
     query_schema = schema.node_sets["queries"].features
     self.assertTrue(query_schema["creation_time"].is_creation_time)

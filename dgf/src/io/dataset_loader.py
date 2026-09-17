@@ -22,7 +22,7 @@ import functools
 import io
 import os
 import tempfile
-from typing import Any, Optional, Tuple, Union
+from typing import Any
 import urllib.request
 import zipfile
 
@@ -34,7 +34,7 @@ from dgf.src.io import feature_format as feature_format_lib
 from dgf.src.io import graph_in_memory as gf_graph_in_memory
 from dgf.src.util import log
 import dgf.src.util.filesystem as fs
-from dgf.src.util.weak_dep.weak_dep_ogb import ogb_nodeproppred
+from dgf.src.util.weak_dep import weak_dep_ogb
 import numpy as np
 import pandas as pd
 import yaml
@@ -67,7 +67,9 @@ class Repo(str, enum.Enum):
   WEB = "WEB"
 
 
-def download_ogb_graph(name: str) -> Tuple[Any, Any, Any]:
+def download_ogb_graph(
+    name: str, cache_dir: str | None = None
+) -> tuple[Any, Any, Any]:
   """Downloads an OGB graph dataset.
 
   Args:
@@ -78,14 +80,15 @@ def download_ogb_graph(name: str) -> Tuple[Any, Any, Any]:
     A tuple containing the graph data, labels, and index splits.
   """
 
-  nodeproppred = ogb_nodeproppred
+  nodeproppred = weak_dep_ogb.ogb_nodeproppred
 
   # Download dataset using OGB's Library-Agnostic Loader.
   # TODO: b/449224186 - Temporarily, always clean up the cache directory
   # because the library has trouble loading the dataset from cache.
   # The problem might need to be fixed in the open-source library, and
   # sync back into /third_party.
-  cache_dir = "/tmp/ogb_cache_dir"
+  if cache_dir is None:
+    cache_dir = "/tmp/ogb_cache_dir"
   if fs.exists(cache_dir):
     logging.info("Clearing OGB dataset cache directory %s", cache_dir)
     fs.rmtree(cache_dir)
@@ -109,7 +112,7 @@ def generate_ids(prefix: str, num_nodes: int) -> np.ndarray:
 
 
 def build_split_idx(
-    num_nodes: int, ogb_splits: Any, subdict: Optional[str] = None
+    num_nodes: int, ogb_splits: Any, subdict: str | None = None
 ) -> np.ndarray:
   """Given an OGB idx_split, generate the content of the #split feature."""
   splits = np.full(num_nodes, "n/a", dtype="S5")
@@ -121,7 +124,7 @@ def build_split_idx(
 
 
 def load_ogbn_arxiv() -> (
-    Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]
+    tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]
 ):
   """Loads the OGBN-Arxiv dataset."""
 
@@ -185,7 +188,7 @@ def load_ogbn_arxiv() -> (
 
 
 def load_ogbn_mag() -> (
-    Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]
+    tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]
 ):
   """Loads the OGBN-Mag dataset."""
 
@@ -324,7 +327,7 @@ def load_ogbn_mag() -> (
 
 
 def load_ogbn_products() -> (
-    Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]
+    tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]
 ):
   """Loads the OGBN-Products dataset."""
 
@@ -384,7 +387,7 @@ def load_ogbn_products() -> (
 
 def load_from_cns(
     name: str,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Loads the data from CNS."""
   path = os.path.join(CNS_GF_REPO, name)
   return gf_graph_in_memory.read_graph(path)
@@ -392,10 +395,10 @@ def load_from_cns(
 
 def fetch_ogb_graph(
     name: str,
-    cache_dir: Optional[str] = "AUTO",
+    cache_dir: str | None = "AUTO",
     verbose: bool = True,
-    repo: Union[Repo, str] = Repo.AUTO,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+    repo: Repo | str = Repo.AUTO,
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Downloads and loads an OGB node property prediction dataset into memory.
 
   This function fetches datasets from the Open Graph Benchmark (OGB)
@@ -475,7 +478,7 @@ def fetch_ogb_graph(
 
 def download_graphland_graph(
     name: str, mask_name: str, repo: Repo
-) -> Tuple[Any, Any, Any, Any, Any]:
+) -> tuple[Any, Any, Any, Any, Any]:
   """Downloads a Graphland graph dataset from Zenodo or CNS.
 
   Args:
@@ -567,11 +570,11 @@ def get_num_classes(targets: np.ndarray) -> int:
 
 def fetch_graphland_graph(
     name: str,
-    cache_dir: Optional[str] = "AUTO",
+    cache_dir: str | None = "AUTO",
     verbose: bool = True,
     mask_name: str = "RL",
-    repo: Union[Repo, str] = Repo.AUTO,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+    repo: Repo | str = Repo.AUTO,
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Downloads and loads a Graphland dataset into memory.
 
   This function fetches datasets from the Graphland benchmark
@@ -619,9 +622,14 @@ def fetch_graphland_graph(
 
   if cache_dir is not None:
     fs.makedirs(cache_dir)
-    cache_graph_path = os.path.join(cache_dir, f"{name}.cache")
+    cache_graph_path = os.path.join(cache_dir, f"{name}_{mask_name}.cache")
     if verbose:
-      log.info("Caching Graphland %s graph at %s", name, cache_graph_path)
+      log.info(
+          "Caching Graphland %s (%s) graph at %s",
+          name,
+          mask_name,
+          cache_graph_path,
+      )
   else:
     cache_graph_path = None
 
@@ -686,20 +694,20 @@ def fetch_graphland_graph(
     fraction_features = set(info.get("fraction_features_names", []))
 
     for feat_name, feat_values in features.items():
-      format = feature_format_lib.NP_DTYPE_TO_FEATURE_FORMAT[
+      feature_format = feature_format_lib.NP_DTYPE_TO_FEATURE_FORMAT[
           feat_values.dtype.type
       ]
       num_categorical_values = None
       if feat_name in categorical_features:
         semantic = schema_lib.FeatureSemantic.CATEGORICAL
-        if format.is_numerical():
+        if feature_format.is_numerical():
           num_categorical_values = get_num_classes(feat_values)
       elif feat_name in numerical_features or feat_name in fraction_features:
         semantic = schema_lib.FeatureSemantic.NUMERICAL
       else:
         raise ValueError(f"Unknown feature type for {feat_name}")
       features_schemas[feat_name] = schema_lib.FeatureSchema(
-          format=format,
+          format=feature_format,
           semantic=semantic,
           shape=None,
           num_categorical_values=num_categorical_values,
@@ -731,9 +739,7 @@ def fetch_graphland_graph(
     return cache_lib.cache(cache_graph_path, load_graph)
 
 
-JENA_CLIMATE_URL = (
-    "https://storage.googleapis.com/tensorflow/tf-keras-datasets/jena_climate_2009_2016.csv.zip"
-)
+JENA_CLIMATE_URL = "https://storage.googleapis.com/tensorflow/tf-keras-datasets/jena_climate_2009_2016.csv.zip"
 
 JENA_CLIMATE_COLUMN_RENAME_MAP = {
     "p (mbar)": "p_mbar",
@@ -755,7 +761,7 @@ JENA_CLIMATE_COLUMN_RENAME_MAP = {
 JENA_WEATHER_FEATURE_NAMES = list(JENA_CLIMATE_COLUMN_RENAME_MAP.values())
 
 
-def download_jena_climate_csv(source: Optional[str] = None) -> pd.DataFrame:
+def download_jena_climate_csv(source: str | None = None) -> pd.DataFrame:
   """Downloads and parses the Jena Climate CSV.
 
   Cleans sentinel values (-9999.0 in wind velocities) and parses timestamps.
@@ -827,7 +833,7 @@ def build_jena_climate_graph(
     forecast_horizon_seconds: int = 3600,
     query_step: int = 6,
     subsample_station_step: int = 1,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Constructs a DGF InMemoryGraph and GraphSchema from Jena Climate data.
 
   Graph structure:
@@ -1022,14 +1028,14 @@ def build_jena_climate_graph(
 
 def fetch_jena_climate_graph(
     name: str = "jena_climate_1h",
-    cache_dir: Optional[str] = "AUTO",
+    cache_dir: str | None = "AUTO",
     verbose: bool = True,
     forecast_horizon_seconds: int = 3600,
     query_step: int = 6,
     subsample_station_step: int = 1,
-    repo: Union[Repo, str] = Repo.AUTO,
-    source: Optional[str] = None,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+    repo: Repo | str = Repo.AUTO,
+    source: str | None = None,
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Downloads and loads the Jena Climate time series benchmark into memory.
 
   This function loads the Jena Climate dataset
@@ -1102,6 +1108,7 @@ def fetch_jena_climate_graph(
           query_step=query_step,
           subsample_station_step=subsample_station_step,
       )
+
   else:
     raise ValueError(f"Unsupported repo for Jena Climate: {repo}")
 
