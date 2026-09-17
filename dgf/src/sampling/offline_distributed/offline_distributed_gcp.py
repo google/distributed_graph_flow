@@ -372,8 +372,8 @@ def offline_distributed_sampler_gcp(
   execute the distributed sampling pipeline on Apache Beam / Dataflow.
 
   Each generated sample is a `tensorflow.Example` proto with two extra columns
-  identifying it: `#seed-id` (the id of the seed node the sample was grown
-  from) and `#sample-id` (the unique id of the sample).
+  identifying it: `#seed_id` (the id of the seed node the sample was grown
+  from) and `#sample_id` (the unique id of the sample).
 
   By default, one sample is generated for each node of the seed nodeset. Use
   `num_seeds` to generate fewer samples than there are seed nodes (each
@@ -417,8 +417,8 @@ def offline_distributed_sampler_gcp(
     input_seeds: Optional path to a sharded container of `tensorflow.Example`
       protos listing the seeds to sample (e.g.
       "gs://my_bucket/seeds@10.tfrecord.gz" or
-      "gs://my_bucket/seeds-*.tfrecord.gz"). Each example must have a `#seed-id`
-      column, and may have a `#sample-id` column; missing sample ids are
+      "gs://my_bucket/seeds-*.tfrecord.gz"). Each example must have a `#seed_id`
+      column, and may have a `#sample_id` column; missing sample ids are
       generated. If None, the seeds are all the nodes of the seed nodeset of the
       sampling plan.
     input_seed_container: Container of `input_seeds`: "TFRECORD" or "RECORDIO".

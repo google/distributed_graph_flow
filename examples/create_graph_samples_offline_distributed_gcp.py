@@ -86,7 +86,7 @@ _INPUT_SEEDS = flags.DEFINE_string(
     "input_seeds",
     None,
     "Optional sharded container of tensorflow.Example protos listing the seeds"
-    " to sample, with a '#seed-id' column and an optional '#sample-id' column."
+    " to sample, with a '#seed_id' column and an optional '#sample_id' column."
     " If None, the nodes of the seed nodeset are used.",
 )
 _INPUT_SEED_CONTAINER = flags.DEFINE_string(
