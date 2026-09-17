@@ -1193,10 +1193,10 @@ class AutoNormalizeConfig:
       will be converted to integer indices using `DictionaryIndexNormalizer`.
     numerical_soft_quantile: If True, numerical features (INTEGER or FLOAT) will
       be normalized using `SoftQuantileNormalizer`.
-    keep_raw_features: A list of feature names that should bypass all
-      normalization and be included in the output graph as-is. This is useful
-      for preserving features like unique identifiers or other metadata not
-      intended for model input.
+    keep_raw_features: A set of `(nodeset_name, feature_name)` tuples that
+      should bypass all normalization and be included in the output graph
+      as-is. This is useful for preserving features like unique identifiers or
+      labels not intended for model input.
     ignore_features_without_stats: Whether to ignore features that are not in
       `keep_raw_features` and do not have associated statistics. If `False`
       (default), an error is raised. If `True`, such features are skipped.
@@ -1225,8 +1225,12 @@ class AutoNormalizeConfig:
 
   categorical_bytes_to_index: bool = True
   numerical_soft_quantile: bool = True
-  keep_raw_features: Set[str] = dataclasses.field(
-      default_factory=lambda: set([])
+  keep_raw_features: Set[Tuple[str, str]] = dataclasses.field(
+      default_factory=set,
+      metadata=dataclasses_json.config(
+          encoder=lambda s: [list(x) for x in s],
+          decoder=lambda l: set(tuple(x) for x in l),
+      ),
   )
   ignore_features_without_stats: bool = False
   consume_primary_keys: bool = False
@@ -1289,6 +1293,33 @@ def auto_normalize(
     A GraphNormalizer instance.
   """
 
+  # Validate keep_raw_features.
+  for entry in config.keep_raw_features:
+    if (
+        not isinstance(entry, (tuple, list))
+        or len(entry) != 2
+        or not isinstance(entry[0], str)
+        or not isinstance(entry[1], str)
+    ):
+      raise ValueError(
+          f"Invalid entry in `keep_raw_features`: {entry!r}. Expected a"
+          " (nodeset_or_edgeset_name, feature_name) tuple of strings."
+      )
+    set_name, feature_name = entry
+    set_schema = schema.node_sets.get(set_name) or schema.edge_sets.get(
+        set_name
+    )
+    if set_schema is None:
+      raise ValueError(
+          f"Set '{set_name}' from `keep_raw_features` not found in graph node"
+          " sets or edge sets."
+      )
+    if feature_name not in set_schema.features:
+      raise ValueError(
+          f"Feature '{feature_name}' from `keep_raw_features` not found in set"
+          f" '{set_name}'."
+      )
+
   edgesets = {}
   for edgeset_name, edgeset_schema in schema.edge_sets.items():
     # TODO(gbm): Normalize edgeset feature values.
@@ -1305,7 +1336,7 @@ def auto_normalize(
     nodeset_stats = stats.node_sets[nodeset_name]
     for feature_name, feature_schema in nodeset_schema.features.items():
       if (
-          feature_name in config.keep_raw_features
+          (nodeset_name, feature_name) in config.keep_raw_features
           # Mask features should be preserved.
           or feature_schema.semantic == schema_lib.FeatureSemantic.MASK
       ):

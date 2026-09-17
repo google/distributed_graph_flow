@@ -1165,7 +1165,7 @@ class AutoNormalierTest(absltest.TestCase):
     normalizer = normalize_lib.auto_normalize(
         input_schema,
         input_stats,
-        normalize_lib.AutoNormalizeConfig(keep_raw_features=set(["f1"])),
+        normalize_lib.AutoNormalizeConfig(keep_raw_features={("n1", "f1")}),
     )
     output_schema = normalizer.output_schema()
     expected_output_schema = schema_lib.GraphSchema(
@@ -1200,6 +1200,107 @@ class AutoNormalierTest(absltest.TestCase):
         },
     )
     test_util.assert_are_equal(self, output_schema, expected_output_schema)
+
+  def _add_shared_numerical_feature(self):
+    """Adds a numerical "f3" to "n1", so "f3" exists in both node sets."""
+    self.input_schema.node_sets["n1"].features["f3"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    self.input_stats.node_sets["n1"].features["f3"] = (
+        statistics_lib.FeatureStatistics(
+            count=2,
+            minimum=0,
+            maximum=4,
+            dictionary={},
+            quantiles=[0.0, 3.0, 4.0, 6.0],
+        )
+    )
+
+  def test_keep_raw_features_scoped_to_nodeset(self):
+    """A (nodeset_name, feature_name) tuple only applies to that node set."""
+    self._add_shared_numerical_feature()
+
+    normalizer = normalize_lib.auto_normalize(
+        self.input_schema,
+        self.input_stats,
+        normalize_lib.AutoNormalizeConfig(keep_raw_features={("n1", "f3")}),
+    )
+
+    output_schema = normalizer.output_schema()
+    test_util.assert_are_equal(
+        self,
+        normalizer.get_normalized_feature_names("n1", "f3"),
+        ["f3"],
+    )
+    test_util.assert_are_equal(
+        self,
+        output_schema.node_sets["n1"].features["f3"].semantic,
+        schema_lib.FeatureSemantic.NUMERICAL,
+    )
+    # The feature with the same name in the other node set is still normalized.
+    test_util.assert_are_equal(
+        self,
+        normalizer.get_normalized_feature_names("n2", "f3"),
+        ["f3_SOFT_QUANTILE"],
+    )
+
+  def test_keep_raw_features_bare_string_raises(self):
+    """Passing a bare string instead of a tuple raises ValueError."""
+    with self.assertRaisesRegex(ValueError, "Expected a .* tuple"):
+      normalize_lib.auto_normalize(
+          self.input_schema,
+          self.input_stats,
+          normalize_lib.AutoNormalizeConfig(keep_raw_features={"f1"}),  # pyrefly: ignore[bad-argument-type]
+      )
+
+  def test_keep_raw_features_scoped_to_edgeset(self):
+    """An (edgeset_name, feature_name) tuple is accepted for edge sets."""
+    self.input_schema.edge_sets["e1"].features["weight"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+
+    normalizer = normalize_lib.auto_normalize(
+        self.input_schema,
+        self.input_stats,
+        normalize_lib.AutoNormalizeConfig(keep_raw_features={("e1", "weight")}),
+    )
+    self.assertIsNotNone(normalizer)
+
+  def test_keep_raw_features_invalid_set_raises(self):
+    """A tuple with a non-existent set raises ValueError."""
+    with self.assertRaisesRegex(ValueError, "Set 'unknown_set'.*not found"):
+      normalize_lib.auto_normalize(
+          self.input_schema,
+          self.input_stats,
+          normalize_lib.AutoNormalizeConfig(
+              keep_raw_features={("unknown_set", "f1")}
+          ),
+      )
+
+  def test_keep_raw_features_invalid_feature_raises(self):
+    """A tuple with a non-existent feature in a valid set raises ValueError."""
+    with self.assertRaisesRegex(ValueError, "Feature 'unknown_feature'.*not found"):
+      normalize_lib.auto_normalize(
+          self.input_schema,
+          self.input_stats,
+          normalize_lib.AutoNormalizeConfig(
+              keep_raw_features={("n1", "unknown_feature")}
+          ),
+      )
+
+  def test_keep_raw_features_json_roundtrip(self):
+    """AutoNormalizeConfig with tuples correctly serializes and deserializes."""
+    config = normalize_lib.AutoNormalizeConfig(
+        keep_raw_features={("n1", "f3"), ("n2", "f3")}
+    )
+    json_str = config.to_json()  # pyrefly: ignore[missing-attribute]
+    loaded = normalize_lib.AutoNormalizeConfig.from_json(json_str)  # pyrefly: ignore[missing-attribute]
+    self.assertIn(("n1", "f3"), loaded.keep_raw_features)
+    self.assertIn(("n2", "f3"), loaded.keep_raw_features)
 
   def test_serialize(self):
     normalizer = normalize_lib.auto_normalize(

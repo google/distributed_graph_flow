@@ -56,7 +56,7 @@ class GNNLinkDatasetPreparatorTest(parameterized.TestCase):
         "num_negative_nodes": 3,
         "seed_edge_idxs": None,
         "auto_normalize_config": normalize_lib.AutoNormalizeConfig(
-            keep_raw_features={"#id"}
+            keep_raw_features={("n1", "#id"), ("n2", "#id")}
         ),
         "edge_neighbor_generator": (
             edge_neighbor_generator_lib.RandomEdgeNeighborGeneratorConfig()
