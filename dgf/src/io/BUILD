@@ -591,6 +591,7 @@ py_test(
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         "//dgf/src/analyse:print_schema",
+        "//dgf/src/util:log",
         "//dgf/src/util:test_util",
         "//dgf/src/validate:in_memory_graph",
         # numpy dep,

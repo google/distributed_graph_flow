@@ -373,7 +373,7 @@ def train_node_model(
             batch_size=hparams.batch_size,
             num_sampling_hops=hparams.num_sampling_hops,
             sampling_width=hparams.sampling_width,
-            keep_raw_features={task.target_column}
+            keep_raw_features={(task.target_nodeset, task.target_column)}
             if task.task_type == node_prediction_model.TaskType.NODE_REGRESSION
             else set(),
             verbose=verbose,

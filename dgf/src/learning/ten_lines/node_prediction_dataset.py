@@ -736,7 +736,7 @@ def prepare_datasets(
     cache_normalized_features_device: Literal["host", "device"],
     sampling_plan: Optional[sampling_config_lib.SamplingPlan],
     auto_normalize_config: Optional[normalize_lib.AutoNormalizeConfig] = None,
-    keep_raw_features: Optional[set[str]] = None,
+    keep_raw_features: Optional[set[Tuple[str, str]]] = None,
 ) -> Tuple["GNNDatasetPreparator", Optional["GNNDatasetPreparator"]]:
   """Prepares the training dataset by sampling, normalizing, and padding."""
   if not cache_valid_dataset or num_valid_steps is None:

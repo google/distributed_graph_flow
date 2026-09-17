@@ -19,6 +19,8 @@
 from dgf.src.io.dataset_loader import fetch_ogb_graph
 from dgf.src.io.dataset_loader import fetch_graphland_graph
 from dgf.src.io.dataset_loader import fetch_jena_climate_graph
+from dgf.src.io.dataset_loader import fetch_metr_la_graph
+from dgf.src.io.dataset_loader import fetch_pems_bay_graph
 
 from dgf.src.io.hgraph_in_memory import read_graphai_hgraph
 
