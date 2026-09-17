@@ -82,9 +82,16 @@ class OfflineDistributedGcpTest(absltest.TestCase):
         container_args,
     )
     self.assertIn("--num_seeds=500", container_args)
+    self.assertIn("--num_samples_per_seed=1", container_args)
+    self.assertIn("--random_seed=42", container_args)
     self.assertIn("--num_workers=3", container_args)
     self.assertIn("--max_num_workers=3", container_args)
     self.assertIn("--runner=dataflow", container_args)
+    # Without input seeds, the sampler seeds on the nodes of the seed nodeset.
+    self.assertNoCommonElements(
+        ["--input_seeds", "--input_seed_container"],
+        [arg.split("=")[0] for arg in container_args],
+    )
 
     mock_job.submit.assert_called_once()
     mock_open_write.assert_called_once_with(
@@ -294,6 +301,103 @@ class OfflineDistributedGcpTest(absltest.TestCase):
     self.assertIn("--project=custom-proj", container_args)
     self.assertIn("--staging_location=gs://custom/staging", container_args)
     self.assertIn("--temp_location=gs://custom/temp", container_args)
+
+  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(aiplatform, "CustomJob")
+  def test_input_seeds(self, mock_custom_job_cls, mock_open_write):
+    mock_open_write.return_value.__enter__.return_value = mock.MagicMock()
+    mock_custom_job_cls.return_value = mock.MagicMock()
+
+    offline_distributed_gcp.offline_distributed_sampler_gcp(
+        input_path="gs://my_bucket/graph",
+        output_path="gs://my_bucket/samples",
+        plan=self.simple_plan,
+        schema=self.mock_schema,
+        project="test-proj",
+        input_seeds="gs://my_bucket/seeds@10.recordio",
+        input_seed_container="RECORDIO",
+        random_seed=7,
+        blocking=False,
+    )
+
+    _, kwargs = mock_custom_job_cls.call_args
+    container_args = kwargs["worker_pool_specs"][0]["container_spec"]["args"]
+    self.assertIn(
+        "--input_seeds=gs://my_bucket/seeds@10.recordio", container_args
+    )
+    self.assertIn("--input_seed_container=RECORDIO", container_args)
+    self.assertIn("--random_seed=7", container_args)
+
+  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(aiplatform, "CustomJob")
+  def test_num_samples_per_seed(self, mock_custom_job_cls, mock_open_write):
+    mock_open_write.return_value.__enter__.return_value = mock.MagicMock()
+    mock_custom_job_cls.return_value = mock.MagicMock()
+
+    offline_distributed_gcp.offline_distributed_sampler_gcp(
+        input_path="gs://my_bucket/graph",
+        output_path="gs://my_bucket/samples",
+        plan=self.simple_plan,
+        schema=self.mock_schema,
+        project="test-proj",
+        num_samples_per_seed=3,
+        blocking=False,
+    )
+
+    _, kwargs = mock_custom_job_cls.call_args
+    container_args = kwargs["worker_pool_specs"][0]["container_spec"]["args"]
+    self.assertIn("--num_samples_per_seed=3", container_args)
+    self.assertIn("--num_seeds=0", container_args)
+
+  def test_num_seeds_and_num_samples_per_seed_are_exclusive(self):
+    with self.assertRaisesRegex(ValueError, "are exclusive"):
+      offline_distributed_gcp.offline_distributed_sampler_gcp(
+          input_path="gs://my_bucket/graph",
+          output_path="gs://my_bucket/samples",
+          plan=self.simple_plan,
+          schema=self.mock_schema,
+          project="test-proj",
+          num_seeds=10,
+          num_samples_per_seed=2,
+      )
+
+  def test_invalid_num_samples_per_seed_raises_error(self):
+    with self.assertRaisesRegex(
+        ValueError, "num_samples_per_seed cannot be less than one"
+    ):
+      offline_distributed_gcp.offline_distributed_sampler_gcp(
+          input_path="gs://my_bucket/graph",
+          output_path="gs://my_bucket/samples",
+          plan=self.simple_plan,
+          schema=self.mock_schema,
+          project="test-proj",
+          num_samples_per_seed=0,
+      )
+
+  def test_invalid_num_seeds_raises_error(self):
+    with self.assertRaisesRegex(ValueError, "num_seeds cannot be negative"):
+      offline_distributed_gcp.offline_distributed_sampler_gcp(
+          input_path="gs://my_bucket/graph",
+          output_path="gs://my_bucket/samples",
+          plan=self.simple_plan,
+          schema=self.mock_schema,
+          project="test-proj",
+          num_seeds=-1,
+      )
+
+  def test_invalid_input_seed_container_raises_error(self):
+    with self.assertRaisesRegex(
+        ValueError, "Unsupported input_seed_container 'SSTABLE'"
+    ):
+      offline_distributed_gcp.offline_distributed_sampler_gcp(
+          input_path="gs://my_bucket/graph",
+          output_path="gs://my_bucket/samples",
+          plan=self.simple_plan,
+          schema=self.mock_schema,
+          project="test-proj",
+          input_seeds="gs://my_bucket/seeds",
+          input_seed_container="SSTABLE",
+      )
 
   def test_invalid_input_path_raises_error(self):
     with self.assertRaisesRegex(

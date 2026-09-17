@@ -73,7 +73,26 @@ _NUM_WORKERS = flags.DEFINE_integer(
 _NUM_SEEDS = flags.DEFINE_integer(
     "num_seeds",
     1000,
-    "Number of seeds to sample (0 means all nodes).",
+    "Number of seeds to select among the available ones (0 means all of them)."
+    " Exclusive with --num_samples_per_seed.",
+)
+_NUM_SAMPLES_PER_SEED = flags.DEFINE_integer(
+    "num_samples_per_seed",
+    1,
+    "Number of samples to generate for each available seed. Exclusive with"
+    " --num_seeds.",
+)
+_INPUT_SEEDS = flags.DEFINE_string(
+    "input_seeds",
+    None,
+    "Optional sharded container of tensorflow.Example protos listing the seeds"
+    " to sample, with a '#seed-id' column and an optional '#sample-id' column."
+    " If None, the nodes of the seed nodeset are used.",
+)
+_INPUT_SEED_CONTAINER = flags.DEFINE_string(
+    "input_seed_container",
+    "TFRECORD",
+    "Container of --input_seeds: TFRECORD or RECORDIO.",
 )
 _PROJECT = flags.DEFINE_string(
     "project",
@@ -117,6 +136,9 @@ def main(argv: Sequence[str]) -> None:
       region=_REGION.value,
       num_workers=_NUM_WORKERS.value,
       num_seeds=_NUM_SEEDS.value,
+      num_samples_per_seed=_NUM_SAMPLES_PER_SEED.value,
+      input_seeds=_INPUT_SEEDS.value,
+      input_seed_container=_INPUT_SEED_CONTAINER.value,
       blocking=_BLOCKING.value,
   )
 

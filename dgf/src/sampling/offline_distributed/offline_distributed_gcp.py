@@ -35,6 +35,10 @@ _WORKER_BINARY = "/google3/third_party/py/dgf/src/bin/google/offline_distributed
 _WORKER_MACHINE_TYPE = "n1-highmem-4"
 _DEFAULT_POLL_INTERVAL_SEC = 5.0
 
+# Containers the input seeds can be read from. SSTable is excluded: it is a DAX
+# sink that the sampler cannot read seeds from.
+_SUPPORTED_INPUT_SEED_CONTAINERS = frozenset({"TFRECORD", "RECORDIO"})
+
 _CONSOLE_JOB_URL_TEMPLATE = "https://console.cloud.google.com/vertex-ai/locations/{region}/training/{job_id}?project={project}"
 _CONSOLE_JOBS_LIST_URL_TEMPLATE = "https://console.cloud.google.com/vertex-ai/training/custom-jobs?project={project}"
 _LOGGING_JOB_URL_TEMPLATE = "https://console.cloud.google.com/logs/viewer?project={project}&resource=ml_job%2Fjob_id%2F{job_id}"
@@ -109,6 +113,42 @@ def _validate_paths(input_path: str, output_path: str) -> tuple[str, str]:
   )
 
 
+def _validate_seed_args(
+    num_seeds: Optional[int],
+    num_samples_per_seed: int,
+    input_seed_container: str,
+) -> None:
+  """Validates the arguments controlling the selection of the seeds.
+
+  Args:
+    num_seeds: Number of seeds to select among the available ones, or None.
+    num_samples_per_seed: Number of samples to generate for each seed.
+    input_seed_container: Container of the input seeds.
+
+  Raises:
+    ValueError: If the arguments are inconsistent.
+  """
+  if num_seeds is not None and num_seeds < 0:
+    raise ValueError(f"num_seeds cannot be negative, got {num_seeds}.")
+  if num_samples_per_seed < 1:
+    raise ValueError(
+        "num_samples_per_seed cannot be less than one, got"
+        f" {num_samples_per_seed}."
+    )
+  if num_seeds and num_samples_per_seed > 1:
+    raise ValueError(
+        f"num_seeds ({num_seeds}) and num_samples_per_seed"
+        f" ({num_samples_per_seed}) are exclusive: use num_seeds to generate"
+        " fewer samples than there are seed nodes, and num_samples_per_seed to"
+        " generate more."
+    )
+  if input_seed_container not in _SUPPORTED_INPUT_SEED_CONTAINERS:
+    raise ValueError(
+        f"Unsupported input_seed_container {input_seed_container!r}. Supported"
+        f" containers are {sorted(_SUPPORTED_INPUT_SEED_CONTAINERS)}."
+    )
+
+
 def _get_job_urls(
     project: str, region: str, resource_name: str
 ) -> tuple[str, str]:
@@ -174,6 +214,10 @@ def _create_custom_job(
     region: str,
     num_workers: int,
     num_seeds: Optional[int],
+    num_samples_per_seed: int,
+    input_seeds: Optional[str],
+    input_seed_container: str,
+    random_seed: int,
     staging_location: str,
     temp_location: str,
     display_name: str,
@@ -184,6 +228,8 @@ def _create_custom_job(
       f"--output_samples={output_path}",
       f"--sampling_config={sampling_config_path}",
       f"--num_seeds={num_seeds if num_seeds is not None else 0}",
+      f"--num_samples_per_seed={num_samples_per_seed}",
+      f"--random_seed={random_seed}",
       "--runner=dataflow",
       f"--project={project}",
       f"--region={region}",
@@ -197,6 +243,9 @@ def _create_custom_job(
       f"--sdk_container_image={_DEFAULT_IMAGE_URI}",
       f"--worker_binary={_WORKER_BINARY}",
   ]
+  if input_seeds is not None:
+    args.append(f"--input_seeds={input_seeds}")
+    args.append(f"--input_seed_container={input_seed_container}")
 
   worker_pool_specs = [{
       "machine_spec": {
@@ -308,6 +357,10 @@ def offline_distributed_sampler_gcp(
     region: str = "us-central1",
     num_workers: int = 5,
     num_seeds: Optional[int] = None,
+    num_samples_per_seed: int = 1,
+    input_seeds: Optional[str] = None,
+    input_seed_container: str = "TFRECORD",
+    random_seed: int = 42,
     temp_location: Optional[str] = None,
     staging_location: Optional[str] = None,
     display_name: Optional[str] = None,
@@ -317,6 +370,15 @@ def offline_distributed_sampler_gcp(
 
   Submits a Vertex AI CustomJob running the Glassbox container image to
   execute the distributed sampling pipeline on Apache Beam / Dataflow.
+
+  Each generated sample is a `tensorflow.Example` proto with two extra columns
+  identifying it: `#seed-id` (the id of the seed node the sample was grown
+  from) and `#sample-id` (the unique id of the sample).
+
+  By default, one sample is generated for each node of the seed nodeset. Use
+  `num_seeds` to generate fewer samples than there are seed nodes (each
+  selected node is sampled once), or `num_samples_per_seed` to generate more
+  (each node is sampled that many times). Both are exclusive.
 
   Usage example:
 
@@ -345,7 +407,22 @@ def offline_distributed_sampler_gcp(
     project: GCP project ID. If None, it is resolved from the environment.
     region: GCP region to run the Vertex AI job and Dataflow workers in.
     num_workers: Number of Dataflow workers.
-    num_seeds: Optional number of seeds to sample. If None, samples all nodes.
+    num_seeds: Optional number of seeds to select among the available ones. If
+      None, all of them are used. It cannot be greater than the number of
+      available seeds, and it is exclusive with `num_samples_per_seed`.
+    num_samples_per_seed: Number of samples to generate for each available seed.
+      1 (the default) generates exactly one sample per seed, 3 generates three
+      samples per seed. It cannot be less than 1, and it is exclusive with
+      `num_seeds`.
+    input_seeds: Optional path to a sharded container of `tensorflow.Example`
+      protos listing the seeds to sample (e.g.
+      "gs://my_bucket/seeds@10.tfrecord.gz" or
+      "gs://my_bucket/seeds-*.tfrecord.gz"). Each example must have a `#seed-id`
+      column, and may have a `#sample-id` column; missing sample ids are
+      generated. If None, the seeds are all the nodes of the seed nodeset of the
+      sampling plan.
+    input_seed_container: Container of `input_seeds`: "TFRECORD" or "RECORDIO".
+    random_seed: Seed of the random number generator.
     temp_location: Optional GCS temporary directory for Dataflow.
     staging_location: Optional GCS staging directory for Dataflow and Vertex AI.
     display_name: Optional display name for the Vertex AI CustomJob.
@@ -353,8 +430,13 @@ def offline_distributed_sampler_gcp(
 
   Returns:
     The `google.cloud.aiplatform.CustomJob` instance.
+
+  Raises:
+    ValueError: If the arguments are inconsistent, or if the GCP project cannot
+      be resolved.
   """
   input_path, output_path = _validate_paths(input_path, output_path)
+  _validate_seed_args(num_seeds, num_samples_per_seed, input_seed_container)
 
   if project is None:
     project = _get_default_gcp_project()
@@ -388,6 +470,10 @@ def offline_distributed_sampler_gcp(
       region=region,
       num_workers=num_workers,
       num_seeds=num_seeds,
+      num_samples_per_seed=num_samples_per_seed,
+      input_seeds=input_seeds,
+      input_seed_container=input_seed_container,
+      random_seed=random_seed,
       staging_location=staging_location,
       temp_location=temp_location,
       display_name=display_name,
