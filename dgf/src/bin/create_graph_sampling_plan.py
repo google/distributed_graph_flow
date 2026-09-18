@@ -68,6 +68,11 @@ _PRINT_PLAN = flags.DEFINE_bool(
     True,
     "Printt a nice display of the sampling_plan.",
 )
+_TEMPORAL_SAMPLING = flags.DEFINE_bool(
+    "temporal_sampling",
+    False,
+    "Whether to perform temporal-aware sampling.",
+)
 
 
 def main(argv):
@@ -83,6 +88,7 @@ def main(argv):
       num_hops=_NUM_HOPS.value,
       hop_width=_HOP_WIDTH.value,
       reverse=_REVERSE.value,
+      temporal_sampling=_TEMPORAL_SAMPLING.value,
   )
 
   # Convert the config to a full sampling plan
