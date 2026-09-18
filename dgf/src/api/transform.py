@@ -54,3 +54,4 @@ from dgf.src.transform.homogenize import apply_feature
 from dgf.src.transform.temporal import propagate_timestamp_to_edges
 from dgf.src.transform.table_2_graph import table2graph
 
+from dgf.src.transform.combine_graph_snapshots import combine_graph_snapshots

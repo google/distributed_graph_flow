@@ -25,7 +25,6 @@ from dgf.src.io import schema as io_schema
 from dgf.src.util import filesystem
 from dgf.src.validate import in_memory_graph as in_memory_graph_validate_lib
 from dgf.src.validate import validate as validate_lib
-from etils import epath
 
 Issue = validate_lib.Issue
 
@@ -40,7 +39,7 @@ def _list_snapshot_ids(dataset_path: str) -> List[str]:
     return []
   paths = filesystem.glob(os.path.join(snaps_dir, "*"))
   return sorted([
-      os.path.basename(p) for p in paths if epath.Path(p).is_dir()
+      os.path.basename(p) for p in paths if filesystem.is_dir(p)
   ])
 
 
