@@ -102,8 +102,8 @@ def _pa_array_to_numpy(arr: pa.Array) -> np.ndarray:
   if pa.types.is_fixed_size_list(arr.type):
     flat_np = _pa_array_to_numpy(arr.flatten())
     if len(flat_np) == 0:
-      return flat_np.reshape(0, arr.type.list_size)
-    return flat_np.reshape(-1, arr.type.list_size)
+      return flat_np.reshape(0, arr.type.list_size, *flat_np.shape[1:])
+    return flat_np.reshape(-1, arr.type.list_size, *flat_np.shape[1:])
 
   feature = arr.to_numpy(zero_copy_only=False)
   if pa.types.is_string(arr.type):
@@ -257,10 +257,20 @@ def _write_single_shard(
       if spec.is_scalar:
         return pa.array(np_values, type=spec.pa_type)
       elif spec.is_static_shape:
-        return pa.FixedSizeListArray.from_arrays(
+        if spec.schema.shape and len(spec.schema.shape) == 1:
+          return pa.FixedSizeListArray.from_arrays(
+              np.ravel(np_values, order="C"),
+              type=spec.pa_type,
+          )
+        curr = pa.array(
             np.ravel(np_values, order="C"),
-            type=spec.pa_type,
+            type=feature_format_lib.FEATURE_FORMAT_TO_PYARROW_DATA_TYPE[
+                spec.schema.format
+            ],
         )
+        for size in reversed(spec.schema.shape[1:]):
+          curr = pa.FixedSizeListArray.from_arrays(curr, size)
+        return pa.FixedSizeListArray.from_arrays(curr, spec.schema.shape[0])
       else:
         # Slow unrolling of all the feature values.
         return pa.array([x.tolist() for x in np_values], type=spec.pa_type)

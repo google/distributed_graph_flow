@@ -278,6 +278,65 @@ class ParquetTest(parameterized.TestCase):
     self.assertEqual(num_rows, 2)
     test_util.assert_are_equal(self, read_data, data)
 
+  def test_multidimensional_static_shape_roundtrip(self):
+    tmpdir = self.tmp_dir()
+    base_path = os.path.join(tmpdir, "write_multidim_test")
+    filesystem.makedirs(base_path)
+
+    data = {
+        # 2D static shape: (2, 3)
+        "f_2d_float": np.arange(24, dtype=np.float32).reshape(4, 2, 3),
+        # 2D static shape: (3, 2)
+        "f_2d_int": np.arange(24, dtype=np.int64).reshape(4, 3, 2),
+        # 3D static shape: (2, 2, 2)
+        "f_3d": np.arange(32, dtype=np.float32).reshape(4, 2, 2, 2),
+    }
+
+    schema = {
+        "f_2d_float": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32, shape=(2, 3)
+        ),
+        "f_2d_int": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.INTEGER_64, shape=(3, 2)
+        ),
+        "f_3d": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32, shape=(2, 2, 2)
+        ),
+    }
+
+    parquet_lib.write_numpy_dict_to_parquet(
+        data,
+        "data",
+        base_path,
+        schema=schema,
+        num_shards=2,
+    )
+
+    file_paths = shard_lib.expand_input_paths(
+        os.path.join(base_path, "data@*.parquet")
+    )
+
+    read_data, num_rows = parquet_lib.read_parquet_to_numpy_dict(file_paths)
+    self.assertEqual(num_rows, 4)
+    test_util.assert_are_equal(self, read_data, data)
+
+  def test_read_multidimensional_empty(self):
+    tmpdir = self.tmp_dir()
+    file_path = os.path.join(tmpdir, "empty_multidim.parquet")
+    inner_type = pa.list_(pa.float32(), 3)
+    outer_type = pa.list_(inner_type, 2)
+    with filesystem.open_write(file_path, True) as f:
+      pq.write_table(
+          pa.Table.from_pydict({
+              "f1": pa.array([], type=outer_type),
+          }),
+          f,
+      )
+    data, num_rows = parquet_lib.read_parquet_to_numpy_dict([file_path])
+    self.assertEqual(num_rows, 0)
+    self.assertEqual(data["f1"].shape, (0, 2, 3))
+    self.assertEqual(data["f1"].dtype, np.float32)
+
   def disabled_test_write_numpy_dict_to_parquet_empty(self):
     tmpdir = self.tmp_dir()
 
@@ -361,6 +420,13 @@ class ParquetTest(parameterized.TestCase):
               format=schema_lib.FeatureFormat.INTEGER_32, shape=()
           ),
           expected_type=pa.int32(),
+      ),
+      dict(
+          testcase_name="float32_multidim_fixed_list",
+          schema=schema_lib.FeatureSchema(
+              format=schema_lib.FeatureFormat.FLOAT_32, shape=(48, 32)
+          ),
+          expected_type=pa.list_(pa.list_(pa.float32(), 32), 48),
       ),
   )
   def test_feature_schema_to_py_arrow_full_data_type(
