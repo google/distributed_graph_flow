@@ -119,10 +119,10 @@ def _process_entity_set_timeseries(
         timeseries_features.add(fname)
         val = source_val.features[fname]
         if val.dtype == object:
-          target_val.features[fname] = np.array(
-              [elem[-max_timeseries_len:] for elem in val[node_idxs]],
-              dtype=object,
-          )
+          arr = np.empty(len(node_idxs), dtype=object)
+          for i, idx in enumerate(node_idxs):
+            arr[i] = val[idx][-max_timeseries_len:]
+          target_val.features[fname] = arr
         else:
           target_val.features[fname] = val[node_idxs, -max_timeseries_len:]
 

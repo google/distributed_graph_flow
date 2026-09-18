@@ -442,6 +442,81 @@ class TemporalTest(absltest.TestCase):
         graph.edge_sets["e1"].features["f1"][0], [200, 300, 400]
     )
 
+  def test_clip_timeseries_keeps_ragged_layout_for_equal_lengths(self):
+    # All entities share the same number of timesteps, and each timestep holds
+    # a vector. np.array(..., dtype=object) would collapse this into a boxed
+    # (num_entities, seq_len, feat_dim) object array instead of a 1-D array of
+    # float32 arrays.
+    scalar_series = np.empty(2, dtype=np.object_)
+    scalar_series[:] = [
+        np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32),
+        np.array([5.0, 6.0, 7.0, 8.0], dtype=np.float32),
+    ]
+    vector_series = np.empty(2, dtype=np.object_)
+    vector_series[:] = [
+        np.arange(8, dtype=np.float32).reshape(4, 2),
+        np.arange(8, 16, dtype=np.float32).reshape(4, 2),
+    ]
+    graph = in_memory_graph.InMemoryGraph(
+        node_sets={
+            "n1": in_memory_graph.InMemoryNodeSet(
+                num_nodes=2,
+                features={
+                    "physical": scalar_series,
+                    "embedding": vector_series,
+                },
+            )
+        },
+        edge_sets={},
+    )
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "physical": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                        is_timeseries=True,
+                        shape=(None,),
+                    ),
+                    "embedding": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                        is_timeseries=True,
+                        shape=(None, 2),
+                    ),
+                }
+            )
+        },
+        edge_sets={},
+    )
+    cache = temporal_util.extract_timeseries_schema_cache(schema)
+    temporal.extract_features_timeseries(
+        graph=graph,
+        timeseries_schema_cache=cache,
+        max_timeseries_len=3,
+        target_timestamp=None,
+    )
+
+    n1 = graph.node_sets["n1"]
+    expected_elem_shapes = {"physical": (3,), "embedding": (3, 2)}
+    for fname, expected_elem_shape in expected_elem_shapes.items():
+      values = n1.features[fname]
+      self.assertEqual(values.dtype, np.object_)
+      self.assertEqual(values.shape, (2,))
+      for elem in values:
+        self.assertIsInstance(elem, np.ndarray)
+        self.assertEqual(elem.dtype, np.float32)
+        self.assertEqual(elem.shape, expected_elem_shape)
+    np.testing.assert_array_equal(n1.features["physical"][0], [2.0, 3.0, 4.0])
+    np.testing.assert_array_equal(n1.features["physical"][1], [6.0, 7.0, 8.0])
+    np.testing.assert_array_equal(
+        n1.features["embedding"][0], [[2.0, 3.0], [4.0, 5.0], [6.0, 7.0]]
+    )
+    np.testing.assert_array_equal(
+        n1.features["embedding"][1], [[10.0, 11.0], [12.0, 13.0], [14.0, 15.0]]
+    )
+
   def test_clip_timeseries_empty_entities(self):
     graph = in_memory_graph.InMemoryGraph(
         node_sets={
