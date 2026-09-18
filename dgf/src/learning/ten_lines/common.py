@@ -222,6 +222,7 @@ class Model(abc.ABC):
         method.
     """
     self.metadata = Metadata(name=self.name())
+    self.serving_function_signature: Optional[str] = None
 
   @abc.abstractmethod
   def describe(self) -> util.RichDisplay:
@@ -285,6 +286,27 @@ class Model(abc.ABC):
     Args:
       path: The directory path from which the model data should be loaded.
     """
+
+  def to_tensorflow_function(
+      self,
+      *,
+      input_format: Any = None,
+      consume_tf_graph_dict: Optional[bool] = None,
+  ) -> Any:
+    """Exports the model as a TensorFlow callable function."""
+    raise NotImplementedError(
+        f"Model of type {type(self).__name__} does not support TensorFlow"
+        " export."
+    )
+
+  def _extract_serving_schemata(
+      self,
+  ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Extracts (instance_schema, prediction_schema) dicts for Vertex AI serving."""
+    raise NotImplementedError(
+        f"Model of type {type(self).__name__} does not support Vertex AI"
+        " serving schema extraction."
+    )
 
 
 @dataclasses_json.dataclass_json

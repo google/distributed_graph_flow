@@ -263,6 +263,152 @@ def schema_to_dict_spec(
   return result
 
 
+def _encode_spanner_identifier(identifier: str) -> str:
+  """Encodes underscores using BEGIN_CODE/END_CODE for Spanner serving signatures."""
+  return identifier.replace("_", f"{BEGIN_CODE}{ord('_'):02x}{END_CODE}")
+
+
+def schema_to_serving_signature_dict(
+    schema_: schema_lib.GraphSchema,
+    target_nodeset: str,
+    model_name: str,
+    model_uuid: str,
+    sampling_plan: Optional[Any] = None,
+) -> Dict[str, Any]:
+  """Converts a GraphSchema to a Spanner TRAVERSE_GRAPH serving signature dict.
+
+  Args:
+    schema_: The graph schema.
+    target_nodeset: The target nodeset name for node prediction.
+    model_name: The registered name of the model class.
+    model_uuid: The unique identifier of the model instance.
+    sampling_plan: Optional SamplingPlan for multi-hop GNN traversal.
+
+  Returns:
+    A dictionary representing the Spanner TRAVERSE_GRAPH instance schema.
+  """
+  graph_name = schema_.graph_name
+  if not graph_name or graph_name == "default_graph":
+    raise ValueError(
+        "The model's GraphSchema must contain a valid `graph_name`. "
+        "This is currently only supported for models trained on datasets "
+        "loaded directly from a Spanner property graph."
+    )
+
+  def _convert_plan_edge(plan_edge: Any) -> Dict[str, Any]:
+    step: Dict[str, Any] = {
+        "edge": plan_edge.edgeset,
+        "width": plan_edge.hop_width,
+    }
+    if plan_edge.reversed:
+      step["reverse"] = True
+    if plan_edge.node and plan_edge.node.children:
+      step["children"] = [
+          _convert_plan_edge(child) for child in plan_edge.node.children
+      ]
+    return step
+
+  signature: Dict[str, Any] = {
+      "x-google-graph": graph_name,
+      "title": f"{model_name}_{graph_name}_{target_nodeset}_{model_uuid}",
+      "type": "object",
+      "required": [],
+  }
+
+  if sampling_plan is not None:
+    root = sampling_plan.root
+    signature["x-google-gnn-input-graphs"] = [{
+        "input_node": root.nodeset,
+        "sampling_plan": [_convert_plan_edge(edge) for edge in root.children],
+    }]
+  else:
+    signature["x-google-gnn-input-graphs"] = [{
+        "input_node": target_nodeset,
+        "sampling_plan": [],
+    }]
+
+  encoded_prefix = _encode_spanner_identifier(target_nodeset)
+  prefix_str = f"gnn_{encoded_prefix}"
+
+  signature[f"{prefix_str}_seed_node_idxs"] = {
+      "shape": "(None,)",
+      "dtype": "tf.int32",
+  }
+
+  def _format_feature_spec(
+      feat_schema: schema_lib.FeatureSchema,
+  ) -> Dict[str, str]:
+    dtype = "tf.float32"
+    if feat_schema.format in [
+        schema_lib.FeatureFormat.INTEGER_32,
+        schema_lib.FeatureFormat.INTEGER_64,
+    ]:
+      dtype = (
+          "tf.int64"
+          if feat_schema.format == schema_lib.FeatureFormat.INTEGER_64
+          else "tf.int32"
+      )
+    elif feat_schema.format == schema_lib.FeatureFormat.FLOAT_64:
+      dtype = "tf.float64"
+    if feat_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL:
+      dtype = "tf.int64"
+
+    shape_str = "(None,)"
+    if feat_schema.shape:
+      dims = [str(d) for d in feat_schema.shape if d is not None and d != 1]
+      if dims:
+        shape_str = f"(None, {', '.join(dims)})"
+    return {"shape": shape_str, "dtype": dtype}
+
+  for nodeset_name, nodeset_schema in schema_.node_sets.items():
+    encoded_node = _encode_spanner_identifier(nodeset_name)
+    size_key = tf_graph_dict_node_key(encoded_node, TF_GRAPH_DICT_SIZE_KEY)
+    signature[f"{prefix_str}_{size_key}"] = {
+        "shape": "()",
+        "dtype": "tf.int32",
+    }
+    for feat_name, feat_schema in nodeset_schema.features.items():
+      encoded_feat = _encode_spanner_identifier(feat_name)
+      feat_key = tf_graph_dict_node_key(encoded_node, encoded_feat)
+      signature[f"{prefix_str}_{feat_key}"] = _format_feature_spec(feat_schema)
+
+  for edge_identifier, edgeset_schema in schema_.edge_sets.items():
+    edgeset_name = (
+        edge_identifier[1]
+        if isinstance(edge_identifier, tuple)
+        else edge_identifier
+    )
+    encoded_edge = _encode_spanner_identifier(edgeset_name)
+    size_key = tf_graph_dict_edge_key(encoded_edge, TF_GRAPH_DICT_SIZE_KEY)
+    signature[f"{prefix_str}_{size_key}"] = {
+        "shape": "()",
+        "dtype": "tf.int32",
+    }
+    adj_key = tf_graph_dict_edge_key(encoded_edge, TF_GRAPH_DICT_ADJACENCY_KEY)
+    signature[f"{prefix_str}_{adj_key}"] = {
+        "shape": "(2, None)",
+        "dtype": "tf.int64",
+    }
+    for feat_name, feat_schema in edgeset_schema.features.items():
+      encoded_feat = _encode_spanner_identifier(feat_name)
+      feat_key = tf_graph_dict_edge_key(encoded_edge, encoded_feat)
+      signature[f"{prefix_str}_{feat_key}"] = _format_feature_spec(feat_schema)
+
+  signature["required"] = [
+      k
+      for k in signature.keys()
+      if k
+      not in (
+          "x-google-graph",
+          "x-google-gnn-input-graphs",
+          "title",
+          "type",
+          "required",
+      )
+  ]
+  return signature
+
+
 def graph_to_tf_graph(
     src: in_memory_graph_lib.InMemoryGraph,
     schema: Optional[schema_lib.GraphSchema] = None,

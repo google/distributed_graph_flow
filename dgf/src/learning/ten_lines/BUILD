@@ -121,6 +121,7 @@ py_library(
         "//dgf/src/util:temporal",
         "//dgf/src/util:util_py",
         # numpy dep,
+        # yaml dep,
     ],
 )
 
@@ -177,6 +178,7 @@ py_library(
         # numpy dep,
         # optax dep,
         # tqdm dep,
+        # yaml dep,
     ],
 )
 
@@ -227,6 +229,7 @@ py_library(
         # numpy dep,
         # orbax/checkpoint dep,
         # tqdm dep,
+        # yaml dep,
     ],
 )
 
@@ -253,6 +256,7 @@ py_library(
         "//dgf/src/util:util_py",
         # jax dep,
         # numpy dep,
+        # yaml dep,
     ],
 )
 
@@ -280,6 +284,7 @@ py_library(
         "//dgf/src/util:util_py",
         # jax dep,
         # numpy dep,
+        # yaml dep,
     ],
 )
 
@@ -315,6 +320,7 @@ py_test(
         # absl/logging dep,
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
+        # yaml dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/generate:graphs",
@@ -359,6 +365,7 @@ py_test(
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/validate:in_memory_graph",
         # numpy dep,
+        # yaml dep,
     ],
 )
 
@@ -390,6 +397,7 @@ py_test(
         # absl/logging dep,
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
+        # yaml dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/io:tf",

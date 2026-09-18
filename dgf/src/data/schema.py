@@ -158,6 +158,7 @@ class EdgeSchema:
 class GraphSchema:
   node_sets: Dict[str, NodeSchema]
   edge_sets: Dict[str, EdgeSchema]
+  graph_name: Optional[str] = None
 
 
 @dataclasses.dataclass
