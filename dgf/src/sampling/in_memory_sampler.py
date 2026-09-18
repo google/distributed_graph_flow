@@ -376,6 +376,10 @@ def create_sampler(
 ) -> Sampler:
   """Creates an in-memory sampler.
 
+  If temporal sampling is enabled and `plan.propagate_timestamp_to_edges` is
+  true, the edgesets without a creation time get one derived from their
+  connected nodes. `graph` and `schema` are not modified.
+
   Args:
     graph: The in-memory heterogeneous graph to sample from.
     plan: The sampling plan configuration. Can be a `SimpleSamplingConfig` or a
@@ -422,6 +426,22 @@ def create_sampler(
         " (yet)."
     )
 
+  if (
+      plan.propagate_timestamp_to_edges
+      and edgeset_to_mask is None
+      and (plan.temporal_sampling or edgeset_timestamp_features)
+  ):
+    sampling_graph, edgeset_timestamp_features = (
+        sampling_temporal_lib.propagate_timestamps_to_edges(
+            graph=graph,
+            schema=schema,
+            edgeset_timestamp_features=edgeset_timestamp_features,
+            edgesets=config_lib.edgesets_in_plan(plan),
+        )
+    )
+  else:
+    sampling_graph = graph
+
   if seed is None:
     seed = -1
 
@@ -435,7 +455,7 @@ def create_sampler(
     num_threads = min(batch_size, os.cpu_count())  # pyrefly: ignore[bad-specialization]
 
   cc_sampler = _in_memory_sampler_ext.CreateSampler(
-      graph,
+      sampling_graph,
       plan,
       debug_sampling,
       num_threads,
@@ -446,7 +466,7 @@ def create_sampler(
   )
   return Sampler(
       cc_sampler,
-      full_graph=graph,
+      full_graph=graph,  # The user graph, without the propagated timestamps.
       return_features=return_features,
       return_node_idxs=return_node_idxs,
       schema=schema,

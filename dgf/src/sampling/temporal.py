@@ -14,11 +14,18 @@
 
 """Temporal sampling utilities for filtering and slicing timeseries features."""
 
-from typing import List, Optional, Tuple, Union
+import dataclasses
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 from dgf.src.data import in_memory_graph
+from dgf.src.data import schema as schema_lib
+from dgf.src.transform import temporal as transform_temporal
 from dgf.src.util import temporal as temporal_util
 import numpy as np
+
+# Edge feature containing the creation times propagated from the connected
+# nodes. Only added to the copy of the graph given to the sampler.
+PROPAGATED_CREATION_TIME_FEATURE = "#propagated_creation_time"
 
 # TODO(simonmeierhans): Improve performance ofhandling of static shaped
 # timeseries.
@@ -203,3 +210,49 @@ def extract_features_timeseries(
             max_timeseries_len=max_timeseries_len,
             target_timestamp=target_timestamp,
         )
+
+
+def propagate_timestamps_to_edges(
+    graph: in_memory_graph.InMemoryGraph,
+    schema: schema_lib.GraphSchema,
+    edgeset_timestamp_features: Dict[str, str],
+    edgesets: Iterable[str],
+) -> Tuple[in_memory_graph.InMemoryGraph, Dict[str, str]]:
+  """Gives a creation time to the edgesets that don't have one."""
+  targets = [
+      name
+      for name in sorted(edgesets)
+      if name not in edgeset_timestamp_features
+      and _has_node_creation_time(schema, name)
+  ]
+  if not targets:
+    return graph, edgeset_timestamp_features
+
+  new_graph, _ = transform_temporal.propagate_timestamp_to_edges(
+      graph,
+      schema,
+      target_edgesets=targets,
+      target_feature=PROPAGATED_CREATION_TIME_FEATURE,
+  )
+  new_timestamp_features = dict(edgeset_timestamp_features)
+  new_timestamp_features.update(
+      {name: PROPAGATED_CREATION_TIME_FEATURE for name in targets}
+  )
+  return (
+      dataclasses.replace(graph, edge_sets=new_graph.edge_sets),
+      new_timestamp_features,
+  )
+
+
+def _has_node_creation_time(
+    schema: schema_lib.GraphSchema, edgeset_name: str
+) -> bool:
+  """Tests if a nodeset connected to an edgeset has a creation time."""
+  edgeset_schema = schema.edge_sets[edgeset_name]
+  return any(
+      temporal_util.creation_time_feature_name(
+          schema.node_sets[nodeset].features
+      )
+      is not None
+      for nodeset in (edgeset_schema.source, edgeset_schema.target)
+  )

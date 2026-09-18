@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import dataclasses
 from typing import List
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -20,6 +21,7 @@ from dgf.src.data import schema as schema_lib
 from dgf.src.sampling import _in_memory_sampler_ext
 from dgf.src.sampling import config as config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
+from dgf.src.sampling import temporal as sampling_temporal_lib
 from dgf.src.transform import temporal as temporal_lib
 from dgf.src.util import gen_test_graph
 from dgf.src.util import test_util
@@ -977,113 +979,190 @@ Node(nodeset_idx=0, children=[
         ),
     )
 
-  @parameterized.parameters(10, 20, 25, 40)
-  def test_temporal_sampling(self, seed_timestamp: int):
-
+  # The graph has 4 "n1" nodes with creation times 10, 20, 30 and 40. The "e1"
+  # edges have a creation time: 0 -> 1 (15), 0 -> 2 (25), 1 -> 3 (35). The "e2"
+  # edges don't: 2 -> 0 and 3 -> 1. Unless disabled, the sampler gives to the
+  # "e2" edges the creation time of their connected nodes: 30 and 40.
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="only_the_seed_node_at_10",
+          seed_timestamp=10,
+          num_hops=2,
+          propagate_timestamp_to_edges=True,
+          remove_node_creation_time=False,
+          expected_node_idxs=[0],
+          expected_e1=[[], []],
+          expected_e2=[[], []],
+      ),
+      dict(
+          testcase_name="one_e1_edge_at_20",
+          seed_timestamp=20,
+          num_hops=2,
+          propagate_timestamp_to_edges=True,
+          remove_node_creation_time=False,
+          expected_node_idxs=[0, 1],
+          expected_e1=[[0], [1]],
+          expected_e2=[[], []],
+      ),
+      dict(
+          # The propagated "e2" edge 2 -> 0 (30) is filtered out.
+          testcase_name="propagated_e2_edge_filtered_at_25",
+          seed_timestamp=25,
+          num_hops=2,
+          propagate_timestamp_to_edges=True,
+          remove_node_creation_time=False,
+          expected_node_idxs=[0, 1, 2],
+          expected_e1=[[0, 0], [1, 2]],
+          expected_e2=[[], []],
+      ),
+      dict(
+          testcase_name="all_the_nodes_at_40",
+          seed_timestamp=40,
+          num_hops=2,
+          propagate_timestamp_to_edges=True,
+          remove_node_creation_time=False,
+          expected_node_idxs=[0, 1, 3, 2],
+          expected_e1=[[0, 0, 1], [1, 3, 2]],
+          expected_e2=[[3], [0]],
+      ),
+      dict(
+          # Without propagation, the "e2" edges are never filtered.
+          testcase_name="without_propagation_e2_edge_kept_at_25",
+          seed_timestamp=25,
+          num_hops=2,
+          propagate_timestamp_to_edges=False,
+          remove_node_creation_time=False,
+          expected_node_idxs=[0, 1, 2],
+          expected_e1=[[0, 0], [1, 2]],
+          expected_e2=[[2], [0]],
+      ),
+      dict(
+          # Without node creation time, there is nothing to propagate and the
+          # "e2" edges are not filtered.
+          testcase_name="without_node_creation_time_e2_edge_kept_at_25",
+          seed_timestamp=25,
+          num_hops=2,
+          propagate_timestamp_to_edges=True,
+          remove_node_creation_time=True,
+          expected_node_idxs=[0, 1, 2],
+          expected_e1=[[0, 0], [1, 2]],
+          expected_e2=[[2], [0]],
+      ),
+      dict(
+          # The creation time of the "e1" edge 0 -> 1 (15) is used instead of
+          # the creation time of its connected nodes (i.e. max(10, 20) = 20),
+          # which would have filtered out the edge.
+          testcase_name="edge_creation_time_not_overridden_at_15",
+          seed_timestamp=15,
+          num_hops=1,
+          propagate_timestamp_to_edges=True,
+          remove_node_creation_time=False,
+          expected_node_idxs=[0, 1],
+          expected_e1=[[0], [1]],
+          expected_e2=[[], []],
+      ),
+  )
+  def test_temporal_sampling(
+      self,
+      seed_timestamp: int,
+      num_hops: int,
+      propagate_timestamp_to_edges: bool,
+      remove_node_creation_time: bool,
+      expected_node_idxs: List[int],
+      expected_e1: List[List[int]],
+      expected_e2: List[List[int]],
+  ):
     graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
         include_e2=True
     )
+    if remove_node_creation_time:
+      del graph.node_sets["n1"].features["timestamp"]
+      del schema.node_sets["n1"].features["timestamp"]
 
-    sampler = in_memory_sampler_lib.create_sampler(
+    config = config_lib.SimpleSamplingConfig(
+        seed_nodeset="n1",
+        num_hops=num_hops,
+        hop_width=2,
+        reverse=False,
+        temporal_sampling=True,
+        propagate_timestamp_to_edges=propagate_timestamp_to_edges,
+    )
+    sampler = self._create_temporal_sampler(graph, schema, config)
+    sample = sampler.sample([0], seed_timestamps=[seed_timestamp])[0]
+
+    node_idxs = np.array(expected_node_idxs, dtype=np.int64)
+    node_features = graph.node_sets["n1"].features
+    expected_graph = InMemoryGraph(
+        node_sets={
+            "n1": InMemoryNodeSet(
+                num_nodes=len(expected_node_idxs),
+                features={
+                    "#idx": node_idxs,
+                    # The features of the sampled nodes.
+                    **{
+                        name: values[node_idxs]
+                        for name, values in node_features.items()
+                    },
+                },
+            )
+        },
+        edge_sets={
+            "e1": InMemoryEdgeSet(
+                adjacency=np.array(expected_e1, dtype=np.int64), features={}
+            ),
+            "e2": InMemoryEdgeSet(
+                adjacency=np.array(expected_e2, dtype=np.int64), features={}
+            ),
+        },
+    )
+    test_util.assert_are_equal(self, expected_graph, sample)
+
+    # The propagated creation times are internal to the sampler.
+    for features in [
+        graph.edge_sets["e2"].features,
+        schema.edge_sets["e2"].features,
+        sample.edge_sets["e2"].features,
+    ]:
+      self.assertNotIn(
+          sampling_temporal_lib.PROPAGATED_CREATION_TIME_FEATURE, features
+      )
+
+    if not propagate_timestamp_to_edges or remove_node_creation_time:
+      return
+
+    # Propagating with "dgf.transform.propagate_timestamp_to_edges" instead of
+    # with the sampler gives the same samples.
+    manual_graph, manual_schema = temporal_lib.propagate_timestamp_to_edges(
+        graph, schema, target_edgesets=["e2"], target_feature="ts"
+    )
+    manual_sampler = self._create_temporal_sampler(
+        manual_graph,
+        manual_schema,
+        dataclasses.replace(config, propagate_timestamp_to_edges=False),
+    )
+    seeds = [0, 1, 2, 3]
+    timestamps = [seed_timestamp] * len(seeds)
+    test_util.assert_are_equal(
+        self,
+        sampler.sample(seeds, seed_timestamps=timestamps),
+        manual_sampler.sample(seeds, seed_timestamps=timestamps),
+    )
+
+  def _create_temporal_sampler(
+      self,
+      graph: in_memory_graph_lib.InMemoryGraph,
+      schema: schema_lib.GraphSchema,
+      config: config_lib.SimpleSamplingConfig,
+  ) -> in_memory_sampler_lib.Sampler:
+    return in_memory_sampler_lib.create_sampler(
         graph,
-        config_lib.SimpleSamplingConfig(
-            seed_nodeset="n1",
-            num_hops=2,
-            hop_width=2,
-            reverse=False,
-            temporal_sampling=True,
-        ),
+        config,
         schema,
         return_features=True,
         return_node_idxs=True,
         batch_size=5,
         debug_sampling=True,
     )
-
-    sample = sampler.sample([0], seed_timestamps=[seed_timestamp])
-
-    # The edges are (source node idx, destination node idx, timestamp):
-    # 0 -> 1 (15)
-    # 0 -> 2 (25)
-    # 1 -> 3 (35)
-    if seed_timestamp == 10:
-      # Should only have node idx 0
-      expected_n1 = InMemoryNodeSet(
-          num_nodes=1,
-          features={
-              "#idx": np.array([0], dtype=np.int64),
-              "timestamp": np.array([10], dtype=np.int64),
-              "feat": np.array([[1.0, 1.0]], dtype=np.float32),
-          },
-      )
-      expected_e1 = InMemoryEdgeSet(
-          adjacency=np.zeros((2, 0), dtype=np.int64), features={}
-      )
-      expected_e2 = InMemoryEdgeSet(
-          adjacency=np.zeros((2, 0), dtype=np.int64), features={}
-      )
-    elif seed_timestamp == 20:
-      # Should only have node idx 0 and 1
-      expected_n1 = InMemoryNodeSet(
-          num_nodes=2,
-          features={
-              "#idx": np.array([0, 1], dtype=np.int64),
-              "timestamp": np.array([10, 20], dtype=np.int64),
-              "feat": np.array([[1.0, 1.0], [2.0, 2.0]], dtype=np.float32),
-          },
-      )
-      expected_e1 = InMemoryEdgeSet(
-          adjacency=np.array([[0], [1]], dtype=np.int64), features={}
-      )
-      expected_e2 = InMemoryEdgeSet(
-          adjacency=np.zeros((2, 0), dtype=np.int64), features={}
-      )
-    elif seed_timestamp == 25:
-      # Should only have node idx 0, 1, and 2
-      expected_n1 = InMemoryNodeSet(
-          num_nodes=3,
-          features={
-              "#idx": np.array([0, 1, 2], dtype=np.int64),
-              "timestamp": np.array([10, 20, 30], dtype=np.int64),
-              "feat": np.array(
-                  [[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]], dtype=np.float32
-              ),
-          },
-      )
-      expected_e1 = InMemoryEdgeSet(
-          adjacency=np.array([[0, 0], [1, 2]], dtype=np.int64), features={}
-      )
-      expected_e2 = InMemoryEdgeSet(
-          adjacency=np.array([[2], [0]], dtype=np.int64), features={}
-      )
-    elif seed_timestamp == 40:
-      # Should have all the node idsx (0,1,2,3)
-      expected_n1 = InMemoryNodeSet(
-          num_nodes=4,
-          features={
-              "#idx": np.array([0, 1, 3, 2], dtype=np.int64),
-              "timestamp": np.array([10, 20, 40, 30], dtype=np.int64),
-              "feat": np.array(
-                  [[1.0, 1.0], [2.0, 2.0], [4.0, 4.0], [3.0, 3.0]],
-                  dtype=np.float32,
-              ),
-          },
-      )
-      expected_e1 = InMemoryEdgeSet(
-          adjacency=np.array([[0, 0, 1], [1, 3, 2]], dtype=np.int64),
-          features={},
-      )
-      expected_e2 = InMemoryEdgeSet(
-          adjacency=np.array([[3], [0]], dtype=np.int64), features={}
-      )
-    else:
-      raise ValueError(f"Unexpected seed_timestamp: {seed_timestamp}")
-
-    expected_graph = InMemoryGraph(
-        node_sets={"n1": expected_n1},
-        edge_sets={"e1": expected_e1, "e2": expected_e2},
-    )
-    test_util.assert_are_equal(self, expected_graph, sample[0])
 
   def test_temporal_sampling_missing_seed_timestamp(self):
     graph, schema = gen_test_graph.generate_temporal_in_memory_graph(

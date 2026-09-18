@@ -2208,10 +2208,23 @@ def generate_temporal_in_memory_graph(
           },
       ),
   }
+
+  edge_sets_data = {
+      "e1": in_memory_graph_lib.InMemoryEdgeSet(
+          adjacency=np.array([[0, 0, 1], [1, 2, 3]], dtype=np.int64),
+          features={"timestamp": np.array([15, 25, 35], dtype=np.int64)},
+      )
+  }
+
   if include_e2:
     edge_sets_schema["e2"] = schema_lib.EdgeSchema(
         source="n1",
         target="n1",
+        features={},
+    )
+
+    edge_sets_data["e2"] = in_memory_graph_lib.InMemoryEdgeSet(
+        adjacency=np.array([[2, 3], [0, 1]], dtype=np.int64),
         features={},
     )
 
@@ -2244,19 +2257,6 @@ def generate_temporal_in_memory_graph(
           ),
       },
   )
-
-  e1_edges = in_memory_graph_lib.InMemoryEdgeSet(
-      adjacency=np.array([[0, 0, 1], [1, 2, 3]], dtype=np.int64),
-      features={"timestamp": np.array([15, 25, 35], dtype=np.int64)},
-  )
-
-  edge_sets_data = {"e1": e1_edges}
-  if include_e2:
-    e2_edges = in_memory_graph_lib.InMemoryEdgeSet(
-        adjacency=np.array([[2, 3], [0, 1]], dtype=np.int64),
-        features={},
-    )
-    edge_sets_data["e2"] = e2_edges
 
   graph = in_memory_graph_lib.InMemoryGraph(
       node_sets={"n1": n1_nodes}, edge_sets=edge_sets_data

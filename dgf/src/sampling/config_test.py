@@ -143,6 +143,48 @@ class ConfigTest(parameterized.TestCase):
     plan = config_lib.SamplingPlan(root=config_lib.PlanNode(nodeset="n1"))
     self.assertEqual(plan.max_timeseries_len, 32)
 
+  @parameterized.parameters(True, False)
+  def test_simple_sampling_config_to_sampling_plan_propagate_timestamp(
+      self, propagate
+  ):
+    schema = schema_lib.GraphSchema(
+        node_sets={"n1": schema_lib.NodeSchema(features={})},
+        edge_sets={},
+    )
+    simple_config = config_lib.SimpleSamplingConfig(
+        seed_nodeset="n1",
+        num_hops=0,
+        propagate_timestamp_to_edges=propagate,
+    )
+    plan = config_lib.simple_sampling_config_to_sampling_plan(
+        simple_config, schema
+    )
+    self.assertEqual(plan.propagate_timestamp_to_edges, propagate)
+
+  def test_edgesets_in_plan(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(features={}),
+            "n2": schema_lib.NodeSchema(features={}),
+        },
+        edge_sets={
+            "e1": schema_lib.EdgeSchema(source="n1", target="n2", features={}),
+            # "e2" is not reachable from the seed nodeset "n1".
+            "e2": schema_lib.EdgeSchema(source="n3", target="n3", features={}),
+        },
+    )
+    plan = config_lib.simple_sampling_config_to_sampling_plan(
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1", num_hops=2, reverse=True
+        ),
+        schema,
+    )
+    self.assertEqual(config_lib.edgesets_in_plan(plan), {"e1"})
+
+  def test_edgesets_in_plan_without_edges(self):
+    plan = config_lib.SamplingPlan(root=config_lib.PlanNode(nodeset="n1"))
+    self.assertEmpty(config_lib.edgesets_in_plan(plan))
+
 
 if __name__ == "__main__":
   absltest.main()

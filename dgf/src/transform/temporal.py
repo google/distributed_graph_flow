@@ -60,10 +60,7 @@ def propagate_timestamp_to_edges(
     feat_name = temporal_util.creation_time_feature_name(
         schema.node_sets[nodeset_name].features
     )
-    if (
-        feat_name
-        and feat_name in graph.node_sets[nodeset_name].features
-    ):
+    if feat_name and feat_name in graph.node_sets[nodeset_name].features:
       return (
           graph.node_sets[nodeset_name].features[feat_name],
           schema.node_sets[nodeset_name].features[feat_name].format,

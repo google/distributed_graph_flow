@@ -27,7 +27,7 @@ This file defines the following important objects:
 
 import collections
 import dataclasses
-from typing import Dict, List
+from typing import Dict, List, Set
 import dataclasses_json
 from dgf.src.data import schema as schema_lib
 from dgf.src.util import temporal as temporal_util
@@ -63,6 +63,12 @@ class SimpleSamplingConfig:
       timestamps are inferred from the schema.
     max_timeseries_len: The maximum number of historical causal sequence steps
       retained for each timeseries feature.
+    propagate_timestamp_to_edges: If true (default) and temporal sampling is
+      enabled, the edgesets without a creation time get one derived from their
+      connected nodes. Equivalent to calling
+      `dgf.transform.propagate_timestamp_to_edges` on the graph, except that the
+      propagation is done by the sampler and is not visible in the graph, the
+      schema, or the samples.
   """
 
   seed_nodeset: str
@@ -73,6 +79,7 @@ class SimpleSamplingConfig:
   temporal_sampling: bool = False
   multi_visit: bool = True
   max_timeseries_len: int = 32
+  propagate_timestamp_to_edges: bool = True
 
 
 @dataclasses.dataclass
@@ -118,6 +125,12 @@ class SamplingPlan:
       feature name for causal filtering.
     max_timeseries_len: The maximum number of historical causal sequence steps
       retained for each timeseries feature.
+    propagate_timestamp_to_edges: If true (default) and temporal sampling is
+      enabled, the edgesets without a creation time get one derived from their
+      connected nodes. Equivalent to calling
+      `dgf.transform.propagate_timestamp_to_edges` on the graph, except that the
+      propagation is done by the sampler and is not visible in the graph, the
+      schema, or the samples.
   """
 
   root: PlanNode
@@ -128,6 +141,7 @@ class SamplingPlan:
       default_factory=dict
   )
   max_timeseries_len: int = 32
+  propagate_timestamp_to_edges: bool = True
 
 
 def simple_sampling_config_to_sampling_plan(
@@ -185,4 +199,18 @@ def simple_sampling_config_to_sampling_plan(
       multi_visit=src.multi_visit,
       edgeset_timestamp_features=edgeset_ts_features,
       max_timeseries_len=src.max_timeseries_len,
+      propagate_timestamp_to_edges=src.propagate_timestamp_to_edges,
   )
+
+
+def edgesets_in_plan(plan: SamplingPlan) -> Set[str]:
+  """Lists the name of the edgesets traversed by a sampling plan."""
+  edgesets = set()
+
+  def rec_scan(node: PlanNode):
+    for child in node.children:
+      edgesets.add(child.edgeset)
+      rec_scan(child.node)
+
+  rec_scan(plan.root)
+  return edgesets
