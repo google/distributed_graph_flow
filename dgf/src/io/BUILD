@@ -289,6 +289,21 @@ py_library(
 )
 
 py_library(
+    name = "dataset_loader_traffic",
+    srcs = ["dataset_loader_traffic.py"],
+    deps = [
+        ":cache",
+        ":dataset_loader",
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/util:filesystem",
+        "//dgf/src/util:log",
+        # numpy dep,
+        # pandas dep,
+    ],
+)
+
+py_library(
     name = "cache",
     srcs = ["cache.py"],
     deps = [
@@ -591,6 +606,23 @@ py_test(
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         "//dgf/src/analyse:print_schema",
+        "//dgf/src/util:test_util",
+        "//dgf/src/validate:in_memory_graph",
+        # numpy dep,
+        # pandas dep,
+    ],
+)
+
+py_test(
+    name = "dataset_loader_traffic_test",
+    srcs = ["dataset_loader_traffic_test.py"],
+    deps = [
+        ":dataset_loader",
+        ":dataset_loader_traffic",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/analyse:print_schema",
+        "//dgf/src/util:log",
         "//dgf/src/util:test_util",
         "//dgf/src/validate:in_memory_graph",
         # numpy dep,
