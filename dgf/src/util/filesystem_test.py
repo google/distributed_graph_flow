@@ -14,6 +14,7 @@
 
 import os
 import tempfile
+from unittest import mock
 from absl.testing import absltest
 from dgf.src.util import filesystem as fs
 
@@ -133,6 +134,100 @@ class FilesystemGcsTest(absltest.TestCase):
       self.assertTrue(fs.exists(new_path))
       with open(new_path, "r") as f:
         self.assertEqual(f.read(), "content")
+
+  def test_write_text(self):
+    with self.assertRaisesRegex(
+        ValueError, "file_path must point to a file, got directory path"
+    ):
+      fs.write_text("gs://my-bucket/dir/", "hello")
+
+    with self.assertRaisesRegex(
+        ValueError, "file_path must include a blob name, got bucket root"
+    ):
+      fs.write_text("gs://my-bucket", "hello")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      path1 = os.path.join(tmpdir, "nested", "a.txt")
+      fs.write_text(path1, "hello a")
+      self.assertTrue(fs.exists(path1))
+      with fs.open_read(path1) as f:
+        self.assertEqual(f.read(), "hello a")
+
+  def test_copy_local_dir(self):
+    # 1. GCS path as local_src_dir raises ValueError
+    with self.assertRaisesRegex(
+        ValueError, "local_src_dir must be an existing local directory"
+    ):
+      fs.copy_local_dir("gs://bucket/src", "/tmp/dst")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      # 2. Non-existent local_src_dir raises ValueError
+      with self.assertRaisesRegex(
+          ValueError, "local_src_dir must be an existing local directory"
+      ):
+        fs.copy_local_dir(os.path.join(tmpdir, "does_not_exist"), tmpdir)
+
+      # 3. File path as local_src_dir raises ValueError
+      file_src = os.path.join(tmpdir, "file.txt")
+      fs.write_text(file_src, "hello")
+      with self.assertRaisesRegex(
+          ValueError, "local_src_dir must be an existing local directory"
+      ):
+        fs.copy_local_dir(file_src, tmpdir)
+
+      # Setup valid source directory with nested files
+      src_dir = os.path.join(tmpdir, "src")
+      sub_dir = os.path.join(src_dir, "sub")
+      os.makedirs(sub_dir)
+      fs.write_text(os.path.join(src_dir, "root.txt"), "root content")
+      fs.write_text(os.path.join(sub_dir, "nested.txt"), "nested content")
+
+      # 4. dst_dir does not exist yet (nested path) -> created automatically
+      new_dst_dir = os.path.join(tmpdir, "new_parent", "dst")
+      fs.copy_local_dir(src_dir, new_dst_dir)
+      self.assertTrue(fs.exists(os.path.join(new_dst_dir, "root.txt")))
+      self.assertTrue(fs.exists(os.path.join(new_dst_dir, "sub", "nested.txt")))
+      with fs.open_read(os.path.join(new_dst_dir, "sub", "nested.txt")) as f:
+        self.assertEqual(f.read(), "nested content")
+
+      # 5. dst_dir is an existing file -> raises OSError
+      with self.assertRaises(OSError):
+        fs.copy_local_dir(src_dir, file_src)
+
+  def test_gcs_operations(self):
+    with mock.patch.object(fs.storage, "Client") as mock_client_cls:
+      mock_bucket = mock.MagicMock()
+      mock_client_cls.return_value.bucket.return_value = mock_bucket
+
+      # Test write_text to gs://
+      mock_blob = mock.MagicMock()
+      mock_bucket.blob.return_value = mock_blob
+      fs.write_text("gs://my-bucket/dir/file.txt", "hello gcs")
+      mock_bucket.blob.assert_called_with("dir/file.txt")
+      mock_blob.upload_from_string.assert_called_once_with("hello gcs")
+
+      # Test exists() on gs:// (exact blob match)
+      mock_blob.exists.return_value = True
+      self.assertTrue(fs.exists("gs://my-bucket/dir/file.txt"))
+
+      # Test exists() on gs:// (directory prefix fallback)
+      mock_blob.exists.return_value = False
+      mock_bucket.list_blobs.return_value = [mock.MagicMock()]
+      self.assertTrue(fs.exists("gs://my-bucket/dir"))
+      mock_bucket.list_blobs.assert_called_with(prefix="dir/", max_results=1)
+
+      # Test exists() on gs:// with trailing slash or bucket root skips blob()
+      mock_bucket.blob.reset_mock()
+      self.assertTrue(fs.exists("gs://my-bucket/dir/"))
+      self.assertTrue(fs.exists("gs://my-bucket"))
+      mock_bucket.blob.assert_not_called()
+
+      # Test copy_local_dir to gs://
+      with tempfile.TemporaryDirectory() as src_dir:
+        fs.write_text(os.path.join(src_dir, "model.pb"), "model data")
+        fs.copy_local_dir(src_dir, "gs://my-bucket/models/v1")
+        mock_bucket.blob.assert_called_with("models/v1/model.pb")
+        mock_blob.upload_from_filename.assert_called_once()
 
 
 if __name__ == "__main__":

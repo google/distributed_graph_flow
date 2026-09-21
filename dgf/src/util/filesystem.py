@@ -17,7 +17,9 @@
 
 from collections.abc import Sequence
 import concurrent.futures
+import os
 import time
+from typing import List, Optional, Sequence, Tuple
 from absl import logging
 from etils import epath
 import fsspec
@@ -27,6 +29,15 @@ from google.cloud import storage
 def is_gcs_path(path: str) -> bool:
   """Returns True if the path is a Google Cloud Storage (GCS) path."""
   return path.startswith("gs://")
+
+
+def _parse_gcs_path(path: str) -> Tuple[str, str]:
+  """Parses a gs:// path into (bucket_name, blob_path)."""
+  gcs_path = path.replace("gs://", "", 1)
+  parts = gcs_path.split("/", 1)
+  bucket_name = parts[0]
+  blob_path = parts[1] if len(parts) > 1 else ""
+  return bucket_name, blob_path
 
 
 def _unnormalize_io_path(path: str) -> str:
@@ -66,11 +77,7 @@ def open_read(path: str, binary: bool = False):
     # so it does NOT load the entire file into memory at once (safe for large files).
     # We also add exponential-backoff retries to handle transient GCS network timeouts.
     client = storage.Client()
-
-    # Parse "gs://bucket/path/to/blob" into bucket name and blob path.
-    gcs_path = path.replace("gs://", "")
-    bucket_name = gcs_path.split("/")[0]
-    blob_path = "/".join(gcs_path.split("/")[1:])
+    bucket_name, blob_path = _parse_gcs_path(path)
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(blob_path)
 
@@ -112,14 +119,107 @@ def open_write(path: str, binary: bool = False):
   return epath.Path(path).open("wb" if binary else "w")
 
 
-def exists(path: str) -> bool:
-  """Returns True if the path exists."""
+def write_text(
+    file_path: str, content: str, project: Optional[str] = None
+) -> None:
+  """Writes string content to a file (local, CNS, or GCS).
+
+  Args:
+    file_path: Path to the destination file (must include file name).
+    content: String content to write.
+    project: Optional GCP project ID to use for GCS operations.
+
+  Raises:
+    ValueError: If file_path ends with '/' or points to a bare GCS bucket root.
+  """
+  if file_path.endswith("/"):
+    raise ValueError(
+        f"file_path must point to a file, got directory path: {file_path}"
+    )
+  if is_gcs_path(file_path):
+    bucket_name, blob_path = _parse_gcs_path(file_path)
+    if not blob_path:
+      raise ValueError(
+          f"file_path must include a blob name, got bucket root: {file_path}"
+      )
+    client = storage.Client(project=project)
+    client.bucket(bucket_name).blob(blob_path).upload_from_string(content)
+  else:
+    target_path = epath.Path(file_path)
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(content)
+
+
+def exists(path: str, project: Optional[str] = None) -> bool:
+  """Returns True if the file or directory exists.
+
+  Args:
+    path: Path to check (local, CNS, or GCS file/prefix).
+    project: Optional GCP project ID to use for GCS operations.
+
+  Returns:
+    True if the file or directory/prefix exists, False otherwise.
+  """
+  if is_gcs_path(path):
+    client = storage.Client(project=project)
+    bucket_name, blob_path = _parse_gcs_path(path)
+    bucket = client.bucket(bucket_name)
+    # Check if path points to an exact file blob (skip for bucket root or dir).
+    if (
+        blob_path
+        and not blob_path.endswith("/")
+        and bucket.blob(blob_path).exists()
+    ):
+      return True
+    # Otherwise, check if any objects exist under this directory prefix.
+    prefix = f"{blob_path.rstrip('/')}/" if blob_path else ""
+    return any(bucket.list_blobs(prefix=prefix, max_results=1))
   return epath.Path(path).exists()
 
 
 def is_dir(path: str) -> bool:
   """Returns True if the path exists and is a directory."""
   return epath.Path(path).is_dir()
+
+
+def copy_local_dir(
+    local_src_dir: str, dst_dir: str, project: Optional[str] = None
+) -> None:
+  """Recursively copies a local directory to dst_dir (local, CNS, or GCS).
+
+  Args:
+    local_src_dir: Path to an existing local directory to copy from.
+    dst_dir: Destination directory path (local, CNS, or GCS).
+    project: Optional GCP project ID to use for GCS operations.
+
+  Raises:
+    ValueError: If local_src_dir is a GCS path or not an existing local
+      directory.
+  """
+  if is_gcs_path(local_src_dir) or not os.path.isdir(local_src_dir):
+    raise ValueError(
+        "local_src_dir must be an existing local directory, got:"
+        f" {local_src_dir}"
+    )
+  if is_gcs_path(dst_dir):
+    client = storage.Client(project=project)
+    bucket_name, prefix = _parse_gcs_path(dst_dir)
+    prefix = prefix.rstrip("/")
+    bucket = client.bucket(bucket_name)
+    for root, _, files in os.walk(local_src_dir):
+      for file in files:
+        local_path = os.path.join(root, file)
+        rel_path = os.path.relpath(local_path, local_src_dir)
+        blob_path = f"{prefix}/{rel_path}" if prefix else rel_path
+        bucket.blob(blob_path).upload_from_filename(local_path)
+  else:
+    for root, _, files in os.walk(local_src_dir):
+      for file in files:
+        local_path = os.path.join(root, file)
+        rel_path = os.path.relpath(local_path, local_src_dir)
+        target_path = epath.Path(dst_dir) / rel_path
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        epath.Path(local_path).copy(target_path)
 
 
 def create_gcs_bucket(

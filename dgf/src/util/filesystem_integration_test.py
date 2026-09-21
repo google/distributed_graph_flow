@@ -28,6 +28,7 @@ Usage examples:
 """
 
 import os
+import tempfile
 from absl import flags
 from absl.testing import absltest
 from dgf.src.util import filesystem as fs
@@ -54,6 +55,33 @@ class FilesystemIntegrationTest(absltest.TestCase):
     with fs.open_read(file_path) as f:
       read_content = f.read()
     self.assertEqual(read_content, content)
+
+  def test_write_text_and_exists(self):
+    dir_path = FLAGS.test_dir
+    file_path = os.path.join(dir_path, "write_text_test.txt")
+    content = "hello write_text"
+    fs.write_text(file_path, content)
+    self.assertTrue(fs.exists(file_path))
+    self.assertTrue(fs.exists(dir_path))
+    self.assertFalse(fs.exists(os.path.join(dir_path, "does_not_exist.txt")))
+    with fs.open_read(file_path) as f:
+      self.assertEqual(f.read(), content)
+
+  def test_copy_local_dir(self):
+    dst_dir = os.path.join(FLAGS.test_dir, "copied_dir")
+    with tempfile.TemporaryDirectory() as src_dir:
+      sub_dir = os.path.join(src_dir, "sub")
+      os.makedirs(sub_dir)
+      fs.write_text(os.path.join(src_dir, "root.txt"), "root content")
+      fs.write_text(os.path.join(sub_dir, "nested.txt"), "nested content")
+
+      fs.copy_local_dir(src_dir, dst_dir)
+
+    self.assertTrue(fs.exists(dst_dir))
+    self.assertTrue(fs.exists(os.path.join(dst_dir, "root.txt")))
+    self.assertTrue(fs.exists(os.path.join(dst_dir, "sub", "nested.txt")))
+    with fs.open_read(os.path.join(dst_dir, "sub", "nested.txt")) as f:
+      self.assertEqual(f.read(), "nested content")
 
 
 if __name__ == "__main__":
