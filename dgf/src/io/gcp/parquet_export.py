@@ -15,7 +15,6 @@
 """Export BigQuery Graph data from underlying tables to Parquet files."""
 
 import os
-from typing import Dict
 
 from dgf.src.io import graph_in_beam as gf_graph_in_beam_lib
 from dgf.src.io.gcp import bigquery_graph_metadata as bqgm_lib

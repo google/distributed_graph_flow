@@ -14,11 +14,12 @@
 
 """Library for working with Google Cloud Native Graphs (Spanner and BigQuery)."""
 
-from collections import abc, defaultdict
+from collections import defaultdict
+from collections.abc import Iterable, Sequence
 import json
 import os
 import re
-from typing import Any, Dict, Iterable, List, Literal, Tuple
+from typing import Any, Literal
 
 from dgf.src.analyse import schema as schema_analyse_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -54,7 +55,7 @@ GqlFeatureType = str
 
 def raw_type_to_feature_format(
     feature_name: str, feature_type: str
-) -> Tuple[schema_lib.FeatureFormat, bool]:
+) -> tuple[schema_lib.FeatureFormat, bool]:
   """Converts a Spanner type to (FeatureFormat, is_utf8_string).
 
   Args:
@@ -127,16 +128,16 @@ def is_semantic_timeseries(feature_type: GqlFeatureType) -> bool:
 
 
 def is_pk_fk_aligned(
-    node_table_columns: List[str],
-    node_table_key_columns: List[str],
+    node_table_columns: list[str],
+    node_table_key_columns: list[str],
 ) -> bool:
   """Returns true if the edge table columns are PK-FK aligned with the node table columns."""
   return node_table_columns == node_table_key_columns
 
 
 def infer_feature_set_schema(
-    graph_element_table: Dict[str, str],
-    key_columns: List[str],
+    graph_element_table: dict[str, str],
+    key_columns: list[str],
     combine_as_json: bool,
     skip_primary_keys: bool = False,
 ) -> schema_lib.FeatureSetSchema:
@@ -362,7 +363,7 @@ def graph_element_to_features(
     graph_element_type: Literal[
         GRAPH_ELEMENT_TYPE_NODE, GRAPH_ELEMENT_TYPE_EDGE  # pyrefly: ignore[not-a-type]
     ],
-    graph_element: Dict[str, Any],
+    graph_element: dict[str, Any],
     graph_schema: schema_lib.GraphSchema,
     combine_as_json: bool,
 ) -> in_memory_graph_lib.Features:
@@ -424,7 +425,7 @@ def create_in_memory_node_set(
     query_results: Iterable[Any],
     combine_as_json: bool,
     verbose: int,
-) -> Tuple[in_memory_graph_lib.InMemoryNodeSet, io_ext.ByteIdToIdxMapper]:
+) -> tuple[in_memory_graph_lib.InMemoryNodeSet, io_ext.ByteIdToIdxMapper]:
   """Returns a DGF InMemoryNodeSet from a GCP property graph element."""
 
   node_set_features = defaultdict(list)
@@ -447,7 +448,7 @@ def create_in_memory_node_set(
       element_id_str = node_row[GRAPH_ELEMENT_ID_KEY]
       has_json = GRAPH_ELEMENT_JSON_KEY in node_row
       json_str = node_row.get(GRAPH_ELEMENT_JSON_KEY) if has_json else None
-    elif isinstance(node_row, abc.Sequence):
+    elif isinstance(node_row, Sequence):
       element_id_str = node_row[0]
       has_json = len(node_row) > 1
       json_str = node_row[1] if has_json else None
@@ -571,7 +572,7 @@ def create_in_memory_edge_set(
       target_id_str = edge_row[GRAPH_ELEMENT_TARGET_ID_KEY]
       has_json = GRAPH_ELEMENT_JSON_KEY in edge_row
       json_str = edge_row.get(GRAPH_ELEMENT_JSON_KEY) if has_json else None
-    elif isinstance(edge_row, abc.Sequence):
+    elif isinstance(edge_row, Sequence):
       source_id_str = edge_row[1]
       target_id_str = edge_row[2]
       has_json = len(edge_row) > 3

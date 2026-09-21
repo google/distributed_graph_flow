@@ -23,10 +23,10 @@ primitives for faster and more memory-efficient sampling.
 """
 
 from __future__ import annotations
+from collections.abc import Sequence
 import dataclasses
 import logging
 import time
-from typing import Dict, Sequence, Tuple
 from typing import TYPE_CHECKING
 from dgf.src.data import distributed_graph
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -35,6 +35,7 @@ from dgf.src.sampling import config as config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.util.weak_dep.weak_dep_apache_beam import CombineFn, DoFn, beam, ptransform_fn
 import numpy as np
+
 
 def sample_with_beam_semi_distributed_sampler(
     graph: distributed_graph.Graph,
@@ -136,7 +137,7 @@ def sample_with_beam_semi_distributed_sampler(
 def compute_dense_node_idx_as_side_input(
     graph: distributed_graph.Graph,
     debug_sampling: bool,
-) -> Tuple[Dict[str, Dict[bytes, int]], Dict[str, int]]:
+) -> tuple[dict[str, dict[bytes, int]], dict[str, int]]:
   """Build a dense integer indexing map for the node ids.
 
   Example of output mapping:
@@ -173,7 +174,7 @@ def compute_dense_node_idx_as_side_input(
   @ptransform_fn
   def _process(
       nodes: distributed_graph.PNode,
-  ) -> beam.PCollection[Tuple[bytes, int]]:
+  ) -> beam.PCollection[tuple[bytes, int]]:
 
     if debug_sampling:
 
@@ -250,8 +251,8 @@ class BatchedNumpyCombineFn(CombineFn):
 
 def compute_dense_adjacencies(
     graph: distributed_graph.Graph,
-    node_id_to_idx: Dict[str, Dict[bytes, int]],
-) -> Dict[str, np.ndarray]:
+    node_id_to_idx: dict[str, dict[bytes, int]],
+) -> dict[str, np.ndarray]:
   """Computes the dense adjacency matrices of the edgesets.
 
   Example of input:
@@ -276,16 +277,16 @@ def compute_dense_adjacencies(
   @ptransform_fn
   def _process(
       edges: distributed_graph.PEdge,
-      source_node_id_to_idx: Dict[bytes, int],
-      target_node_id_to_idx: Dict[bytes, int],
+      source_node_id_to_idx: dict[bytes, int],
+      target_node_id_to_idx: dict[bytes, int],
       edgeset_name: str,
-  ) -> beam.PCollection[Tuple[str, np.ndarray]]:
+  ) -> beam.PCollection[tuple[str, np.ndarray]]:
 
     def _edge_to_np_array(
         edge: distributed_graph.Edge,
-        source_node_id_to_idx: Dict[bytes, int],
-        target_node_id_to_idx: Dict[bytes, int],
-    ) -> Tuple[int, int]:
+        source_node_id_to_idx: dict[bytes, int],
+        target_node_id_to_idx: dict[bytes, int],
+    ) -> tuple[int, int]:
       source_node_idx = source_node_id_to_idx[edge.source]  # pyrefly: ignore[bad-index]
       target_node_idx = target_node_id_to_idx[edge.target]  # pyrefly: ignore[bad-index]
       return (source_node_idx, target_node_idx)
@@ -322,8 +323,8 @@ def compute_dense_adjacencies(
 
 def compute_dense_seeds(
     seeds: beam.PCollection[distributed_graph.NodeId],
-    node_id_to_idx: Dict[bytes, int],  # beam.pvalue.AsDict,
-) -> beam.PCollection[Tuple[int, distributed_graph.NodeId]]:
+    node_id_to_idx: dict[bytes, int],  # beam.pvalue.AsDict,
+) -> beam.PCollection[tuple[int, distributed_graph.NodeId]]:
   """Computes the dense node idx of seeds.
 
   Example of input:
@@ -365,9 +366,9 @@ class RawSampler(DoFn):
 
   def process(
       self,
-      seeds: Sequence[Tuple[int, distributed_graph.NodeId]],
-      num_nodes: Dict[str, int],
-      dense_node_adjs: Dict[str, np.ndarray],
+      seeds: Sequence[tuple[int, distributed_graph.NodeId]],
+      num_nodes: dict[str, int],
+      dense_node_adjs: dict[str, np.ndarray],
   ):
 
     if self.sampler is None:
@@ -416,9 +417,9 @@ class RawSampler(DoFn):
 def create_raw_samples(
     schema: schema_lib.GraphSchema,
     plan: config_lib.SamplingPlan,
-    dense_node_adjs: Dict[str, np.ndarray],
-    dense_seeds: beam.PCollection[Tuple[int, distributed_graph.NodeId]],
-    num_nodes: Dict[str, int],
+    dense_node_adjs: dict[str, np.ndarray],
+    dense_seeds: beam.PCollection[tuple[int, distributed_graph.NodeId]],
+    num_nodes: dict[str, int],
     debug_sampling: bool,
 ) -> beam.PCollection[distributed_graph.PKeyedInMemoryGraph]:
   """Create graph samples."""

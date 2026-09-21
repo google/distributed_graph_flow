@@ -14,7 +14,7 @@
 
 """A set of utilities to feed normalized features into a GNN model."""
 
-from typing import Dict, Sequence, Tuple
+from collections.abc import Sequence
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
 from flax import linen as nn
@@ -71,16 +71,16 @@ class EmbedNodesetFeaturesModule(nn.Module):
   """
 
   schema: schema_lib.GraphSchema
-  ignore_features: Sequence[Tuple[str, str]] = ()
+  ignore_features: Sequence[tuple[str, str]] = ()
   categorical_feature_embedding_dim: int = 64
 
   @nn.compact
   def __call__(
       self, graph: jax_in_memory_graph.JaxInMemoryGraph, training: bool
-  ) -> Dict[str, jax.Array]:
+  ) -> dict[str, jax.Array]:
 
     # The embedding value for all the nodesets
-    node_embeddings: Dict[str, jax.Array] = {}
+    node_embeddings: dict[str, jax.Array] = {}
 
     # Compute a fixed size embedding for all the nodesets.
     for nodeset_name, nodeset_schema in self.schema.node_sets.items():

@@ -14,9 +14,10 @@
 
 """Utilities to convert user input data into batched graph samples."""
 
+from collections.abc import Callable, Iterator, Sequence
 import dataclasses
 import enum
-from typing import Callable, Dict, Iterator, Optional, Sequence, Tuple, TypeAlias, Union
+from typing import TypeAlias
 from dgf.src.data import in_memory_graph
 from dgf.src.data import padding as padding_lib
 from dgf.src.data import schema as schema_lib
@@ -29,11 +30,7 @@ from dgf.src.util import util
 import numpy as np
 
 # The types of graphs supported.
-Graph: TypeAlias = Union[
-    in_memory_graph.InMemoryGraph,
-    str,
-    Sequence[str],
-]
+Graph: TypeAlias = in_memory_graph.InMemoryGraph | str | Sequence[str]
 
 
 class GraphFormat(enum.Enum):
@@ -62,7 +59,7 @@ class GraphFormat(enum.Enum):
 
 def resolve_graph_format(
     graph: Graph,
-    format: Union[GraphFormat, str] = GraphFormat.AUTO,  # pylint: disable=redefined-builtin
+    format: GraphFormat | str = GraphFormat.AUTO,  # pylint: disable=redefined-builtin
 ) -> GraphFormat:
   """Returns the format of a graph, inferring it if the format is AUTO.
 
@@ -89,7 +86,9 @@ def resolve_graph_format(
 
   if isinstance(graph, (list, tuple)):
     if not graph:
-      raise ValueError("Cannot resolve graph format from empty sequence of paths.")
+      raise ValueError(
+          "Cannot resolve graph format from empty sequence of paths."
+      )
     return resolve_graph_format(graph[0], format=format)
   if isinstance(graph, in_memory_graph.InMemoryGraph):
     return GraphFormat.IN_MEMORY_GRAPH
@@ -116,7 +115,7 @@ def resolve_graph_format(
 
 # Generator of batched graph samples.
 BatchSampleGeneratorIteratorFn = Callable[
-    [], Iterator[Tuple[in_memory_graph.InMemoryGraph, Dict[str, np.ndarray]]]
+    [], Iterator[tuple[in_memory_graph.InMemoryGraph, dict[str, np.ndarray]]]
 ]
 
 # Generator of individual graph samples.
@@ -179,34 +178,35 @@ class SampleGeneratorFromAnything:
   graph: Graph
   schema: schema_lib.GraphSchema
   batch_size: int
-  seed_node_idxs: Optional[np.ndarray]
-  sampling_config: Union[
-      sampling_config_lib.SimpleSamplingConfig, sampling_config_lib.SamplingPlan
-  ]
+  seed_node_idxs: np.ndarray | None
+  sampling_config: (
+      sampling_config_lib.SimpleSamplingConfig
+      | sampling_config_lib.SamplingPlan
+  )
   drop_remainder: bool
   shuffle: bool
-  format: Union[GraphFormat, str] = GraphFormat.AUTO
-  padding: Optional[padding_lib.Padding] = None
+  format: GraphFormat | str = GraphFormat.AUTO
+  padding: padding_lib.Padding | None = None
   skip_overflow_padding_error: bool = False
   temporal: bool = False
-  edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
+  edgeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
   )
-  nodeset_timestamp_features: Dict[str, str] = dataclasses.field(
+  nodeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
   )
   sampler_returns_node_idxs_only: bool = False
 
-  num_seed_nodes: Optional[int] = dataclasses.field(init=False)
+  num_seed_nodes: int | None = dataclasses.field(init=False)
   batch_iterator: BatchSampleGeneratorIteratorFn = dataclasses.field(init=False)
   single_iterator: SingleSampleGeneratorIteratorFn = dataclasses.field(
       init=False
   )
-  in_memory_sampler: Optional[in_memory_sampler_lib.Sampler] = None
+  in_memory_sampler: in_memory_sampler_lib.Sampler | None = None
   _output_schema: schema_lib.GraphSchema = dataclasses.field(init=False)
-  _target_nodeset: Optional[str] = dataclasses.field(init=False, default=None)
-  _ts_feature: Optional[str] = dataclasses.field(init=False, default=None)
-  _seed_timestamps_all: Optional[np.ndarray] = dataclasses.field(
+  _target_nodeset: str | None = dataclasses.field(init=False, default=None)
+  _ts_feature: str | None = dataclasses.field(init=False, default=None)
+  _seed_timestamps_all: np.ndarray | None = dataclasses.field(
       init=False, default=None
   )
 
@@ -313,7 +313,7 @@ class SampleGeneratorFromAnything:
 
   def _generator_from_in_memory_graph(
       self,
-  ) -> Tuple[BatchSampleGeneratorIteratorFn, SingleSampleGeneratorIteratorFn]:
+  ) -> tuple[BatchSampleGeneratorIteratorFn, SingleSampleGeneratorIteratorFn]:
     """Creates a SampleGenerator from an InMemoryGraph."""
     assert isinstance(self.graph, in_memory_graph.InMemoryGraph)
     assert self.num_seed_nodes is not None
@@ -381,7 +381,7 @@ class SampleGeneratorFromAnything:
 
   def _generator_from_path_tf_sample(
       self, container_type
-  ) -> Tuple[BatchSampleGeneratorIteratorFn, SingleSampleGeneratorIteratorFn]:
+  ) -> tuple[BatchSampleGeneratorIteratorFn, SingleSampleGeneratorIteratorFn]:
     """Creates a SampleGenerator from a path to a bagz file."""
     assert isinstance(self.graph, (str, list, tuple))
 
@@ -421,7 +421,7 @@ class SampleGeneratorFromAnything:
 
   def iterator_builder(
       self,
-  ) -> Tuple[BatchSampleGeneratorIteratorFn, SingleSampleGeneratorIteratorFn]:
+  ) -> tuple[BatchSampleGeneratorIteratorFn, SingleSampleGeneratorIteratorFn]:
     if self.temporal and self.format != GraphFormat.IN_MEMORY_GRAPH:
       raise ValueError(
           "Temporal sampling is only supported for GraphFormat.IN_MEMORY_GRAPH,"

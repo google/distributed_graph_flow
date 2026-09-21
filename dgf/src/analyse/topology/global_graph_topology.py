@@ -20,7 +20,6 @@ components. It also includes methods for auto-calculating derived statistics.
 """
 
 import dataclasses
-from typing import Dict, Optional
 from dgf.src.analyse.topology import node_degree
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
@@ -65,14 +64,14 @@ class GlobalGraphTopology:
 
   total_nodes: int
   total_edges: int
-  avg_degree: Optional[float] = None
-  graph_density: Optional[float] = None
-  num_connected_components: Optional[int] = None
-  largest_component_size: Optional[int] = None
-  isolated_nodes: Optional[int] = None
-  graph_diameter: Optional[float] = None
-  homophily_ratio: Optional[float] = None
-  degree_distribution: Optional[Dict[int, int]] = None
+  avg_degree: float | None = None
+  graph_density: float | None = None
+  num_connected_components: int | None = None
+  largest_component_size: int | None = None
+  isolated_nodes: int | None = None
+  graph_diameter: float | None = None
+  homophily_ratio: float | None = None
+  degree_distribution: dict[int, int] | None = None
 
   ## No need to call post_init. Use update_graph_density() to auto-calculate
   ## derived statistics if not provided.

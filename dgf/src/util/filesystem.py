@@ -15,9 +15,9 @@
 """A basic filesystem compatible with local and gcp.
 """
 
+from collections.abc import Sequence
 import concurrent.futures
 import time
-from typing import List, Optional, Sequence
 from absl import logging
 from etils import epath
 import fsspec
@@ -33,7 +33,7 @@ def _unnormalize_io_path(path: str) -> str:
   return path
 
 
-def glob(pattern: str) -> List[str]:
+def glob(pattern: str) -> list[str]:
   """Returns a list of files and directories matching a pattern.
 
   Args:
@@ -124,8 +124,8 @@ def is_dir(path: str) -> bool:
 
 def create_gcs_bucket(
     bucket_name: str,
-    client: Optional[storage.Client] = None,
-    project: Optional[str] = None,
+    client: storage.Client | None = None,
+    project: str | None = None,
 ):
   """Creates a GCS bucket.
 

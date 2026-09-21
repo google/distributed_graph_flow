@@ -15,10 +15,9 @@
 """An in-memory generic graph."""
 
 import dataclasses
-from typing import Dict, Optional
 import numpy as np
 
-Features = Dict[str, np.ndarray]
+Features = dict[str, np.ndarray]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -32,7 +31,7 @@ class InMemoryNodeSet:
       ArrayOrAnys of shape [num_nodes, <feature shape>].
   """
 
-  num_nodes: Optional[int]
+  num_nodes: int | None
   features: Features = dataclasses.field(default_factory=dict)
 
 
@@ -64,7 +63,6 @@ class InMemoryGraph:
     timestamp: Optional integer timestamp of this graph snapshot.
   """
 
-  node_sets: Dict[str, InMemoryNodeSet]
-  edge_sets: Dict[str, InMemoryEdgeSet]
-  timestamp: Optional[int] = None
-
+  node_sets: dict[str, InMemoryNodeSet]
+  edge_sets: dict[str, InMemoryEdgeSet]
+  timestamp: int | None = None

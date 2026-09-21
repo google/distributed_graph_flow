@@ -16,7 +16,6 @@
 
 import dataclasses
 import enum
-from typing import Optional
 
 import dataclasses_json
 
@@ -45,5 +44,5 @@ class GFGraphMetadata:
   """
 
   version: int
-  timestamp: Optional[int] = None
+  timestamp: int | None = None
   container: Container = Container.PARQUET

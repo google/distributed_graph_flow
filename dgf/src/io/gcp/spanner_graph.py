@@ -18,7 +18,7 @@
 
 from collections.abc import Iterator
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from dgf.src.analyse import print_schema as print_schema_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
@@ -45,8 +45,8 @@ def _infoschema_query() -> str:
 def _execute_query(
     database_or_snapshot: Any,
     query: str,
-    params: Optional[Dict[str, Any]] = None,
-    param_types: Optional[Dict[str, Any]] = None,
+    params: dict[str, Any] | None = None,
+    param_types: dict[str, Any] | None = None,
 ) -> StreamedResultSet:
   """Executes a Spanner query and returns an iterator of the result rows."""
   if hasattr(database_or_snapshot, "snapshot"):
@@ -94,9 +94,9 @@ def get_metadata(
 
 
 def _graph_element_table(
-    property_definitions: List[spanner_graph_metadata_lib.PropertyDefinition],
-    property_types: Dict[str, str],
-) -> Dict[str, str]:
+    property_definitions: list[spanner_graph_metadata_lib.PropertyDefinition],
+    property_types: dict[str, str],
+) -> dict[str, str]:
   """Returns a Dict of Spanner graph element features."""
   graph_element_table = {}
   if property_definitions:
@@ -265,11 +265,11 @@ def read_spanner_graph(
     database: str,
     graph: str,
     *,
-    schema: Optional[schema_lib.GraphSchema] = None,
+    schema: schema_lib.GraphSchema | None = None,
     combine_as_json: bool = False,
     verbose: int = 1,
     **kwargs,  # Accept and ignore legacy parallel arguments
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Reads a Spanner Graph sequentially in-process using direct SQL queries on base tables."""
   start_time = time.time()
 

@@ -12,19 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Common utilities for supporting differnt types of Apache Beam Runners.
-"""
+"""Common utilities for supporting differnt types of Apache Beam Runners."""
 
 from __future__ import annotations
 
 import abc
 import dataclasses
-from typing import Any, Dict, Optional
+from typing import Any
 
 from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 
 
-def runner_from_options(options: Dict[str, Any]) -> beam.runners.PipelineRunner:
+def runner_from_options(options: dict[str, Any]) -> beam.runners.PipelineRunner:
   """Returns a Beam runner based on the provided options."""
   return runner_from_name(options["runner"])
 
@@ -47,11 +46,10 @@ def program_started(name: str):
 
 
 class RunnerBuildableConfig(abc.ABC):
-  """Abstract base class for an Apache Beam runner configuration.
-  """
+  """Abstract base class for an Apache Beam runner configuration."""
 
   @abc.abstractmethod
-  def to_options_dict(self) -> Dict[str, Any]:
+  def to_options_dict(self) -> dict[str, Any]:
     pass
 
   def make(self) -> beam.runners.PipelineRunner:
@@ -63,7 +61,7 @@ class RunnerBuildableConfig(abc.ABC):
 class LocalRunnerConfig(RunnerBuildableConfig):
   """Configuration for running a pipeline locally (DirectRunner)."""
 
-  def to_options_dict(self) -> Dict[str, Any]:
+  def to_options_dict(self) -> dict[str, Any]:
     """Returns options for the DirectRunner."""
     return {"runner": "DirectRunner"}
 
@@ -71,35 +69,36 @@ class LocalRunnerConfig(RunnerBuildableConfig):
 @dataclasses.dataclass(frozen=True)
 class DataflowRunnerConfig(RunnerBuildableConfig):
   """Configuration for running a pipeline on Cloud Dataflow."""
+
   project: str
   region: str
   temp_location: str
   job_name: str
 
   # --- Optional but common parameters ---
-  service_account_email: Optional[str] = None
-  subnetwork: Optional[str] = None
-  machine_type: Optional[str] = None
-  num_workers: Optional[int] = None
-  max_num_workers: Optional[int] = None
+  service_account_email: str | None = None
+  subnetwork: str | None = None
+  machine_type: str | None = None
+  num_workers: int | None = None
+  max_num_workers: int | None = None
 
   # The modern option for Beam SDKs (2.30.0+)
-  sdk_container_image: Optional[str] = None
+  sdk_container_image: str | None = None
 
   # The legacy option for older Beam SDKs
-  worker_harness_container_image: Optional[str] = None
+  worker_harness_container_image: str | None = None
 
   # Path to a setup.py file for installing dependencies on workers
-  setup_file: Optional[str] = None
+  setup_file: str | None = None
 
-  def to_options_dict(self) -> Dict[str, Any]:
+  def to_options_dict(self) -> dict[str, Any]:
     """Returns options for the DataflowRunner."""
     opts = {
         "runner": "DataflowRunner",
         "project": self.project,
         "region": self.region,
         "temp_location": self.temp_location,
-        "job_name": self.job_name
+        "job_name": self.job_name,
     }
 
     # Fill in optional fields w/o overriding defaults.

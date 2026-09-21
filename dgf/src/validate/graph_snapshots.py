@@ -14,9 +14,9 @@
 
 """Validation utilities for DGF Snapshots Datasets."""
 
+from collections.abc import Sequence
 import json
 import os
-from typing import List, Sequence
 
 from dgf.src.data import graph_snapshots_metadata as data_snapshot_metadata
 from dgf.src.io import graph_in_memory
@@ -33,14 +33,12 @@ def _get_snapshots_dir(dataset_path: str) -> str:
   return os.path.join(dataset_path, "snapshots")
 
 
-def _list_snapshot_ids(dataset_path: str) -> List[str]:
+def _list_snapshot_ids(dataset_path: str) -> list[str]:
   snaps_dir = _get_snapshots_dir(dataset_path)
   if not filesystem.exists(snaps_dir):
     return []
   paths = filesystem.glob(os.path.join(snaps_dir, "*"))
-  return sorted([
-      os.path.basename(p) for p in paths if filesystem.is_dir(p)
-  ])
+  return sorted([os.path.basename(p) for p in paths if filesystem.is_dir(p)])
 
 
 def snapshots_issues(
@@ -56,7 +54,7 @@ def snapshots_issues(
   Returns:
     Sequence of Issue objects describing errors or warnings.
   """
-  issues: List[validate_lib.Issue] = []
+  issues: list[validate_lib.Issue] = []
 
   # 1. Root Metadata Check
   metadata_path = os.path.join(dataset_path, "metadata.json")
@@ -138,9 +136,7 @@ def snapshots_issues(
       graph, _ = graph_in_memory.read_graph(
           snap_dir, override_schema=global_schema
       )
-      content_issues = in_memory_graph_validate_lib.issues(
-          graph, global_schema
-      )
+      content_issues = in_memory_graph_validate_lib.issues(graph, global_schema)
       for issue in content_issues:
         issues.append(
             Issue(issue.severity, f"Snapshot {snap_id!r}: {issue.text}")
@@ -173,9 +169,7 @@ def validate_snapshots(
       found.
   """
   validate_lib.print_and_raise(
-      snapshots_issues(
-          dataset_path, validate_contents=validate_contents
-      ),
+      snapshots_issues(dataset_path, validate_contents=validate_contents),
       raise_on_error=raise_on_error,
       raise_on_warning=raise_on_warning,
   )

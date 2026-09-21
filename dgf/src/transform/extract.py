@@ -15,7 +15,6 @@
 """Operations on a schema."""
 
 import copy
-from typing import Tuple
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.transform import schema as schema_transform_lib
@@ -63,7 +62,7 @@ def filter_graph(
 def drop_edge_features(
     graph: in_memory_graph_lib.InMemoryGraph,
     schema: schema_lib.GraphSchema,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Drops all edge features from a graph and its schema."""
   schema = copy.deepcopy(schema)
   schema = schema_transform_lib.drop_edge_features_from_schema(schema)

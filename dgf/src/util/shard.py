@@ -16,9 +16,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 import math
 import re
-from typing import List, Optional, Sequence, Tuple
 
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 
@@ -27,7 +27,7 @@ NUM_NODES_PER_SHARD = 10000
 NUM_EDGES_PER_SHARD = 10000
 
 
-def expand_output_paths(path: str, num_shards: Optional[int]) -> List[str]:
+def expand_output_paths(path: str, num_shards: int | None) -> list[str]:
   """Generates a list of concrete filenames from a path expression.
 
   The input path can be a sharded path or a concrete path. If sharded, but with
@@ -81,7 +81,7 @@ def expand_output_paths(path: str, num_shards: Optional[int]) -> List[str]:
       return [path]
 
 
-def expand_input_paths(path: str | Sequence[str]) -> List[str]:
+def expand_input_paths(path: str | Sequence[str]) -> list[str]:
   """Generates a list of concrete filenames from a path expression.
 
   The input path can be a sharded path, a glob path, or a concrete path, or a
@@ -176,7 +176,7 @@ def sharded_filename(
 
 def _match_sharded_path(
     path: str,
-) -> Optional[Tuple[str, str, Optional[str]]]:
+) -> tuple[str, str, str | None] | None:
   """Matches the parts of a sharded path.
 
   Examples:
@@ -231,7 +231,7 @@ def shard_path_to_glob(path: str) -> str:
     return path
 
 
-def parse_sharded_filename(path: str) -> Tuple[str, int | None, str]:
+def parse_sharded_filename(path: str) -> tuple[str, int | None, str]:
   """Parses the basename, number of shards, and extension of a sharded path."""
   match_result = _match_sharded_path(path)
   if match_result:
@@ -248,7 +248,7 @@ def parse_sharded_filename(path: str) -> Tuple[str, int | None, str]:
 
 def list_paths(
     basename: str, extension: str, allow_bq_fallback: bool = False
-) -> List[str]:
+) -> list[str]:
   """Lists the files matching a sharded patter.
 
   Example:

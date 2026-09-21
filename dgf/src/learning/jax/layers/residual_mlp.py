@@ -15,7 +15,6 @@
 """Residual MLP."""
 
 import dataclasses
-from typing import Optional
 import dataclasses_json
 from dgf.src.learning.jax import common
 from dgf.src.learning.jax.layers.registry import registry as layer_registry
@@ -98,11 +97,11 @@ class ResidualMLPV2Config:
   dims: int
   num_layers: int = 1
   activation: str = "gelu"
-  dropout_rate: Optional[float] = 0.1
-  norm: Optional[str] = "batch_norm"
+  dropout_rate: float | None = 0.1
+  norm: str | None = "batch_norm"
   residual: bool = True
 
-  def make(self, name: Optional[str] = None) -> "ResidualMLPV2":
+  def make(self, name: str | None = None) -> "ResidualMLPV2":
     return ResidualMLPV2(config=self, name=name)
 
 

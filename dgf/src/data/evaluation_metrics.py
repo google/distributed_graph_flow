@@ -15,7 +15,6 @@
 """Training model metrics for DGF."""
 
 import dataclasses
-from typing import Dict, Optional
 import dataclasses_json
 from dgf.src.learning import training_configuration
 
@@ -45,10 +44,10 @@ class Metrics:
   precision: float
   recall: float
   f1_score: float
-  eval_time_in_seconds: Optional[float] = None
+  eval_time_in_seconds: float | None = None
 
 
-DatasetMetricsDict = Dict[str, Metrics]
+DatasetMetricsDict = dict[str, Metrics]
 
 
 @dataclasses_json.dataclass_json

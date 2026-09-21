@@ -15,7 +15,6 @@
 """Tests for the simple flax train loop."""
 
 import os
-from typing import Optional
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.learning import early_stopping_monitor
@@ -36,9 +35,7 @@ class SimpleModel(nn.Module):
     return nn.Dense(self.hidden_dim)(x)
 
 
-def dataset_iterator(
-    num_steps: Optional[int], batch_size: int = 4, dim: int = 8
-):
+def dataset_iterator(num_steps: int | None, batch_size: int = 4, dim: int = 8):
   example = {
       "data": np.random.normal(size=(batch_size, dim)).astype(np.float32),
       "label": np.random.randint(2, size=(batch_size,), dtype=np.int32),

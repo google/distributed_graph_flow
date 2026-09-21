@@ -18,9 +18,10 @@ The main utility GNNDatasetPreparator generates normalized, padded and batched
 graph samples for node prediction.
 """
 
+from collections.abc import Iterator
 import dataclasses
 import itertools
-from typing import Dict, Iterator, Literal, Optional, Tuple, Union
+from typing import Literal
 from dgf.src.analyse import in_process_feature_statistics as in_process_feature_statistics_lib
 from dgf.src.analyse import padding as padding_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -53,11 +54,11 @@ class LiveData:
   normalizer: normalize_lib.GraphNormalizer
   padding: padding_data_lib.Padding
   sampling_plan: sampling_config_lib.SamplingPlan
-  num_nodes_in_seed_nodeset: Optional[int]
+  num_nodes_in_seed_nodeset: int | None
   sample_generator: dataset.SampleGeneratorFromAnything
-  normalized_graph: Optional[in_memory_graph_lib.InMemoryGraph] = None
-  normalized_jax_graph: Optional[jax_in_memory_graph.JaxInMemoryGraph] = None
-  timeseries_schema_cache: Optional[temporal_util.TimeseriesSchemaCache] = None
+  normalized_graph: in_memory_graph_lib.InMemoryGraph | None = None
+  normalized_jax_graph: jax_in_memory_graph.JaxInMemoryGraph | None = None
+  timeseries_schema_cache: temporal_util.TimeseriesSchemaCache | None = None
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -154,28 +155,28 @@ class GNNDatasetPreparator:
   sampling_plan: sampling_config_lib.SamplingPlan
   drop_remainder: bool
   shuffle: bool
-  format: Union[dataset.GraphFormat, str] = dataset.GraphFormat.AUTO
-  seed_node_idxs: Optional[np.ndarray] = None
+  format: dataset.GraphFormat | str = dataset.GraphFormat.AUTO
+  seed_node_idxs: np.ndarray | None = None
 
   # Optional arguments
-  num_samples_for_stats: Optional[int] = 10000
+  num_samples_for_stats: int | None = 10000
   auto_normalize_config: normalize_lib.AutoNormalizeConfig = dataclasses.field(
       default_factory=normalize_lib.AutoNormalizeConfig
   )
   verbose_preparation: bool = True
   skip_overflow_padding_error: bool = False
   temporal_sampling: bool = False
-  edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
+  edgeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
   )
-  nodeset_timestamp_features: Dict[str, str] = dataclasses.field(
+  nodeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
   )
   cache_normalized_features: bool = True
   cache_normalized_features_device: Literal["host", "device"] = "device"
 
   # The is_prepared data computed by the `prepare()` method.
-  live: Optional[LiveData] = dataclasses.field(init=False, default=None)
+  live: LiveData | None = dataclasses.field(init=False, default=None)
 
   def __post_init__(self):
     if self.batch_size <= 0:
@@ -193,7 +194,7 @@ class GNNDatasetPreparator:
   def is_prepared(self) -> bool:
     return self.live is not None
 
-  def num_nodes_in_seed_nodeset(self) -> Optional[int]:
+  def num_nodes_in_seed_nodeset(self) -> int | None:
     """Number of nodes in the seed nodeset."""
     return self.get_live().num_nodes_in_seed_nodeset
 
@@ -201,7 +202,7 @@ class GNNDatasetPreparator:
     """Returns the schema of the generated samples."""
     return self.get_live().normalizer.output_schema()
 
-  def prepare_from_existing_one(self, other: "GNNDatasetPreparator"):
+  def prepare_from_existing_one(self, other: GNNDatasetPreparator):
     """Pre-compute data (same as "prepare") but with an already computed cache.
 
     Instead of beeing recomputed, the following are grabbed from "other":
@@ -413,7 +414,7 @@ class GNNDatasetPreparator:
   def generate(
       self,
   ) -> Iterator[
-      Tuple[in_memory_graph_lib.InMemoryGraph, Dict[str, np.ndarray]]
+      tuple[in_memory_graph_lib.InMemoryGraph, dict[str, np.ndarray]]
   ]:
     """Generates batched + normalized graph samples.
 
@@ -453,7 +454,7 @@ class GNNDatasetPreparator:
   def generate_jax(
       self,
   ) -> Iterator[
-      Tuple[jax_in_memory_graph.JaxInMemoryGraph, Dict[str, jnp.ndarray]]
+      tuple[jax_in_memory_graph.JaxInMemoryGraph, dict[str, jnp.ndarray]]
   ]:
     """Generates jax batched + normalized graph samples.
 
@@ -500,7 +501,7 @@ class GNNDatasetPreparator:
 def _get_target_nodeset_and_timestamp_feature(
     live: LiveData,
     schema: schema_lib.GraphSchema,
-) -> Tuple[Optional[str], Optional[str]]:
+) -> tuple[str | None, str | None]:
   """Resolves target nodeset and timestamp feature if normalizer requires seed_timestamps."""
   target_nodeset = None
   timestamp_feature = None
@@ -519,11 +520,11 @@ def _get_target_nodeset_and_timestamp_feature(
 
 def _normalize_batch_sample(
     sample: in_memory_graph_lib.InMemoryGraph,
-    merge_offsets: Dict[str, np.ndarray],
+    merge_offsets: dict[str, np.ndarray],
     live: LiveData,
     schema: schema_lib.GraphSchema,
-    target_nodeset: Optional[str] = None,
-    timestamp_feature: Optional[str] = None,
+    target_nodeset: str | None = None,
+    timestamp_feature: str | None = None,
 ) -> in_memory_graph_lib.InMemoryGraph:
   """Normalizes a merged batch sample, expanding root timestamps if supported."""
   normalizer_kwargs = {}
@@ -554,9 +555,9 @@ def _normalize_batch_sample(
 def attach_features_from_numpy_graph(
     graph: in_memory_graph_lib.InMemoryGraph,
     sample: in_memory_graph_lib.InMemoryGraph,
-    schema_or_cache: Union[
-        schema_lib.GraphSchema, temporal_util.TimeseriesSchemaCache
-    ],
+    schema_or_cache: (
+        schema_lib.GraphSchema | temporal_util.TimeseriesSchemaCache
+    ),
 ) -> in_memory_graph_lib.InMemoryGraph:
   """Attaches the numpy features from `graph` to the `sample`."""
   if isinstance(schema_or_cache, schema_lib.GraphSchema):
@@ -575,9 +576,9 @@ def attach_features_from_numpy_graph(
 
 
 def attach_features_from_jax_graph_and_cast_to_jax(
-    graph: Union[
-        in_memory_graph_lib.InMemoryGraph, jax_in_memory_graph.JaxInMemoryGraph
-    ],
+    graph: (
+        in_memory_graph_lib.InMemoryGraph | jax_in_memory_graph.JaxInMemoryGraph
+    ),
     sample: in_memory_graph_lib.InMemoryGraph,
 ) -> jax_in_memory_graph.JaxInMemoryGraph:
   """Similar but more efficient than attach_features_from_numpy_graph + optional graph_to_jax_graph."""
@@ -617,17 +618,17 @@ def attach_features_from_jax_graph_and_cast_to_jax(
 
 def compute_train_and_valid_node_idxs(
     graph: common.Graph,
-    valid_graph: Optional[common.Graph],
-    graph_format: Union[dataset.GraphFormat, str],
+    valid_graph: common.Graph | None,
+    graph_format: dataset.GraphFormat | str,
     target_nodeset: str,
     random_seed: int,
     validation_ratio: float,
-    train_seed_nodes: Optional[common.SeedNodeIdxs],
-    valid_seed_nodes: Optional[common.SeedNodeIdxs],
-    max_num_valid_examples: Optional[int],
+    train_seed_nodes: common.SeedNodeIdxs | None,
+    valid_seed_nodes: common.SeedNodeIdxs | None,
+    max_num_valid_examples: int | None,
     temporal_split: bool = False,
-    ts_feature: Optional[str] = None,
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    ts_feature: str | None = None,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
   """Computes the training and validation seed node indices."""
   if not isinstance(graph, in_memory_graph_lib.InMemoryGraph) or (
       valid_graph is not None
@@ -723,21 +724,21 @@ def prepare_datasets(
     num_sampling_hops: int,
     sampling_width: int,
     verbose: int,
-    graph_format: Union[dataset.GraphFormat, str],
+    graph_format: dataset.GraphFormat | str,
     validation_ratio: float,
-    train_seed_nodes: Optional[common.SeedNodeIdxs],
-    valid_seed_nodes: Optional[common.SeedNodeIdxs],
+    train_seed_nodes: common.SeedNodeIdxs | None,
+    valid_seed_nodes: common.SeedNodeIdxs | None,
     temporal_sampling: bool,
     nodeset_timestamp_features: dict[str, str],
     edgeset_timestamp_features: dict[str, str],
-    num_valid_steps: Optional[int],
+    num_valid_steps: int | None,
     cache_valid_dataset: bool,
     cache_normalized_features: bool,
     cache_normalized_features_device: Literal["host", "device"],
-    sampling_plan: Optional[sampling_config_lib.SamplingPlan],
-    auto_normalize_config: Optional[normalize_lib.AutoNormalizeConfig] = None,
-    keep_raw_features: Optional[set[Tuple[str, str]]] = None,
-) -> Tuple["GNNDatasetPreparator", Optional["GNNDatasetPreparator"]]:
+    sampling_plan: sampling_config_lib.SamplingPlan | None,
+    auto_normalize_config: normalize_lib.AutoNormalizeConfig | None = None,
+    keep_raw_features: set[tuple[str, str]] | None = None,
+) -> tuple[GNNDatasetPreparator, GNNDatasetPreparator | None]:
   """Prepares the training dataset by sampling, normalizing, and padding."""
   if not cache_valid_dataset or num_valid_steps is None:
     max_num_valid_examples = None

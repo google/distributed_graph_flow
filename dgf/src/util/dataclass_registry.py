@@ -15,7 +15,7 @@
 """Define an annotation to serialize/deserialize layer config."""
 
 import dataclasses
-from typing import Any, Dict, List, Optional
+from typing import Any
 import dataclasses_json
 
 # Name of the field containing the type / class name.
@@ -65,7 +65,7 @@ class Registry:
 
   def __init__(self, name: str):
     self._name = name
-    self._registered_classes: Dict[str, Any] = {}
+    self._registered_classes: dict[str, Any] = {}
 
   def register(self, cls):
     """Registers a class with the registry.
@@ -131,7 +131,7 @@ class Registry:
   def _get_key(self, cls):
     return f"{self._name}.{cls.__name__}"
 
-  def _encode(self, item: Any) -> Optional[Dict[str, Any]]:
+  def _encode(self, item: Any) -> dict[str, Any] | None:
     """Encodes an object of a registered class to a JSON dictionary."""
     if item is None:
       return None
@@ -147,7 +147,7 @@ class Registry:
     encoded_item[TYPE_FIELD] = key
     return encoded_item
 
-  def _decode(self, encoded_item: Dict[str, Any]) -> Any:
+  def _decode(self, encoded_item: dict[str, Any]) -> Any:
     """Decodes a JSON dictionary to an object of a registered class."""
     item_type = encoded_item.get(TYPE_FIELD)
     if not item_type:
@@ -162,15 +162,15 @@ class Registry:
     data.pop(TYPE_FIELD)
     return cls.from_dict(data)
 
-  def _encode_list(self, items: List[Any]) -> Any:
+  def _encode_list(self, items: list[Any]) -> Any:
     """Encodes a list of objects of registered classes."""
     if items is None:
       return None
     return [self._encode(item) for item in items]
 
-  def _decode_list(self, encoded_items: Any) -> List[Any]:
+  def _decode_list(self, encoded_items: Any) -> list[Any]:
     """Decodes a list of JSON dictionaries to objects of registered classes."""
     return [self._decode(item) for item in encoded_items]
 
-  def registered_keys(self) -> List[str]:
+  def registered_keys(self) -> list[str]:
     return sorted(list(self._registered_classes.keys()))

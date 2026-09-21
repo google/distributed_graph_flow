@@ -15,8 +15,9 @@
 """Common utilities and definitions for JAX in GraphFlow."""
 
 import abc
+from collections.abc import Callable
 import dataclasses
-from typing import Any, Callable, Dict, Optional, Protocol
+from typing import Any, Protocol
 
 from absl import logging
 from dgf.src.learning import config
@@ -56,7 +57,7 @@ class BuildableModule(Protocol):
 class GenericLayer(Protocol):
   """Protocol for objects that define a `make` function and returns nn.Module."""
 
-  def make(self, name: Optional[str] = None) -> nn.Module:
+  def make(self, name: str | None = None) -> nn.Module:
     ...
 
   def architecture(self) -> str:
@@ -178,8 +179,8 @@ def log_info_value(name: str, value: Any):
 
 @jax.jit
 def jit_gather_features(
-    features: Dict[str, jax.Array], node_idxs: jax.Array
-) -> Dict[str, jax.Array]:
+    features: dict[str, jax.Array], node_idxs: jax.Array
+) -> dict[str, jax.Array]:
   """Gathers features for specified node indices.
 
   Args:

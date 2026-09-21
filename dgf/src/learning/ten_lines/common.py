@@ -18,7 +18,7 @@ import abc
 import dataclasses
 import enum
 import os
-from typing import Any, Dict, List, Literal, Optional, Type, TypeAlias, Union
+from typing import Any, Literal, TypeAlias
 import uuid
 import dataclasses_json
 from dgf.src.learning import early_stopping_monitor
@@ -36,7 +36,7 @@ import numpy as np
 Graph = dataset.Graph
 
 # The type of seed node idxs supported in high-level APIs.
-SeedNodeIdxs: TypeAlias = Union[List[int], np.ndarray]
+SeedNodeIdxs: TypeAlias = list[int] | np.ndarray
 
 # Filename in the model saved on disk.
 FILENAME_DONE = "DONE"
@@ -54,7 +54,7 @@ class Architecture(enum.Enum):
 DEFAULT_ARCHITECTURE = Architecture.HETEROGENEOUS_MESSAGE_PASSING
 
 
-def parse_architecture(architecture: Union[Architecture, str]) -> Architecture:
+def parse_architecture(architecture: Architecture | str) -> Architecture:
   """Parses a string or Architecture enum into an Architecture enum."""
   if isinstance(architecture, Architecture):
     return architecture
@@ -93,7 +93,7 @@ DEFAULT_TF_FUNCTION_INPUT_FORMAT = TFFunctionInputFormat.TF_GRAPH
 
 
 def parse_tf_function_input_format(
-    input_format: Union[TFFunctionInputFormat, str],
+    input_format: TFFunctionInputFormat | str,
 ) -> TFFunctionInputFormat:
   """Parses a string or TFFunctionInputFormat into a TFFunctionInputFormat."""
   if isinstance(input_format, TFFunctionInputFormat):
@@ -113,8 +113,8 @@ def parse_tf_function_input_format(
 
 
 def resolve_tf_function_input_format(
-    input_format: Optional[Union[TFFunctionInputFormat, str]],
-    consume_tf_graph_dict: Optional[bool],
+    input_format: TFFunctionInputFormat | str | None,
+    consume_tf_graph_dict: bool | None,
 ) -> TFFunctionInputFormat:
   """Resolves the input format of `to_tensorflow_function`.
 
@@ -165,7 +165,7 @@ class LogItem:
   """
 
   step: int
-  metrics: Dict[str, float]
+  metrics: dict[str, float]
 
 
 @dataclasses.dataclass
@@ -180,8 +180,8 @@ class TrainingLogs:
       the model was reverted to a previous version.
   """
 
-  train: List[LogItem]
-  valid: List[LogItem]
+  train: list[LogItem]
+  valid: list[LogItem]
   num_train_step: int
 
 
@@ -304,11 +304,9 @@ class Metadata:
 
   name: str
   version: int = 1  # NOTE: Keep the last version as a default.
-  trainig_logs: Optional[TrainingLogs] = None
-  uuid: Optional[str] = dataclasses.field(
-      default_factory=lambda: uuid.uuid4().hex
-  )
-  captured_logs: Optional[List[log.Message]] = None
+  trainig_logs: TrainingLogs | None = None
+  uuid: str | None = dataclasses.field(default_factory=lambda: uuid.uuid4().hex)
+  captured_logs: list[log.Message] | None = None
 
 
 # TODO(gbm): Structure / organize / populate
@@ -340,8 +338,8 @@ class HParam:
   sampling_width: int = 10
   num_layers: int = 2
   batch_size: int = 32
-  max_training_time_seconds: Optional[int] = None
-  num_train_steps: Optional[int] = None
+  max_training_time_seconds: int | None = None
+  num_train_steps: int | None = None
   random_seed: int = 42
   node_embedding_dim: int = 64
   learning_rate: float = 0.0005
@@ -349,9 +347,9 @@ class HParam:
   dropout: float = 0.1
   message_pooling: str = "sum"
   architecture: Architecture = DEFAULT_ARCHITECTURE
-  early_stopping: Optional[
-      early_stopping_monitor.EarlyStoppingMonitorConfig
-  ] = None
+  early_stopping: early_stopping_monitor.EarlyStoppingMonitorConfig | None = (
+      None
+  )
 
 
 def save_model(model: Model, path: str) -> None:
@@ -450,7 +448,7 @@ def build_gnn_config(hparams: HParam) -> jax_common.GenericLayer:
 
 
 def register_model(
-    model_class: Type[Model], constructor_argument_class: Type[Any]
+    model_class: type[Model], constructor_argument_class: type[Any]
 ) -> None:
   """Registers a model class.
 
@@ -470,14 +468,14 @@ def register_model(
 
 @dataclasses.dataclass
 class RegisteredModel:
-  model_class: Type[Model]
-  data_class: Type[Any]
+  model_class: type[Model]
+  data_class: type[Any]
 
 
-REGISTERED_MODELS: Dict[str, RegisteredModel] = {}
+REGISTERED_MODELS: dict[str, RegisteredModel] = {}
 
 
-def num_model_weights(model_params: Optional[Any]) -> Dict[str, int]:
+def num_model_weights(model_params: Any | None) -> dict[str, int]:
   """Returns a dictionary of the type and number of weights of the model.
 
   Example:
@@ -496,8 +494,8 @@ def num_model_weights(model_params: Optional[Any]) -> Dict[str, int]:
 
 def check_number_of_seeds(
     batch_size: int,
-    num_training: Optional[int],
-    num_validation: Optional[int],
+    num_training: int | None,
+    num_validation: int | None,
     key: Literal["node", "edge"],
 ):
   """Checks if the number of seed nodes is sufficient for the given batch size.

@@ -16,35 +16,33 @@
 
 from collections import defaultdict
 import dataclasses
-from typing import Any, Dict, Optional, Protocol, Tuple, Type, Union
+from typing import Any, Protocol
 from dgf.src.data import in_memory_graph
 from dgf.src.data import jax_in_memory_graph as jax_in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 import jax.numpy as jnp
 import numpy as np
 
-Features = Union[in_memory_graph.Features, jax_in_memory_graph_lib.Features]
-Graph = Union[
-    in_memory_graph.InMemoryGraph, jax_in_memory_graph_lib.JaxInMemoryGraph
-]
-NodeSet = Union[
-    in_memory_graph.InMemoryNodeSet, jax_in_memory_graph_lib.JaxInMemoryNodeSet
-]
-EdgeSet = Union[
-    in_memory_graph.InMemoryEdgeSet, jax_in_memory_graph_lib.JaxInMemoryEdgeSet
-]
-GraphType = Union[
-    Type[in_memory_graph.InMemoryGraph],
-    Type[jax_in_memory_graph_lib.JaxInMemoryGraph],
-]
-NodeSetType = Union[
-    Type[in_memory_graph.InMemoryNodeSet],
-    Type[jax_in_memory_graph_lib.JaxInMemoryNodeSet],
-]
-EdgeSetType = Union[
-    Type[in_memory_graph.InMemoryEdgeSet],
-    Type[jax_in_memory_graph_lib.JaxInMemoryEdgeSet],
-]
+Features = in_memory_graph.Features | jax_in_memory_graph_lib.Features
+Graph = in_memory_graph.InMemoryGraph | jax_in_memory_graph_lib.JaxInMemoryGraph
+NodeSet = (
+    in_memory_graph.InMemoryNodeSet | jax_in_memory_graph_lib.JaxInMemoryNodeSet
+)
+EdgeSet = (
+    in_memory_graph.InMemoryEdgeSet | jax_in_memory_graph_lib.JaxInMemoryEdgeSet
+)
+GraphType = (
+    type[in_memory_graph.InMemoryGraph]
+    | type[jax_in_memory_graph_lib.JaxInMemoryGraph]
+)
+NodeSetType = (
+    type[in_memory_graph.InMemoryNodeSet]
+    | type[jax_in_memory_graph_lib.JaxInMemoryNodeSet]
+)
+EdgeSetType = (
+    type[in_memory_graph.InMemoryEdgeSet]
+    | type[jax_in_memory_graph_lib.JaxInMemoryEdgeSet]
+)
 
 
 # Specific numpy or jax functions.
@@ -84,16 +82,16 @@ class FeatureSetProcessor(Protocol):
       src_features: Features,
       src_feature_schema: schema_lib.FeatureSetSchema,
       num_rows: int,
-  ) -> Tuple[Features, schema_lib.FeatureSetSchema]:
+  ) -> tuple[Features, schema_lib.FeatureSetSchema]:
     ...
 
 
 def apply_feature(
     graph: Graph,
     schema: schema_lib.GraphSchema,
-    process_nodesets: Optional[Dict[str, FeatureSetProcessor]] = None,
-    process_edgesets: Optional[Dict[str, FeatureSetProcessor]] = None,
-) -> Tuple[Graph, schema_lib.GraphSchema]:
+    process_nodesets: dict[str, FeatureSetProcessor] | None = None,
+    process_edgesets: dict[str, FeatureSetProcessor] | None = None,
+) -> tuple[Graph, schema_lib.GraphSchema]:
   """Applies feature processors to the node and edge sets of a graph.
 
   This function does not check the validity of the output e.g. the returned
@@ -229,7 +227,7 @@ def homogenize(
     schema: schema_lib.GraphSchema,
     homogenized_nodeset_name: str = "nodes",
     homogenized_edgeset_name: str = "edges",
-) -> Tuple[Graph, schema_lib.GraphSchema, Dict[str, int]]:
+) -> tuple[Graph, schema_lib.GraphSchema, dict[str, int]]:
   """Homogenizes a heterogeneous graph into a homogeneous one.
 
   All nodesets on the input graph must have the same feature schemas. Similarly,
@@ -340,7 +338,7 @@ class Homogenizer:
     """The homogeneous schema."""
     return self._output_schema
 
-  def __call__(self, graph: Graph) -> Tuple[Graph, Dict[str, int]]:
+  def __call__(self, graph: Graph) -> tuple[Graph, dict[str, int]]:
     """Homogenizes the provided graph based on the precomputed schema.
 
     Args:

@@ -16,11 +16,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Generator, Mapping, Sequence
 import enum
 import os
 import typing
-from typing import Any, Dict, Generator, List, Optional, Sequence
+from typing import Any
 
 from dgf.src.data import distributed_graph as distributed_graph_lib
 from dgf.src.data import in_memory_graph
@@ -45,8 +45,8 @@ class TFGraphSampleContainerType(enum.Enum):
 def tfgnn_graph_to_graph(
     example: tf.train.Example,
     schema: schema_lib.GraphSchema,
-    import_node_ids: Optional[str] = None,
-    import_edge_ids: Optional[str] = None,
+    import_node_ids: str | None = None,
+    import_edge_ids: str | None = None,
 ) -> in_memory_graph.InMemoryGraph:
   """Converts a TF GNN Graph Sample to an InMemoryGraph."""
   feature_dict = {}
@@ -63,7 +63,7 @@ def tfgnn_graph_to_graph(
 
 
 def _check_at_most_one_ragged_dim(
-    feature_key: str, shape: List[Optional[int]]
+    feature_key: str, shape: list[int | None]
 ) -> None:
   """Fails if the feature has more than one variable-length dimension.
 
@@ -114,7 +114,7 @@ def _split_ragged_dim(
   return result
 
 
-def _group_static_dims(values: np.ndarray, dims: List[int]) -> np.ndarray:
+def _group_static_dims(values: np.ndarray, dims: list[int]) -> np.ndarray:
   """Groups the outer-most dimension of `values` into the `dims` dimensions.
 
   For example, if `values` is of shape [12] and `dims` is [3], the result is of
@@ -140,7 +140,7 @@ def _group_static_dims(values: np.ndarray, dims: List[int]) -> np.ndarray:
 
 
 def _tfgnn_feature_to_array(
-    example: Dict[str, np.ndarray],
+    example: dict[str, np.ndarray],
     feature_key: str,
     feature_schema: schema_lib.FeatureSchema,
     num_items: int,
@@ -156,7 +156,7 @@ def _tfgnn_feature_to_array(
 
   shape = list(feature_schema.shape) if feature_schema.shape else []
   if feature_schema.is_static_shape():
-    static_shape = typing.cast(List[int], shape)
+    static_shape = typing.cast(list[int], shape)
     return values.reshape([num_items] + static_shape)
 
   _check_at_most_one_ragged_dim(feature_key, shape)
@@ -165,7 +165,7 @@ def _tfgnn_feature_to_array(
   # one. `pending_static_dims` contains the static dimensions that are not yet
   # applied on the accumulated `result`.
   result = values
-  pending_static_dims: List[int] = []
+  pending_static_dims: list[int] = []
   for dim_idx in range(len(shape), 0, -1):
     dim = shape[dim_idx - 1]
     if dim is None:
@@ -189,10 +189,10 @@ def _tfgnn_feature_to_array(
 
 
 def graph_dict_to_graph(
-    example: Dict[str, np.ndarray],
+    example: dict[str, np.ndarray],
     schema: schema_lib.GraphSchema,
-    import_node_ids: Optional[str] = None,
-    import_edge_ids: Optional[str] = None,
+    import_node_ids: str | None = None,
+    import_edge_ids: str | None = None,
 ) -> in_memory_graph.InMemoryGraph:
   """Converts a TF GNN Graph Sample Dict to an InMemoryGraph.
 
@@ -298,7 +298,7 @@ def _feature_to_tfgnn_values(
     feature_value: np.ndarray,
     feature_schema: schema_lib.FeatureSchema,
     feature_key: str,
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
   """Converts a feature of an InMemoryGraph into TF GNN Graph Sample values.
 
   Args:
@@ -326,8 +326,8 @@ def _feature_to_tfgnn_values(
     )
 
   shape = list(feature_schema.shape or [])
-  flat_values: List[np.ndarray] = []
-  row_lengths: Dict[int, List[int]] = {}
+  flat_values: list[np.ndarray] = []
+  row_lengths: dict[int, list[int]] = {}
 
   def collect(rows: Any, dim_idx: int) -> None:
     """Collects the row lengths and flat values of the `dim_idx`-th dim."""
@@ -370,7 +370,7 @@ def _feature_to_tfgnn_values(
 
 def graph_to_tfgnn_graph_dict(
     graph: in_memory_graph.InMemoryGraph, schema: schema_lib.GraphSchema
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
   """Converts an InMemoryGraph to a TF GNN Graph Sample Dict.
 
   The values are stored with the dtype used in a `tf.train.Example` proto (i.e.
@@ -431,8 +431,8 @@ def read_tfgnn_graphs_beam(
     container_type: (
         TFGraphSampleContainerType | str
     ) = TFGraphSampleContainerType.TF_RECORD,
-    import_node_ids: Optional[str] = None,
-    import_edge_ids: Optional[str] = None,
+    import_node_ids: str | None = None,
+    import_edge_ids: str | None = None,
 ) -> distributed_graph_lib.PKeyedInMemoryGraph:
   """Read a collection of TF GNN Graphs.
 
@@ -476,8 +476,8 @@ class ReadFromTFGraphSample(PTransform):
       path: str,
       schema: schema_lib.GraphSchema,
       container_type: TFGraphSampleContainerType | str,
-      import_node_ids: Optional[str],
-      import_edge_ids: Optional[str],
+      import_node_ids: str | None,
+      import_edge_ids: str | None,
   ):
     """Initializes the PTransform."""
     if isinstance(container_type, str):
@@ -744,8 +744,8 @@ schema_to_tfgnn_graph_parsing_spec = (
 def read_tfgnn_graphs(
     path: str | Sequence[str],
     schema: schema_lib.GraphSchema,
-    import_node_ids: Optional[str] = None,
-    import_edge_ids: Optional[str] = None,
+    import_node_ids: str | None = None,
+    import_edge_ids: str | None = None,
     container_type: (
         TFGraphSampleContainerType | str
     ) = TFGraphSampleContainerType.TF_RECORD,
@@ -878,7 +878,7 @@ def graphs_to_serialized_tfgnn_graphs(
     schema: schema_lib.GraphSchema | None = None,
     *,
     num_threads: int = os.cpu_count() * 2,  # pyrefly: ignore[unsupported-operation]
-) -> List[bytes]:
+) -> list[bytes]:
   """Converts a sequence of InMemoryGraphs into serialized TF-GNN graph sample protos.
 
   This function is significantly faster than calling

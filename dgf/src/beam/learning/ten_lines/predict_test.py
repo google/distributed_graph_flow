@@ -14,7 +14,6 @@
 
 import functools
 import os
-from typing import Tuple
 from absl.testing import absltest
 from apache_beam.testing import test_pipeline
 from apache_beam.testing import util as beam_test_util
@@ -32,7 +31,7 @@ test_util.disable_diff_truncation()
 
 
 def _gen_graph_real_looking() -> (
-    Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]
+    tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]
 ):
   """Generate a toy dataset with real looking features, but without patterns."""
   schema = schema_lib.GraphSchema(

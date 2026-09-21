@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from dgf.src.data import schema as schema_lib
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
@@ -58,7 +58,7 @@ class _LazyTfDtypeToFeatureFormat:
 TF_DTYPE_TO_FEATURE_FORMAT = _LazyTfDtypeToFeatureFormat()
 
 # Mapping from NumPy dtypes to FeatureFormat.
-NP_DTYPE_TO_FEATURE_FORMAT: Dict[Any, schema_lib.FeatureFormat] = {
+NP_DTYPE_TO_FEATURE_FORMAT: dict[Any, schema_lib.FeatureFormat] = {
     np.int64: schema_lib.FeatureFormat.INTEGER_64,
     np.int32: schema_lib.FeatureFormat.INTEGER_32,
     np.float32: schema_lib.FeatureFormat.FLOAT_32,
@@ -69,7 +69,7 @@ NP_DTYPE_TO_FEATURE_FORMAT: Dict[Any, schema_lib.FeatureFormat] = {
 }
 
 # Mapping from FeatureFormat to NumPy dtypes.
-FEATURE_FORMAT_TO_NP_DTYPE: Dict[schema_lib.FeatureFormat, Any] = {
+FEATURE_FORMAT_TO_NP_DTYPE: dict[schema_lib.FeatureFormat, Any] = {
     schema_lib.FeatureFormat.INTEGER_64: np.int64,
     schema_lib.FeatureFormat.INTEGER_32: np.int32,
     schema_lib.FeatureFormat.FLOAT_32: np.float32,
@@ -79,7 +79,7 @@ FEATURE_FORMAT_TO_NP_DTYPE: Dict[schema_lib.FeatureFormat, Any] = {
 }
 
 # Mapping from FeatureFormat to Avro types.
-FEATURE_FORMAT_TO_AVRO_DTYPE: Dict[schema_lib.FeatureFormat, str] = {
+FEATURE_FORMAT_TO_AVRO_DTYPE: dict[schema_lib.FeatureFormat, str] = {
     schema_lib.FeatureFormat.INTEGER_32: "int",
     schema_lib.FeatureFormat.INTEGER_64: "long",
     schema_lib.FeatureFormat.FLOAT_32: "float",
@@ -88,7 +88,7 @@ FEATURE_FORMAT_TO_AVRO_DTYPE: Dict[schema_lib.FeatureFormat, str] = {
     schema_lib.FeatureFormat.BOOL: "boolean",
 }
 
-FEATURE_FORMAT_TO_PYARROW_DATA_TYPE: Dict[
+FEATURE_FORMAT_TO_PYARROW_DATA_TYPE: dict[
     schema_lib.FeatureFormat, pa.DataType
 ] = {
     schema_lib.FeatureFormat.INTEGER_32: pa.int32(),
@@ -104,7 +104,7 @@ FEATURE_FORMAT_TO_PYARROW_DATA_TYPE: Dict[
 # `tf.train.Example` only supports three types of values: int64, float32 and
 # bytes. The conversion back to the schema format is done when converting a TF
 # GNN Graph Sample into a DGF object (e.g. `InMemoryGraph`, `TFInMemoryGraph`).
-FEATURE_FORMAT_TO_TFGNN_STORAGE_FORMAT: Dict[
+FEATURE_FORMAT_TO_TFGNN_STORAGE_FORMAT: dict[
     schema_lib.FeatureFormat, schema_lib.FeatureFormat
 ] = {
     schema_lib.FeatureFormat.INTEGER_32: schema_lib.FeatureFormat.INTEGER_64,
@@ -117,7 +117,7 @@ FEATURE_FORMAT_TO_TFGNN_STORAGE_FORMAT: Dict[
 
 # Mapping from a FeatureFormat to the NumPy dtype used to store its values in a
 # TF GNN Graph Sample.
-FEATURE_FORMAT_TO_TFGNN_NP_DTYPE: Dict[schema_lib.FeatureFormat, Any] = {
+FEATURE_FORMAT_TO_TFGNN_NP_DTYPE: dict[schema_lib.FeatureFormat, Any] = {
     key: FEATURE_FORMAT_TO_NP_DTYPE[value]
     for key, value in FEATURE_FORMAT_TO_TFGNN_STORAGE_FORMAT.items()
 }

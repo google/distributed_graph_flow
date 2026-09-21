@@ -16,7 +16,6 @@
 
 import dataclasses
 import textwrap
-from typing import Optional, Tuple
 from dgf.src.data import jax_in_memory_graph as jax_in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.learning.jax import common
@@ -94,7 +93,7 @@ class EncoderConfig(common.ArchitectureProvider):
       self,
       schema: schema_lib.GraphSchema,
       target_nodeset: str,
-      name: Optional[str] = None,
+      name: str | None = None,
   ) -> "Encoder":
     return Encoder(
         config=self, schema=schema, target_nodeset=target_nodeset, name=name
@@ -215,7 +214,7 @@ class CoreModel(nn.Module):
 
   def __call__(
       self, batch: Batch, training: bool
-  ) -> Tuple[jax.Array, jax.Array]:
+  ) -> tuple[jax.Array, jax.Array]:
     """Computes positive and negative logits for a training batch."""
 
     log.info("...Tracing model")

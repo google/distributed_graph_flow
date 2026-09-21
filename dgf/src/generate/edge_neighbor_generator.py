@@ -16,7 +16,6 @@
 
 import abc
 import dataclasses
-from typing import Optional, Union
 import dataclasses_json
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
@@ -26,6 +25,7 @@ import numpy as np
 
 # TODO(gbm): Implement a PPR negative sampler, with an option to cache the PPR
 # computation.
+
 
 class AbstractNegativeNeighborSampler(abc.ABC):
   """Abstract class for negative samplers for link-predictions."""
@@ -165,10 +165,9 @@ class RandomWalkEdgeNeighborGeneratorConfig:
   num_walks_per_negative: int = 10
 
 
-EdgeNeighborGeneratorConfig = Union[
-    RandomEdgeNeighborGeneratorConfig,
-    RandomWalkEdgeNeighborGeneratorConfig,
-]
+EdgeNeighborGeneratorConfig = (
+    RandomEdgeNeighborGeneratorConfig | RandomWalkEdgeNeighborGeneratorConfig
+)
 
 
 class EdgeNeighborGenerator:
@@ -195,7 +194,7 @@ class EdgeNeighborGenerator:
       target_edgeset: str,
       num_negative_neighbors: int,
       *,
-      sampler: Optional[in_memory_sampler_lib.Sampler] = None,
+      sampler: in_memory_sampler_lib.Sampler | None = None,
       config: EdgeNeighborGeneratorConfig = RandomEdgeNeighborGeneratorConfig(),
   ):
     if isinstance(config, RandomEdgeNeighborGeneratorConfig):

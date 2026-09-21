@@ -16,7 +16,7 @@
 
 import dataclasses
 import datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from dgf.src.analyse.topology import global_graph_topology as global_graph_topology_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -49,34 +49,32 @@ class GraphStatsPayload:
   """
 
   dataset_name: str
-  task_type: Optional[str] = None
-  feature_dimensionality: Optional[int] = None
-  num_classes: Optional[int] = None
-  feature_stats: Optional[statistics_lib.GraphFeatureStatistics] = None
+  task_type: str | None = None
+  feature_dimensionality: int | None = None
+  num_classes: int | None = None
+  feature_stats: statistics_lib.GraphFeatureStatistics | None = None
 
-  global_graph_topology: Optional[
-      global_graph_topology_lib.GlobalGraphTopology
-  ] = None
+  global_graph_topology: (
+      global_graph_topology_lib.GlobalGraphTopology | None
+  ) = None
 
   # Visual Inspection
   # Optional list of NetworkX subgraphs or InMemoryGraphs to visualize
-  subgraphs: Optional[
-      List[Union[nx.Graph, in_memory_graph_lib.InMemoryGraph]]
-  ] = None
+  subgraphs: list[nx.Graph | in_memory_graph_lib.InMemoryGraph] | None = None
 
   # Graph Schema (contains edge definitions for heterogeneous graphs)
-  graph_schema: Optional[schema_lib.GraphSchema] = None
+  graph_schema: schema_lib.GraphSchema | None = None
 
   ## TODO(tewariy): Add support for heterogeneous graph attributes.
   # Attribute to use for node coloring in Homogeneous graphs
   # (e.g., "label", "class", "gender")
-  color_by_attribute: Optional[str] = None
+  color_by_attribute: str | None = None
 
   # Attribute to use for node labeling (default: "id")
-  node_label_attribute: Optional[str] = None
+  node_label_attribute: str | None = None
 
   # Derived data for PyVis visualization (list of dicts with 'pyvis_data', etc.)
-  visual_gallery_data: Optional[List[Dict[str, Any]]] = None
+  visual_gallery_data: list[dict[str, Any]] | None = None
 
   generated_at: datetime.datetime = dataclasses.field(
       default_factory=datetime.datetime.now

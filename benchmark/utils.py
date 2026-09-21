@@ -18,7 +18,6 @@ import abc
 import dataclasses
 import math
 import time
-from typing import List, Optional, Union
 
 _NAME_WIDTH = 50
 _TIME_WIDTH = 15
@@ -128,7 +127,7 @@ class BenchmarkResult:
   """Results of a benchark."""
 
   name: str
-  num_units: Optional[int]
+  num_units: int | None
   details: str
   wall_time_seconds: float
   cpu_time_seconds: float
@@ -171,7 +170,7 @@ class Benchmarker:
   """
 
   def __init__(self):
-    self._results: List[Union[BenchmarkResult, None]] = []
+    self._results: list[BenchmarkResult | None] = []
 
   def run(
       self,

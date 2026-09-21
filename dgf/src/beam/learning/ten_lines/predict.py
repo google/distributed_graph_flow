@@ -15,8 +15,8 @@
 """Code to compute predictions of a model trained with the 10-lines API."""
 
 from __future__ import annotations
+from collections.abc import Iterator, Sequence
 import logging
-from typing import Iterator, Optional, Sequence, Tuple
 from typing import TYPE_CHECKING
 from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import distributed_graph
@@ -33,7 +33,7 @@ import numpy as np
 # example, for a node classification model, Prediction will be the probabilities
 # of each label classes available with "model.label_classes()".
 Prediction = np.ndarray
-KeyedPrediction = Tuple[distributed_graph.NodeId, Prediction]
+KeyedPrediction = tuple[distributed_graph.NodeId, Prediction]
 PKeyedPrediction = beam.PCollection[KeyedPrediction]
 
 
@@ -107,7 +107,7 @@ def predict_node_prediction_on_graph_path(
     pbegin: beam.Pipeline,
     model_path: str,
     graph_path: str,
-    seed_node_ids: Optional[beam.PCollection[distributed_graph.NodeId]] = None,
+    seed_node_ids: beam.PCollection[distributed_graph.NodeId] | None = None,
     beam_feature_collection: bool = False,
 ) -> PKeyedPrediction:
   """Computes the predictions of a model on a graph stored on disk.

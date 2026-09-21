@@ -14,7 +14,6 @@
 
 """Common layers implemented in jax/flax that are agnostic to GNN backend."""
 
-from typing import Optional
 from absl import logging
 import chex
 from dgf.src.learning.jax import common
@@ -60,9 +59,9 @@ class MLP(nn.Module):
 
   num_layers: int
   hidden_dim: int
-  output_dim: Optional[int] = None
+  output_dim: int | None = None
   activation: str = "tanh"
-  norm_type: Optional[str] = "layer"
+  norm_type: str | None = "layer"
   use_bias: bool = False
   dropout_rate: float = common.DEFAULT_DROPOUT_RATE
   matrix_dtype: jnp.dtype = common.DEFAULT_MATRIX_PRECISION

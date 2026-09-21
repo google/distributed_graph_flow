@@ -27,11 +27,12 @@ handling common tasks such as:
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 import dataclasses
 import math
 import os
 import time
-from typing import Any, Callable, Dict, Iterator, List, Optional, Protocol, TYPE_CHECKING, Tuple
+from typing import Any, Protocol, TYPE_CHECKING
 
 if TYPE_CHECKING:
   from clu import metric_writers
@@ -74,7 +75,7 @@ class TrainStep(Protocol):
       opt_state: optax.OptState,
       batch: Any,
       rng_key: Any,
-  ) -> Tuple[optax.Params, optax.OptState, Dict[str, Any]]:
+  ) -> tuple[optax.Params, optax.OptState, dict[str, Any]]:
     """The call function for a generic training step.
 
     Args:
@@ -98,7 +99,7 @@ class ValidStep(Protocol):
       params: optax.Params,
       opt_state: optax.OptState,
       batch: Any,
-  ) -> Dict[str, Any]:
+  ) -> dict[str, Any]:
     """The call function for a generic validation step.
 
     Args:
@@ -138,7 +139,7 @@ class MetricAccumulator:
     self.acc = {}
     self.count = 0
 
-  def add(self, values: Dict[str, jax.Array]):
+  def add(self, values: dict[str, jax.Array]):
     """Add a dictionary of jax metric values to the accumulator."""
     if self.count == 0:
       self.acc = values
@@ -147,7 +148,7 @@ class MetricAccumulator:
         self.acc[k] = self.acc[k] + v
     self.count += 1
 
-  def get_and_reset(self) -> Dict[str, float]:
+  def get_and_reset(self) -> dict[str, float]:
     """Returns accumulated metrics as Python floats and resets."""
     if self.count == 0:
       return {}
@@ -157,7 +158,7 @@ class MetricAccumulator:
 
 
 def _append_to_display_dict(
-    metrics: Dict[str, float], prefix: str, output: Dict[str, str]
+    metrics: dict[str, float], prefix: str, output: dict[str, str]
 ):
   """Formats float metrics and appends them to a string dictionary."""
   for k, v in metrics.items():
@@ -181,8 +182,8 @@ class TrainResult:
 
   model_params: optax.Params
   opt_state: optax.OptState
-  train_logs: List[LogItem]
-  valid_logs: List[LogItem]
+  train_logs: list[LogItem]
+  valid_logs: list[LogItem]
   num_train_step: int
 
 
@@ -202,7 +203,7 @@ class CheckpointState:
   opt_state: optax.OptState
   rng_key: Any
   step: int = 0
-  es_state: Optional[Dict[str, Any]] = None
+  es_state: dict[str, Any] | None = None
 
 
 def _save_checkpoint(
@@ -223,7 +224,7 @@ def _save_checkpoint(
 def _restore_checkpoint(
     checkpoint_manager: ocp.CheckpointManager,
     target: CheckpointState,
-) -> Optional[CheckpointState]:
+) -> CheckpointState | None:
   """Restores model parameters, optimizer state, PRNG key, and monitor state."""
   log.info(f"Checking for existing checkpoints {checkpoint_manager.directory}")
   latest_step: int | None = checkpoint_manager.latest_step()
@@ -278,27 +279,27 @@ def train(
     num_train_steps: int,
     rng_key: Any,
     *,
-    model_params: Optional[optax.Params] = None,
-    opt_state: Optional[optax.OptState] = None,
-    dummy_data: Optional[jt.PyTree[jt.ArrayLike]] = None,
-    dummy_data_fn: Optional[DummyDataFn] = None,
-    working_path: Optional[str] = None,
-    metric_writer: Optional[metric_writers.MetricWriter] = None,
-    checkpoint_manager: Optional[ocp.CheckpointManager] = None,
+    model_params: optax.Params | None = None,
+    opt_state: optax.OptState | None = None,
+    dummy_data: jt.PyTree[jt.ArrayLike] | None = None,
+    dummy_data_fn: DummyDataFn | None = None,
+    working_path: str | None = None,
+    metric_writer: metric_writers.MetricWriter | None = None,
+    checkpoint_manager: ocp.CheckpointManager | None = None,
     train_log_every_n_steps: int = 100,
-    checkpoint_every_n_steps: Optional[int] = 1000,
+    checkpoint_every_n_steps: int | None = 1000,
     disable_progress_bar: bool = False,
     display_model_structure: bool = False,
     valid_every_n_steps: int = 1000,
-    valid_step: Optional[ValidStep] = None,
-    valid_dataset_iterator_fn: Optional[Callable[[], Iterator[Any]]] = None,
+    valid_step: ValidStep | None = None,
+    valid_dataset_iterator_fn: Callable[[], Iterator[Any]] | None = None,
     print_logs: bool = False,
     print_initial_model_params: bool = False,
-    max_training_time_seconds: Optional[int] = None,
+    max_training_time_seconds: int | None = None,
     export_metrics_to_xm: bool = False,
-    early_stopping: Optional[
-        early_stopping_monitor.EarlyStoppingMonitorConfig
-    ] = None,
+    early_stopping: (
+        early_stopping_monitor.EarlyStoppingMonitorConfig | None
+    ) = None,
     early_stopping_keep_best_param: bool = True,
 ) -> TrainResult:
   """Trains a Flax module with a flexible and feature-rich training loop.

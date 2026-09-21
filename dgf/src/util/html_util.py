@@ -14,10 +14,8 @@
 
 """Utilities for HTML report generation."""
 
-from typing import Optional
 
-
-def get_table_style(component_id: Optional[str] = None) -> str:
+def get_table_style(component_id: str | None = None) -> str:
   """CSS style string for a DGF table.
 
   Args:

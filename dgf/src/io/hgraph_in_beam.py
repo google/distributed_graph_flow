@@ -16,9 +16,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 import logging
 import os
-from typing import Iterator, Optional, Tuple
 from typing import TYPE_CHECKING
 
 from dgf.src.data import distributed_graph
@@ -42,9 +42,9 @@ def read_graphai_hgraph(
     container_type: (
         hgraph_in_memory.HGraphContainerType | str
     ) = hgraph_in_memory.HGraphContainerType.TF_RECORD,
-    node_id_column: Optional[str] = None,
-    edge_id_column: Optional[str] = None,
-    override_schema: Optional[schema_lib.GraphSchema] = None,
+    node_id_column: str | None = None,
+    edge_id_column: str | None = None,
+    override_schema: schema_lib.GraphSchema | None = None,
     remove_dangling_edges: bool = False,
 ) -> distributed_graph.Graph:
   """Reads a distributed HGraph using Beam.
@@ -85,9 +85,9 @@ class ReadFromHGraph(PTransform):
       self,
       path: str,
       container_type: hgraph_in_memory.HGraphContainerType | str,
-      node_id_column: Optional[str],
-      edge_id_column: Optional[str],
-      override_schema: Optional[schema_lib.GraphSchema],
+      node_id_column: str | None,
+      edge_id_column: str | None,
+      override_schema: schema_lib.GraphSchema | None,
       remove_dangling_edges: bool = False,
   ):
     """Initializes the ReadFromHGraph PTransform."""
@@ -252,7 +252,7 @@ class ReadNodeSet(PTransform):
       file_pattern: str,
       container_type: hgraph_in_memory.HGraphContainerType,
       schema: schema_lib.NodeSchema,
-      node_id_column: Optional[str],
+      node_id_column: str | None,
   ):
     self.file_pattern = file_pattern
     self.container_type = container_type
@@ -296,7 +296,7 @@ class ReadEdgeSet(PTransform):
       self,
       file_pattern: str,
       container_type: hgraph_in_memory.HGraphContainerType,
-      edge_id_column: Optional[str],
+      edge_id_column: str | None,
       schema: schema_lib.EdgeSchema,
   ):
     self.file_pattern = file_pattern
@@ -351,8 +351,8 @@ def write_graphai_hgraph(
     container_type: (
         hgraph_in_memory.HGraphContainerType | str
     ) = hgraph_in_memory.HGraphContainerType.TF_RECORD,
-    node_id_column: Optional[str] = None,
-    edge_id_column: Optional[str] = None,
+    node_id_column: str | None = None,
+    edge_id_column: str | None = None,
 ):
   """Writes a distributed HGraph using Beam.
 

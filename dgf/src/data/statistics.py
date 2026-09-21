@@ -16,7 +16,6 @@
 
 import dataclasses
 import math
-from typing import Dict, List, Optional
 import dataclasses_json
 from dgf.src.analyse import reservoir_sampling
 from dgf.src.data import histogram
@@ -31,11 +30,11 @@ class DictionaryItem:
 
 # Dictionary of key->(index, count). Non-utf8 characters are encoded using the
 # 'surrogateescape' method.
-Dictionary = Dict[str, DictionaryItem]
+Dictionary = dict[str, DictionaryItem]
 
 # Dictionary of key->count. Non-utf8 characters are encoded using the
 # 'surrogateescape' method.
-AccumulatorDictionary = Dict[str, int]
+AccumulatorDictionary = dict[str, int]
 
 
 @dataclasses.dataclass
@@ -56,7 +55,7 @@ class FeatureStatistics:
   minimum: float = math.nan
   maximum: float = math.nan
   dictionary: Dictionary = dataclasses.field(default_factory=dict)
-  quantiles: List[float] = dataclasses.field(default_factory=list)
+  quantiles: list[float] = dataclasses.field(default_factory=list)
 
   def __str__(self) -> str:
     s = f"count={self.count}"
@@ -90,7 +89,7 @@ class FeatureStatistics:
 class FeatureSetStatistics:
   """Statistics for a set of features."""
 
-  features: Dict[str, FeatureStatistics]
+  features: dict[str, FeatureStatistics]
 
   def to_string(self, prefix: str) -> str:
     s = ""
@@ -104,7 +103,7 @@ class FeatureSetStatistics:
 class GraphFeatureStatistics:
   """Statistics about the features in a graph."""
 
-  node_sets: Dict[str, FeatureSetStatistics]
+  node_sets: dict[str, FeatureSetStatistics]
 
   def __str__(self) -> str:
     return self.__repr__()
@@ -138,15 +137,15 @@ class FeatureStatisticsAccumulator:
   count: int
   minimum: float
   maximum: float
-  dictionary: Optional[Dict[str, int]]
-  quantiles: Optional[reservoir_sampling.BatchReservoirSampling]
+  dictionary: dict[str, int] | None
+  quantiles: reservoir_sampling.BatchReservoirSampling | None
 
 
 @dataclasses.dataclass
 class FeatureSetStatisticsAccumulator:
   """In-computation statistics for a set of features."""
 
-  features: Dict[str, FeatureStatisticsAccumulator]
+  features: dict[str, FeatureStatisticsAccumulator]
 
 
 @dataclasses.dataclass
@@ -184,8 +183,8 @@ class EdgeSetTopologyStatistics:
 class GraphTopologyStatistics:
   """Statistics about the topology of a graph."""
 
-  node_sets: Dict[str, NodeSetTopologyStatistics]
-  edge_sets: Dict[str, EdgeSetTopologyStatistics]
+  node_sets: dict[str, NodeSetTopologyStatistics]
+  edge_sets: dict[str, EdgeSetTopologyStatistics]
   num_graphs: int = 1
 
   def __str__(self) -> str:

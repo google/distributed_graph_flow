@@ -16,8 +16,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 import json
-from typing import Any, Dict, Iterator, List, NamedTuple, Tuple
+from typing import Any, NamedTuple
 
 from dgf.src.data import distributed_graph as distributed_graph_lib
 from dgf.src.io.gcp import common as gcp_common_lib
@@ -50,7 +51,7 @@ def _generate_read_partitions(
     instance: str,
     database: str,
     query: str,
-) -> Tuple[Iterator[dict[str, Any]] | None, bool]:
+) -> tuple[Iterator[dict[str, Any]] | None, bool]:
   """Returns a list of Spanner graph read partitions."""
   spanner_client = gcp_spanner.Client(project=project)
   database = spanner_client.instance(instance).database(database)

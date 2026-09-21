@@ -15,11 +15,12 @@
 """Semi-distributed sampler where data is loaded with in-mem IO instead of beam."""
 
 from __future__ import annotations
+from collections.abc import Iterable, Iterator, Sequence
 import logging
 import os
 import threading
 import time
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import Any
 from typing import TYPE_CHECKING
 from dgf.src.data import distributed_graph
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -50,13 +51,13 @@ KEY_ID = "#id"
 
 def sample_with_beam_semi_distributed_sampler_v2(
     graph_path: str,
-    plan: Union[config_lib.SimpleSamplingConfig, config_lib.SamplingPlan],
+    plan: config_lib.SimpleSamplingConfig | config_lib.SamplingPlan,
     seeds: beam.PCollection[NodeId],
     debug_sampling: bool = False,
     num_threads: int = 20,
     beam_feature_collection: bool = False,
     beam_namespace: str = "",
-) -> Tuple[distributed_graph.PKeyedInMemoryGraph, schema_lib.GraphSchema]:
+) -> tuple[distributed_graph.PKeyedInMemoryGraph, schema_lib.GraphSchema]:
   """Samples subgraphs from a distributed graph using a semi-distributed algo.
 
   This beam sampler generates samples by running the in-process sampler multiple
@@ -184,7 +185,7 @@ class RawSamplerV2(DoFn):
       self,
       graph_path: str,
       schema: schema_lib.GraphSchema,
-      plan: Union[config_lib.SimpleSamplingConfig, config_lib.SamplingPlan],
+      plan: config_lib.SimpleSamplingConfig | config_lib.SamplingPlan,
       num_threads: int,
       debug_sampling: bool,
       beam_feature_collection: bool,
@@ -271,7 +272,7 @@ class RawSamplerV2(DoFn):
 def add_features_to_graph_samples(
     raw_samples: distributed_graph.PKeyedInMemoryGraph,
     feature_graph: distributed_graph.Graph,
-    probe_stages: Optional[Dict[str, Any]] = None,
+    probe_stages: dict[str, Any] | None = None,
     beam_namespace: str = "",
 ) -> distributed_graph.PKeyedInMemoryGraph:
   """Adds feature values from "feature_graph" to "raw_samples".
@@ -418,22 +419,20 @@ class Stage3ExpandRawSamples(DoFn):
 
 def Stage4IndexFeatureGraphNodes(
     element: distributed_graph.Node,
-) -> Tuple[NodeId, distributed_graph.Features]:
+) -> tuple[NodeId, distributed_graph.Features]:
   return element.id, element.features or {}
 
 
 def Stage6IndexBySampleId(
-    element: Tuple[
+    element: tuple[
         NodeId,
-        Dict[
+        dict[
             str,  # Note: Beam would not support: Literal["s", "f"],
-            Union[
-                Iterable[Tuple[SampleId, NodeIdx]],
-                Iterable[distributed_graph.Features],
-            ],
+            Iterable[tuple[SampleId, NodeIdx]]
+            | Iterable[distributed_graph.Features],
         ],
     ],
-) -> Iterator[Tuple[SampleId, Tuple[NodeIdx, distributed_graph.Features]]]:
+) -> Iterator[tuple[SampleId, tuple[NodeIdx, distributed_graph.Features]]]:
   _, d = element
 
   # Get the node feature values.
@@ -450,20 +449,18 @@ def Stage6IndexBySampleId(
 
 def Stage8IndexSample(
     raw_sample: distributed_graph.KeyedInMemoryGraph,
-) -> Tuple[SampleId, in_memory_graph_lib.InMemoryGraph]:
+) -> tuple[SampleId, in_memory_graph_lib.InMemoryGraph]:
   assert raw_sample.key is not None
   return raw_sample.key, raw_sample.graph
 
 
 def Stage8AddFeatureValueToSample(
-    element: Tuple[
+    element: tuple[
         SampleId,
-        Dict[
+        dict[
             str,  # Nodeset name or special SAMPLE_KEY value
-            Union[
-                Iterable[Tuple[NodeIdx, distributed_graph.Features]],
-                Iterable[in_memory_graph_lib.InMemoryGraph],
-            ],
+            Iterable[tuple[NodeIdx, distributed_graph.Features]]
+            | Iterable[in_memory_graph_lib.InMemoryGraph],
         ],
     ],
     schema: schema_lib.GraphSchema,
@@ -508,7 +505,7 @@ def Stage8AddFeatureValueToSample(
 
 
 def safe_stack(
-    values: List[np.ndarray], schema: schema_lib.FeatureSchema
+    values: list[np.ndarray], schema: schema_lib.FeatureSchema
 ) -> np.ndarray:
   """Stacks feature value arrays, handling static and variable shapes."""
   try:

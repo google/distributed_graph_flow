@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Iterator
 import math
-from typing import Dict, Iterator, Optional
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import padding as padding_lib
 from dgf.src.data import schema as schema_lib
@@ -23,8 +23,8 @@ from dgf.src.data import schema as schema_lib
 
 def _feature_padding_from_schema(
     features_schema: schema_lib.FeatureSetSchema,
-    max_timeseries_len: Optional[int] = None,
-) -> Dict[str, padding_lib.FeaturePadding]:
+    max_timeseries_len: int | None = None,
+) -> dict[str, padding_lib.FeaturePadding]:
   """Creates feature padding for timeseries features from a feature schema."""
   features = {}
   if max_timeseries_len is not None:
@@ -41,7 +41,7 @@ def padding_from_graph_generator(
     graphs: Iterator[in_memory_graph_lib.InMemoryGraph],
     relative_margin: float = 0.1,
     absolute_margin: int = 1,
-    max_timeseries_len: Optional[int] = None,
+    max_timeseries_len: int | None = None,
 ) -> padding_lib.Padding:
   """Creates a padding configuration from a set of in-memory graphs.
 
@@ -133,7 +133,7 @@ def print_padding(
     padding: padding_lib.Padding,
     return_output: bool = False,
     header: bool = True,
-) -> Optional[str]:
+) -> str | None:
   """Generates a human-readable string representation of a graph padding.
 
   Args:

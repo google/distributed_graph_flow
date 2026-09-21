@@ -14,7 +14,6 @@
 
 """Import / export data to sparse deferred."""
 
-from typing import Dict, Optional
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import jax_in_memory_graph as jax_in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
@@ -24,11 +23,11 @@ import sparse_deferred as sd
 from sparse_deferred.structs import graph_struct as sd_struct_lib
 
 
-def _features_to_numpy(src: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+def _features_to_numpy(src: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
   return {k: np.asarray(v, copy=False) for k, v in src.items()}
 
 
-def _features_to_jax(src: Dict[str, np.ndarray]) -> Dict[str, jnp.ndarray]:
+def _features_to_jax(src: dict[str, np.ndarray]) -> dict[str, jnp.ndarray]:
   return {k: jnp.asarray(v, copy=False) for k, v in src.items()}
 
 
@@ -108,7 +107,7 @@ def sparse_deferred_struct_to_jax_graph(
 
 def graph_to_sparse_deferred_struct(
     in_memory_graph: in_memory_graph_lib.InMemoryGraph,
-    schema: Optional[schema_lib.GraphSchema] = None,
+    schema: schema_lib.GraphSchema | None = None,
 ) -> sd_struct_lib.GraphStruct:
   """Converts an in-memory graph into a Sparse Deferred struct.
 
@@ -150,7 +149,7 @@ def graph_to_sparse_deferred_struct(
 
 def jax_graph_to_sparse_deferred_struct(
     in_memory_graph: jax_in_memory_graph_lib.JaxInMemoryGraph,
-    schema: Optional[schema_lib.GraphSchema] = None,
+    schema: schema_lib.GraphSchema | None = None,
 ) -> sd_struct_lib.GraphStruct:
   """Converts a Jax in memory graph into a Sparse Deferred struct.
 

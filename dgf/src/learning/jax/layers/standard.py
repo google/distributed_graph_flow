@@ -16,7 +16,6 @@
 
 import dataclasses
 import re
-from typing import Optional
 import dataclasses_json
 from dgf.src.learning.jax import common
 from dgf.src.learning.jax.layers.registry import registry as layer_registry  # pylint: disable=g-importing-member
@@ -27,9 +26,9 @@ import jaxtyping as jt
 
 def norm(
     x: jnp.ndarray,
-    norm_name: Optional[str],
+    norm_name: str | None,
     training: bool,
-    name: Optional[str] = None,
+    name: str | None = None,
 ) -> jnp.ndarray:
   """Applies a normalization layer to the input."""
   if norm_name is None:
@@ -47,7 +46,7 @@ def norm(
 
 
 def modern_residual_mlp(
-    dims: int, dropout_rate: Optional[float] = 0.1, expansion_ratio: int = 4
+    dims: int, dropout_rate: float | None = 0.1, expansion_ratio: int = 4
 ) -> "GenericBlockConfig":
   """Preconfigured GenericBlockConfig for a modern residual MLP.
 
@@ -68,7 +67,7 @@ def ingest_feature(dims: int, norm: str = "layer_norm") -> "GenericBlockConfig":
 
 
 def sequential_mlp(
-    dims: int, num_layers: int = 2, dropout_rate: Optional[float] = None
+    dims: int, num_layers: int = 2, dropout_rate: float | None = None
 ) -> "GenericBlockConfig":
   """Preconfigured GenericBlockConfig for a sequential MLP.
 
@@ -154,9 +153,9 @@ class GenericBlockConfig(common.ArchitectureProvider):
 
   config: str
   dims: int
-  norm: Optional[str] = "rms_norm"
-  activation: Optional[str] = "silu"
-  dropout_rate: Optional[float] = None
+  norm: str | None = "rms_norm"
+  activation: str | None = "silu"
+  dropout_rate: float | None = None
 
   def __post_init__(self):
     # Validate dims
@@ -187,7 +186,7 @@ class GenericBlockConfig(common.ArchitectureProvider):
           " None or <= 0.0."
       )
 
-  def make(self, name: Optional[str] = None) -> "GenericBlock":
+  def make(self, name: str | None = None) -> "GenericBlock":
     return GenericBlock(config=self, name=name)
 
   def architecture(self) -> str:

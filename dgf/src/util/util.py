@@ -14,10 +14,10 @@
 
 """Utility functions for the DGF project."""
 
+from collections.abc import Iterator
 import contextlib
 import math
 import time
-from typing import Iterator, Optional, Tuple, Union
 from dgf.src.util import log
 import numpy as np
 
@@ -66,7 +66,7 @@ def print_timer(message: str, enabled: bool):
 
 
 def num_batches(
-    items: Union[int, np.ndarray], *, batch_size: int, drop_remainder: bool
+    items: int | np.ndarray, *, batch_size: int, drop_remainder: bool
 ):
   """Returns the number of batches returned by "batch_indices_generator"."""
   if isinstance(items, int):
@@ -89,7 +89,7 @@ def num_batches(
 
 
 def batch_indices_generator(
-    items: Union[int, np.ndarray],
+    items: int | np.ndarray,
     *,
     batch_size: int,
     drop_remainder: bool,
@@ -193,7 +193,7 @@ def split_train_valid(
     validation_ratio: float,
     random_seed: int,
     batch_size: int = 1,
-    max_num_valid_examples: Optional[int] = None,
+    max_num_valid_examples: int | None = None,
 ):
   """Splits indices into training and validation sets.
 
@@ -251,8 +251,8 @@ def split_train_valid_temporal(
     creation_times: np.ndarray,
     validation_ratio: float,
     batch_size: int = 1,
-    max_num_valid_examples: Optional[int] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+    max_num_valid_examples: int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
   """Splits indices into training (past) and validation (future) sets chronologically.
 
   The entities are sorted by `creation_times` in ascending order. The earlier

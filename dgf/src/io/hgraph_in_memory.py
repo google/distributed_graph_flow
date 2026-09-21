@@ -16,11 +16,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import enum
 import logging
 import os
 import time
-from typing import Callable, Dict, Optional, TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING
 
 from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -129,7 +130,6 @@ def schema_to_tfgnn_schema(
     A TF-GNN schema proto.
   """
 
-
   def convert_feature_schema(feature: schema_lib.FeatureSchema):
     feature_type = feature_format_lib.FEATURE_FORMAT_TO_TF_DTYPE[
         feature.format
@@ -186,15 +186,15 @@ def read_graphai_hgraph(
     path: str,
     container_type: HGraphContainerType | str = HGraphContainerType.TF_RECORD,
     verbose: bool = True,
-    node_id_column: Optional[str] = None,
-    edge_id_column: Optional[str] = None,
-    schema_transformer: Optional[
-        Callable[[schema_lib.GraphSchema], schema_lib.GraphSchema]
-    ] = None,
-    override_schema: Optional[schema_lib.GraphSchema] = None,
+    node_id_column: str | None = None,
+    edge_id_column: str | None = None,
+    schema_transformer: (
+        Callable[[schema_lib.GraphSchema], schema_lib.GraphSchema] | None
+    ) = None,
+    override_schema: schema_lib.GraphSchema | None = None,
     research_node_format: bool = False,
     remove_dangling_edges: bool = False,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Reads an on-disk HGraph into an in-memory representation.
 
   This function is suitable for datasets that can fully fit in memory. Loading
@@ -282,8 +282,8 @@ def read_graphai_hgraph(
     )
 
   # Final container of nodesets / edgesets.
-  node_sets: Dict[str, in_memory_graph_lib.InMemoryNodeSet] = {}
-  edge_sets: Dict[str, in_memory_graph_lib.InMemoryEdgeSet] = {}
+  node_sets: dict[str, in_memory_graph_lib.InMemoryNodeSet] = {}
+  edge_sets: dict[str, in_memory_graph_lib.InMemoryEdgeSet] = {}
 
   # Maps each node set name to a vectorized function that converts raw byte
   # IDs to integer indices.
@@ -322,10 +322,10 @@ def read_graphai_hgraph(
   def _read_container(
       paths: list[str],
       container_type: HGraphContainerType,
-      columns: Dict[str, Tuple[tf.DType | str, Tuple[Optional[int], ...]]],
+      columns: dict[str, tuple[tf.DType | str, tuple[int | None, ...]]],
       verbose: bool,
-      key_column: Optional[str] = None,
-  ) -> Tuple[Dict[str, np.ndarray], int]:
+      key_column: str | None = None,
+  ) -> tuple[dict[str, np.ndarray], int]:
     """Reads features given a container type."""
     if container_type == HGraphContainerType.TF_RECORD:
       features, num_records = tfexample_lib.read_tfrecord(
@@ -402,7 +402,7 @@ def read_graphai_hgraph(
       # A slow version of "ByteIdToIdxMapper" for integer values.
       mapping = {id.item(): idx for idx, id in enumerate(node_raw_ids)}
 
-      def mapper(ids: np.ndarray) -> Tuple[np.ndarray, int]:
+      def mapper(ids: np.ndarray) -> tuple[np.ndarray, int]:
         idxs = np.empty(shape=[ids.shape[0]], dtype=np.int64)
         missmatch = -1
         for i, id_value in enumerate(ids):
@@ -740,8 +740,8 @@ def write_graphai_hgraph(
     schema: schema_lib.GraphSchema,
     path: str,
     container_type: HGraphContainerType | str = HGraphContainerType.TF_RECORD,
-    node_id_column: Optional[str] = None,
-    edge_id_column: Optional[str] = None,
+    node_id_column: str | None = None,
+    edge_id_column: str | None = None,
     verbose: bool = True,
 ):
   """Writes an in-memory heterogeneous graph to an HGraph directory.

@@ -14,12 +14,11 @@
 
 """Generates a human-readable string representation of the graph schema."""
 
-from typing import List, Optional
 from dgf.src.data import schema as schema_lib
 import tabulate
 
 
-def _format_feature_table(features: schema_lib.FeatureSetSchema) -> List[str]:
+def _format_feature_table(features: schema_lib.FeatureSetSchema) -> list[str]:
   """Generates an ASCII table for a set of features using tabulate."""
   if not features:
     return ["    (No features)"]
@@ -54,7 +53,7 @@ def print_schema(
     schema: schema_lib.GraphSchema,
     return_output: bool = False,
     header: bool = True,
-) -> Optional[str]:
+) -> str | None:
   """Generates a human-readable string representation of a graph schema.
 
   Usage example:

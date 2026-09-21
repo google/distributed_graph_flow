@@ -15,7 +15,6 @@
 """A simple classification head for a GNN."""
 
 import dataclasses
-from typing import Optional
 import dataclasses_json
 from dgf.src.learning.jax import common
 from dgf.src.learning.jax.layers.registry import registry as layer_registry
@@ -54,7 +53,7 @@ class ClassificationHeadConfig(common.ArchitectureProvider):
 
   num_classes: int
 
-  def make(self, name: Optional[str] = None) -> "ClassificationHead":
+  def make(self, name: str | None = None) -> "ClassificationHead":
     return ClassificationHead(config=self, name=name)
 
   def architecture(self) -> str:

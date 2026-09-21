@@ -14,10 +14,9 @@
 
 """Evaluation utilities for ten_lines model."""
 
-from typing import Any, Dict, List, Union
+from typing import Any
 from dgf.src.data import evaluation as evaluation_data_lib
 from dgf.src.learning.ten_lines import evaluation_ext
-
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -68,7 +67,7 @@ class ClassificationEvaluationAccumulator:
     """Adds predictions to the accumulator."""
     self._impl.add_predictions(predictions, targets)
 
-  def extract_metrics(self) -> List[PerClass]:
+  def extract_metrics(self) -> list[PerClass]:
     """Extracts metrics from the accumulator."""
     raw_metrics = self._impl.extract_metrics()
     per_classes = []
@@ -98,9 +97,9 @@ class ClassificationEvaluationAccumulator:
 
 
 def compute_ranking_metrics(
-    pos_scores: Union[jax.Array, np.ndarray],
-    neg_scores: Union[jax.Array, np.ndarray],
-) -> Dict[str, Union[jax.Array, np.ndarray]]:
+    pos_scores: jax.Array | np.ndarray,
+    neg_scores: jax.Array | np.ndarray,
+) -> dict[str, jax.Array | np.ndarray]:
   """Computes ranking metrics (MRR, Hit@1, Hit@5, AUC) from scores.
 
   Scores can be probabilities or logits.

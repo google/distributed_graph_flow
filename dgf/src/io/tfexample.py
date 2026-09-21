@@ -16,15 +16,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import datetime
-from typing import Callable, Dict, List, Optional, Tuple
 
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import numpy as np
 import tqdm
 
 def _sparse_to_numpy(
-    values: tf.SparseTensor, expected_shape: Tuple[int, ...], column: str
+    values: tf.SparseTensor, expected_shape: tuple[int, ...], column: str
 ) -> np.ndarray:
   if expected_shape and (-1 in expected_shape or None in expected_shape):
     ragged = tf.RaggedTensor.from_sparse(values)
@@ -60,12 +60,12 @@ def _sparse_to_numpy(
 
 def _read_dataset_generic(
     paths: list[str],
-    columns: Dict[str, Tuple[tf.DType, Tuple[int, ...]]],
+    columns: dict[str, tuple[tf.DType, tuple[int, ...]]],
     preserve_order: bool,
     dataset_creator: Callable[[str], tf.data.Dataset],
-    key_column: Optional[str] = None,
+    key_column: str | None = None,
     verbose: bool = False,
-) -> Tuple[Dict[str, np.ndarray], int]:
+) -> tuple[dict[str, np.ndarray], int]:
 
   time_begin = datetime.datetime.now()
   if verbose:
@@ -109,7 +109,7 @@ def _read_dataset_generic(
     )
   dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
-  data: Dict[str, List[np.ndarray]] = {column: [] for column in columns}
+  data: dict[str, list[np.ndarray]] = {column: [] for column in columns}
   num_examples = 0
   pbar = tqdm.tqdm(desc="Reading examples", unit="row") if verbose else None
 
@@ -158,7 +158,7 @@ def _read_dataset_generic(
         f" {datetime.datetime.now() - time_begin}",
     )
 
-  final_data: Dict[str, np.ndarray] = {}
+  final_data: dict[str, np.ndarray] = {}
   for key, (_, shape) in columns.items():
     try:
       value = np.concatenate(data[key], axis=0)
@@ -185,11 +185,11 @@ def _read_dataset_generic(
 
 def read_tfrecord(
     paths: list[str],
-    columns: Dict[str, Tuple[tf.DType, Tuple[int, ...]]],
+    columns: dict[str, tuple[tf.DType, tuple[int, ...]]],
     preserve_order: bool,
     compressed: bool = True,
     verbose: bool = False,
-) -> Tuple[Dict[str, np.ndarray], int]:
+) -> tuple[dict[str, np.ndarray], int]:
   """Reads a TensorFlow Records data and return a dict of numpy arrays.
 
   This implementation is optimized for speed by using tf.data and vectorized

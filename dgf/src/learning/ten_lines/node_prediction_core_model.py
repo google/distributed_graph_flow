@@ -16,7 +16,6 @@
 
 import dataclasses
 import textwrap
-from typing import Tuple
 from dgf.src.data import jax_in_memory_graph as jax_in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.learning.jax import common
@@ -33,7 +32,7 @@ import jax
 # A batch of data for the node prediction model.
 # It is composed of a graph and the indices of the seed nodes in the target
 # nodeset.
-Batch = Tuple[jax_in_memory_graph_lib.JaxInMemoryGraph, jax.Array]
+Batch = tuple[jax_in_memory_graph_lib.JaxInMemoryGraph, jax.Array]
 
 
 @dataclasses.dataclass(frozen=True, kw_only=True)

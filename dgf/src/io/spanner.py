@@ -19,7 +19,7 @@ from __future__ import annotations
 import enum
 import functools
 import re
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple, Type, TypeVar
+from typing import Any, NamedTuple, TypeVar
 from typing import TYPE_CHECKING
 
 from absl import logging
@@ -54,9 +54,9 @@ class Precision(enum.Enum):
 
 def feature_format_to_spanner_type(
     feature_format: schema_lib.FeatureFormat,
-    shape: Tuple[int, ...],
+    shape: tuple[int, ...],
     is_utf8_string: bool = False,
-    max_bytes_length: Optional[int] = None,
+    max_bytes_length: int | None = None,
     float_precision: Precision = Precision.SINGLE,
     int_precision: Precision = Precision.DOUBLE,
 ) -> str:
@@ -115,7 +115,7 @@ def feature_format_to_spanner_type(
 
 def feature_format_to_type_hint(
     feature_format: schema_lib.FeatureFormat,
-    shape: Tuple[int, ...],
+    shape: tuple[int, ...],
 ) -> type[Any]:
   """Converts a FeatureFormat to a type hint.
 
@@ -144,7 +144,7 @@ def feature_format_to_type_hint(
   if shape is None or shape == ():
     return base
   else:
-    return List[base]
+    return list[base]
 
 
 def sanitize_name(name, prefix):
@@ -157,7 +157,7 @@ def sanitize_name(name, prefix):
 
 def schema_to_spanner_ddl(
     schema: schema_lib.GraphSchema,
-    max_bytes_length: Optional[int] = None,
+    max_bytes_length: int | None = None,
     enforce_foreign_keys: bool = False,
 ):
   r"""Converts a GraphSchema to a string of CREATE statements for Spanner.
@@ -196,7 +196,7 @@ def schema_to_spanner_ddl(
   """
   max_bytes_length = max_bytes_length if max_bytes_length else "MAX"  # pyrefly: ignore[bad-assignment]
 
-  ddl_statements: Dict[str, str] = {}
+  ddl_statements: dict[str, str] = {}
 
   for node_set_name, node_set_schema in schema.node_sets.items():
     node_set_name = sanitize_name(node_set_name, _NAME_PREFIX_TABLE)
@@ -342,7 +342,7 @@ def create_spanner_tables_from_graph_schema(
     project_id: str,
     instance_id: str,
     database_id: str,
-    spanner_client: Optional[gcp_spanner.Client] = None,
+    spanner_client: gcp_spanner.Client | None = None,
     ddl_timeout_seconds: int = 30,
 ):
   """Creates Spanner tables for a graph schema.
@@ -376,7 +376,7 @@ def create_spanner_tables_from_graph_schema(
 
 
 # TODO(bmayer): Add support to make all features support either scalar or array.
-def features_to_dict(features: distributed_graph.Features) -> Dict[str, Any]:
+def features_to_dict(features: distributed_graph.Features) -> dict[str, Any]:
   """Converts a Features to a dictionary."""
   ret = {}
   for k, v in features.items():
@@ -388,7 +388,7 @@ def features_to_dict(features: distributed_graph.Features) -> Dict[str, Any]:
 
 
 def node_to_spanner_row(
-    node: distributed_graph.Node, cls: Type[T], id_key: str = _DEFAULT_ID_KEY
+    node: distributed_graph.Node, cls: type[T], id_key: str = _DEFAULT_ID_KEY
 ) -> T:
   """Converts a Node to a dictionary for SpannerSink.
 
@@ -411,7 +411,7 @@ def node_to_spanner_row(
 def write_node_set_to_spanner(
     nodes: distributed_graph.PNode,
     node_set_name: str,
-    node_row_type: Type[NamedTuple],
+    node_row_type: type[NamedTuple],
     project_id: str,
     instance_id: str,
     database_id: str,
@@ -460,7 +460,7 @@ def write_node_set_to_spanner(
 
 
 def edge_to_spanner_row(
-    edge: distributed_graph.Edge, cls: Type[T], id_key: str = _DEFAULT_ID_KEY
+    edge: distributed_graph.Edge, cls: type[T], id_key: str = _DEFAULT_ID_KEY
 ) -> T:
   """Converts an Edge to a dictionary for SpannerSink.
 
@@ -492,7 +492,7 @@ def edge_to_spanner_row(
 def write_edge_set_to_spanner(
     edges: distributed_graph.PEdge,
     edge_set_name: str,
-    edge_row_type: Type[NamedTuple],
+    edge_row_type: type[NamedTuple],
     project_id: str,
     instance_id: str,
     database_id: str,
@@ -593,7 +593,7 @@ def create_spanner_row_type_from_node_schema(
     node_schema: schema_lib.NodeSchema,
     id_column: str = _DEFAULT_ID_KEY,
     name_suffix: str = "NodeSet_SpannerRow",
-) -> Type[NamedTuple]:
+) -> type[NamedTuple]:
   """Creates a Spanner row type for a node schema.
 
   Uses the NamedTuple functional API to satisfy the Beam type hint requirement
@@ -671,7 +671,7 @@ def create_spanner_row_types_from_schema(
     node_set_name_suffix: str = "NodeSet_SpannerRow",
     edge_set_name_suffix: str = "EdgeSet_SpannerRow",
     register_row_coders: bool = True,
-) -> Dict[str, Type[NamedTuple]]:
+) -> dict[str, type[NamedTuple]]:
   """Creates a Spanner row type for a graph schema and maybe register coders.
 
   **NOTE** THIS MUST BE CALLED BEFORE THE DATAFLOW BEAM PIPELINE THAT USES
@@ -695,7 +695,7 @@ def create_spanner_row_types_from_schema(
     A dictionary mapping node and edge set names to the corresponding NamedTuple
     Spanner row types and optionally registers the row coders.
   """
-  row_types: Dict[str, Type[NamedTuple]] = {}
+  row_types: dict[str, type[NamedTuple]] = {}
   for node_set_name, node_schema in schema.node_sets.items():
     row_types[node_set_name] = create_spanner_row_type_from_node_schema(
         node_set_name, node_schema, name_suffix=node_set_name_suffix
@@ -716,14 +716,14 @@ def create_spanner_row_types_from_schema(
 # https://yaqs.corp.google.com/cloud/q/8465600717619462144 is resolved.
 def write_spanner(
     graph: distributed_graph.Graph,
-    spanner_row_types: Dict[str, Type[NamedTuple]],
+    spanner_row_types: dict[str, type[NamedTuple]],
     project_id: str,
     instance_id: str,
     database_id: str,
     create_tables: bool,
     ddl_timeout_seconds: int = 30,
     **kwargs,
-) -> Dict[str, beam.pvalue.PDone]:
+) -> dict[str, beam.pvalue.PDone]:
   """Writes a heterogeneous graph to Spanner.
 
   **NOTE** `create_spanner_row_types_from_schema` MUST BE CALLED ON THE DRIVER
@@ -760,7 +760,7 @@ def write_spanner(
         ddl_timeout_seconds=ddl_timeout_seconds,
     )
 
-  pdones: Dict[str, beam.pvalue.PDone] = {}
+  pdones: dict[str, beam.pvalue.PDone] = {}
   for node_set_name, node_set in graph.node_sets.items():
     pdones[node_set_name] = write_node_set_to_spanner(
         node_set,

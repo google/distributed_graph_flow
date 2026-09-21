@@ -15,7 +15,6 @@
 """Main entry point for generating Graph Flow EDA Reports."""
 
 import os
-from typing import Optional
 
 from absl import logging
 from dgf.src.analyse.reports import data_model
@@ -28,7 +27,7 @@ def generate_report(
     output_dir: str,
     output_html_name: str = "report.html",
     output_pdf_name: str = "report.pdf",
-    template_dir: Optional[str] = None,
+    template_dir: str | None = None,
 ) -> None:
   """Generates both HTML and PDF reports.
 

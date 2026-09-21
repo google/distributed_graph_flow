@@ -16,9 +16,7 @@
 
 from collections import defaultdict
 import dataclasses
-from typing import Dict, List, Optional
 import dataclasses_json
-
 
 dataclass_json = dataclasses_json.dataclass_json
 config = dataclasses_json.config
@@ -37,8 +35,8 @@ class PropertyDefinition:
 @dataclass_json(letter_case=LetterCase.CAMEL)
 @dataclass
 class NodeTableRef:
-  edge_table_columns: List[str]
-  node_table_columns: List[str]
+  edge_table_columns: list[str]
+  node_table_columns: list[str]
   node_table_name: str
 
 
@@ -49,19 +47,19 @@ class EdgeTable:
   base_schema_name: str
   base_table_name: str
   destination_node_table: NodeTableRef
-  key_columns: List[str]
+  key_columns: list[str]
   kind: str
-  label_names: List[str]
+  label_names: list[str]
   name: str
   source_node_table: NodeTableRef
-  property_definitions: Optional[List[PropertyDefinition]] = None
+  property_definitions: list[PropertyDefinition] | None = None
 
 
 @dataclass_json(letter_case=LetterCase.CAMEL)
 @dataclass
 class Label:
   name: str
-  property_declaration_names: Optional[List[str]] = None
+  property_declaration_names: list[str] | None = None
 
 
 @dataclass_json(letter_case=LetterCase.CAMEL)
@@ -70,11 +68,11 @@ class NodeTable:
   base_catalog_name: str
   base_schema_name: str
   base_table_name: str
-  key_columns: List[str]
+  key_columns: list[str]
   kind: str
-  label_names: List[str]
+  label_names: list[str]
   name: str
-  property_definitions: Optional[List[PropertyDefinition]] = None
+  property_definitions: list[PropertyDefinition] | None = None
 
 
 @dataclass_json(letter_case=LetterCase.CAMEL)
@@ -90,16 +88,16 @@ class SpannerGraphMetadata:
   """Dataclass for Spanner Graph metadata."""
 
   catalog: str
-  edge_tables: List[EdgeTable]
-  labels: List[Label]
+  edge_tables: list[EdgeTable]
+  labels: list[Label]
   name: str
-  node_tables: List[NodeTable]
-  property_declarations: List[PropertyDeclaration]
+  node_tables: list[NodeTable]
+  property_declarations: list[PropertyDeclaration]
   # The key 'schema' can conflict, so we map it to 'schema_field'
   # letter_case doesn't apply to keys with explicit field_name/data_key
   schema_field: str = field(metadata=config(field_name='schema'))
-  property_types: Optional[Dict[str, str]] = None
-  has_duplicate_labels: Optional[bool] = False
+  property_types: dict[str, str] | None = None
+  has_duplicate_labels: bool | None = False
 
   def __post_init__(self):
     """To simplify property type look up."""

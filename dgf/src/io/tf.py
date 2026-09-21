@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import re
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
@@ -152,7 +152,7 @@ def _has_encoded_pattern(name: str) -> bool:
 
 def _feature_to_spec(
     feature_schema: schema_lib.FeatureSchema,
-) -> Union[tf.TensorSpec, tf.RaggedTensorSpec]:
+) -> tf.TensorSpec | tf.RaggedTensorSpec:
   """Spec of a feature value in a `TFInMemoryGraph`.
 
   Args:
@@ -229,7 +229,7 @@ def schema_to_spec(
 
 def schema_to_dict_spec(
     schema_: schema_lib.GraphSchema,
-) -> Dict[str, Union[tf.TensorSpec, tf.RaggedTensorSpec]]:
+) -> dict[str, tf.TensorSpec | tf.RaggedTensorSpec]:
   """Converts a GraphSchema to the specs of a `TFInMemoryGraphDict`.
 
   Args:
@@ -265,7 +265,7 @@ def schema_to_dict_spec(
 
 def graph_to_tf_graph(
     src: in_memory_graph_lib.InMemoryGraph,
-    schema: Optional[schema_lib.GraphSchema] = None,
+    schema: schema_lib.GraphSchema | None = None,
 ) -> tf_in_memory_graph_lib.TFInMemoryGraph:
   """Converts a graph to a TF in-memory graph.
 
@@ -472,7 +472,7 @@ def tf_graph_dict_to_tf_graph(
 
 def schema_to_tfgnn_graph_parsing_spec(
     schema_: schema_lib.GraphSchema,
-) -> Dict[str, tf.io.VarLenFeature]:
+) -> dict[str, tf.io.VarLenFeature]:
   """Builds the parsing spec of a TF GNN Graph Sample from a graph schema.
 
   The returned spec is meant to be used with `tf.io.parse_example` or
@@ -570,8 +570,8 @@ def _tfgnn_num_items(src: TFGNNGraphDict, key: str) -> tf.Tensor:
 
 
 def _group_uniform_dims(
-    values: Union[tf.Tensor, tf.RaggedTensor], dims: List[int]
-) -> Union[tf.Tensor, tf.RaggedTensor]:
+    values: tf.Tensor | tf.RaggedTensor, dims: list[int]
+) -> tf.Tensor | tf.RaggedTensor:
   """Groups the outer-most dimension of `values` into the `dims` dimensions.
 
   For example, if `values` is of shape [12, 5] and `dims` is [3], the result is
@@ -597,7 +597,7 @@ def _tfgnn_feature_to_tensor(
     src: TFGNNGraphDict,
     feature_key: str,
     feature_schema: schema_lib.FeatureSchema,
-) -> Union[tf.Tensor, tf.RaggedTensor]:
+) -> tf.Tensor | tf.RaggedTensor:
   """Converts a TF GNN Graph Sample feature into a dense or ragged tensor."""
 
   values = _tfgnn_get(src, feature_key)
@@ -616,7 +616,7 @@ def _tfgnn_feature_to_tensor(
   # one. `pending_uniform_dims` contains the static dimensions that are not yet
   # applied on the accumulated `result`.
   result = values
-  pending_uniform_dims: List[int] = []
+  pending_uniform_dims: list[int] = []
   for dim_idx in range(len(shape), 0, -1):
     dim = shape[dim_idx - 1]
     if dim is None:

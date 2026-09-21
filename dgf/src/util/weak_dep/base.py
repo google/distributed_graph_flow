@@ -14,7 +14,7 @@
 
 import importlib
 import types
-from typing import Any, Optional
+from typing import Any
 
 
 def _error_message(library_name: str, pip: str, bazel_rule: str) -> str:

@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import dataclasses
-from typing import List
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -740,7 +739,7 @@ Node(nodeset_idx=0, children=[
       self,
       depth: int,
       seed_nodeset: str,
-      seed_idxs: List[int],
+      seed_idxs: list[int],
       expected_subgraph: in_memory_graph_lib.InMemoryGraph,
   ):
     sampling_config = config_lib.SimpleSamplingConfig(
@@ -1068,9 +1067,9 @@ Node(nodeset_idx=0, children=[
       num_hops: int,
       propagate_timestamp_to_edges: bool,
       remove_node_creation_time: bool,
-      expected_node_idxs: List[int],
-      expected_e1: List[List[int]],
-      expected_e2: List[List[int]],
+      expected_node_idxs: list[int],
+      expected_e1: list[list[int]],
+      expected_e2: list[list[int]],
   ):
     graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
         include_e2=True

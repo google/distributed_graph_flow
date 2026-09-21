@@ -23,7 +23,6 @@ to 0-based indices in the edge set adjacencies.
 from collections.abc import Sequence
 import os
 import time
-from typing import Dict, Optional, Tuple
 from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import gf_metadata as gf_metadata_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -79,7 +78,7 @@ def _read_container(
     features_def: schema_lib.FeatureSetSchema,
     container_type: gf_metadata_lib.Container,
     verbose: bool,
-) -> Tuple[Dict[str, np.ndarray], int]:
+) -> tuple[dict[str, np.ndarray], int]:
   """Reads files from the specified container type."""
   extension = get_extension(container_type)
   sharded_files = shard_lib.list_paths(
@@ -167,7 +166,7 @@ def _read_node_set(
     # A slow version of "ByteIdToIdxMapper" for integer values.
     mapping = {id.item(): idx for idx, id in enumerate(node_raw_ids)}
 
-    def mapper(ids: np.ndarray) -> Tuple[np.ndarray, int]:
+    def mapper(ids: np.ndarray) -> tuple[np.ndarray, int]:
 
       idxs = np.empty(shape=[ids.shape[0]], dtype=np.int64)
       missmatch = -1
@@ -365,7 +364,7 @@ def read_graph(
     override_schema: schema_lib.GraphSchema | None = None,
     verbose: bool = False,
     remove_dangling_edges: bool = False,
-    schema_filter: Optional[schema_lib.GraphSchemaFilter] = None,
+    schema_filter: schema_lib.GraphSchemaFilter | None = None,
 ) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Reads a GF graph from a directory to an in-memory graph.
 
@@ -493,7 +492,7 @@ def write_graph(
     schema: schema_lib.GraphSchema,
     path: str,
     verbose: bool = False,
-    num_shards: Optional[int] = None,
+    num_shards: int | None = None,
     compression: str = "snappy",
     container: (
         str | gf_metadata_lib.Container

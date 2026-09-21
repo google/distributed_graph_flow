@@ -30,7 +30,6 @@ TODO(bmayer): Reference type encoding implementations and examples.
 """
 
 import dataclasses
-from typing import Optional
 
 from dgf.src.data import schema as schema_lib
 from dgf.src.learning.jax import common
@@ -178,7 +177,7 @@ class ProjectorConfig(JaxBaseConfig):
     return "Projector"
 
   def make(  # pytype: disable=signature-mismatch  # pyrefly: ignore[bad-override]
-      self, name: Optional[str] = None
+      self, name: str | None = None
   ) -> "Projector":
     return Projector(config=self, name=name)
 
@@ -235,7 +234,7 @@ class GCNConfig(JaxBaseConfig):
     return "GCN"
 
   def make(  # pytype: disable=signature-mismatch  # pyrefly: ignore[bad-override]
-      self, name: Optional[str] = None
+      self, name: str | None = None
   ) -> "GCN":
     return GCN(config=self, name=name)
 
@@ -325,7 +324,7 @@ class MPNNConfig(JaxBaseConfig):
     return "MPNN"
 
   def make(  # pytype: disable=signature-mismatch  # pyrefly: ignore[bad-override]
-      self, name: Optional[str] = None
+      self, name: str | None = None
   ) -> "MPNN":
     return MPNN(config=self, name=name)
 
@@ -466,7 +465,7 @@ class GINConfig(JaxBaseConfig):
     return "GIN"
 
   def make(  # pytype: disable=signature-mismatch  # pyrefly: ignore[bad-override]
-      self, name: Optional[str] = None
+      self, name: str | None = None
   ) -> "GIN":
     return GIN(config=self, name=name)
 

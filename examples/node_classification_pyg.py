@@ -23,9 +23,9 @@ blaze run -c opt --config=cuda \
 //third_party/py/dgf/examples:node_classification_pyg
 """
 
+from collections.abc import Mapping, Sequence
 import dataclasses
 import itertools
-import typing
 
 from absl import app
 from absl import flags
@@ -55,11 +55,11 @@ class PyGHeteroGNN(torch.nn.Module):
 
   def __init__(
       self,
-      in_channels_dict: typing.Mapping[str, int],
+      in_channels_dict: Mapping[str, int],
       hidden_channels: int,
       out_channels: int,
       num_layers: int,
-      edge_types: typing.Sequence[typing.Tuple[str, str, str]],
+      edge_types: Sequence[tuple[str, str, str]],
       target_nodeset: str = "paper",
   ):
     super().__init__()
@@ -88,10 +88,8 @@ class PyGHeteroGNN(torch.nn.Module):
 
   def forward(
       self,
-      x_dict: typing.Mapping[str, torch.Tensor],
-      edge_index_dict: typing.Mapping[
-          typing.Tuple[str, str, str], torch.Tensor
-      ],
+      x_dict: Mapping[str, torch.Tensor],
+      edge_index_dict: Mapping[tuple[str, str, str], torch.Tensor],
       seed_node_idxs: torch.Tensor,
   ) -> torch.Tensor:
     # Initial projection
@@ -116,7 +114,7 @@ class PyGHeteroGNN(torch.nn.Module):
     return self.lin(target_embeds)
 
 
-def main(argv: typing.Sequence[str]) -> None:
+def main(argv: Sequence[str]) -> None:
   if len(argv) > 1:
     raise app.UsageError("Too many command-line arguments.")
 

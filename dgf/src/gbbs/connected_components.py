@@ -32,7 +32,6 @@ print(f"Largest component size: {result.largest_component_size}")
 import contextlib
 import threading
 import time
-from typing import Optional, Union
 
 from dgf.src.gbbs import _gbbs_ext
 import tqdm
@@ -49,14 +48,14 @@ ConnectedComponentsResult = _gbbs_ext.ConnectedComponentsResult
 CCSession = _gbbs_ext.CCSession
 
 # Type alias matching the C++ CCParams variant.
-CCParams = Union[
-    SimpleUnionAsyncCCParams,
-    BfsCCParams,
-    LabelPropagationCCParams,
-    WorkEfficientCCParams,
-    ShiloachVishkinCCParams,
-    StronglyConnectedComponentsParams,
-]
+CCParams = (
+    SimpleUnionAsyncCCParams
+    | BfsCCParams
+    | LabelPropagationCCParams
+    | WorkEfficientCCParams
+    | ShiloachVishkinCCParams
+    | StronglyConnectedComponentsParams
+)
 
 
 def validate_graph_params(
@@ -157,7 +156,7 @@ def _track_cc_progress(session: CCSession, poll_interval: float = 0.5):
 
 def connected_components(
     graph: _gbbs_ext.GbbsGraphHandle,
-    params: Optional[CCParams] = None,
+    params: CCParams | None = None,
     progress: bool = True,
 ) -> ConnectedComponentsResult:
   """Compute connected components of a GBBS graph.

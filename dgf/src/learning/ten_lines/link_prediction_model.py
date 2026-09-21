@@ -16,9 +16,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 import dataclasses
 import os
-from typing import Any, Callable, Dict, Iterator, List, Literal, Optional, Tuple, Union
+from typing import Any, Literal
 
 import dataclasses_json
 from dgf.src.data import in_memory_graph
@@ -78,8 +79,8 @@ class LinkPredictionTask:
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass(kw_only=True)
 class TrainingStats:
-  num_train_seed_edges: Optional[int]
-  num_valid_seed_edges: Optional[int]
+  num_train_seed_edges: int | None
+  num_valid_seed_edges: int | None
   train_duration_seconds: float
 
 
@@ -103,10 +104,10 @@ class ModelData:
   target_sampling_plan: sampling_config_lib.SamplingPlan
   training_stats: TrainingStats
   temporal_sampling: bool = False
-  nodeset_timestamp_features: Dict[str, str] = dataclasses.field(
+  nodeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
   )
-  edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
+  edgeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
   )
   edge_neighbor_generator: (
@@ -116,13 +117,13 @@ class ModelData:
   )
 
   # This field is serialized / deserialized manually.
-  model_params: Optional[jaxtyping.PyTree] = dataclasses.field(
+  model_params: jaxtyping.PyTree | None = dataclasses.field(
       default_factory=lambda: None,
       metadata=dataclasses_json.config(exclude=dataclasses_json.Exclude.ALWAYS),
       repr=False,
   )
 
-  def num_model_weights(self) -> Dict[str, int]:
+  def num_model_weights(self) -> dict[str, int]:
     """Returns a dictionary of the type and number of weights of the model.
 
     Example:
@@ -158,7 +159,7 @@ def _interleave_positives_and_negatives(
     pos_src: np.ndarray,
     pos_trg: np.ndarray,
     neg_trg: np.ndarray,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
   """Interleaves positive and negative examples for link prediction evaluation.
 
   The output arrays are structured such that for each positive edge, its
@@ -202,7 +203,7 @@ def _interleave_positives_and_negatives(
 
 def _separate_positives_and_negatives(
     probs: np.ndarray, examples_per_seed_edge: int
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
   """Separates positive and negative probabilities from a combined array.
 
   Toy Example:
@@ -394,7 +395,7 @@ class LinkPredictionModel(common.Model):
       source_node_idxs: common.SeedNodeIdxs,
       target_node_idxs: common.SeedNodeIdxs,
       *,
-      edge_timestamps: Optional[np.ndarray] = None,
+      edge_timestamps: np.ndarray | None = None,
       all_combinations: bool = False,
       verbose: int = 2,
   ) -> np.ndarray:
@@ -506,7 +507,7 @@ class LinkPredictionModel(common.Model):
 
   def _build_samplers(
       self, graph: in_memory_graph.InMemoryGraph
-  ) -> Tuple[in_memory_sampler_lib.Sampler, in_memory_sampler_lib.Sampler]:
+  ) -> tuple[in_memory_sampler_lib.Sampler, in_memory_sampler_lib.Sampler]:
     sampler_kwargs = {
         "graph": graph,
         "schema": self._data.schema,
@@ -532,10 +533,10 @@ class LinkPredictionModel(common.Model):
       source_node_idxs: common.SeedNodeIdxs,
       target_node_idxs: common.SeedNodeIdxs,
       all_combinations: bool = False,
-      edge_timestamps: Optional[np.ndarray] = None,
+      edge_timestamps: np.ndarray | None = None,
       verbose: int = 2,
-      source_sampler: Optional[in_memory_sampler_lib.Sampler] = None,
-      target_sampler: Optional[in_memory_sampler_lib.Sampler] = None,
+      source_sampler: in_memory_sampler_lib.Sampler | None = None,
+      target_sampler: in_memory_sampler_lib.Sampler | None = None,
   ) -> Iterator[BatchPrediction]:
     """Generate batches of predictions."""
     live = self._get_live()
@@ -584,8 +585,8 @@ class LinkPredictionModel(common.Model):
 
     if self._data.temporal_sampling and edge_timestamps is None:
       raise ValueError(
-          "`edge_timestamps` must be provided in `predict()` / `predict_batch()` "
-          "when `temporal_sampling=True`."
+          "`edge_timestamps` must be provided in `predict()` /"
+          " `predict_batch()` when `temporal_sampling=True`."
       )
 
     source_nodeset = self._data.schema.edge_sets[
@@ -632,8 +633,8 @@ class LinkPredictionModel(common.Model):
     def merge_and_predict(
         sub_src: np.ndarray,
         sub_trg: np.ndarray,
-        sub_src_samples: List[in_memory_graph.InMemoryGraph],
-        sub_trg_samples: List[in_memory_graph.InMemoryGraph],
+        sub_src_samples: list[in_memory_graph.InMemoryGraph],
+        sub_trg_samples: list[in_memory_graph.InMemoryGraph],
     ):
 
       source_merged, source_offsets = source_graph_merger(sub_src_samples)
@@ -706,7 +707,7 @@ class LinkPredictionModel(common.Model):
       node_idxs: common.SeedNodeIdxs,
       encoder: Literal["source", "target"],
       *,
-      node_timestamps: Optional[np.ndarray] = None,
+      node_timestamps: np.ndarray | None = None,
       verbose: int = 2,
   ) -> np.ndarray:
     """Predicts node embeddings for source or target sides.
@@ -821,7 +822,7 @@ class LinkPredictionModel(common.Model):
         sentinel_offset=False,
     )
 
-    def merge_and_predict_emb(sub_samples: List[in_memory_graph.InMemoryGraph]):
+    def merge_and_predict_emb(sub_samples: list[in_memory_graph.InMemoryGraph]):
 
       merged, offsets = graph_merger(sub_samples)
 
@@ -852,8 +853,8 @@ class LinkPredictionModel(common.Model):
       self,
       encoder: Literal["source", "target", "both"],
       *,
-      input_format: Optional[Union[common.TFFunctionInputFormat, str]] = None,
-      consume_tf_graph_dict: Optional[bool] = None,
+      input_format: common.TFFunctionInputFormat | str | None = None,
+      consume_tf_graph_dict: bool | None = None,
   ) -> tf.Module:
     """Exports the model as a TensorFlow function without the sampling step.
 
@@ -1254,12 +1255,12 @@ class LinkPredictionModel(common.Model):
   def evaluate(
       self,
       graph: in_memory_graph.InMemoryGraph,
-      num_eval_steps: Optional[int] = 10_000,
+      num_eval_steps: int | None = 10_000,
       *,
-      seed_edge_idxs: Optional[common.SeedNodeIdxs] = None,
+      seed_edge_idxs: common.SeedNodeIdxs | None = None,
       verbose: int = 2,
-      random_seed: Optional[int] = None,
-      num_negative_nodes: Optional[int] = None,
+      random_seed: int | None = None,
+      num_negative_nodes: int | None = None,
   ) -> evaluation.Evaluation:
     """Evaluates the model on a given graph.
 

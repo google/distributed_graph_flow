@@ -19,13 +19,13 @@ Can be loaded, saved, evaluate, and used to generated predictions.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
 import copy
 import dataclasses
 import enum
 import itertools
 import os
 import textwrap
-from typing import Callable, Dict, Iterator, List, Optional, Union
 
 import dataclasses_json
 from dgf.src.data import in_memory_graph
@@ -116,7 +116,7 @@ class NodePredictionTask:
 
   target_nodeset: str
   target_column: str
-  normalized_target_column: Optional[str]
+  normalized_target_column: str | None
   task_type: TaskType
 
 
@@ -131,8 +131,8 @@ class TrainingStats:
     train_duration_seconds: The duration of the training in seconds.
   """
 
-  num_train_seed_nodes: Optional[int]
-  num_valid_seed_nodes: Optional[int]
+  num_train_seed_nodes: int | None
+  num_valid_seed_nodes: int | None
   train_duration_seconds: float
 
 
@@ -155,20 +155,20 @@ class ModelData:
   # explicit sampling plan: in this case, the sampling plan used to generate
   # the training samples is unknown, and the model can only generate
   # predictions from graph samples.
-  sampling_plan: Optional[sampling_config_lib.SamplingPlan]
+  sampling_plan: sampling_config_lib.SamplingPlan | None
   feature_stats: statistics_lib.GraphFeatureStatistics
   training_stats: TrainingStats
   temporal_sampling: bool
-  nodeset_timestamp_features: Dict[str, str] = dataclasses.field(
+  nodeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
   )
-  edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
+  edgeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
   )
-  final_evaluation: Optional[evaluation.Evaluation] = None
+  final_evaluation: evaluation.Evaluation | None = None
 
   # This field is serialized / deserialized manually.
-  model_params: Optional[jaxtyping.PyTree] = dataclasses.field(
+  model_params: jaxtyping.PyTree | None = dataclasses.field(
       default_factory=lambda: None,
       metadata=dataclasses_json.config(exclude=dataclasses_json.Exclude.ALWAYS),
       repr=False,
@@ -202,7 +202,7 @@ class NodePredictionModel(common.Model):
     super().__init__(data)
 
     self._data = data
-    self._live: Optional[ModelLiveResource] = None
+    self._live: ModelLiveResource | None = None
 
   @classmethod
   def name(cls) -> str:
@@ -292,7 +292,7 @@ class NodePredictionModel(common.Model):
     )
     return self._data.core_model_config.head.num_classes
 
-  def label_classes(self) -> List[str]:
+  def label_classes(self) -> list[str]:
     """Returns the string representation of the labels."""
     if self._data.task.task_type != TaskType.NODE_CLASSIFICATION:
       raise ValueError(
@@ -453,7 +453,7 @@ class NodePredictionModel(common.Model):
       self,
       live,
       sub_seed_idxs: np.ndarray,
-      sub_samples: List[in_memory_graph.InMemoryGraph],
+      sub_samples: list[in_memory_graph.InMemoryGraph],
       graph_merger: merge_lib.GraphMerger,
   ) -> Iterator[BatchPrediction]:
     try:
@@ -525,7 +525,7 @@ class NodePredictionModel(common.Model):
   # TODO(gbm): Factor with predict_batch above.
   def predict_on_graph_sample_batch(
       self,
-      graph_samples: List[in_memory_graph.InMemoryGraph],
+      graph_samples: list[in_memory_graph.InMemoryGraph],
   ) -> np.ndarray:
     """Predicts the target column values for a batch of graph samples.
 
@@ -584,11 +584,11 @@ class NodePredictionModel(common.Model):
   def evaluate(
       self,
       graph: in_memory_graph.InMemoryGraph,
-      num_eval_steps: Optional[int] = 10_000,
+      num_eval_steps: int | None = 10_000,
       *,
-      seed_node_idxs: Optional[common.SeedNodeIdxs] = None,
+      seed_node_idxs: common.SeedNodeIdxs | None = None,
       verbose: int = 2,
-      random_seed: Optional[int] = None,
+      random_seed: int | None = None,
   ) -> evaluation.Evaluation:
     """Evaluates the model on a given graph.
 
@@ -648,7 +648,7 @@ class NodePredictionModel(common.Model):
   def evaluate_generator(
       self,
       graph_samples: Iterator[in_memory_graph.InMemoryGraph],
-      num_eval_steps: Optional[int] = 10_000,
+      num_eval_steps: int | None = 10_000,
       *,
       verbose: int = 2,
   ) -> evaluation.Evaluation:
@@ -829,8 +829,8 @@ class NodePredictionModel(common.Model):
   def to_tensorflow_function(
       self,
       *,
-      input_format: Optional[Union[common.TFFunctionInputFormat, str]] = None,
-      consume_tf_graph_dict: Optional[bool] = None,
+      input_format: common.TFFunctionInputFormat | str | None = None,
+      consume_tf_graph_dict: bool | None = None,
   ) -> tf.Module:
     """Exports the model as a TensorFlow function without the sampling step.
 

@@ -17,7 +17,7 @@
 # TODO(liuyanchen): Add the Avrio IO to the IO benchmark.
 
 import os
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any
 
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
@@ -28,7 +28,6 @@ import fastavro
 import numpy as np
 import tqdm
 
-
 parse_schema = fastavro.parse_schema
 fastavro_reader = fastavro.reader
 fastavro_writer = fastavro.writer
@@ -36,7 +35,7 @@ tqdm = tqdm.tqdm
 
 
 def _get_avro_type_for_shape(
-    shape: Tuple[Optional[int], ...], base_avro_type: str
+    shape: tuple[int | None, ...], base_avro_type: str
 ) -> Any:
   """Recursively builds a nested Avro array type from a shape tuple."""
   if not shape:
@@ -62,7 +61,7 @@ def _get_avro_type_for_feature(feature_schema: schema_lib.FeatureSchema) -> Any:
   return _get_avro_type_for_shape(shape, base_avro_type)
 
 
-def _serialize_numpy_value(value: Union[np.ndarray, np.generic, Any]) -> Any:
+def _serialize_numpy_value(value: np.ndarray | np.generic | Any) -> Any:
   """Converts a numpy scalar or array to a JSON-serializable Python type."""
   if isinstance(value, np.ndarray):
     return value.tolist()
@@ -73,7 +72,7 @@ def _serialize_numpy_value(value: Union[np.ndarray, np.generic, Any]) -> Any:
 
 
 def _generate_node_records(
-    feature_items: List[Tuple[str, Any]],
+    feature_items: list[tuple[str, Any]],
     start_index: int,
     end_index: int,
     name: str,
@@ -96,7 +95,7 @@ def _generate_node_records(
 
 
 def _generate_edge_records(
-    feature_items: List[Tuple[str, Any]],
+    feature_items: list[tuple[str, Any]],
     source_array: np.ndarray,
     target_array: np.ndarray,
     start_index: int,
@@ -265,12 +264,12 @@ def write_avro_edge_sets(
 
 
 def read_avro_record(
-    paths: List[str],
-    columns: Dict[str, Tuple[str, Tuple[Optional[int], ...]]],
+    paths: list[str],
+    columns: dict[str, tuple[str, tuple[int | None, ...]]],
     verbose: bool,
-) -> Tuple[Dict[str, np.ndarray], int]:
+) -> tuple[dict[str, np.ndarray], int]:
   """Reads an Avro file and updates the feature builders."""
-  feature_builders: Dict[str, List[Any]] = {f_name: [] for f_name in columns}
+  feature_builders: dict[str, list[Any]] = {f_name: [] for f_name in columns}
   num_records = 0
 
   for avro_file in paths:
@@ -294,7 +293,7 @@ def read_avro_record(
     dtype = columns[feature_name][0]
     if not data_list:
       shape = (0,) + tuple(
-          d for d in (columns[feature_name][1] or ()) if d is not None
+          d for d in columns[feature_name][1] or () if d is not None
       )
       final_features[feature_name] = np.empty(shape, dtype=dtype)
     else:

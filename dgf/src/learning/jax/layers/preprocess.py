@@ -41,7 +41,6 @@ All the layers follow the 3 steps:
 
 import collections
 import dataclasses
-from typing import List, Optional, Tuple
 import dataclasses_json
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
@@ -68,7 +67,7 @@ def _is_non_mask_timeseries(
 
 
 def _has_defined_timeseries_dimension(
-    shape: Optional[schema_lib.Shape],
+    shape: schema_lib.Shape | None,
 ) -> bool:
   """Returns True if shape is non-empty and has a defined sequence length (shape[0] is not None)."""
   return shape is not None and len(shape) > 0 and shape[0] is not None
@@ -86,7 +85,7 @@ class EmbedFeatureGroupsConfig:
   categorical_feature_embedding_dim: int = 64
 
   def make(
-      self, schema: schema_lib.FeatureSetSchema, name: Optional[str] = None
+      self, schema: schema_lib.FeatureSetSchema, name: str | None = None
   ) -> "EmbedFeatureGroups":
     return EmbedFeatureGroups(config=self, schema=schema, name=name)
 
@@ -404,7 +403,7 @@ class EmbedFeatureGroups(nn.Module):
           if raw_value.ndim != 3:
             raise ValueError(
                 f"Feature {feature_name!r} with EMBEDDING semantic and"
-                f" is_timeseries=True must have ndim 2 or 3, but got"
+                " is_timeseries=True must have ndim 2 or 3, but got"
                 f" {raw_value.ndim}."
             )
           group_embedding_list.append(raw_value)
@@ -424,7 +423,7 @@ class EmbedFeatureGroups(nn.Module):
           if raw_value.ndim != 2:
             raise ValueError(
                 f"Feature {feature_name!r} with CATEGORICAL semantic and"
-                f" is_timeseries=True must have ndim == 2, but got"
+                " is_timeseries=True must have ndim == 2, but got"
                 f" {raw_value.ndim}."
             )
           embedding = nn.Embed(
@@ -478,13 +477,13 @@ class EmbedFeatureSetConfig:
   timeseries_embedding_dim: int = 64
 
   def make(
-      self, schema: schema_lib.FeatureSetSchema, name: Optional[str] = None
+      self, schema: schema_lib.FeatureSetSchema, name: str | None = None
   ) -> "EmbedFeatureSet":
     return EmbedFeatureSet(config=self, schema=schema, name=name)
 
   def output_schema(
       self, schema: schema_lib.FeatureSetSchema
-  ) -> Optional[schema_lib.FeatureSchema]:
+  ) -> schema_lib.FeatureSchema | None:
     groups_config = EmbedFeatureGroupsConfig(
         categorical_feature_embedding_dim=self.categorical_feature_embedding_dim
     )
@@ -587,7 +586,7 @@ class EmbedFeatureSet(nn.Module):
       self,
       features: jax_in_memory_graph.Features,
       training: bool,
-  ) -> Optional[jnp.ndarray]:
+  ) -> jnp.ndarray | None:
     groups_config = EmbedFeatureGroupsConfig(
         categorical_feature_embedding_dim=self.config.categorical_feature_embedding_dim
     )
@@ -646,7 +645,7 @@ class EmbedGraphConfig(common.ArchitectureProvider):
   )
 
   def make(
-      self, schema: schema_lib.GraphSchema, name: Optional[str] = None
+      self, schema: schema_lib.GraphSchema, name: str | None = None
   ) -> "EmbedGraph":
     return EmbedGraph(config=self, schema=schema, name=name)
 
@@ -745,10 +744,10 @@ class EmbedAndHomogenizeGraphConfig:
   node_embedding_dim: int = 64
   node_type_dim: int = 16
   categorical_feature_embedding_dim: int = 64
-  ignore_target_nodeset_features: List[str] = dataclasses.field(
+  ignore_target_nodeset_features: list[str] = dataclasses.field(
       default_factory=list
   )
-  node_embedding: Optional[common.BuildableModule] = layer_registry.field(
+  node_embedding: common.BuildableModule | None = layer_registry.field(
       default=None
   )
 
@@ -759,7 +758,7 @@ class EmbedAndHomogenizeGraphConfig:
       )
 
   def make(
-      self, schema: schema_lib.GraphSchema, name: Optional[str] = None
+      self, schema: schema_lib.GraphSchema, name: str | None = None
   ) -> "EmbedAndHomogenizeGraph":
     return EmbedAndHomogenizeGraph(config=self, schema=schema, name=name)
 

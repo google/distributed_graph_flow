@@ -16,7 +16,6 @@
 
 import dataclasses
 import enum
-from typing import Optional
 import dataclasses_json
 
 
@@ -79,10 +78,11 @@ class TrainingConfig:
     label_node_set: The node set containing the label feature.
     label_feature: The name of the label feature.
   """
+
   model_name: str = "default"
   num_epochs: int = 10
-  num_steps_per_epoch: Optional[int] = None
-  validation_steps: Optional[int] = None
+  num_steps_per_epoch: int | None = None
+  validation_steps: int | None = None
   batch_size: int = 32
   learning_rate: float = 0.001
   optimizer: str = "adam"
@@ -90,8 +90,8 @@ class TrainingConfig:
       default_factory=ModelTrainingHyperparameters
   )
   task_type: TaskType = TaskType.CLASSIFICATION
-  label_node_set: Optional[str] = None
-  label_feature: Optional[str] = None
+  label_node_set: str | None = None
+  label_feature: str | None = None
 
 
 @dataclasses_json.dataclass_json
@@ -101,11 +101,11 @@ class TrainingMonitoring:
 
   Attributes:
     training_config: The training configuration used for the model.
-    total_training_time_in_seconds: The total time taken in seconds to train
-      the model.
+    total_training_time_in_seconds: The total time taken in seconds to train the
+      model.
   """
+
   training_config: TrainingConfig = dataclasses.field(
       default_factory=TrainingConfig
   )
-  total_training_time_in_seconds: Optional[float] = None
-
+  total_training_time_in_seconds: float | None = None

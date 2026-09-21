@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import functools
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from dgf.src.analyse import schema as schema_analyse_lib
 from dgf.src.data import distributed_graph as distributed_graph_lib
@@ -49,7 +49,7 @@ KEY_TARGET = graph_constants.KEY_TARGET
 MAX_SUPPORTED_GF_VERSION = graph_constants.MAX_SUPPORTED_GF_VERSION
 
 
-FEATURE_FORMAT_TO_PY_ARROW_DTYPE: Dict[schema_lib.FeatureFormat, Any] = {
+FEATURE_FORMAT_TO_PY_ARROW_DTYPE: dict[schema_lib.FeatureFormat, Any] = {
     schema_lib.FeatureFormat.INTEGER_64: pyarrow.int64(),
     schema_lib.FeatureFormat.INTEGER_32: pyarrow.int32(),
     schema_lib.FeatureFormat.FLOAT_32: pyarrow.float32(),
@@ -63,8 +63,8 @@ def read_graph(
     pbegin: beam.Pipeline,
     path: str,
     *,
-    override_schema: Optional[schema_lib.GraphSchema] = None,
-    schema_filter: Optional[schema_lib.GraphSchemaFilter] = None,
+    override_schema: schema_lib.GraphSchema | None = None,
+    schema_filter: schema_lib.GraphSchemaFilter | None = None,
     beam_namespace: str = "",
 ) -> distributed_graph_lib.Graph:
   """Reads a GF graph into a distributed graph.
@@ -219,7 +219,7 @@ def read_graph(
 
 
 def _raw_to_node(
-    row: Dict[str, Any], schema: schema_lib.NodeSchema, primary_key: str
+    row: dict[str, Any], schema: schema_lib.NodeSchema, primary_key: str
 ) -> distributed_graph_lib.Node:
   node_features = {}
   node_id = None
@@ -265,9 +265,9 @@ def read_node_set_features(
 
 
 def _raw_to_edge(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     schema: schema_lib.EdgeSchema,
-    primary_key: Optional[str],
+    primary_key: str | None,
 ) -> distributed_graph_lib.Edge:
   edge_features = {}
   edge_id = None
@@ -324,7 +324,7 @@ def write_graph(
     container_type: (
         str | gf_metadata_lib.Container
     ) = gf_metadata_lib.Container.PARQUET,
-    container: Optional[str | gf_metadata_lib.Container] = None,
+    container: str | gf_metadata_lib.Container | None = None,
 ) -> beam.pvalue.PDone:
   """Writes a GF Graph from a distributed graph (beam).
 
@@ -502,7 +502,7 @@ def write_graph(
 
 def _feature_schema_to_parquet_fields(
     feature_schema: schema_lib.FeatureSchema,
-) -> List[pyarrow.Field]:
+) -> list[pyarrow.Field]:
   """Creates the schema for the parquet node container."""
   fields = []
   # Note: The schema has the node "#id".
@@ -565,7 +565,7 @@ def _edge_schema_to_parquet_schema(
 
 def _node_to_raw(
     node: distributed_graph_lib.Node, schema: schema_lib.NodeSchema
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """Converts a Node to a raw dictionary for Parquet writing."""
   primary_key = schema_analyse_lib.primary_feature_or_none("", schema)
   raw_dict = {}
@@ -580,7 +580,7 @@ def _node_to_raw(
 
 def _edge_to_raw(
     edge: distributed_graph_lib.Edge, schema: schema_lib.EdgeSchema
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """Converts an Edge to a raw dictionary for Parquet writing."""
   raw_dict = {
       KEY_SOURCE: edge.source,

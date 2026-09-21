@@ -20,10 +20,11 @@ batched graph samples for link prediction.
 Mirrors the in_memory_gnn_dataset_preparator.py utility.
 """
 
+from collections.abc import Iterator
 import copy
 import dataclasses
 import itertools
-from typing import Dict, Iterator, Literal, Optional
+from typing import Literal
 from dgf.src.analyse import in_process_feature_statistics as in_process_feature_statistics_lib
 from dgf.src.analyse import padding as padding_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -66,19 +67,19 @@ class LiveData:
   source_sampler: in_memory_sampler_lib.Sampler
   target_sampler: in_memory_sampler_lib.Sampler
 
-  num_edges_in_seed_edgeset: Optional[int]
+  num_edges_in_seed_edgeset: int | None
 
-  normalized_source_graph: Optional[in_memory_graph_lib.InMemoryGraph] = None
-  normalized_target_graph: Optional[in_memory_graph_lib.InMemoryGraph] = None
-  normalized_jax_source_graph: Optional[
-      jax_in_memory_graph_lib.JaxInMemoryGraph
-  ] = None
-  normalized_jax_target_graph: Optional[
-      jax_in_memory_graph_lib.JaxInMemoryGraph
-  ] = None
+  normalized_source_graph: in_memory_graph_lib.InMemoryGraph | None = None
+  normalized_target_graph: in_memory_graph_lib.InMemoryGraph | None = None
+  normalized_jax_source_graph: (
+      jax_in_memory_graph_lib.JaxInMemoryGraph | None
+  ) = None
+  normalized_jax_target_graph: (
+      jax_in_memory_graph_lib.JaxInMemoryGraph | None
+  ) = None
 
-  sampling_schema: Optional[schema_lib.GraphSchema] = None
-  merge_schema: Optional[schema_lib.GraphSchema] = None
+  sampling_schema: schema_lib.GraphSchema | None = None
+  merge_schema: schema_lib.GraphSchema | None = None
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -87,9 +88,9 @@ class GNNLinkDatasetPreparatorSample:
   positive_target_graph: in_memory_graph_lib.InMemoryGraph
   negative_target_graph: in_memory_graph_lib.InMemoryGraph
 
-  positive_source_offsets: Dict[str, np.ndarray]
-  positive_target_offsets: Dict[str, np.ndarray]
-  negative_target_offsets: Dict[str, np.ndarray]
+  positive_source_offsets: dict[str, np.ndarray]
+  positive_target_offsets: dict[str, np.ndarray]
+  negative_target_offsets: dict[str, np.ndarray]
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -98,9 +99,9 @@ class GNNLinkDatasetPreparatorJaxSample:
   positive_target_graph: jax_in_memory_graph_lib.JaxInMemoryGraph
   negative_target_graph: jax_in_memory_graph_lib.JaxInMemoryGraph
 
-  positive_source_offsets: Dict[str, jnp.ndarray]
-  positive_target_offsets: Dict[str, jnp.ndarray]
-  negative_target_offsets: Dict[str, jnp.ndarray]
+  positive_source_offsets: dict[str, jnp.ndarray]
+  positive_target_offsets: dict[str, jnp.ndarray]
+  negative_target_offsets: dict[str, jnp.ndarray]
 
 
 @dataclasses.dataclass
@@ -109,7 +110,7 @@ class NodeIdsBatch:
   pos_trg_node_idxs: np.ndarray
   neg_trg_node_idxs: np.ndarray
   edge_idxs: np.ndarray
-  seed_timestamps: Optional[np.ndarray] = None
+  seed_timestamps: np.ndarray | None = None
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -177,8 +178,8 @@ class GNNLinkDatasetPreparator:
   schema: schema_lib.GraphSchema
   batch_size: int
   sampling_config: sampling_config_lib.SimpleSamplingConfig
-  source_sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None
-  target_sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None
+  source_sampling_plan: sampling_config_lib.SamplingPlan | None = None
+  target_sampling_plan: sampling_config_lib.SamplingPlan | None = None
   drop_remainder: bool
   shuffle: bool
   target_edgeset: str
@@ -186,7 +187,7 @@ class GNNLinkDatasetPreparator:
   edge_neighbor_generator: (
       edge_neighbor_generator_lib.EdgeNeighborGeneratorConfig
   )
-  seed_edge_idxs: Optional[np.ndarray] = None
+  seed_edge_idxs: np.ndarray | None = None
   mask_seed_edge: bool = False
   mask_target_edgeset: bool = False
 
@@ -194,19 +195,19 @@ class GNNLinkDatasetPreparator:
   cache_normalized_features_device: Literal["host", "device"] = "device"
 
   # Optional arguments
-  num_samples_for_stats: Optional[int] = 10000
+  num_samples_for_stats: int | None = 10000
   auto_normalize_config: normalize_lib.AutoNormalizeConfig = dataclasses.field(
       default_factory=normalize_lib.AutoNormalizeConfig
   )
   verbose_preparation: bool = True
   skip_overflow_padding_error: bool = False
   temporal_sampling: bool = False
-  edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
+  edgeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
   )
 
   # The is_prepared data computed by the `prepare()` method.
-  live: Optional[LiveData] = dataclasses.field(init=False, default=None)
+  live: LiveData | None = dataclasses.field(init=False, default=None)
 
   def __post_init__(self):
     if self.batch_size <= 0:
@@ -246,7 +247,7 @@ class GNNLinkDatasetPreparator:
   def is_prepared(self) -> bool:
     return self.live is not None
 
-  def num_edge_in_seed_edgeset(self) -> Optional[int]:
+  def num_edge_in_seed_edgeset(self) -> int | None:
     """Number of nodes in the seed nodeset."""
     return self.get_live().num_edges_in_seed_edgeset
 
@@ -347,7 +348,7 @@ class GNNLinkDatasetPreparator:
           )
 
   def _build_neighbor_generator(
-      self, sampler: Optional[in_memory_sampler_lib.Sampler]
+      self, sampler: in_memory_sampler_lib.Sampler | None
   ) -> edge_neighbor_generator_lib.EdgeNeighborGenerator:
     return edge_neighbor_generator_lib.EdgeNeighborGenerator(
         self.graph,
@@ -365,7 +366,7 @@ class GNNLinkDatasetPreparator:
       return sampling_schema
     return self.schema
 
-  def _edgeset_to_mask(self) -> Optional[str]:
+  def _edgeset_to_mask(self) -> str | None:
     return (
         self.target_edgeset
         if self.mask_seed_edge and not self.temporal_sampling

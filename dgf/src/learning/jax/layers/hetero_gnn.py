@@ -17,7 +17,6 @@
 import collections
 import dataclasses
 import textwrap
-from typing import Dict, List, Optional, Tuple
 import dataclasses_json
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
@@ -30,12 +29,12 @@ import jax.numpy as jnp
 
 # A plan is a list of (edge name, is_reversed) indicating which edge
 # is used to propagate the message.
-Plan = List[Tuple[str, bool]]
+Plan = list[tuple[str, bool]]
 
 # A sorted plan groups plan items by destination nodesets. More precisely, a
 # sorted plan maps for each target nodesets, the list of
 # (edgeset name, source nodeset, is_reversed).
-SortedPlan = Dict[str, List[Tuple[str, str, bool]]]
+SortedPlan = dict[str, list[tuple[str, str, bool]]]
 
 
 def sort_plan(plan: Plan, schema: schema_lib.GraphSchema) -> SortedPlan:
@@ -92,15 +91,15 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
       transformer-like MLP. Defaults to a two-layer ResidualMLP.
   """
 
-  plan: Optional[List[Tuple[str, bool]]] = None
+  plan: list[tuple[str, bool]] | None = None
   embedding_feature: str = "embedding"
   dims: int = 128
   dropout_rate: float = 0.1
   message_pooling: str = "sum"
 
-  message: Optional[common.BuildableModule] = layer_registry.field(default=None)
-  update: Optional[common.BuildableModule] = layer_registry.field(default=None)
-  post: Optional[common.BuildableModule] = layer_registry.field(default=None)
+  message: common.BuildableModule | None = layer_registry.field(default=None)
+  update: common.BuildableModule | None = layer_registry.field(default=None)
+  post: common.BuildableModule | None = layer_registry.field(default=None)
 
   def __post_init__(self):
 
@@ -117,7 +116,7 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
       )
 
   def make(
-      self, schema: schema_lib.GraphSchema, name: Optional[str] = None
+      self, schema: schema_lib.GraphSchema, name: str | None = None
   ) -> "HeterogeneousGraphConvolution":
     return HeterogeneousGraphConvolution(config=self, schema=schema, name=name)
 

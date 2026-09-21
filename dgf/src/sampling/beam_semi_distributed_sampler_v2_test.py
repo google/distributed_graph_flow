@@ -17,7 +17,6 @@ import functools
 import logging
 import os
 import tempfile
-from typing import List
 
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -121,7 +120,7 @@ class BeamSemiDistributedSamplerV2Test(parameterized.TestCase):
   )
   def test_safe_stack(
       self,
-      values: List[np.ndarray],
+      values: list[np.ndarray],
       schema: schema_lib.FeatureSchema,
       expected: np.ndarray,
   ):

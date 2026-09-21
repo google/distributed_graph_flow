@@ -14,12 +14,12 @@
 
 """Schema of a graph."""
 
+from collections.abc import Callable
 import dataclasses
 import enum
-from typing import Callable, Dict, Optional, Tuple
 import dataclasses_json
 
-Shape = Optional[Tuple[Optional[int], ...]]
+Shape = tuple[int | None, ...] | None
 
 
 class FeatureFormat(enum.Enum):
@@ -113,11 +113,11 @@ class FeatureSchema:
   format: FeatureFormat
   semantic: FeatureSemantic = FeatureSemantic.UNKNOWN
   shape: Shape = None
-  num_categorical_values: Optional[int] = None
-  is_utf8_string: Optional[bool] = False
+  num_categorical_values: int | None = None
+  is_utf8_string: bool | None = False
   is_timeseries: bool = False
   is_creation_time: bool = False
-  group: Optional[str] = None
+  group: str | None = None
 
   def is_static_shape(self) -> bool:
     """Returns true if the feature has a fully static shape."""
@@ -136,7 +136,7 @@ class FeatureSchema:
     return size
 
 
-FeatureSetSchema = Dict[str, FeatureSchema]
+FeatureSetSchema = dict[str, FeatureSchema]
 
 
 @dataclasses_json.dataclass_json
@@ -156,8 +156,8 @@ class EdgeSchema:
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass
 class GraphSchema:
-  node_sets: Dict[str, NodeSchema]
-  edge_sets: Dict[str, EdgeSchema]
+  node_sets: dict[str, NodeSchema]
+  edge_sets: dict[str, EdgeSchema]
 
 
 @dataclasses.dataclass

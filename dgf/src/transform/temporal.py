@@ -14,7 +14,6 @@
 
 """Temporal transformations for graphs."""
 
-from typing import List, Optional
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.util import temporal as temporal_util
@@ -24,7 +23,7 @@ import numpy as np
 def propagate_timestamp_to_edges(
     graph: in_memory_graph.InMemoryGraph,
     schema: schema_lib.GraphSchema,
-    target_edgesets: Optional[List[str]] = None,
+    target_edgesets: list[str] | None = None,
     target_feature: str = "timestamps",
 ) -> tuple[in_memory_graph.InMemoryGraph, schema_lib.GraphSchema]:
   """Propagates timestamps from nodes to edges.

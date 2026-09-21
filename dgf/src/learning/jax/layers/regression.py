@@ -15,7 +15,6 @@
 """A simple regression head for a GNN."""
 
 import dataclasses
-from typing import Optional
 import dataclasses_json
 from dgf.src.learning.jax import common
 from dgf.src.learning.jax.layers.registry import registry as layer_registry
@@ -46,9 +45,10 @@ class RegressionHeadConfig(common.ArchitectureProvider):
     predictions = RegressionHead.logits_to_predictions(logits)
     ```
   """
+
   num_outputs: int = 1
 
-  def make(self, name: Optional[str] = None) -> "RegressionHead":
+  def make(self, name: str | None = None) -> "RegressionHead":
     return RegressionHead(config=self, name=name)
 
   def architecture(self) -> str:

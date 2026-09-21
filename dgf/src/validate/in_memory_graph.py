@@ -15,7 +15,7 @@
 """Validate an in-memory graph object."""
 
 import collections
-from typing import Sequence
+from collections.abc import Sequence
 from dgf.src.analyse import schema as analyse_schema
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib

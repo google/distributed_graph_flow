@@ -16,7 +16,6 @@
 
 import collections
 import dataclasses
-from typing import Dict, List, Optional, Tuple
 
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
@@ -33,22 +32,22 @@ class TimeseriesGroupSpec:
     feature_names: List of feature names associated with this timestamp.
   """
 
-  timestamp_feature_name: Optional[str]
-  feature_names: List[str]
+  timestamp_feature_name: str | None
+  feature_names: list[str]
 
 
 @dataclasses.dataclass(frozen=True)
 class TimeseriesSchemaCache:
   """Pre-resolved schema metadata for fast timeseries filtering."""
 
-  node_sets: Dict[str, List[TimeseriesGroupSpec]]
-  edge_sets: Dict[str, List[TimeseriesGroupSpec]]
+  node_sets: dict[str, list[TimeseriesGroupSpec]]
+  edge_sets: dict[str, list[TimeseriesGroupSpec]]
   has_timeseries: bool
 
 
 def creation_time_feature_name(
     schemas: schema_lib.FeatureSetSchema,
-) -> Optional[str]:
+) -> str | None:
   """Infers the feature name for entity creation time."""
   ts_features = []
   for feat_name, feat in schemas.items():
@@ -70,7 +69,7 @@ def creation_time_feature_name(
 def edgeset_creation_time_feature_name(
     es_schema: schema_lib.EdgeSchema,
     schema: schema_lib.GraphSchema,
-) -> Optional[str]:
+) -> str | None:
   """Infers creation timestamp feature for an edgeset, falling back to connected node creation times."""
   feat_name = creation_time_feature_name(es_schema.features)
   if feat_name is not None:
@@ -95,7 +94,7 @@ def edgeset_creation_time_feature_name(
 
 def group_creation_time_feature_name(
     group_name: str, schemas: schema_lib.FeatureSetSchema
-) -> Optional[str]:
+) -> str | None:
   """Infers the creation time sequence feature name for a group."""
   for name, sch in schemas.items():
     if sch.is_creation_time and sch.is_timeseries:
@@ -107,7 +106,7 @@ def group_creation_time_feature_name(
 
 def nodeset_timestamp_features(
     schema: schema_lib.GraphSchema,
-) -> Dict[str, str]:
+) -> dict[str, str]:
   """Infers nodeset creation timestamp feature names from schema."""
   result = {}
   for name, ns in schema.node_sets.items():
@@ -119,7 +118,7 @@ def nodeset_timestamp_features(
 
 def edgeset_timestamp_features(
     schema: schema_lib.GraphSchema,
-) -> Dict[str, str]:
+) -> dict[str, str]:
   """Infers edgeset creation timestamp feature names from schema."""
   result = {}
   for name, es in schema.edge_sets.items():
@@ -130,11 +129,11 @@ def edgeset_timestamp_features(
 
 
 def _extract_entity_set_timeseries_specs(
-    features: Dict[str, schema_lib.FeatureSchema],
-) -> List[TimeseriesGroupSpec]:
+    features: dict[str, schema_lib.FeatureSchema],
+) -> list[TimeseriesGroupSpec]:
   """Extracts and groups timeseries feature specs for a node set or edge set."""
-  grouped_features: Dict[str, List[str]] = collections.defaultdict(list)
-  ungrouped_features: List[str] = []
+  grouped_features: dict[str, list[str]] = collections.defaultdict(list)
+  ungrouped_features: list[str] = []
 
   for fname, fschema in features.items():
     if not fschema.is_timeseries:
@@ -166,7 +165,7 @@ def _extract_entity_set_timeseries_specs(
 
 def get_mask_feature_name(
     feature_name: str, schemas: schema_lib.FeatureSetSchema
-) -> Optional[str]:
+) -> str | None:
   """Gets the authoritative mask feature name associated with a given feature.
 
   A mask feature has `semantic=FeatureSemantic.MASK` and explicitly shares the
@@ -197,13 +196,13 @@ def extract_timeseries_schema_cache(
     schema: schema_lib.GraphSchema,
 ) -> TimeseriesSchemaCache:
   """Extracts and pre-resolves timeseries feature metadata from a schema."""
-  node_sets_cache: Dict[str, List[TimeseriesGroupSpec]] = {}
+  node_sets_cache: dict[str, list[TimeseriesGroupSpec]] = {}
   for ns_name, ns_schema in schema.node_sets.items():
     node_sets_cache[ns_name] = _extract_entity_set_timeseries_specs(
         ns_schema.features
     )
 
-  edge_sets_cache: Dict[str, List[TimeseriesGroupSpec]] = {}
+  edge_sets_cache: dict[str, list[TimeseriesGroupSpec]] = {}
   for es_name, es_schema in schema.edge_sets.items():
     edge_sets_cache[es_name] = _extract_entity_set_timeseries_specs(
         es_schema.features
@@ -247,7 +246,7 @@ def schema_has_dynamic_timeseries_features(
 
 def get_timeseries_step_shape(
     fschema: schema_lib.FeatureSchema,
-) -> Tuple[Optional[int], ...]:
+) -> tuple[int | None, ...]:
   """Returns per-step feature dimension, excluding leading sequence length shape[0]."""
   if not fschema.is_timeseries:
     raise ValueError("Feature schema must be a timeseries feature.")
@@ -296,10 +295,10 @@ def expand_mask_dims(mask: np.ndarray, target: np.ndarray) -> np.ndarray:
 
 def expand_batch_seed_timestamps(
     sample: in_memory_graph_lib.InMemoryGraph,
-    merge_offsets: Dict[str, np.ndarray],
+    merge_offsets: dict[str, np.ndarray],
     schema: schema_lib.GraphSchema,
     seed_timestamps: np.ndarray,
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
   """Expands 1D batch seed timestamps across all node and edge sets in a merged graph.
 
   Args:
@@ -316,7 +315,7 @@ def expand_batch_seed_timestamps(
   """
   assert seed_timestamps.ndim == 1
   num_subgraphs = len(seed_timestamps)
-  result: Dict[str, np.ndarray] = {}
+  result: dict[str, np.ndarray] = {}
 
   for node_set_name in schema.node_sets:
     offsets = merge_offsets[node_set_name]

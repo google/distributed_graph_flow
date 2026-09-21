@@ -17,7 +17,6 @@
 import concurrent.futures
 import os
 import typing
-from typing import Dict, List, Optional, Tuple, Union
 import uuid
 
 from dgf.src.analyse import print_schema as print_schema_lib
@@ -99,7 +98,7 @@ def get_metadata(
 
 def _graph_element_table(
     labels_and_properties: bigquery_graph_metadata_lib.LabelAndProperties,
-) -> Dict[str, str]:
+) -> dict[str, str]:
   """Returns a Dict of BigQuery graph element features.
 
   This represents the nodes and edges metadata in a common format. The common
@@ -163,7 +162,7 @@ def metadata_to_schema(
 
 def _is_source_and_destination_pk_fk_aligned(
     edge_table: bigquery_graph_metadata_lib.EdgeTable,
-    node_tables: List[bigquery_graph_metadata_lib.NodeTable],
+    node_tables: list[bigquery_graph_metadata_lib.NodeTable],
 ) -> bool:
   """Returns true if the edge table columns are PK-FK aligned with the node table columns."""
   source_node_table = None
@@ -211,7 +210,7 @@ def read_bigquery_graph_schema(
     graph: str,
     *,
     combine_as_json: bool = False,
-    verbose: Union[int, bool] = True,
+    verbose: int | bool = True,
 ):
   """Reads the schema of a BigQuery graph into a GF schema.
 
@@ -249,12 +248,12 @@ def read_bigquery_graph(
     dataset: str,
     graph: str,
     *,
-    schema: Optional[schema_lib.GraphSchema] = None,
+    schema: schema_lib.GraphSchema | None = None,
     work_dir: str,
     combine_as_json: bool = False,
     max_workers: int = 10,
-    verbose: Union[int, bool] = True,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+    verbose: int | bool = True,
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Reads a BigQuery Graph in-process and returns a GraphFlow in-memory graph.
 
   Usage:
@@ -318,10 +317,10 @@ def export_bigquery_to_disk(
     dataset: str,
     graph: str,
     *,
-    schema: Optional[schema_lib.GraphSchema] = None,
+    schema: schema_lib.GraphSchema | None = None,
     combine_as_json: bool = False,
     max_workers: int = 10,
-    verbose: Union[int, bool] = True,
+    verbose: int | bool = True,
 ):
   """Reads a BigQuery Graph in-process and returns a GraphFlow in-memory graph.
 

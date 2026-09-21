@@ -15,7 +15,6 @@
 """PDF Renderer for Graph Flow EDA Reports."""
 
 import io
-from typing import List
 
 from dgf.src.analyse.reports import data_model
 from reportlab.lib import colors
@@ -106,7 +105,7 @@ class PdfRenderer:
         bottomMargin=40,
     )
 
-    story: List[flowables.Flowable] = []
+    story: list[flowables.Flowable] = []
 
     # --- Header Section (Simulating a colored banner) ---
     # We use a table with a background color to create the header banner

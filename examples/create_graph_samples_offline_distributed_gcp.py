@@ -32,9 +32,9 @@ blaze run -c opt //third_party/py/dgf/examples:create_graph_samples_offline_dist
 ```
 """
 
+from collections.abc import Sequence
 import datetime
 import os
-from typing import Sequence
 
 from absl import app
 from absl import flags
@@ -116,11 +116,12 @@ def main(argv: Sequence[str]) -> None:
     raise app.UsageError("Too many command-line arguments.")
 
   timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-  output_path = os.path.join(
-      _OUTPUT_SAMPLES.value, f"samples_{timestamp}"
-  )
+  output_path = os.path.join(_OUTPUT_SAMPLES.value, f"samples_{timestamp}")
 
-  print(f"Starting offline distributed sampling from {_INPUT_GRAPH.value} to {output_path}...")
+  print(
+      f"Starting offline distributed sampling from {_INPUT_GRAPH.value} to"
+      f" {output_path}..."
+  )
 
   plan = dgf.sampling.SimpleSamplingConfig(
       seed_nodeset=_SEED_NODESET.value,

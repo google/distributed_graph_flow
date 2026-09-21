@@ -14,11 +14,11 @@
 
 """Utilities to read parquet files."""
 
+from collections.abc import Sequence
 from concurrent import futures
 import dataclasses
 import os
 import time
-from typing import Dict, Optional, Sequence, Tuple
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import feature_format as feature_format_lib
 from dgf.src.util import filesystem
@@ -111,7 +111,7 @@ def _pa_array_to_numpy(arr: pa.Array) -> np.ndarray:
   return feature
 
 
-def _table_to_numpy_dict(table: pa.Table) -> Dict[str, np.ndarray]:
+def _table_to_numpy_dict(table: pa.Table) -> dict[str, np.ndarray]:
   """Converts a pyarrow Table to a dictionary of numpy arrays."""
 
   def process_column(value: pa.ChunkedArray):
@@ -135,8 +135,8 @@ def _table_to_numpy_dict(table: pa.Table) -> Dict[str, np.ndarray]:
 
 
 def _read_single_parquet_file(
-    path: str, columns: Optional[Sequence[str]] = None
-) -> Dict[str, np.ndarray]:
+    path: str, columns: Sequence[str] | None = None
+) -> dict[str, np.ndarray]:
   """Reads a single Parquet file into a pyarrow Table."""
   try:
     with filesystem.open_read(path, binary=True) as f:
@@ -151,9 +151,9 @@ def _read_single_parquet_file(
 
 def read_parquet_to_numpy_dict(
     paths: Sequence[str],
-    columns: Optional[Sequence[str]] = None,
+    columns: Sequence[str] | None = None,
     verbose: bool = False,
-) -> Tuple[Dict[str, np.ndarray], int]:
+) -> tuple[dict[str, np.ndarray], int]:
   """Reads multiple Parquet files into a single pyarrow Table.
 
   Args:
@@ -189,7 +189,7 @@ def read_parquet_to_numpy_dict(
 
   if verbose:
     log.info(".concatenating values")
-  final_data: Dict[str, np.ndarray] = {}
+  final_data: dict[str, np.ndarray] = {}
   if not chunks:
     return final_data, 0
   columns = list(chunks[0])
@@ -243,11 +243,11 @@ class WriteParquetSpec:
 
 
 def _write_single_shard(
-    data: Dict[str, np.ndarray],
+    data: dict[str, np.ndarray],
     shard_path: str,
     start_row: int,
     end_row: int,
-    write_specs: Dict[str, WriteParquetSpec],
+    write_specs: dict[str, WriteParquetSpec],
     compression: str = "snappy",
 ):
 
@@ -290,7 +290,7 @@ def _write_single_shard(
 
 
 def write_numpy_dict_to_parquet(
-    data: Dict[str, np.ndarray],
+    data: dict[str, np.ndarray],
     filename: str,
     base_path: str,
     schema: schema_lib.FeatureSetSchema,

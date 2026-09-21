@@ -23,7 +23,7 @@ The flax GNN module provides an interface guide for common GNN patterns:
 representation.
 """
 
-from typing import Mapping, Optional
+from collections.abc import Mapping
 from dgf.src.learning.jax import common
 import flax.linen as nn
 import frozendict
@@ -36,8 +36,8 @@ BuildableModule = common.BuildableModule
 # TODO(bmayer): Add this to the public API with appropriate name.
 def from_config(
     gnn_config: BuildableModule,
-    initial_node_state_fn: Optional[nn.Module] = None,
-    heads: Optional[Mapping[str, BuildableModule]] = None,
+    initial_node_state_fn: nn.Module | None = None,
+    heads: Mapping[str, BuildableModule] | None = None,
 ) -> 'GNN':
   """Build a flax GNN model from configs.
 
@@ -91,7 +91,7 @@ class GNN(nn.Module):
   """
 
   gnn: nn.Module
-  initial_node_state_fn: Optional[nn.Module] = None
+  initial_node_state_fn: nn.Module | None = None
 
   # TODO(bmayer): We may want to define "parent" heads so we can make a
   # compute DAG.
@@ -99,7 +99,7 @@ class GNN(nn.Module):
   # requirements. Buildable means any callable that has a .make() function that
   # returns a nn.Module. The buildable callable itself **must** be hashable,
   # e.g., if it's a dataclass, it needs to be marked/annotated as `frozen`.
-  heads: Optional[Mapping[str, BuildableModule]] = None
+  heads: Mapping[str, BuildableModule] | None = None
 
   def __post_init__(self):
     if self.heads:

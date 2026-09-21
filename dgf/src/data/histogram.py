@@ -16,7 +16,6 @@
 
 import dataclasses
 import math
-from typing import List
 
 _DEFAULT_PRECISION = 8
 
@@ -31,8 +30,8 @@ class Histogram:
       len(values) + 1.
   """
 
-  values: List[float] = dataclasses.field(default_factory=list)
-  bins: List[float] = dataclasses.field(default_factory=list)
+  values: list[float] = dataclasses.field(default_factory=list)
+  bins: list[float] = dataclasses.field(default_factory=list)
 
   def __str__(self) -> str:
     if not self.values:

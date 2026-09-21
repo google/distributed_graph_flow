@@ -15,7 +15,6 @@
 """Evaluation classes for models."""
 
 import dataclasses
-from typing import Dict, List, Optional
 import uuid
 import altair as alt
 import dataclasses_json
@@ -99,17 +98,17 @@ class Evaluation:
     per_classes: List of PerClass metrics for multi-class classification.
   """
 
-  loss: Optional[float] = None
-  accuracy: Optional[float] = None
-  rmse: Optional[float] = None
-  r2: Optional[float] = None
-  num_examples: Optional[int] = None
-  num_examples_weighted: Optional[float] = None
-  mrr: Optional[float] = None
-  auc: Optional[float] = None
-  hit_at: Dict[int, float] = dataclasses.field(default_factory=dict)
-  user_metrics: Dict[str, float] = dataclasses.field(default_factory=dict)
-  per_classes: List[PerClass] = dataclasses.field(default_factory=list)
+  loss: float | None = None
+  accuracy: float | None = None
+  rmse: float | None = None
+  r2: float | None = None
+  num_examples: int | None = None
+  num_examples_weighted: float | None = None
+  mrr: float | None = None
+  auc: float | None = None
+  hit_at: dict[int, float] = dataclasses.field(default_factory=dict)
+  user_metrics: dict[str, float] = dataclasses.field(default_factory=dict)
+  per_classes: list[PerClass] = dataclasses.field(default_factory=list)
 
   def _repr_html_(
       self, max_plot_points: int = 1000, max_plot_classes: int = 20

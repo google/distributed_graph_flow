@@ -18,7 +18,7 @@ import base64
 import collections
 import dataclasses
 import json
-from typing import Any, Dict, List, Set, Tuple, Union
+from typing import Any
 from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
@@ -32,7 +32,7 @@ NormalizedNodeId = bytes
 
 
 def _normalize_node_id(
-    node_id: Union[str, bytes],
+    node_id: str | bytes,
     feature_schema: schema_lib.FeatureSchema,
     is_from_spanner: bool = False,
 ) -> bytes:
@@ -74,7 +74,7 @@ def _sql_cast_to_bytes(
   return col_name
 
 
-RawFeatures = Dict[str, list]
+RawFeatures = dict[str, list]
 
 
 @dataclasses.dataclass
@@ -86,20 +86,20 @@ class RawNodeset:
 @dataclasses.dataclass
 class RawEdgeset:
   features: RawFeatures
-  adjacency: List[Tuple[int, int]] = dataclasses.field(default_factory=list)
+  adjacency: list[tuple[int, int]] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
 class RawGraph:
-  node_sets: Dict[str, RawNodeset]
-  edge_sets: Dict[str, RawEdgeset]
+  node_sets: dict[str, RawNodeset]
+  edge_sets: dict[str, RawEdgeset]
 
   # Mapping from the Spanner graph internal node ids to the per-nodeset dense
   # node index in the raw graph.
-  spanner_node_ids: Dict[bytes, int] = dataclasses.field(default_factory=dict)
+  spanner_node_ids: dict[bytes, int] = dataclasses.field(default_factory=dict)
 
   # Set of Spanner graph internal edge ids to avoid double counting edges.
-  spanner_edge_ids: Set[Any] = dataclasses.field(default_factory=set)
+  spanner_edge_ids: set[Any] = dataclasses.field(default_factory=set)
 
 
 @dataclasses.dataclass
@@ -314,8 +314,8 @@ class SpannerGraphSampler:
     return generator.generate()
 
   def sample(
-      self, seed_ids: List[bytes]
-  ) -> List[in_memory_graph_lib.InMemoryGraph]:
+      self, seed_ids: list[bytes]
+  ) -> list[in_memory_graph_lib.InMemoryGraph]:
     """Samples subgraphs starting from the given seed nodes.
 
     Args:
@@ -370,7 +370,7 @@ def create_graph_spanner_sampler(
     instance: str,
     database: str,
     graph: str,
-    plan: Union[config_lib.SimpleSamplingConfig, config_lib.SamplingPlan],
+    plan: config_lib.SimpleSamplingConfig | config_lib.SamplingPlan,
     schema: schema_lib.GraphSchema,
     debug_sampling: bool = False,
 ) -> SpannerGraphSampler:
@@ -392,8 +392,8 @@ def create_graph_spanner_sampler(
 
 
 def _json_features_to_features(
-    values: Dict[str, List[Any]], schema: schema_lib.FeatureSetSchema
-) -> Dict[str, np.ndarray]:
+    values: dict[str, list[Any]], schema: schema_lib.FeatureSetSchema
+) -> dict[str, np.ndarray]:
   """Converts spanner feature/propertie values into numpy feature values."""
   result = {}
   for feature_name, feature_schema in schema.items():
@@ -417,9 +417,9 @@ def _json_features_to_features(
 def _cte_result_to_in_memory_graphs(
     result: Any,
     schema: schema_lib.GraphSchema,
-    seed_ids: List[bytes],
+    seed_ids: list[bytes],
     root_nodeset: str,
-) -> List[in_memory_graph_lib.InMemoryGraph]:
+) -> list[in_memory_graph_lib.InMemoryGraph]:
   """Converts the flat CTE query results (with features) into InMemoryGraphs."""
   root_pk = _get_primary_key(root_nodeset, schema)
   root_pk_schema = schema.node_sets[root_nodeset].features[root_pk]
@@ -428,7 +428,7 @@ def _cte_result_to_in_memory_graphs(
   ]
 
   # 1. Initialize RawGraphs for each seed
-  raw_graphs_per_seed: Dict[bytes, RawGraph] = {}
+  raw_graphs_per_seed: dict[bytes, RawGraph] = {}
   for seed_id in normalized_seeds:
     raw_graphs_per_seed[seed_id] = RawGraph(
         node_sets={

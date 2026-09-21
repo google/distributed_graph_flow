@@ -14,7 +14,7 @@
 
 """Beam utilities for working with Google Cloud Native Graphs."""
 
-from typing import Any, Dict
+from typing import Any
 
 from dgf.src.analyse import schema as schema_analyse_lib
 from dgf.src.data import distributed_graph as distributed_graph_lib
@@ -24,7 +24,7 @@ from dgf.src.io.gcp import common as gcp_common_lib
 
 
 def create_distributed_node_set(
-    graph_element: Dict[str, Any],
+    graph_element: dict[str, Any],
     nodeset_name: str,
     graph_schema: schema_lib.GraphSchema,
     combine_as_json: bool = False,
@@ -63,7 +63,7 @@ def create_distributed_node_set(
 
 
 def create_distributed_edge_set(
-    graph_element: Dict[str, Any],
+    graph_element: dict[str, Any],
     edgeset_name: str,
     graph_schema: schema_lib.GraphSchema,
     combine_as_json: bool = False,

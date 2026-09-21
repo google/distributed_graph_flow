@@ -14,7 +14,7 @@
 
 """Compute feature stats, in process, on InMemoryGraph."""
 
-from typing import Iterator
+from collections.abc import Iterator
 from dgf.src.analyse import feature_statistics as feature_statistics_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib

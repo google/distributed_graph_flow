@@ -19,7 +19,7 @@ import logging
 import math
 import os
 import pprint
-from typing import Any, List, Optional
+from typing import Any
 from absl import flags
 from absl.testing import absltest
 from dgf.src.data import distributed_graph
@@ -53,7 +53,7 @@ class TwoDiffObjects:
 
 
 # The last two different objects computed by are_equal.
-_last_diff: Optional[TwoDiffObjects] = None
+_last_diff: TwoDiffObjects | None = None
 
 
 def disable_diff_truncation():
@@ -254,7 +254,7 @@ def are_equal(obj1: Any, obj2: Any, abs_tol: float | None = None) -> bool:
     raise RuntimeError(f"Error comparing:\nobj1={obj1!r}\nobj2={obj2!r}") from e
 
 
-def unique_subset_of_length(values: List, allowed: List, length: int) -> bool:
+def unique_subset_of_length(values: list, allowed: list, length: int) -> bool:
   """Tests if "values" are unique and only contain values in "allowed".
 
   Args:
@@ -280,7 +280,7 @@ def unique_subset_of_length(values: List, allowed: List, length: int) -> bool:
 
 
 def assert_unique_subset_of_length(
-    test, values: List, allowed: List, length: int
+    test, values: list, allowed: list, length: int
 ):
   """Test asserts that "unique_subset_of_length" is true."""
   test.assertTrue(

@@ -14,13 +14,12 @@
 
 """Import / export data to networkx."""
 
-from typing import Tuple
-
-
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 import networkx as nx
 import numpy as np
+
+
 def _get_element_id(set_name: str, index: int, for_graphml: bool = False):
   if not for_graphml:
     return (set_name, index)
@@ -121,7 +120,7 @@ def _infer_feature_schema(arr: np.ndarray) -> schema_lib.FeatureSchema:
   return schema_lib.FeatureSchema(format=fmt, shape=shape)
 
 
-def _get_feature_shape(arr: np.ndarray) -> Tuple[int, ...]:
+def _get_feature_shape(arr: np.ndarray) -> tuple[int, ...]:
   if arr.ndim > 1:
     return arr.shape[1:]
   return ()
@@ -129,7 +128,7 @@ def _get_feature_shape(arr: np.ndarray) -> Tuple[int, ...]:
 
 def networkx_to_graph(
     nx_graph: nx.MultiDiGraph,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Converts a NetworkX graph into an InMemoryGraph and its schema.
 
   Usage:

@@ -19,7 +19,8 @@ See in_memory_graph.py for the actual documentation.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, TYPE_CHECKING, Union
+from collections.abc import Mapping
+from typing import Any, TYPE_CHECKING, Union
 
 from dgf.src.util.weak_dep.weak_dep_tensorflow import ExtensionType, tf
 
@@ -35,7 +36,7 @@ Features = Mapping[str, Array]
 # A TF Graph Dict is equivalent to a TF Graph (i.e. TFInMemoryGraph class
 # defined below), but where all the fields are flattened in a single dictionary.
 # A TF Graph Dict is useful for passing graphs in some systems e.g. VertexAI.
-TFInMemoryGraphDict = Dict[str, Array]
+TFInMemoryGraphDict = dict[str, Array]
 
 
 class TFInMemoryNodeSet(ExtensionType):

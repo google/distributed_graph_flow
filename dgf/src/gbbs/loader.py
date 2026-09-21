@@ -42,7 +42,6 @@ handle = dgf.gbbs.loader.read_gbbs_projection("/path/to/graph", "node_set",
 import atexit
 import os
 import time
-from typing import Optional
 
 from absl import logging
 from dgf.src.api import io as dgf_io
@@ -112,7 +111,7 @@ def num_parlay_workers() -> int:
 def create_gbbs_graph_handle(
     num_nodes: int,
     adjacency: np.ndarray,
-    weights: Optional[np.ndarray] = None,
+    weights: np.ndarray | None = None,
     symmetric: bool = True,
 ) -> GbbsGraphHandle:
   """Creates a GBBS graph from COO adjacency arrays and optional weights.
@@ -160,7 +159,7 @@ def gbbs_graph_handle_from_graph(
     graph: in_memory_graph_lib.InMemoryGraph,
     node_set_name: str,
     edge_set_name: str,
-    weight_key: Optional[str] = None,
+    weight_key: str | None = None,
     symmetric: bool = True,
 ) -> GbbsGraphHandle:
   """Converts an ``InMemoryGraph`` into a ``GbbsGraphHandle``.
@@ -228,7 +227,7 @@ def validate_projection(
     schema: GraphSchema,
     node_set_name: str,
     edge_set_name: str,
-    weight_key: Optional[str] = None,
+    weight_key: str | None = None,
 ) -> None:
   """Validates that a node/edge set can be projected onto a GBBS graph.
 
@@ -283,7 +282,7 @@ def create_override_schema(
     schema: GraphSchema,
     node_set_name: str,
     edge_set_name: str,
-    weight_key: Optional[str] = None,
+    weight_key: str | None = None,
 ) -> GraphSchema:
   """Creates an override schema for loading a projection as a GBBS graph."""
   node_schema = schema.node_sets[node_set_name]
@@ -309,7 +308,7 @@ def read_gbbs_projection(
     path: str,
     node_set_name: str,
     edge_set_name: str,
-    weight_key: Optional[str] = None,
+    weight_key: str | None = None,
     symmetric: bool = True,
     verbose: bool = False,
     remove_dangling_edges: bool = False,

@@ -15,7 +15,7 @@
 """In memory sampler."""
 
 import os
-from typing import List, Optional, Union, overload
+from typing import overload
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.sampling import _in_memory_sampler_ext
@@ -69,29 +69,29 @@ class Sampler:
   def sample(
       self,
       seed_node_idxs: int,
-      seed_timestamps: Optional[int] = None,
-      masked_edge_idxs: Optional[int] = None,
+      seed_timestamps: int | None = None,
+      masked_edge_idxs: int | None = None,
   ) -> in_memory_graph_lib.InMemoryGraph:
     ...
 
   @overload
   def sample(
       self,
-      seed_node_idxs: Union[np.ndarray, List[int]],
-      seed_timestamps: Optional[Union[List[int], np.ndarray]] = None,
-      masked_edge_idxs: Optional[Union[List[int], np.ndarray]] = None,
-  ) -> List[in_memory_graph_lib.InMemoryGraph]:
+      seed_node_idxs: np.ndarray | list[int],
+      seed_timestamps: list[int] | np.ndarray | None = None,
+      masked_edge_idxs: list[int] | np.ndarray | None = None,
+  ) -> list[in_memory_graph_lib.InMemoryGraph]:
     ...
 
   def sample(
       self,
-      seed_node_idxs: Union[int, List[int], np.ndarray],
-      seed_timestamps: Optional[Union[int, List[int], np.ndarray]] = None,
-      masked_edge_idxs: Optional[Union[int, List[int], np.ndarray]] = None,
-  ) -> Union[
-      in_memory_graph_lib.InMemoryGraph,
-      List[in_memory_graph_lib.InMemoryGraph],
-  ]:
+      seed_node_idxs: int | list[int] | np.ndarray,
+      seed_timestamps: int | list[int] | np.ndarray | None = None,
+      masked_edge_idxs: int | list[int] | np.ndarray | None = None,
+  ) -> (
+      in_memory_graph_lib.InMemoryGraph
+      | list[in_memory_graph_lib.InMemoryGraph]
+  ):
     """Samples one (or multiple) subgraphs.
 
     Grows one or more graph samples starting from the provided seed nodes. Each
@@ -188,7 +188,7 @@ class Sampler:
       return graphs
 
   def subgraph(
-      self, seed_node_idxs: List[int]
+      self, seed_node_idxs: list[int]
   ) -> in_memory_graph_lib.InMemoryGraph:
     """Extracts the subgraph around the provided seed nodes.
 
@@ -232,8 +232,8 @@ class Sampler:
     return graph
 
   def multisubgraph(
-      self, seed_node_idxs: List[int]
-  ) -> List[in_memory_graph_lib.InMemoryGraph]:
+      self, seed_node_idxs: list[int]
+  ) -> list[in_memory_graph_lib.InMemoryGraph]:
     """Extracts the subgraphs around the provided seed nodes.
 
     This method returns the graphs containing all the nodes and edges at a
@@ -284,8 +284,8 @@ class Sampler:
 
   def _add_finalize_graphs(
       self,
-      graphs: List[in_memory_graph_lib.InMemoryGraph],
-      seed_timestamps: Optional[np.ndarray] = None,
+      graphs: list[in_memory_graph_lib.InMemoryGraph],
+      seed_timestamps: np.ndarray | None = None,
   ):
     """Adds features and removes temporary node indices based on settings.
 
@@ -326,7 +326,7 @@ class Sampler:
 
 def add_features_to_samples(
     full_graph: in_memory_graph_lib.InMemoryGraph,
-    samples: List[in_memory_graph_lib.InMemoryGraph],
+    samples: list[in_memory_graph_lib.InMemoryGraph],
     return_features: bool,
     return_node_idxs: bool,
 ):
@@ -362,17 +362,17 @@ def add_features_to_samples(
 
 def create_sampler(
     graph: in_memory_graph_lib.InMemoryGraph,
-    plan: Union[config_lib.SimpleSamplingConfig, config_lib.SamplingPlan],
+    plan: config_lib.SimpleSamplingConfig | config_lib.SamplingPlan,
     schema: schema_lib.GraphSchema,
     *,
-    batch_size: Optional[int] = None,
+    batch_size: int | None = None,
     return_features: bool = True,
     return_node_idxs: bool = False,
     debug_sampling: bool = False,
-    num_threads: Optional[int] = None,
-    seed: Optional[int] = None,
-    edgeset_to_mask: Optional[str] = None,
-    slice_timeseries_by_seed: Optional[bool] = None,
+    num_threads: int | None = None,
+    seed: int | None = None,
+    edgeset_to_mask: str | None = None,
+    slice_timeseries_by_seed: bool | None = None,
 ) -> Sampler:
   """Creates an in-memory sampler.
 

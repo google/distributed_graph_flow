@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-from typing import Optional, Tuple
-
 from dgf.src.data import distributed_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import tf_graph_common
@@ -105,9 +103,9 @@ def nonkeyed_tf_example_to_node(
 
 
 def keyed_tf_example_to_node(
-    keyed_example: Tuple[bytes, tf.train.Example],
+    keyed_example: tuple[bytes, tf.train.Example],
     schema: schema_lib.NodeSchema,
-    node_id_column: Optional[str],
+    node_id_column: str | None,
     ignore_keys: tuple[str, ...],
 ) -> distributed_graph.Node:
   """Build a node from a tf example."""
@@ -122,7 +120,7 @@ def keyed_tf_example_to_node(
 
 def tf_example_to_edge(
     example: tf.train.Example,
-    edge_id_column: Optional[str],
+    edge_id_column: str | None,
     schema: schema_lib.EdgeSchema,
     ignore_keys: tuple[str, ...],
 ) -> distributed_graph.Edge:
@@ -155,7 +153,7 @@ def tf_example_to_edge(
 
 def node_to_tf_example(
     node: distributed_graph.Node,
-    node_id_column: Optional[str],
+    node_id_column: str | None,
     nodeset_schema: schema_lib.NodeSchema,
 ) -> tf.train.Example:
   """Converts node features to a tf example."""
@@ -180,7 +178,7 @@ def node_to_tf_example(
 
 def edge_to_tf_example(
     edge: distributed_graph.Edge,
-    edge_id_column: Optional[str],
+    edge_id_column: str | None,
     edge_schema: schema_lib.EdgeSchema,
     source_format: schema_lib.FeatureFormat,
     target_format: schema_lib.FeatureFormat,

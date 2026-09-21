@@ -41,8 +41,9 @@ filter_graphs(
         yield tuple(g for p in predicates if p(g))
 """
 
+from collections.abc import Sequence
 import dataclasses
-from typing import Any, List, Optional, Protocol, Sequence, TypeVar
+from typing import Any, Protocol, TypeVar
 
 from dgf.src.data import in_memory_graph as dgf_in_memory_graph
 import numpy as np
@@ -77,7 +78,7 @@ class NumNodesPredicate:
   """
 
   # TODO(bmayer): Consider supporting List[str].
-  nodeset_name: Optional[str] = None
+  nodeset_name: str | None = None
   lower: int = -np.inf  # pyrefly: ignore[bad-assignment]
   upper: int = np.inf  # pyrefly: ignore[bad-assignment]
 
@@ -136,7 +137,7 @@ def filter_graphs(
     predicates: Sequence[InMemoryGraphPredicate],
     verbose: bool = True,
     tqdm_desc: str = "Filtering Graphs",
-) -> List[List[InMemoryGraph]]:
+) -> list[list[InMemoryGraph]]:
   """Filters a sequence of graphs based on user defined predicates.
 
   Simple single-thread alternative to built in filter for chaining multiple

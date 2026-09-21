@@ -18,7 +18,7 @@ import datetime
 import os
 import subprocess
 import time
-from typing import Any, Optional, Union
+from typing import Any
 
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import schema as io_schema
@@ -69,7 +69,7 @@ def _format_duration(seconds: float) -> str:
   return f"{sec}s"
 
 
-def _get_default_gcp_project() -> Optional[str]:
+def _get_default_gcp_project() -> str | None:
   """Gets the active GCP project from environment or gcloud config."""
   for env_var in (
       "GOOGLE_CLOUD_PROJECT",
@@ -114,7 +114,7 @@ def _validate_paths(input_path: str, output_path: str) -> tuple[str, str]:
 
 
 def _validate_seed_args(
-    num_seeds: Optional[int],
+    num_seeds: int | None,
     num_samples_per_seed: int,
     input_seed_container: str,
 ) -> None:
@@ -186,8 +186,8 @@ def _get_job_stage_and_name(state: Any) -> tuple[int, str]:
 def _write_sampling_plan(
     input_path: str,
     output_path: str,
-    plan: Union[config_lib.SimpleSamplingConfig, config_lib.SamplingPlan],
-    schema: Optional[schema_lib.GraphSchema],
+    plan: config_lib.SimpleSamplingConfig | config_lib.SamplingPlan,
+    schema: schema_lib.GraphSchema | None,
 ) -> str:
   """Converts sampling config to plan if needed and writes it to GCS."""
   sampling_config_path = f"{output_path}/sampling_config.json"
@@ -213,9 +213,9 @@ def _create_custom_job(
     project: str,
     region: str,
     num_workers: int,
-    num_seeds: Optional[int],
+    num_seeds: int | None,
     num_samples_per_seed: int,
-    input_seeds: Optional[str],
+    input_seeds: str | None,
     input_seed_container: str,
     random_seed: int,
     staging_location: str,
@@ -349,21 +349,21 @@ def _monitor_job(
 def offline_distributed_sampler_gcp(
     input_path: str,
     output_path: str,
-    plan: Union[config_lib.SimpleSamplingConfig, config_lib.SamplingPlan],
-    schema: Optional[schema_lib.GraphSchema] = None,
+    plan: config_lib.SimpleSamplingConfig | config_lib.SamplingPlan,
+    schema: schema_lib.GraphSchema | None = None,
     *,
     blocking: bool = True,
-    project: Optional[str] = None,
+    project: str | None = None,
     region: str = "us-central1",
     num_workers: int = 5,
-    num_seeds: Optional[int] = None,
+    num_seeds: int | None = None,
     num_samples_per_seed: int = 1,
-    input_seeds: Optional[str] = None,
+    input_seeds: str | None = None,
     input_seed_container: str = "TFRECORD",
     random_seed: int = 42,
-    temp_location: Optional[str] = None,
-    staging_location: Optional[str] = None,
-    display_name: Optional[str] = None,
+    temp_location: str | None = None,
+    staging_location: str | None = None,
+    display_name: str | None = None,
     poll_interval: float = _DEFAULT_POLL_INTERVAL_SEC,
 ) -> aiplatform.CustomJob:
   """Runs the offline distributed graph sampler on GCP.

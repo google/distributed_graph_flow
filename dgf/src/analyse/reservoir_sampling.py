@@ -15,7 +15,6 @@
 """Reservoir sampling."""
 
 import dataclasses
-from typing import List, Tuple
 from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 import numpy as np
 
@@ -77,9 +76,9 @@ class BatchReservoirSampling:
     """Adds another reservoir to the current reservoir."""
     self.add(other._samples[: other._num_in_cache])
 
-  def get_quantiles(self, num_quantiles: int) -> Tuple[
-      List[float],
-      List[float],
+  def get_quantiles(self, num_quantiles: int) -> tuple[
+      list[float],
+      list[float],
   ]:
     """Computes the quantiles and corresponding quantile arguments."""
     # TODO(b/381397901): This is not optimal when a few values have a lot of

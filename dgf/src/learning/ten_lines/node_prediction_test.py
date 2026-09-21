@@ -18,7 +18,6 @@ import copy
 import dataclasses
 import os
 import tempfile
-from typing import Tuple
 import unittest
 from absl import logging
 from absl.testing import absltest
@@ -77,7 +76,7 @@ def _sampling_plan(
 
 def _gen_graph_real_looking(
     has_timestamp_feature: bool = False,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Generate a toy dataset with real looking features, but without patterns."""
   edge_features = {}
   if has_timestamp_feature:
@@ -661,6 +660,7 @@ class NodePredictionRealLooking(parameterized.TestCase):
 
     def mock_graph_merger(*args, **kwargs):
       real_graph_merger = original_graph_merger(*args, **kwargs)
+
       def graph_merger_wrapper(*call_args, **call_kwargs):
         nonlocal call_count
         call_count += 1
@@ -669,6 +669,7 @@ class NodePredictionRealLooking(parameterized.TestCase):
               "Simulated insufficient padding"
           )
         return real_graph_merger(*call_args, **call_kwargs)
+
       return graph_merger_wrapper
 
     with unittest.mock.patch.object(
@@ -1128,7 +1129,7 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
 
   def _create_timeseries_graph_and_schema(
       self,
-  ) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+  ) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
     """Creates 1 sensor node with a timeseries and 2 query nodes with different creation times."""
 
     schema = schema_lib.GraphSchema(

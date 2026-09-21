@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Literal, TYPE_CHECKING, Tuple
+from typing import Any, Literal, TYPE_CHECKING
 from unittest import mock
 
 from dgf.src.util.weak_dep.weak_dep_bagz import bagz
@@ -82,8 +82,8 @@ def _write_sharded_avro(
     shard_idx: int,
     num_shards: int,
     extension: str,
-    schema: Dict[str, Any],
-    records: List[Dict[str, Any]],
+    schema: dict[str, Any],
+    records: list[dict[str, Any]],
 ):
   """Create an Avro sharded file, and write some records."""
   filename = shard_lib.sharded_filename(
@@ -1223,7 +1223,7 @@ def generate_tf_graph_sample_in_tf_record(
 def generate_tf_graph_sample_dict(
     node_ids: bool,
     edge_ids: bool,
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
   """Generates a dict of numpy arrays representing a graph sample.
 
   Args:
@@ -1439,8 +1439,8 @@ def generate_tf_in_memory_graph(
 
 def generate_graph_pieces(
     schema_node_ids: bool = True, schema_edge_ids: bool = True
-) -> Tuple[
-    Dict[str, List[Node]], Dict[str, List[Edge]], schema_lib.GraphSchema
+) -> tuple[
+    dict[str, list[Node]], dict[str, list[Edge]], schema_lib.GraphSchema
 ]:
   """Generates some node sets, edge sets and a schema.
 
@@ -1506,7 +1506,7 @@ def generate_graph_pieces(
   )
 
 
-def get_spanner_graph_metadata_dict() -> Dict[str, Any]:
+def get_spanner_graph_metadata_dict() -> dict[str, Any]:
   """Returns the Spanner Graph metadata as a dictionary."""
   return {
       "catalog": "",
@@ -1643,7 +1643,7 @@ def _get_spanner_graph_metadata_and_features():
   )
 
 
-def generate_spanner_graph() -> Tuple[Any, Dict[str, List[Dict[str, Any]]]]:
+def generate_spanner_graph() -> tuple[Any, dict[str, list[dict[str, Any]]]]:
   """Generates a SpannerGraph config and corresponding raw data for mocking.
 
   Returns:
@@ -1894,7 +1894,7 @@ def gen_toy_classification_dataset(
     random_seed: int = 0,
     max_num_edges_per_n1_nodes: int = 20,
     accuracy: float = 0.8,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Generates a toy classification dataset with a learnable pattern.
 
   The dataset contains two node sets, N1 and N2. N1 contains the label feature.
@@ -2044,7 +2044,7 @@ def gen_toy_regression_dataset(
     max_num_edges_per_n1_nodes: int = 20,
     label_dtype: Literal["float32", "int64"] = "float32",
     label_dim: int = 1,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Generates a toy regression dataset with a learnable pattern.
 
   The dataset contains two node sets, N1 and N2. N1 contains the label feature.
@@ -2192,7 +2192,7 @@ def gen_toy_regression_dataset(
 
 def generate_temporal_in_memory_graph(
     include_e2: bool,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Generates a temporal InMemoryGraph for testing."""
 
   edge_sets_schema = {
@@ -2265,7 +2265,7 @@ def generate_temporal_in_memory_graph(
 
 
 def generate_recommender_like_in_memory_graph() -> (
-    Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]
+    tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]
 ):
   """Generates a recommender-like in-memory graph and schema.
 

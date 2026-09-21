@@ -32,9 +32,10 @@ graph, schema = dgf.io.cache("/tmp/cache.pkl",
 ```
 """
 
+from collections.abc import Callable, Sequence
 import inspect
 import pickle
-from typing import Callable, Optional, Sequence, TypeVar, Union
+from typing import TypeVar
 from dgf.src.util import filesystem as fs
 
 
@@ -54,7 +55,7 @@ T = TypeVar("T")
 def cache(
     path: str,
     create_fn: Callable[..., T],
-    variable_names: Optional[Union[str, Sequence[str]]] = None,
+    variable_names: str | Sequence[str] | None = None,
 ) -> T:
   """Returns and caches the variable(s) created by "create_fn".
 

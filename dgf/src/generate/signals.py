@@ -14,7 +14,7 @@
 
 import abc
 import dataclasses
-from typing import List, Literal
+from typing import Literal
 import numpy as np
 
 
@@ -32,8 +32,8 @@ class SignalConfig(abc.ABC):
 class CompositeSignal(SignalConfig):
   """Weighted linear combination of signals."""
 
-  components: List[SignalConfig]
-  weights: List[float]
+  components: list[SignalConfig]
+  weights: list[float]
 
   def __post_init__(self):
     assert len(self.components) == len(

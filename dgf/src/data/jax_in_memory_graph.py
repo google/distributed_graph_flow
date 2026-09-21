@@ -22,13 +22,11 @@ type annotations required for static checkers in both this file and user code.
 """
 
 import dataclasses
-from typing import Dict, Optional
 
 import jax
 from jax import tree_util as jax_tree_util
 
-
-Features = Dict[str, jax.Array]
+Features = dict[str, jax.Array]
 
 
 @jax_tree_util.register_dataclass
@@ -45,7 +43,7 @@ class JaxInMemoryNodeSet:
   """
 
   features: Features
-  num_nodes: Optional[int] = dataclasses.field(metadata=dict(static=True))
+  num_nodes: int | None = dataclasses.field(metadata=dict(static=True))
 
 
 @jax_tree_util.register_dataclass
@@ -78,5 +76,5 @@ class JaxInMemoryGraph:
     edge_sets: Dictionary of edge set name and edge set features.
   """
 
-  node_sets: Dict[str, JaxInMemoryNodeSet]
-  edge_sets: Dict[str, JaxInMemoryEdgeSet]
+  node_sets: dict[str, JaxInMemoryNodeSet]
+  edge_sets: dict[str, JaxInMemoryEdgeSet]

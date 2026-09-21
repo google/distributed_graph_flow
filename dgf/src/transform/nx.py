@@ -14,7 +14,7 @@
 
 """GF <-> networkx toolkit."""
 
-from typing import Optional, Sequence
+from collections.abc import Sequence
 import dgf.src.data.in_memory_graph
 import networkx as nx
 import numpy as np
@@ -28,7 +28,7 @@ def homogeneous_graph_piece_to_nx(
     nodeset_name: str,
     edgeset_name: str,
     *,
-    id_feature_name: Optional[str] = None,
+    id_feature_name: str | None = None,
     features_to_keep: str | Sequence[str] = (),
     verbose=True
 ):

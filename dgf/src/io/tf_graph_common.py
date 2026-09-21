@@ -15,7 +15,6 @@
 """Common utilities for TF-based graph serialization and processing."""
 
 import enum
-from typing import Optional
 
 from dgf.src.data import schema as schema_lib
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
@@ -107,7 +106,7 @@ def maybe_set_id_column(
     index: int,
     feature_schema: schema_lib.FeatureSetSchema,
     features: dict[str, np.ndarray],
-    id_column: Optional[str],
+    id_column: str | None,
 ):
   """Sets the id column if present in features and schema."""
   if (
@@ -128,7 +127,7 @@ def in_memory_node_to_tf_example(
     node_index: int,
     feature_schema: schema_lib.FeatureSetSchema,
     features: dict[str, np.ndarray] | None,
-    node_id_column: Optional[str],
+    node_id_column: str | None,
     ignore_keys: tuple[str, ...] = (),
 ) -> tf.train.Example:
   """Builds a tf.train.Example for a single node inside an InMemoryNodeSet.
@@ -164,7 +163,7 @@ def in_memory_edge_to_tf_example(
     target: int | bytes,
     target_format: schema_lib.FeatureFormat,
     features: dict[str, np.ndarray] | None,
-    edge_id_column: Optional[str],
+    edge_id_column: str | None,
     ignore_keys: tuple[str, ...] = (KEY_SOURCE, KEY_TARGET),
 ) -> tf.train.Example:
   """Builds a tf.train.Example for a single edge inside an InMemoryEdgeSet.

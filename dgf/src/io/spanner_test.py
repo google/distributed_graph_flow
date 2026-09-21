@@ -14,8 +14,6 @@
 
 """Tests for working with Cloud Spanner databases."""
 
-from typing import Dict, Set, Tuple
-
 from absl.testing import absltest
 from absl.testing import parameterized
 import apache_beam as beam
@@ -142,7 +140,7 @@ class SpannerTest(parameterized.TestCase):
           database_id=self.database_id,
       )
 
-    node_set_table_schemas: Dict[str, Set[Tuple[str, str, str]]] = {}
+    node_set_table_schemas: dict[str, set[tuple[str, str, str]]] = {}
     for node_set_name in self.schema.node_sets:
       with self.database.snapshot() as snapshot:
         results = snapshot.execute_sql(
@@ -176,7 +174,7 @@ class SpannerTest(parameterized.TestCase):
     )
 
     # edge_set_table_schemas = defaultdict(list)
-    edge_set_table_schemas: Dict[str, Set[Tuple[str, str, str]]] = {}
+    edge_set_table_schemas: dict[str, set[tuple[str, str, str]]] = {}
     for edge_set_name in self.schema.edge_sets:
       with self.database.snapshot() as snapshot:
         results = snapshot.execute_sql(

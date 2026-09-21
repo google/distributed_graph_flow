@@ -15,7 +15,6 @@
 """1D CNN Timeseries Encoder layer for DGF."""
 
 import dataclasses
-from typing import Optional
 import dataclasses_json
 from dgf.src.data import schema as schema_lib
 from dgf.src.learning.jax import common
@@ -53,7 +52,7 @@ class TimeseriesCNNEncoderConfig(common.ArchitectureProvider):
   num_layers: int = 2
   activation: str = "relu"
   dropout_rate: float = 0.1
-  norm: Optional[str] = "layer_norm"
+  norm: str | None = "layer_norm"
 
   def __post_init__(self):
     if self.out_dim <= 0:
@@ -89,8 +88,8 @@ class TimeseriesCNNEncoderConfig(common.ArchitectureProvider):
   def make(
       self,
       feature_schema: schema_lib.FeatureSchema,
-      mask_schema: Optional[schema_lib.FeatureSchema] = None,
-      name: Optional[str] = None,
+      mask_schema: schema_lib.FeatureSchema | None = None,
+      name: str | None = None,
   ) -> "TimeseriesCNNEncoder":
     return TimeseriesCNNEncoder(
         config=self,
@@ -120,13 +119,13 @@ class TimeseriesCNNEncoder(nn.Module):
 
   config: TimeseriesCNNEncoderConfig
   feature_schema: schema_lib.FeatureSchema
-  mask_schema: Optional[schema_lib.FeatureSchema] = None
+  mask_schema: schema_lib.FeatureSchema | None = None
 
   @nn.compact
   def __call__(
       self,
       x: jt.Float[jt.Array, "N T C"],
-      mask: Optional[jt.Bool[jt.Array, "N T"]] = None,
+      mask: jt.Bool[jt.Array, "N T"] | None = None,
       training: bool = False,
   ) -> jt.Float[jt.Array, "N out_dim"]:
     """Applies 1D CNN + Masking + Masked Mean Pooling + Dense projection.

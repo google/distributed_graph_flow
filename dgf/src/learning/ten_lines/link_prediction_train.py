@@ -14,10 +14,11 @@
 
 """The logic to train a link prediction model."""
 
+from collections.abc import Callable, Iterator
 import itertools
 import os
 import time
-from typing import Callable, Dict, Iterator, List, Literal, Optional, Tuple, Union
+from typing import Literal
 from dgf.src.analyse import print_schema as print_schema_lib
 from dgf.src.data import in_memory_graph
 from dgf.src.data import jax_in_memory_graph
@@ -49,7 +50,7 @@ import optax
 import tqdm
 
 Batch = link_prediction_core_model.Batch
-EdgeBatch = Tuple[
+EdgeBatch = tuple[
     in_memory_graph.InMemoryGraph, jax.Array, jax.Array, jax.Array
 ]
 LinkPredictionModel = link_prediction_model.LinkPredictionModel
@@ -63,14 +64,14 @@ HParam = link_prediction_model.HParam
 
 def compute_train_and_valid_edge_idxs(
     graph: in_memory_graph.InMemoryGraph,
-    valid_graph: Optional[in_memory_graph.InMemoryGraph],
+    valid_graph: in_memory_graph.InMemoryGraph | None,
     hparams: HParam,
     task: LinkPredictionTask,
     validation_ratio: float,
-    train_seed_edges: Optional[common.SeedNodeIdxs],
-    valid_seed_edges: Optional[common.SeedNodeIdxs],
-    max_num_valid_examples: Optional[int],
-) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    train_seed_edges: common.SeedNodeIdxs | None,
+    valid_seed_edges: common.SeedNodeIdxs | None,
+    max_num_valid_examples: int | None,
+) -> tuple[np.ndarray | None, np.ndarray | None]:
   """Computes the training and validation seed edges indices.
 
   Logics:
@@ -154,26 +155,26 @@ def compute_train_and_valid_edge_idxs(
 
 def prepare_datasets(
     graph: in_memory_graph.InMemoryGraph,
-    valid_graph: Optional[in_memory_graph.InMemoryGraph],
+    valid_graph: in_memory_graph.InMemoryGraph | None,
     schema: schema_lib.GraphSchema,
     hparams: HParam,
     task: LinkPredictionTask,
     verbose: int,
     validation_ratio: float,
-    train_seed_edges: Optional[common.SeedNodeIdxs],
-    valid_seed_edges: Optional[common.SeedNodeIdxs],
-    num_valid_steps: Optional[int],
+    train_seed_edges: common.SeedNodeIdxs | None,
+    valid_seed_edges: common.SeedNodeIdxs | None,
+    num_valid_steps: int | None,
     cache_valid_dataset: bool,
     batch_size: int,
     cache_normalized_features: bool,
     cache_normalized_features_device: Literal["host", "device"],
-    source_sampling_plan: Optional[sampling_config_lib.SamplingPlan],
-    target_sampling_plan: Optional[sampling_config_lib.SamplingPlan],
+    source_sampling_plan: sampling_config_lib.SamplingPlan | None,
+    target_sampling_plan: sampling_config_lib.SamplingPlan | None,
     temporal_sampling: bool,
-    edgeset_timestamp_features: Dict[str, str],
-) -> Tuple[
+    edgeset_timestamp_features: dict[str, str],
+) -> tuple[
     link_prediction_dataset.GNNLinkDatasetPreparator,
-    Optional[link_prediction_dataset.GNNLinkDatasetPreparator],
+    link_prediction_dataset.GNNLinkDatasetPreparator | None,
 ]:
   """Builds generators of batches of training and validation graph samples."""
 
@@ -296,18 +297,18 @@ def create_core_model_config(
 def train_link_model(
     graph: in_memory_graph.InMemoryGraph,
     schema: schema_lib.GraphSchema,
-    target_edgeset: Optional[str] = None,
+    target_edgeset: str | None = None,
     *,
-    max_training_time_seconds: Optional[int] = None,
-    work_dir: Optional[str] = None,
+    max_training_time_seconds: int | None = None,
+    work_dir: str | None = None,
     verbose: int = 2,
     validation_ratio: float = 0.1,
-    train_seed_edges: Optional[List[int]] = None,
-    valid_seed_edges: Optional[List[int]] = None,
-    num_train_steps: Optional[int] = 10_000,
-    num_valid_steps: Optional[int] = 1_000,
+    train_seed_edges: list[int] | None = None,
+    valid_seed_edges: list[int] | None = None,
+    num_train_steps: int | None = 10_000,
+    num_valid_steps: int | None = 1_000,
     valid_every_n_steps: int = 1000,
-    valid_graph: Optional[in_memory_graph.InMemoryGraph] = None,
+    valid_graph: in_memory_graph.InMemoryGraph | None = None,
     num_sampling_hops: int = 2,
     sampling_width: int = 15,
     num_layers: int = 2,
@@ -320,18 +321,18 @@ def train_link_model(
     message_passing_on_target_edgeset: bool = True,
     negative_edges: Literal["random", "random-walk"] = "random",
     random_walk_num_walks_per_negative: int = 10,
-    diagnostic_dir: Optional[str] = None,
+    diagnostic_dir: str | None = None,
     message_pooling: str = "sum",
-    experimental_preprocess_core_model_config: Optional[
-        Callable[[CoreModelConfig], CoreModelConfig]
-    ] = None,
+    experimental_preprocess_core_model_config: (
+        Callable[[CoreModelConfig], CoreModelConfig] | None
+    ) = None,
     cache_normalized_features: bool = False,
     cache_normalized_features_device: Literal["host", "device"] = "device",
     export_metrics_to_xm: bool = False,
-    architecture: Union[common.Architecture, str] = common.DEFAULT_ARCHITECTURE,
-    source_sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None,
-    target_sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None,
-    early_stopping: Union[bool, int] = True,
+    architecture: common.Architecture | str = common.DEFAULT_ARCHITECTURE,
+    source_sampling_plan: sampling_config_lib.SamplingPlan | None = None,
+    target_sampling_plan: sampling_config_lib.SamplingPlan | None = None,
+    early_stopping: bool | int = True,
 ) -> LinkPredictionModel:
   """Trains a supervised Graph Neural Network model for edge prediction.
 
@@ -452,8 +453,8 @@ def train_link_model(
         raise ValueError(
             f"The target edgeset '{target_edgeset}' must have a creation time"
             " feature. Set is_creation_time=True on the creation time feature"
-            f" (e.g. `schema.edge_sets['{target_edgeset}'].features[<creation time"
-            " feature>].is_creation_time = True`)."
+            f" (e.g. `schema.edge_sets['{target_edgeset}'].features[<creation"
+            " time feature>].is_creation_time = True`)."
         )
     else:
       nodeset_ts_features = {}
@@ -604,7 +605,7 @@ def train_link_model(
         params: jaxtyping.PyTree,
         batch_stats: jaxtyping.PyTree,
         batch: Batch,
-        rng_key: Optional[jax.Array],
+        rng_key: jax.Array | None,
         training: bool,
     ):
 
@@ -828,7 +829,7 @@ def _diagnose_train_batch(
 
   def render_graph_diagnostic(
       graph: jax_in_memory_graph.JaxInMemoryGraph,
-      offsets: Dict[str, jax.Array],
+      offsets: dict[str, jax.Array],
       schema: schema_lib.GraphSchema,
       name: str,
   ):

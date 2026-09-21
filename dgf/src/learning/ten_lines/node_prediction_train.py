@@ -17,11 +17,12 @@
 Takes a training dataset and return a model (node_prediction_model).
 """
 
+from collections.abc import Callable
 import itertools
 import os
 import textwrap
 import time
-from typing import Callable, Dict, Literal, Optional, Tuple, Union
+from typing import Literal
 from dgf.src.analyse import print_schema as print_schema_lib
 from dgf.src.data import in_memory_graph
 from dgf.src.data import jax_in_memory_graph
@@ -144,18 +145,18 @@ def train_node_model(
     schema: schema_lib.GraphSchema,
     target_column: str,
     *,
-    target_nodeset: Optional[str] = None,
-    max_training_time_seconds: Optional[int] = None,
-    work_dir: Optional[str] = None,
+    target_nodeset: str | None = None,
+    max_training_time_seconds: int | None = None,
+    work_dir: str | None = None,
     verbose: int = 2,
     validation_ratio: float = 0.1,
-    train_seed_nodes: Optional[common.SeedNodeIdxs] = None,
-    valid_seed_nodes: Optional[common.SeedNodeIdxs] = None,
-    num_train_steps: Optional[int] = 10_000,
-    num_valid_steps: Optional[int] = 1_000,
+    train_seed_nodes: common.SeedNodeIdxs | None = None,
+    valid_seed_nodes: common.SeedNodeIdxs | None = None,
+    num_train_steps: int | None = 10_000,
+    num_valid_steps: int | None = 1_000,
     valid_every_n_steps: int = 1000,
-    graph_format: Union[dataset.GraphFormat, str] = dataset.GraphFormat.AUTO,
-    valid_graph: Optional[common.Graph] = None,
+    graph_format: dataset.GraphFormat | str = dataset.GraphFormat.AUTO,
+    valid_graph: common.Graph | None = None,
     num_sampling_hops: int = 2,
     sampling_width: int = 15,
     num_layers: int = 2,
@@ -165,16 +166,16 @@ def train_node_model(
     cache_valid_dataset: bool = True,
     time_aware: bool = False,
     message_pooling: str = "sum",
-    experimental_preprocess_core_model_config: Optional[
-        Callable[[CoreModelConfig], CoreModelConfig]
-    ] = None,
+    experimental_preprocess_core_model_config: (
+        Callable[[CoreModelConfig], CoreModelConfig] | None
+    ) = None,
     cache_normalized_features: bool = False,
     cache_normalized_features_device: Literal["host", "device"] = "device",
     export_metrics_to_xm: bool = False,
-    architecture: Union[common.Architecture, str] = common.DEFAULT_ARCHITECTURE,
-    sampling_plan: Optional[sampling_config_lib.SamplingPlan] = None,
-    diagnostic_dir: Optional[str] = None,
-    early_stopping: Union[bool, int] = True,
+    architecture: common.Architecture | str = common.DEFAULT_ARCHITECTURE,
+    sampling_plan: sampling_config_lib.SamplingPlan | None = None,
+    diagnostic_dir: str | None = None,
+    early_stopping: bool | int = True,
     evaluate_final_model: bool = True,
 ) -> NodePredictionModel:
   """Trains a supervised Graph Neural Network model for node-level prediction.
@@ -483,7 +484,7 @@ def train_node_model(
 
     def process_batch(
         graph: jax_in_memory_graph.JaxInMemoryGraph,
-        merge_offsets: Dict[str, jnp.ndarray],
+        merge_offsets: dict[str, jnp.ndarray],
     ) -> Batch:
       return graph, merge_offsets[task.target_nodeset][:-1]
 
@@ -518,9 +519,9 @@ def train_node_model(
         batch_stats: jaxtyping.PyTree,
         batch: Batch,
         labels: jax.Array,
-        rng_key: Optional[jax.Array],
+        rng_key: jax.Array | None,
         training: bool,
-    ) -> Tuple[jax.Array, jaxtyping.PyTree]:
+    ) -> tuple[jax.Array, jaxtyping.PyTree]:
       if rng_key is not None:
         rngs = {"dropout": rng_key}
       else:
@@ -737,7 +738,7 @@ def train_node_model(
 
 def _diagnose_train_batch(
     graph: jax_in_memory_graph.JaxInMemoryGraph,
-    offsets: Dict[str, jnp.ndarray],
+    offsets: dict[str, jnp.ndarray],
     diagnostic_dir: str,
     schema: schema_lib.GraphSchema,
     batch_idx: int,

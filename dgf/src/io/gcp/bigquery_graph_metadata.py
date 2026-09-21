@@ -16,10 +16,8 @@
 
 import dataclasses
 import datetime
-from typing import Dict, List, Optional
 
 import dataclasses_json
-
 
 dataclass_json = dataclasses_json.dataclass_json
 config = dataclasses_json.config
@@ -39,9 +37,9 @@ class DataSourceTable:
 @dataclass_json(letter_case=LetterCase.CAMEL)
 @dataclass
 class NodeReference:
-  edge_table_columns: List[str]
+  edge_table_columns: list[str]
   node_table: str
-  node_table_columns: List[str]
+  node_table_columns: list[str]
 
 
 @dataclass_json(letter_case=LetterCase.CAMEL)
@@ -54,7 +52,7 @@ class ArrayElementType:
 @dataclass
 class DataType:
   type_kind: str
-  array_element_type: Optional[ArrayElementType] = None
+  array_element_type: ArrayElementType | None = None
 
   def resolved_data_type(self) -> str:
     """Returns the resolved data type of the DataType."""
@@ -76,7 +74,7 @@ class Property:
 @dataclass
 class LabelAndProperties:
   label: str
-  properties: Optional[List[Property]] = None
+  properties: list[Property] | None = None
 
 
 @dataclass_json(letter_case=LetterCase.CAMEL)
@@ -84,8 +82,8 @@ class LabelAndProperties:
 class EdgeTable:
   data_source_table: DataSourceTable
   destination_node_reference: NodeReference
-  key_columns: List[str]
-  label_and_properties: List[LabelAndProperties]
+  key_columns: list[str]
+  label_and_properties: list[LabelAndProperties]
   name: str
   source_node_reference: NodeReference
 
@@ -94,8 +92,8 @@ class EdgeTable:
 @dataclass
 class NodeTable:
   data_source_table: DataSourceTable
-  key_columns: List[str]
-  label_and_properties: List[LabelAndProperties]
+  key_columns: list[str]
+  label_and_properties: list[LabelAndProperties]
   name: str
 
 
@@ -113,17 +111,17 @@ class BigQueryGraphMetadata:
   """Dataclass for BigQuery Graph metadata."""
 
   creation_time: str
-  edge_tables: List[EdgeTable]
+  edge_tables: list[EdgeTable]
   etag: str
   last_modified_time: str
-  node_tables: List[NodeTable]
+  node_tables: list[NodeTable]
   property_graph_reference: PropertyGraphReference
   metadata_load_time: datetime.datetime = field(
       default_factory=datetime.datetime.now
   )
-  nodeset: Optional[Dict[str, NodeTable]] = None
-  edgeset: Optional[Dict[str, EdgeTable]] = None
-  has_duplicate_labels: Optional[bool] = False
+  nodeset: dict[str, NodeTable] | None = None
+  edgeset: dict[str, EdgeTable] | None = None
+  has_duplicate_labels: bool | None = False
 
   def __post_init__(self):
     """To simplify node table look up during parquet export."""

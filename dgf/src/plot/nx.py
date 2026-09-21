@@ -14,13 +14,12 @@
 
 """Helpers to visualize NetworkX graphs."""
 
-from typing import Optional
 import matplotlib.pyplot as plt
 import networkx as nx
 
 
 def plot_nx_graph(
-    g: nx.Graph, label_name: Optional[str] = None, ax: Optional[plt.Axes] = None
+    g: nx.Graph, label_name: str | None = None, ax: plt.Axes | None = None
 ):
   """Helper function to draw an nx graph.
 

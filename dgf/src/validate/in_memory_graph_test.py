@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Tuple
 from absl.testing import absltest
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
@@ -28,7 +27,7 @@ test_util.disable_diff_truncation()
 
 
 def valid_graph() -> (
-    Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]
+    tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]
 ):
   graph = gen_test_graph.generate_in_memory_graph(
       node_ids=True, edge_ids=True, variable_length=True
@@ -177,13 +176,15 @@ class InMemoryGraphTest(absltest.TestCase):
   def test_is_creation_time_not_timestamp_semantic(self):
     graph, schema = valid_graph()
     schema.node_sets["n1"].features["f1"].is_creation_time = True
-    schema.node_sets["n1"].features["f1"].semantic = schema_lib.FeatureSemantic.NUMERICAL
+    schema.node_sets["n1"].features[
+        "f1"
+    ].semantic = schema_lib.FeatureSemantic.NUMERICAL
     issues = in_memory_graph_validate_lib.issues(graph, schema)
     self.assertIn(
         Issue.error(
             "The feature 'f1' in nodeset 'n1' has is_creation_time=True, but"
-            " its semantic is <FeatureSemantic.NUMERICAL: 'NUMERICAL'>. Features"
-            " with is_creation_time=True must have semantic=TIMESTAMP."
+            " its semantic is <FeatureSemantic.NUMERICAL: 'NUMERICAL'>."
+            " Features with is_creation_time=True must have semantic=TIMESTAMP."
         ),
         issues,
     )

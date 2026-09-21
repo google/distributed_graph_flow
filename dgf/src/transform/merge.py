@@ -16,8 +16,6 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
-
 from dgf.src.data import in_memory_graph
 from dgf.src.data import padding as padding_lib
 from dgf.src.data import schema as schema_lib
@@ -61,9 +59,9 @@ class GraphMerger:
   def __init__(
       self,
       schema: schema_lib.GraphSchema,
-      padding: Optional[padding_lib.Padding] = None,
+      padding: padding_lib.Padding | None = None,
       sentinel_offset: bool = True,
-      schema_cache: Optional[temporal_util.TimeseriesSchemaCache] = None,
+      schema_cache: temporal_util.TimeseriesSchemaCache | None = None,
   ):
     self.schema = schema
     self.padding = padding
@@ -81,10 +79,9 @@ class GraphMerger:
             f"Padding specifies unknown edge sets: {sorted(unknown_edge_sets)}."
         )
 
-    self._has_timeseries_padding = (
-        timeseries_padding.has_timeseries_padding(padding)
-        and temporal_util.schema_has_timeseries_features(schema)
-    )
+    self._has_timeseries_padding = timeseries_padding.has_timeseries_padding(
+        padding
+    ) and temporal_util.schema_has_timeseries_features(schema)
 
     if self._has_timeseries_padding:
       assert padding is not None
@@ -106,8 +103,8 @@ class GraphMerger:
 
   def __call__(
       self,
-      graphs: List[in_memory_graph.InMemoryGraph],
-  ) -> Tuple[in_memory_graph.InMemoryGraph, Dict[str, np.ndarray]]:
+      graphs: list[in_memory_graph.InMemoryGraph],
+  ) -> tuple[in_memory_graph.InMemoryGraph, dict[str, np.ndarray]]:
     """Merges a list of graphs into a single graph.
 
     Args:
@@ -154,18 +151,16 @@ class GraphMerger:
 
     # Index of the first node of each graph in the merged graph, for each
     # nodeset.
-    node_set_offsets: Dict[str, np.ndarray] = {}
+    node_set_offsets: dict[str, np.ndarray] = {}
     for node_set_name in schema.node_sets:
-      num_nodes = [
-          graph.node_sets[node_set_name].num_nodes for graph in graphs
-      ]
+      num_nodes = [graph.node_sets[node_set_name].num_nodes for graph in graphs]
       offsets = np.cumsum(np.array(num_nodes, dtype=np.int32))
       node_set_offsets[node_set_name] = np.insert(offsets, 0, 0)
 
     # Determine the edgeset offsets.
     # Index of the first edge of each graph in the merged graph, for each
     # nodeset.
-    edge_set_offsets: Dict[str, np.ndarray] = {}
+    edge_set_offsets: dict[str, np.ndarray] = {}
     for edge_set_name in schema.edge_sets:
       num_edges = [
           graph.edge_sets[edge_set_name].adjacency.shape[1] for graph in graphs
@@ -174,8 +169,8 @@ class GraphMerger:
       edge_set_offsets[edge_set_name] = np.insert(offsets, 0, 0)
 
     # Merge the nodesets + some more nodeset related compute.
-    node_set_sentinel_idx: Dict[str, int] = {}
-    merged_node_sets: Dict[str, in_memory_graph.InMemoryNodeSet] = {}
+    node_set_sentinel_idx: dict[str, int] = {}
+    merged_node_sets: dict[str, in_memory_graph.InMemoryNodeSet] = {}
     for node_set_name, node_set_schema in schema.node_sets.items():
       merged_features = {}
       node_offsets = node_set_offsets[node_set_name]
@@ -199,9 +194,9 @@ class GraphMerger:
         node_set_sentinel_idx[node_set_name] = num_nodes - 1
         if num_sentinel_nodes < 1:
           raise InsufficientPaddingError(
-              f"Padding for node set '{node_set_name}' is insufficient. Required"
-              f" at least {num_real_nodes + 1} nodes (including the sentinel"
-              f" node), but the padder only defines {num_nodes}."
+              f"Padding for node set '{node_set_name}' is insufficient."
+              f" Required at least {num_real_nodes + 1} nodes (including the"
+              f" sentinel node), but the padder only defines {num_nodes}."
           )
       else:
         num_nodes = num_real_nodes
@@ -238,7 +233,7 @@ class GraphMerger:
       )
 
     # Merge the edges
-    merged_edge_sets: Dict[str, in_memory_graph.InMemoryEdgeSet] = {}
+    merged_edge_sets: dict[str, in_memory_graph.InMemoryEdgeSet] = {}
     for edge_set_name, edge_set_schema in schema.edge_sets.items():
       merged_features = {}
       # Collect the adjacency of all the graph and apply the offset.
@@ -340,9 +335,6 @@ class GraphMerger:
     )
 
 
-
-
-
 def create_padding_item(value, num_padding_items):
   """Creates a padding item for a given value."""
   if isinstance(value, tf.RaggedTensor):
@@ -399,7 +391,7 @@ def pad_graph_tensorflow(
   assert padding.node_sets
   assert padding.edge_sets
 
-  merged_node_sets: Dict[str, tf_in_memory_graph.TFInMemoryNodeSet] = {}
+  merged_node_sets: dict[str, tf_in_memory_graph.TFInMemoryNodeSet] = {}
   for node_set_name, node_set_schema in schema.node_sets.items():
     merged_features = {}
     node_set_padding = padding.node_sets[node_set_name]
@@ -434,7 +426,7 @@ def pad_graph_tensorflow(
         num_nodes=num_nodes,
     )
 
-  merged_edge_sets: Dict[str, tf_in_memory_graph.TFInMemoryEdgeSet] = {}
+  merged_edge_sets: dict[str, tf_in_memory_graph.TFInMemoryEdgeSet] = {}
   for edge_set_name, edge_set_schema in schema.edge_sets.items():
     adjacency = graph.edge_sets[edge_set_name].adjacency
 
@@ -499,7 +491,7 @@ def pad_graph_tensorflow(
 def remove_padding_sentinels(
     graph: in_memory_graph.InMemoryGraph,
     schema: schema_lib.GraphSchema,
-    offsets: Dict[str, np.ndarray],
+    offsets: dict[str, np.ndarray],
 ) -> in_memory_graph.InMemoryGraph:
   """Removes the sentinel nodes and edges added by `GraphMerger`.
 
@@ -528,7 +520,7 @@ def remove_padding_sentinels(
   Returns:
     A new `InMemoryGraph` with sentinel nodes and edges removed.
   """
-  unpadded_node_sets: Dict[str, in_memory_graph.InMemoryNodeSet] = {}
+  unpadded_node_sets: dict[str, in_memory_graph.InMemoryNodeSet] = {}
   for node_set_name, node_set_schema in schema.node_sets.items():
     node_set = graph.node_sets[node_set_name]
     num_real_nodes = int(offsets[node_set_name][-1])
@@ -543,7 +535,7 @@ def remove_padding_sentinels(
         num_nodes=num_real_nodes,
     )
 
-  unpadded_edge_sets: Dict[str, in_memory_graph.InMemoryEdgeSet] = {}
+  unpadded_edge_sets: dict[str, in_memory_graph.InMemoryEdgeSet] = {}
   for edge_set_name, edge_set_schema in schema.edge_sets.items():
     edge_set = graph.edge_sets[edge_set_name]
     num_real_nodes_src = int(offsets[edge_set_schema.source][-1])

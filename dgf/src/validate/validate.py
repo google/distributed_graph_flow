@@ -14,8 +14,8 @@
 
 """Validation utility."""
 
+from collections.abc import Sequence
 import logging
-from typing import Sequence
 from dgf.src.util import log
 
 Severity = log.Severity

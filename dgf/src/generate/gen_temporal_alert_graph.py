@@ -44,7 +44,6 @@ Target Formulation (`signal_regression`):
 """
 
 import dataclasses
-from typing import Optional
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import graph_in_memory as gf_graph_in_memory_lib
@@ -82,7 +81,7 @@ class TemporalAlertGraphConfig:
   sample_interval_jitter: int = 300
   window_duration: int = 3600
   neighbor_decay: float = 0.8
-  max_hardware_per_alert: Optional[int] = None
+  max_hardware_per_alert: int | None = None
   seed: int = 42
 
 
@@ -159,7 +158,7 @@ def generate_signal_regression_schema() -> schema_lib.GraphSchema:
 def generate_signal_regression_in_memory_graph(
     config: TemporalAlertGraphConfig = TemporalAlertGraphConfig(),
     *,
-    schema: Optional[schema_lib.GraphSchema] = None,
+    schema: schema_lib.GraphSchema | None = None,
 ) -> in_memory_graph_lib.InMemoryGraph:
   """Generates an in-memory heterogeneous temporal signal regression graph.
 
@@ -250,9 +249,7 @@ def generate_signal_regression_in_memory_graph(
     t_create = int(alert_creation_times[alert_idx])
     t_start = t_create - config.window_duration
     k = int(neighbor_counts[alert_idx])
-    chosen_hw_indices = rng.choice(
-        config.num_hardware, size=k, replace=False
-    )
+    chosen_hw_indices = rng.choice(config.num_hardware, size=k, replace=False)
     total_integral = 0.0
     for hw_idx in chosen_hw_indices:
       edge_sources.append(hw_idx)
@@ -349,7 +346,7 @@ def generate_signal_regression_graph(
     path: str,
     config: TemporalAlertGraphConfig = TemporalAlertGraphConfig(),
     *,
-    schema: Optional[schema_lib.GraphSchema] = None,
+    schema: schema_lib.GraphSchema | None = None,
 ):
   """Generates a signal regression temporal graph on disk in GF format.
 

@@ -14,10 +14,11 @@
 
 """Benchmarking of IO operations on in memory graphs."""
 
+from collections.abc import Callable
 import enum
 import os
 import random
-from typing import Any, Callable, List, Optional
+from typing import Any
 import dgf
 from dgf.benchmark import utils as benchmark_utils
 from dgf.src.util import log
@@ -45,8 +46,8 @@ class GenGraphSamples(benchmark_utils.Benchmark):
   num_samples: int
   sampler: dgf.sampling.Sampler
   sampling_config: dgf.sampling.SimpleSamplingConfig
-  output_fn: Callable[[List[dgf.data.InMemoryGraph]], Any]
-  edgeset_to_mask: Optional[str]
+  output_fn: Callable[[list[dgf.data.InMemoryGraph]], Any]
+  edgeset_to_mask: str | None
 
   def __init__(
       self,
@@ -57,7 +58,7 @@ class GenGraphSamples(benchmark_utils.Benchmark):
       num_hops: int,
       extract_features: bool = True,
       output_format: OutputFormat = OutputFormat.NUMPY,
-      edgeset_to_mask: Optional[str] = None,
+      edgeset_to_mask: str | None = None,
       with_replacement: bool = False,
       multi_visit: bool = True,
   ):
@@ -111,7 +112,7 @@ class GenGraphSamples(benchmark_utils.Benchmark):
     if self.output_format == OutputFormat.NUMPY:
 
       def output_fn(
-          graphs: List[dgf.data.InMemoryGraph],
+          graphs: list[dgf.data.InMemoryGraph],
       ):
         # Nothing to do
         return graphs
@@ -119,14 +120,14 @@ class GenGraphSamples(benchmark_utils.Benchmark):
     elif self.output_format == OutputFormat.JAX:
 
       def output_fn(
-          graphs: List[dgf.data.InMemoryGraph],
+          graphs: list[dgf.data.InMemoryGraph],
       ):
         return [dgf.convert.graph_to_jax_graph(g) for g in graphs]
 
     elif self.output_format == OutputFormat.JAX_SD:
 
       def output_fn(
-          graphs: List[dgf.data.InMemoryGraph],
+          graphs: list[dgf.data.InMemoryGraph],
       ):
         return [
             dgf.convert.graph_to_sparse_deferred_struct(g, schema=self.schema)
@@ -241,10 +242,10 @@ class GenGraphSubsets(benchmark_utils.Benchmark):
 
 
 def in_process_sampling(
-    work_dir: Optional[str],
+    work_dir: str | None,
     gf_graph_path: str,
     seed_nodeset: str,
-    list_num_hops: List[int],
+    list_num_hops: list[int],
     benchmark_output_formats: bool = True,
 ):
   """Benchmarks the IO of in-memory graphs."""

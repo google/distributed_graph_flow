@@ -17,12 +17,12 @@
 from __future__ import annotations
 
 import abc
-import collections.abc
+from collections.abc import Callable, Mapping, Sequence, Set
 import copy
 import dataclasses
 import enum
 import inspect
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any
 
 import dataclasses_json
 from dgf.src.data import in_memory_graph
@@ -81,16 +81,16 @@ class AbstractFeatureNormalizer(abc.ABC):
     pass
 
   @abc.abstractmethod
-  def normalize_numpy(self, value: np.ndarray) -> Dict[str, np.ndarray]:
+  def normalize_numpy(self, value: np.ndarray) -> dict[str, np.ndarray]:
     """Applies the normalization to a numpy array of feature values."""
     pass
 
   @abc.abstractmethod
-  def normalize_tensorflow(self, value: tf.Tensor) -> Dict[str, tf.Tensor]:
+  def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
     """Applies the normalization to a dictionary of TensorFlow tensors."""
     pass
 
-  def tensorflow_resources(self) -> List[tf.Tensor]:
+  def tensorflow_resources(self) -> list[tf.Tensor]:
     """Returns the list of TensorFlow resources used by `normalize_tensorflow`.
 
     Access to resources is necessary to serialize a `tf.Module`. If the
@@ -116,10 +116,10 @@ class IdentityNormalizer(AbstractFeatureNormalizer):
   def output_schema(self) -> schema_lib.FeatureSetSchema:
     return {self.input_feature: self.input_schema}
 
-  def normalize_numpy(self, value: np.ndarray) -> Dict[str, np.ndarray]:
+  def normalize_numpy(self, value: np.ndarray) -> dict[str, np.ndarray]:
     return {self.input_feature: value}
 
-  def normalize_tensorflow(self, value: tf.Tensor) -> Dict[str, tf.Tensor]:
+  def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
     return {self.input_feature: value}
 
 
@@ -141,9 +141,9 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
   # TODO(gbm): Renam to LookupTable.
   # TODO(gbm): Check that the indexing is in a dense [0, num_items).
 
-  dictionary_map: Dict[str, int]
+  dictionary_map: dict[str, int]
   out_of_vocab_value: int
-  output_shape: Tuple[Optional[int], ...]
+  output_shape: tuple[int | None, ...]
   output_feature_name: str
   type: str = dataclasses.field(default="DictionaryIndexNormalizer", init=False)
   tf_table: Any = dataclasses.field(
@@ -198,7 +198,7 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
         )
     }
 
-  def normalize_numpy(self, value: np.ndarray) -> Dict[str, np.ndarray]:
+  def normalize_numpy(self, value: np.ndarray) -> dict[str, np.ndarray]:
     # TODO(gbm): Would sorting the key + np.searchsorted be much faster?
     def _lookup(v):
       return self.dictionary_map.get(
@@ -210,7 +210,7 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
     # TODO(gbm): Parametrize to int32.
     return {self.output_feature_name: vectorized_lookup(value)}
 
-  def tensorflow_resources(self) -> List[tf.Tensor]:
+  def tensorflow_resources(self) -> list[tf.Tensor]:
     if self.tf_table is None:
       keys = list(self.dictionary_map.keys())
       values = list(self.dictionary_map.values())
@@ -226,7 +226,7 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
       )
     return [self.tf_table]  # pyrefly: ignore[bad-return]
 
-  def normalize_tensorflow(self, value: tf.Tensor) -> Dict[str, tf.Tensor]:
+  def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
     self.tensorflow_resources()
     return {self.output_feature_name: self.tf_table.lookup(value)}
 
@@ -254,7 +254,7 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
   """
 
   output_feature_name: str
-  output_shape: Tuple[Optional[int], ...]
+  output_shape: tuple[int | None, ...]
   quantiles: np.ndarray = dataclasses.field(
       metadata=dataclasses_json.config(
           encoder=lambda x: x.tolist(),
@@ -262,7 +262,7 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
       )
   )
   is_timeseries: bool = False
-  group: Optional[str] = None
+  group: str | None = None
   type: str = dataclasses.field(default="SoftQuantileNormalizer", init=False)
 
   @classmethod
@@ -324,7 +324,7 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
         )
     }
 
-  def normalize_numpy(self, value: np.ndarray) -> Dict[str, np.ndarray]:
+  def normalize_numpy(self, value: np.ndarray) -> dict[str, np.ndarray]:
     # TODO(gbm): Add support for multi-dim features.
 
     value = value.astype(np.float32)
@@ -366,7 +366,7 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
     soft_quantile = smooth_bucket_idx / num_buckets
     return {self.output_feature_name: soft_quantile - 0.5}
 
-  def normalize_tensorflow(self, value: tf.Tensor) -> Dict[str, tf.Tensor]:
+  def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
     value = tf.cast(value, tf.float32)
     quantiles = tf.constant(self.quantiles, dtype=tf.float32)
     num_buckets = len(self.quantiles) - 1
@@ -394,7 +394,7 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
 class HashStringNormalizer(AbstractFeatureNormalizer):
 
   num_buckets: int
-  output_shape: Tuple[Optional[int], ...]
+  output_shape: tuple[int | None, ...]
   output_feature_name: str
   type: str = dataclasses.field(default="HashStringNormalizer", init=False)
 
@@ -427,14 +427,14 @@ class HashStringNormalizer(AbstractFeatureNormalizer):
         )
     }
 
-  def normalize_numpy(self, value: np.ndarray) -> Dict[str, np.ndarray]:
+  def normalize_numpy(self, value: np.ndarray) -> dict[str, np.ndarray]:
     tensor_value = tf.constant(value)
     hashed_tensor = tf.strings.to_hash_bucket_fast(
         tensor_value, self.num_buckets
     )
     return {self.output_feature_name: hashed_tensor.numpy()}
 
-  def normalize_tensorflow(self, value: tf.Tensor) -> Dict[str, tf.Tensor]:
+  def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
     return {
         self.output_feature_name: tf.strings.to_hash_bucket_fast(
             value, self.num_buckets
@@ -454,12 +454,12 @@ class SinusoidTimedeltaNormalizer(AbstractFeatureNormalizer):
   """
 
   output_feature_name: str
-  output_shape: Tuple[Optional[int], ...]
+  output_shape: tuple[int | None, ...]
   embedding_dim: int = 32
   min_period: float = 2.0
   max_period: float = 31536000.0  # one year in seconds
   is_timeseries: bool = False
-  group: Optional[str] = None
+  group: str | None = None
   frequencies: np.ndarray = dataclasses.field(
       default_factory=lambda: np.array([], dtype=np.float32),
       metadata=dataclasses_json.config(
@@ -537,7 +537,7 @@ class SinusoidTimedeltaNormalizer(AbstractFeatureNormalizer):
         )
     }
 
-  def normalize_numpy(self, value: np.ndarray) -> Dict[str, np.ndarray]:
+  def normalize_numpy(self, value: np.ndarray) -> dict[str, np.ndarray]:
     if value.dtype == np.object_:
       raise ValueError(
           "SinusoidTimedeltaNormalizer requires fixed-length feature tensors,"
@@ -552,7 +552,7 @@ class SinusoidTimedeltaNormalizer(AbstractFeatureNormalizer):
     emb = np.concatenate([sin_emb, cos_emb], axis=-1)
     return {self.output_feature_name: emb}
 
-  def normalize_tensorflow(self, value: tf.Tensor) -> Dict[str, tf.Tensor]:
+  def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
     value = tf.cast(value, tf.float32)
     freqs = tf.constant(self.frequencies, dtype=tf.float32)
 
@@ -565,7 +565,7 @@ class SinusoidTimedeltaNormalizer(AbstractFeatureNormalizer):
 
 def _output_timeseries_group(
     input_feature: str, input_schema: schema_lib.FeatureSchema
-) -> Optional[str]:
+) -> str | None:
   """Returns the timeseries group a feature's normalized outputs belong to.
 
   Falls back to the input feature name rather than leaving the group unset:
@@ -634,8 +634,8 @@ class TimedeltaNormalizer(AbstractFeatureNormalizer):
   def normalize_numpy(
       self,
       value: np.ndarray,
-      seed_timestamps: Optional[np.ndarray] = None,
-  ) -> Dict[str, np.ndarray]:
+      seed_timestamps: np.ndarray | None = None,
+  ) -> dict[str, np.ndarray]:
     assert seed_timestamps is not None, (
         "seed_timestamps must be provided to normalize timestamp feature"
         f" '{self.input_feature}'."
@@ -657,8 +657,8 @@ class TimedeltaNormalizer(AbstractFeatureNormalizer):
   def normalize_tensorflow(
       self,
       value: tf.Tensor,
-      seed_timestamps: Optional[tf.Tensor] = None,
-  ) -> Dict[str, tf.Tensor]:
+      seed_timestamps: tf.Tensor | None = None,
+  ) -> dict[str, tf.Tensor]:
     assert seed_timestamps is not None, (
         "seed_timestamps must be provided to normalize timestamp feature"
         f" '{self.input_feature}'."
@@ -700,7 +700,7 @@ class CalendarFeature(str, enum.Enum):
 #
 # `CalendarFeature.YEAR` is the one member that cannot be supported this way: a
 # year has no a-priori range, so there is nothing to rescale from.
-_CALENDAR_FEATURE_RANGES: Dict[CalendarFeature, Tuple[float, float]] = {
+_CALENDAR_FEATURE_RANGES: dict[CalendarFeature, tuple[float, float]] = {
     CalendarFeature.SECOND: (0.0, 60.0),
     CalendarFeature.MINUTE: (0.0, 60.0),
     CalendarFeature.HOUR: (0.0, 24.0),
@@ -712,7 +712,7 @@ _CALENDAR_FEATURE_RANGES: Dict[CalendarFeature, Tuple[float, float]] = {
 # `SECOND` and `MINUTE` are supported but not enabled by default
 # TODO(simonmeierhans): Automatically select features based on observed
 # timestamps.
-DEFAULT_CALENDAR_FEATURES: Tuple[CalendarFeature, ...] = (
+DEFAULT_CALENDAR_FEATURES: tuple[CalendarFeature, ...] = (
     CalendarFeature.HOUR,
     CalendarFeature.DAY_OF_WEEK,
     CalendarFeature.DAY_OF_MONTH,
@@ -777,7 +777,7 @@ class CalendarNormalizer(AbstractFeatureNormalizer):
     input_schema: The schema of the input TIMESTAMP feature.
   """
 
-  calendar_features: Tuple[CalendarFeature, ...]
+  calendar_features: tuple[CalendarFeature, ...]
   input_schema: schema_lib.FeatureSchema
   type: str = dataclasses.field(default="CalendarNormalizer", init=False)
 
@@ -819,7 +819,7 @@ class CalendarNormalizer(AbstractFeatureNormalizer):
       cls,
       feature_name: str,
       input_schema: schema_lib.FeatureSchema,
-      calendar_features: Tuple[CalendarFeature, ...],
+      calendar_features: tuple[CalendarFeature, ...],
   ) -> "CalendarNormalizer":
     return CalendarNormalizer(
         input_feature=feature_name,
@@ -846,7 +846,7 @@ class CalendarNormalizer(AbstractFeatureNormalizer):
         for calendar_feature in self.calendar_features
     }
 
-  def normalize_numpy(self, value: np.ndarray) -> Dict[str, np.ndarray]:
+  def normalize_numpy(self, value: np.ndarray) -> dict[str, np.ndarray]:
     if value.dtype == np.object_:
       raise ValueError(
           "CalendarNormalizer requires fixed-length feature tensors, but"
@@ -890,7 +890,7 @@ class CalendarNormalizer(AbstractFeatureNormalizer):
 
     return output_features
 
-  def normalize_tensorflow(self, value: tf.Tensor) -> Dict[str, tf.Tensor]:
+  def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
     timestamps = tf.cast(value, tf.int64)
     # Only computed if a day-based component is requested.
     days = None
@@ -980,9 +980,7 @@ def _month_from_days_tensorflow(days: tf.Tensor) -> tf.Tensor:
   )
   shifted_month = tf.math.floordiv(5 * day_of_year + 2, 153)
   return (
-      shifted_month
-      + 3
-      - 12 * tf.cast(shifted_month >= 10, shifted_month.dtype)
+      shifted_month + 3 - 12 * tf.cast(shifted_month >= 10, shifted_month.dtype)
   )
 
 
@@ -1044,9 +1042,9 @@ class SequentialNormalizer(AbstractFeatureNormalizer):
   Executes normalizer stages sequentially and emits only the final stage output.
   """
 
-  stages: List[AbstractFeatureNormalizer] = normalizer_registry.field_list()
+  stages: list[AbstractFeatureNormalizer] = normalizer_registry.field_list()
   type: str = dataclasses.field(default="SequentialNormalizer", init=False)
-  _stage_kwargs: List[frozenset[str]] = dataclasses.field(
+  _stage_kwargs: list[frozenset[str]] = dataclasses.field(
       default_factory=list,
       init=False,
       metadata=dataclasses_json.config(exclude=dataclasses_json.Exclude.ALWAYS),
@@ -1054,7 +1052,7 @@ class SequentialNormalizer(AbstractFeatureNormalizer):
 
   def __post_init__(self):
     _validate_stages(self.input_feature, self.stages)
-    self._stage_kwargs: List[frozenset[str]] = [
+    self._stage_kwargs: list[frozenset[str]] = [
         _accepted_kwargs(s) for s in self.stages
     ]
 
@@ -1075,14 +1073,12 @@ class SequentialNormalizer(AbstractFeatureNormalizer):
 
   def _normalize(
       self,
-      stage_fn_getter: collections.abc.Callable[
-          [AbstractFeatureNormalizer], Any
-      ],
+      stage_fn_getter: Callable[[AbstractFeatureNormalizer], Any],
       value: Any,
       **kwargs: Any,
-  ) -> Dict[str, Any]:
-    current_features: Dict[str, Any] = {self.input_feature: value}
-    stage_output: Dict[str, Any] = {}
+  ) -> dict[str, Any]:
+    current_features: dict[str, Any] = {self.input_feature: value}
+    stage_output: dict[str, Any] = {}
     for stage, accepted_kwargs in zip(self.stages, self._stage_kwargs):
       assert stage.input_feature in current_features, (
           f"Stage '{stage.type}' expects input feature '{stage.input_feature}',"
@@ -1099,17 +1095,17 @@ class SequentialNormalizer(AbstractFeatureNormalizer):
       self,
       value: np.ndarray,
       **kwargs: Any,
-  ) -> Dict[str, np.ndarray]:
+  ) -> dict[str, np.ndarray]:
     return self._normalize(lambda s: s.normalize_numpy, value, **kwargs)
 
   def normalize_tensorflow(
       self,
       value: tf.Tensor,
       **kwargs: Any,
-  ) -> Dict[str, tf.Tensor]:
+  ) -> dict[str, tf.Tensor]:
     return self._normalize(lambda s: s.normalize_tensorflow, value, **kwargs)
 
-  def tensorflow_resources(self) -> List[tf.Tensor]:
+  def tensorflow_resources(self) -> list[tf.Tensor]:
     resources = []
     for stage in self.stages:
       resources.extend(stage.tensorflow_resources())
@@ -1156,8 +1152,8 @@ def _accepted_kwargs(stage: AbstractFeatureNormalizer) -> frozenset[str]:
 def _filter_and_call(
     method: Any,
     value: Any,
-    accepted_kwargs: collections.abc.Set[str],
-    kwargs: Dict[str, Any],
+    accepted_kwargs: Set[str],
+    kwargs: dict[str, Any],
 ) -> Any:
   if not accepted_kwargs:
     return method(value)
@@ -1194,9 +1190,9 @@ class AutoNormalizeConfig:
     numerical_soft_quantile: If True, numerical features (INTEGER or FLOAT) will
       be normalized using `SoftQuantileNormalizer`.
     keep_raw_features: A set of `(nodeset_name, feature_name)` tuples that
-      should bypass all normalization and be included in the output graph
-      as-is. This is useful for preserving features like unique identifiers or
-      labels not intended for model input.
+      should bypass all normalization and be included in the output graph as-is.
+      This is useful for preserving features like unique identifiers or labels
+      not intended for model input.
     ignore_features_without_stats: Whether to ignore features that are not in
       `keep_raw_features` and do not have associated statistics. If `False`
       (default), an error is raised. If `True`, such features are skipped.
@@ -1225,7 +1221,7 @@ class AutoNormalizeConfig:
 
   categorical_bytes_to_index: bool = True
   numerical_soft_quantile: bool = True
-  keep_raw_features: Set[Tuple[str, str]] = dataclasses.field(
+  keep_raw_features: set[tuple[str, str]] = dataclasses.field(
       default_factory=set,
       metadata=dataclasses_json.config(
           encoder=lambda s: [list(x) for x in s],
@@ -1243,7 +1239,7 @@ class AutoNormalizeConfig:
   has_seed_timestamps: bool = False
   # TODO(simonmeierhans): Consider enabling by default after benchmarking.
   calendar_normalize: bool = False
-  calendar_features: Tuple[CalendarFeature, ...] = DEFAULT_CALENDAR_FEATURES
+  calendar_features: tuple[CalendarFeature, ...] = DEFAULT_CALENDAR_FEATURES
 
 
 def auto_normalize(
@@ -1499,7 +1495,7 @@ def auto_normalize(
 class NodeSetNormalizerConfig:
   """Raw information of a NodeSetNormalizer for easy serialization."""
 
-  normalizers: List[AbstractFeatureNormalizer] = (
+  normalizers: list[AbstractFeatureNormalizer] = (
       normalizer_registry.field_list()
   )
 
@@ -1511,7 +1507,7 @@ class EdgeSetNormalizerConfig:
 
   source: str
   target: str
-  normalizers: List[AbstractFeatureNormalizer] = (
+  normalizers: list[AbstractFeatureNormalizer] = (
       normalizer_registry.field_list()
   )
 
@@ -1521,13 +1517,13 @@ class EdgeSetNormalizerConfig:
 class GraphNormalizerConfig:
   """Raw information of a GraphNormalizer for easy serialization."""
 
-  nodesets: Dict[str, NodeSetNormalizerConfig]
-  edgesets: Dict[str, EdgeSetNormalizerConfig]
+  nodesets: dict[str, NodeSetNormalizerConfig]
+  edgesets: dict[str, EdgeSetNormalizerConfig]
 
   def make(self) -> "GraphNormalizer":
     return GraphNormalizer(config=self)
 
-  def nice_print(self, return_output: bool = False) -> Optional[str]:
+  def nice_print(self, return_output: bool = False) -> str | None:
     """Generates a human-readable string representation of the normalizer.
 
     Args:
@@ -1594,22 +1590,22 @@ class GraphNormalizer:
   """
 
   config: GraphNormalizerConfig
-  _nodeset_kwargs: Dict[str, List[collections.abc.Set[str]]] = (
-      dataclasses.field(default_factory=dict, init=False)
+  _nodeset_kwargs: dict[str, list[Set[str]]] = dataclasses.field(
+      default_factory=dict, init=False
   )
-  _edgeset_kwargs: Dict[str, List[collections.abc.Set[str]]] = (
-      dataclasses.field(default_factory=dict, init=False)
+  _edgeset_kwargs: dict[str, list[Set[str]]] = dataclasses.field(
+      default_factory=dict, init=False
   )
   _all_accepted_kwargs: frozenset[str] = dataclasses.field(
       default_factory=frozenset, init=False
   )
 
   def __post_init__(self):
-    self._nodeset_kwargs: Dict[str, List[collections.abc.Set[str]]] = {
+    self._nodeset_kwargs: dict[str, list[Set[str]]] = {
         name: [_accepted_kwargs(s) for s in cfg.normalizers]
         for name, cfg in self.config.nodesets.items()
     }
-    self._edgeset_kwargs: Dict[str, List[collections.abc.Set[str]]] = {
+    self._edgeset_kwargs: dict[str, list[Set[str]]] = {
         name: [_accepted_kwargs(s) for s in cfg.normalizers]
         for name, cfg in self.config.edgesets.items()
     }
@@ -1625,7 +1621,7 @@ class GraphNormalizer:
     """Returns the set of accepted keyword arguments for this normalizer."""
     return self._all_accepted_kwargs
 
-  def _validate_kwargs(self, kwargs: Dict[str, Any]) -> None:
+  def _validate_kwargs(self, kwargs: dict[str, Any]) -> None:
     # If no keyword arguments are provided, we return early.
     if not kwargs:
       return
@@ -1637,7 +1633,7 @@ class GraphNormalizer:
           f"Accepted arguments: {sorted(self._all_accepted_kwargs)}."
       )
     for kwarg_name, entity_dict in kwargs.items():
-      if not isinstance(entity_dict, collections.abc.Mapping):
+      if not isinstance(entity_dict, Mapping):
         raise ValueError(
             f"Keyword argument '{kwarg_name}' to GraphNormalizer must be a dict"
             " mapping entity names (nodeset and edgeset names) to"
@@ -1673,7 +1669,7 @@ class GraphNormalizer:
       self,
       nodeset_name: str,
       original_feature_name: str,
-  ) -> List[str]:
+  ) -> list[str]:
     """Gets the normalized feature names derived from a given input feature.
 
     An original feature can be transformed into one or more new features by
@@ -1775,7 +1771,7 @@ class GraphNormalizer:
     )
     return dst_graph
 
-  def tensorflow_resources(self) -> List[tf.Tensor]:
+  def tensorflow_resources(self) -> list[tf.Tensor]:
     """Returns all the tf resources of all the operations."""
     resources = []
     for edgeset in self.config.edgesets.values():

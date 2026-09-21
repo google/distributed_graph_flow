@@ -16,7 +16,6 @@
 
 import dataclasses
 import textwrap
-from typing import List, Optional, Tuple
 import dataclasses_json
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
@@ -57,16 +56,16 @@ class HeterogeneousGraphAttentionNetworkConfig(common.ArchitectureProvider):
       transformer-like MLP. Defaults to a two-layer ResidualMLP.
   """
 
-  plan: Optional[List[Tuple[str, bool]]] = None
+  plan: list[tuple[str, bool]] | None = None
   embedding_feature: str = "embedding"
   dims: int = 128
   dropout_rate: float = 0.1
   message_pooling: str = "sum"
   num_heads: int = 4
 
-  message: Optional[common.BuildableModule] = layer_registry.field(default=None)
-  update: Optional[common.BuildableModule] = layer_registry.field(default=None)
-  post: Optional[common.BuildableModule] = layer_registry.field(default=None)
+  message: common.BuildableModule | None = layer_registry.field(default=None)
+  update: common.BuildableModule | None = layer_registry.field(default=None)
+  post: common.BuildableModule | None = layer_registry.field(default=None)
 
   def __post_init__(self):
     if self.message is None:
@@ -81,7 +80,7 @@ class HeterogeneousGraphAttentionNetworkConfig(common.ArchitectureProvider):
       )
 
   def make(
-      self, schema: schema_lib.GraphSchema, name: Optional[str] = None
+      self, schema: schema_lib.GraphSchema, name: str | None = None
   ) -> "HeterogeneousGraphAttentionNetwork":
     return HeterogeneousGraphAttentionNetwork(
         config=self, schema=schema, name=name

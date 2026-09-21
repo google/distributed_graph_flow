@@ -16,7 +16,6 @@ r"""Integration test.
 """
 
 import time
-from typing import List
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.analyse import schema as analyse_schema_lib
@@ -99,8 +98,8 @@ def normalize_graph(
 
 def print_graph_stats(
     name: str,
-    samples: List[in_memory_graph_lib.InMemoryGraph],
-    seed_ids: List[bytes],
+    samples: list[in_memory_graph_lib.InMemoryGraph],
+    seed_ids: list[bytes],
 ):
   for sample, seed_id in zip(samples, seed_ids):
     num_nodes = sum(nodeset.num_nodes for nodeset in sample.node_sets.values())  # pyrefly: ignore[no-matching-overload]

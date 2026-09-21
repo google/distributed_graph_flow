@@ -17,7 +17,7 @@
 import dataclasses
 import os
 import tempfile
-from typing import Literal, Tuple
+from typing import Literal
 import unittest.mock
 from absl import logging
 from absl.testing import absltest
@@ -68,7 +68,7 @@ def gen_toy_graph(
     num_categorical_values: int = 200,
     random_seed: int = 42,
     has_timestamp_feature: bool = False,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Generates a toy dataset for link prediction testing.
 
   The graph contains two node sets, "A" and "B", and one edge set, "A_to_B".
@@ -528,6 +528,7 @@ class LinkPredictionToyTest(parameterized.TestCase):
 
     def mock_graph_merger(*args, **kwargs):
       real_graph_merger = original_graph_merger(*args, **kwargs)
+
       def graph_merger_wrapper(*call_args, **call_kwargs):
         nonlocal call_count
         call_count += 1
@@ -536,6 +537,7 @@ class LinkPredictionToyTest(parameterized.TestCase):
               "Simulated insufficient padding"
           )
         return real_graph_merger(*call_args, **call_kwargs)
+
       return graph_merger_wrapper
 
     with unittest.mock.patch.object(

@@ -66,7 +66,7 @@ Converts object formats, e.g., a graph to a Sparse Deferred struct.
 
 Classes that represent graph data. Contains no functions or algorithms.
 
-*   [`dgf.data.EdgeSchema`](api/dgf-data.md#section-edgeschema): EdgeSchema(source: str, target: str, features: Dict[str, dgf.src.data.schema.FeatureSchema] = <factory>)
+*   [`dgf.data.EdgeSchema`](api/dgf-data.md#section-edgeschema): EdgeSchema(source: str, target: str, features: dict[str, dgf.src.data.schema.FeatureSchema] = <factory>)
 *   [`dgf.data.EdgeSetPadding`](api/dgf-data.md#section-edgesetpadding): EdgeSetPadding(num_edges: int)
 *   [`dgf.data.FeatureFormat`](api/dgf-data.md#section-featureformat): How a value is represented / stored.
 *   [`dgf.data.FeatureSchema`](api/dgf-data.md#section-featureschema): Schema for a single feature.
@@ -74,16 +74,16 @@ Classes that represent graph data. Contains no functions or algorithms.
 *   [`dgf.data.FeatureSetStatistics`](api/dgf-data.md#section-featuresetstatistics): Statistics for a set of features.
 *   [`dgf.data.FeatureStatistics`](api/dgf-data.md#section-featurestatistics): Statistics for a feature.
 *   [`dgf.data.GraphFeatureStatistics`](api/dgf-data.md#section-graphfeaturestatistics): Statistics about the features in a graph.
-*   [`dgf.data.GraphSchema`](api/dgf-data.md#section-graphschema): GraphSchema(node_sets: Dict[str, dgf.src.data.schema.NodeSchema], edge_sets: Dict[str, dgf.src.data.schema.EdgeSchema])
+*   [`dgf.data.GraphSchema`](api/dgf-data.md#section-graphschema): GraphSchema(node_sets: dict[str, dgf.src.data.schema.NodeSchema], edge_sets: dict[str, dgf.src.data.schema.EdgeSchema])
 *   [`dgf.data.GraphSchemaFilter`](api/dgf-data.md#section-graphschemafilter): Filters a GraphSchema to sub-select node sets, edge sets, and features.
-*   [`dgf.data.GraphSchemaV2`](api/dgf-data.md#section-graphschemav2): GraphSchema(node_sets: Dict[str, dgf.src.data.schema.NodeSchema], edge_sets: Dict[str, dgf.src.data.schema.EdgeSchema])
+*   [`dgf.data.GraphSchemaV2`](api/dgf-data.md#section-graphschemav2): GraphSchema(node_sets: dict[str, dgf.src.data.schema.NodeSchema], edge_sets: dict[str, dgf.src.data.schema.EdgeSchema])
 *   [`dgf.data.InMemoryEdgeSet`](api/dgf-data.md#section-inmemoryedgeset): An Edge Set.
 *   [`dgf.data.InMemoryGraph`](api/dgf-data.md#section-inmemorygraph): An in-memory generic graph.
 *   [`dgf.data.InMemoryNodeSet`](api/dgf-data.md#section-inmemorynodeset): A Node Set.
 *   [`dgf.data.JaxInMemoryEdgeSet`](api/dgf-data.md#section-jaxinmemoryedgeset): An Edge Set.
 *   [`dgf.data.JaxInMemoryGraph`](api/dgf-data.md#section-jaxinmemorygraph): An in-memory generic graph.
 *   [`dgf.data.JaxInMemoryNodeSet`](api/dgf-data.md#section-jaxinmemorynodeset): A Node Set.
-*   [`dgf.data.NodeSchema`](api/dgf-data.md#section-nodeschema): NodeSchema(features: Dict[str, dgf.src.data.schema.FeatureSchema] = <factory>)
+*   [`dgf.data.NodeSchema`](api/dgf-data.md#section-nodeschema): NodeSchema(features: dict[str, dgf.src.data.schema.FeatureSchema] = <factory>)
 *   [`dgf.data.NodeSetPadding`](api/dgf-data.md#section-nodesetpadding): NodeSetPadding(num_nodes: int)
 *   [`dgf.data.Padding`](api/dgf-data.md#section-padding): Information to pad a graph.
 *   [`dgf.data.TFInMemoryEdgeSet`](api/dgf-data.md#section-tfinmemoryedgeset): An Edge Set.
@@ -344,7 +344,7 @@ Classes that represent graph data. Contains no functions or algorithms.
 *   [`dgf.beam.data.HeterogeniousGraph`](api/dgf-beam-data.md#section-heterogeniousgraph): A (potentially distributed) heterogeneous graph.
 *   [`dgf.beam.data.HomogeneousGraph`](api/dgf-beam-data.md#section-homogeneousgraph): A (potentially distributed) homogeneous graph.
 *   [`dgf.beam.data.KeyedInMemoryGraph`](api/dgf-beam-data.md#section-keyedinmemorygraph): KeyedInMemoryGraph(key, graph)
-*   [`dgf.beam.data.Node`](api/dgf-beam-data.md#section-node): Node(id: bytes | int, features: Optional[Dict[str, numpy.ndarray]] = None)
+*   [`dgf.beam.data.Node`](api/dgf-beam-data.md#section-node): Node(id: bytes | int, features: dict[str, numpy.ndarray] | None = None)
 
 
 

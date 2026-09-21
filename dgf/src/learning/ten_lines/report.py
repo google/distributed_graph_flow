@@ -17,7 +17,7 @@
 import dataclasses
 import html
 import pprint
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 import uuid
 import altair as alt
 from dgf.src.analyse import padding as analyse_padding_lib
@@ -222,7 +222,7 @@ function openTab_{component_id.replace("-", "_")}(evt, tabId) {{
   return "\n".join(html)
 
 
-def html_log_messages(log_messages: List[log.Message]) -> str:
+def html_log_messages(log_messages: list[log.Message]) -> str:
   """Returns HTML rendering for log messages."""
   if not log_messages:
     return "<i>No logs were captured.</i>"
@@ -257,8 +257,8 @@ def html_log_messages(log_messages: List[log.Message]) -> str:
 
 def _get_training_logs_tab(
     training_logs: common.TrainingLogs,
-    training_stats_summary: Optional[str],
-) -> Tuple[str, str]:
+    training_stats_summary: str | None,
+) -> tuple[str, str]:
   """Generates the Training logs tab."""
   if len(training_logs.train) >= 10:
     training_logs = dataclasses.replace(
@@ -285,7 +285,7 @@ def _get_training_logs_tab(
   return "Training", content
 
 
-def _get_hyper_parameters_tab(hparams: Any) -> Tuple[str, str]:
+def _get_hyper_parameters_tab(hparams: Any) -> tuple[str, str]:
   """Generates the Hyper-parameters tab."""
   if dataclasses.is_dataclass(hparams):
     hparams_dict = dataclasses.asdict(hparams)
@@ -309,7 +309,7 @@ def _get_hyper_parameters_tab(hparams: Any) -> Tuple[str, str]:
 
 def _get_schema_tab(
     schemas: dict[str, schema_lib.GraphSchema],
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
   """Generates the Schema tab."""
   txt_schemas = ""
   for name, schema in schemas.items():
@@ -352,7 +352,7 @@ def _get_schema_tab(
 
 def _get_feature_stats_tab(
     feature_stats: dict[str, statistics_lib.GraphFeatureStatistics],
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
   """Generates the Feature statistics tab."""
   txt_feature_stats = ""
   for name, stats in feature_stats.items():
@@ -362,8 +362,8 @@ def _get_feature_stats_tab(
 
 
 def _get_graph_sampling_tab(
-    sampling_plans: dict[str, Optional[sampling_config_lib.SamplingPlan]],
-) -> Tuple[str, str]:
+    sampling_plans: dict[str, sampling_config_lib.SamplingPlan | None],
+) -> tuple[str, str]:
   """Generates the Graph sampling tab."""
   txt_sampling_plan = ""
   for name, sampling_plan in sampling_plans.items():
@@ -384,8 +384,8 @@ def _get_graph_sampling_tab(
 
 
 def _get_architecture_tab(
-    architecture: str, num_model_weights: Optional[Dict[str, int]] = None
-) -> Tuple[str, str]:
+    architecture: str, num_model_weights: dict[str, int] | None = None
+) -> tuple[str, str]:
   """Generates the Architecture tab."""
   num_weights_str = (
       pprint.pformat(num_model_weights)
@@ -401,7 +401,7 @@ def _get_architecture_tab(
 
 def _get_padding_tab(
     padding: dict[str, padding_data_lib.Padding],
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
   """Generates the Padding tab."""
   txt_padding = ""
   for name, pad in padding.items():
@@ -416,20 +416,20 @@ def _get_padding_tab(
 def get_common_tabs(
     hparams: Any,
     schemas: dict[str, schema_lib.GraphSchema],
-    feature_stats: Optional[
-        dict[str, statistics_lib.GraphFeatureStatistics]
-    ] = None,
-    sampling_plans: Optional[
-        dict[str, Optional[sampling_config_lib.SamplingPlan]]
-    ] = None,
-    training_logs: Optional[common.TrainingLogs] = None,
-    training_stats_summary: Optional[str] = None,
-    padding: Optional[dict[str, padding_data_lib.Padding]] = None,
-    architecture: Optional[str] = None,
-    num_model_weights: Optional[Dict[str, int]] = None,
-    log_messages: Optional[List[log.Message]] = None,
-    final_evaluation: Optional[evaluation.Evaluation] = None,
-) -> List[Tuple[str, str]]:
+    feature_stats: (
+        dict[str, statistics_lib.GraphFeatureStatistics] | None
+    ) = None,
+    sampling_plans: (
+        dict[str, sampling_config_lib.SamplingPlan | None] | None
+    ) = None,
+    training_logs: common.TrainingLogs | None = None,
+    training_stats_summary: str | None = None,
+    padding: dict[str, padding_data_lib.Padding] | None = None,
+    architecture: str | None = None,
+    num_model_weights: dict[str, int] | None = None,
+    log_messages: list[log.Message] | None = None,
+    final_evaluation: evaluation.Evaluation | None = None,
+) -> list[tuple[str, str]]:
   """Generates common tabs for model description."""
   tabs = []
 

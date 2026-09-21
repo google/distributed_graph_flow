@@ -16,8 +16,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 import dataclasses
-from typing import Iterable
 
 from absl import logging
 from dgf.src.data import distributed_graph

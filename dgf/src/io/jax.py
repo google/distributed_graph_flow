@@ -14,7 +14,6 @@
 
 """Conversion to JAX related graph objects."""
 
-from typing import Union
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import jax_in_memory_graph as jax_in_memory_graph_lib
 from dgf.src.data import tf_in_memory_graph as tf_in_memory_graph_lib
@@ -23,10 +22,10 @@ import numpy as np
 
 
 def graph_to_jax_graph(
-    src: Union[
-        in_memory_graph_lib.InMemoryGraph,
-        tf_in_memory_graph_lib.TFInMemoryGraph,
-    ],
+    src: (
+        in_memory_graph_lib.InMemoryGraph
+        | tf_in_memory_graph_lib.TFInMemoryGraph
+    ),
     cast_arrays: bool = True,
 ) -> jax_in_memory_graph_lib.JaxInMemoryGraph:
   """Converts a (NumPy) in-memory graph into a JAX in-memory graph.

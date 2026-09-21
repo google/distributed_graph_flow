@@ -16,7 +16,7 @@
 
 # pytype: disable=module-attr
 import dataclasses
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from dgf.src.data import in_memory_graph
 from dgf.src.data import padding as padding_lib
@@ -29,11 +29,11 @@ import numpy as np
 def _pad_and_cap_single_feature(
     raw_series: np.ndarray,
     seq_len: int,
-    feat_shape: Tuple[int, ...],
+    feat_shape: tuple[int, ...],
     padding_value: Any,
     dtype: Any,
     is_static_shape: bool,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
   """Pads and caps a single sequence feature into (padded_matrix, mask_matrix)."""
   num_entities = raw_series.shape[0]
   if dtype == np.bytes_:
@@ -102,7 +102,7 @@ def _pad_and_cap_single_feature(
 
 
 def has_timeseries_padding(
-    padding: Optional[padding_lib.Padding],
+    padding: padding_lib.Padding | None,
 ) -> bool:
   """Returns True if padding contains any timeseries feature padding."""
   if padding is None:
@@ -119,8 +119,8 @@ def has_timeseries_padding(
 
 
 def _validate_group_sequence_lengths(
-    group_specs: List[temporal_util.TimeseriesGroupSpec],
-    feature_padding: Dict[str, padding_lib.FeaturePadding],
+    group_specs: list[temporal_util.TimeseriesGroupSpec],
+    feature_padding: dict[str, padding_lib.FeaturePadding],
     schemas: schema_lib.FeatureSetSchema,
 ) -> None:
   """Validates that all features in each timeseries group share the same sequence length."""
@@ -151,8 +151,8 @@ def _validate_group_sequence_lengths(
 
 def _pad_timeseries_feature_set_schema(
     schemas: schema_lib.FeatureSetSchema,
-    group_specs: List[temporal_util.TimeseriesGroupSpec],
-    feature_padding: Dict[str, padding_lib.FeaturePadding],
+    group_specs: list[temporal_util.TimeseriesGroupSpec],
+    feature_padding: dict[str, padding_lib.FeaturePadding],
 ) -> schema_lib.FeatureSetSchema:
   """Computes schema for a feature set after padding/capping."""
   _validate_group_sequence_lengths(group_specs, feature_padding, schemas)
@@ -207,7 +207,7 @@ def _pad_timeseries_feature_set_schema(
 def pad_timeseries_schema(
     schema: schema_lib.GraphSchema,
     padding: padding_lib.Padding,
-    schema_cache: Optional[temporal_util.TimeseriesSchemaCache] = None,
+    schema_cache: temporal_util.TimeseriesSchemaCache | None = None,
 ) -> schema_lib.GraphSchema:
   """Returns the GraphSchema after padding/capping timeseries and adding mask features."""
   if not temporal_util.schema_has_timeseries_features(schema):
@@ -254,8 +254,8 @@ def pad_timeseries_schema(
 def pad_timeseries_feature_set(
     values: in_memory_graph.Features,
     schemas: schema_lib.FeatureSetSchema,
-    group_specs: List[temporal_util.TimeseriesGroupSpec],
-    feature_padding: Dict[str, padding_lib.FeaturePadding],
+    group_specs: list[temporal_util.TimeseriesGroupSpec],
+    feature_padding: dict[str, padding_lib.FeaturePadding],
     padding_value: Any = 0,
 ) -> in_memory_graph.Features:
   """Pads/caps timeseries features and generates matching mask features for a single entity set."""
@@ -317,7 +317,7 @@ def pad_timeseries_graph(
     schema: schema_lib.GraphSchema,
     padding: padding_lib.Padding,
     padding_value: Any = 0,
-    schema_cache: Optional[temporal_util.TimeseriesSchemaCache] = None,
+    schema_cache: temporal_util.TimeseriesSchemaCache | None = None,
 ) -> in_memory_graph.InMemoryGraph:
   """Pads and caps all timeseries features in a single graph."""
   if not temporal_util.schema_has_timeseries_features(schema):

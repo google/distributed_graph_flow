@@ -27,7 +27,6 @@ This file defines the following important objects:
 
 import collections
 import dataclasses
-from typing import Dict, List, Set
 import dataclasses_json
 from dgf.src.data import schema as schema_lib
 from dgf.src.util import temporal as temporal_util
@@ -87,7 +86,7 @@ class PlanNode:
   """Part of a sampling plan."""
 
   nodeset: str
-  children: List["PlanEdge"] = dataclasses.field(default_factory=list)
+  children: list["PlanEdge"] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass
@@ -137,7 +136,7 @@ class SamplingPlan:
   with_replacement: bool = False
   temporal_sampling: bool = False
   multi_visit: bool = True
-  edgeset_timestamp_features: Dict[str, str] = dataclasses.field(
+  edgeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
   )
   max_timeseries_len: int = 32
@@ -203,7 +202,7 @@ def simple_sampling_config_to_sampling_plan(
   )
 
 
-def edgesets_in_plan(plan: SamplingPlan) -> Set[str]:
+def edgesets_in_plan(plan: SamplingPlan) -> set[str]:
   """Lists the name of the edgesets traversed by a sampling plan."""
   edgesets = set()
 

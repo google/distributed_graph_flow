@@ -17,7 +17,6 @@
 from __future__ import annotations
 import dataclasses
 import math
-from typing import Tuple
 from typing import TYPE_CHECKING
 from dgf.src.analyse import reservoir_sampling
 from dgf.src.data import distributed_graph
@@ -452,5 +451,5 @@ def remove_feature_statistics_accumulator(
 
 def add_name(
     stats: statistics_lib.FeatureSetStatistics, name: str
-) -> Tuple[str, statistics_lib.FeatureSetStatistics]:
+) -> tuple[str, statistics_lib.FeatureSetStatistics]:
   return name, stats

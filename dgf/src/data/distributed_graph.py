@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
-from typing import Dict, List, NamedTuple, Optional, Union
+from typing import NamedTuple
 
 from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 
@@ -73,25 +73,25 @@ class Edge:
   target: TargetId
 
   # ID of this edge entry, e.g., join key with `edge_features`
-  id: Optional[EdgeId] = None
+  id: EdgeId | None = None
 
   # Optionally pack the external `edge_features` directly into the edge or use
   # for special features such as weights and temporal (datetime) data.
-  features: Optional[Features] = None
+  features: Features | None = None
 
 
 @dataclasses.dataclass(frozen=True)
 class Neighbor:
   target: TargetId
-  id: Optional[EdgeId] = None
-  features: Optional[Features] = None
+  id: EdgeId | None = None
+  features: Features | None = None
 
 
 # Adjacency list of edges.
 @dataclasses.dataclass(frozen=True)
 class AdjacencyList:
   source: SourceId
-  neighbors: List[Neighbor]
+  neighbors: list[Neighbor]
 
 
 # Defined to optionally store edge features separately from topology.
@@ -105,7 +105,7 @@ PNode = PCollection[Node]
 # Flattened list of edges.
 PEdge = PCollection[Edge]
 PAdjacencyList = PCollection[AdjacencyList]
-PEdgeSet = Union[PEdge, PAdjacencyList]
+PEdgeSet = PEdge | PAdjacencyList
 PEdgeFeatures = PCollection[EdgeFeatures]
 
 
@@ -115,7 +115,7 @@ class HomogeneousGraph:
 
   nodes: PNode
   edges: PEdgeSet
-  edge_features: Optional[PEdgeFeatures] = None
+  edge_features: PEdgeFeatures | None = None
 
   # Track the edge set format.
   edge_format: EdgeFormat = EdgeFormat.UNDEFINED
@@ -129,24 +129,24 @@ class Graph:
   schema: schema_lib.GraphSchema
 
   # Name -> NodeSet
-  node_sets: Dict[str, PNode]
+  node_sets: dict[str, PNode]
 
   # Name -> EdgeSet
-  edge_sets: Dict[str, PEdgeSet]
+  edge_sets: dict[str, PEdgeSet]
 
   edge_format: EdgeFormat = EdgeFormat.UNDEFINED
 
   # Optional named -> EdgeFeatures
-  edge_features: Optional[Dict[str, PEdgeFeatures]] = None
+  edge_features: dict[str, PEdgeFeatures] | None = None
 
 
 def heterogeneous_graph_from_pieces(
     p: beam.pvalue.PBegin,
     schema: schema_lib.GraphSchema,
-    node_sets: Dict[str, List[Node]],
-    edge_sets: Dict[str, List[Edge]],
-    edge_format: Optional[EdgeFormat] = EdgeFormat.UNDEFINED,
-    edge_features: Optional[Dict[str, List[EdgeFeatures]]] = None,
+    node_sets: dict[str, list[Node]],
+    edge_sets: dict[str, list[Edge]],
+    edge_format: EdgeFormat | None = EdgeFormat.UNDEFINED,
+    edge_features: dict[str, list[EdgeFeatures]] | None = None,
     stage_prefix: str = "",
 ) -> Graph:
   """Creates a distributed Graph from in-memory pieces.
@@ -198,7 +198,7 @@ def heterogeneous_graph_from_pieces(
 
 
 class KeyedInMemoryGraph(NamedTuple):
-  key: Optional[bytes]
+  key: bytes | None
   graph: in_memory_graph.InMemoryGraph
 
 

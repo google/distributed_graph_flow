@@ -15,7 +15,7 @@
 """Utility to handle early stopping of model training."""
 
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any
 
 
 @dataclass
@@ -109,8 +109,8 @@ class EarlyStoppingMonitor:
 
 
 def normalize_early_stopping_config(
-    value: Union[bool, int],
-) -> Optional[EarlyStoppingMonitorConfig]:
+    value: bool | int,
+) -> EarlyStoppingMonitorConfig | None:
   if isinstance(value, bool):
     if value:
       return EarlyStoppingMonitorConfig()

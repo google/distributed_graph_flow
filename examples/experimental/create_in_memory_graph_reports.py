@@ -52,9 +52,9 @@ blaze run -c opt \
 
 """
 
+from collections.abc import Sequence
 import logging
 import os
-from typing import Sequence
 
 from absl import app
 from absl import flags

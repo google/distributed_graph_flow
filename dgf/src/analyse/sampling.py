@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Optional
 from dgf.src.sampling import config as config_lib
 
 
@@ -20,7 +19,7 @@ def print_sampling_plan(
     plan: config_lib.SamplingPlan,
     return_output: bool = False,
     header: bool = True,
-) -> Optional[str]:
+) -> str | None:
   """Generates a human-readable tree representation of a sampling plan.
 
   Args:
@@ -53,7 +52,7 @@ def print_sampling_plan(
 
 
 def _append_plan_node_str(
-    node: config_lib.PlanNode, lines: List[str], prefix: str
+    node: config_lib.PlanNode, lines: list[str], prefix: str
 ):
   """Recursively appends the string representation of the plan tree."""
   if not node.children:

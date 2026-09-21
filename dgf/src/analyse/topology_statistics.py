@@ -14,8 +14,8 @@
 
 """Compute topology statistics, in process, on InMemoryGraph."""
 
+from collections.abc import Iterable
 import dataclasses
-from typing import Iterable, List
 from dgf.src.analyse import histogram as analyse_hist
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
@@ -25,14 +25,14 @@ import numpy as np
 
 @dataclasses.dataclass
 class _NodeSetAccumulator:
-  node_counts: List[int]
+  node_counts: list[int]
 
 
 @dataclasses.dataclass
 class _EdgeSetAccumulator:
-  edge_counts: List[int]
-  in_degrees: List[np.ndarray]
-  out_degrees: List[np.ndarray]
+  edge_counts: list[int]
+  in_degrees: list[np.ndarray]
+  out_degrees: list[np.ndarray]
 
 
 def _get_num_nodes(nodeset: in_memory_graph_lib.InMemoryNodeSet) -> int:

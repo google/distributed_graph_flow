@@ -14,7 +14,6 @@
 
 """Utility to convert tables to In-Memory Graphs and their schemas."""
 
-from typing import Dict, Tuple, Union
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import feature_format
@@ -48,10 +47,10 @@ def _infer_feature_schema(
 
 
 def table2graph(
-    table: Union[Dict[str, np.ndarray], pd.DataFrame],
+    table: dict[str, np.ndarray] | pd.DataFrame,
     nodeset_name: str = "nodes",
     detect_semantic: bool = True,
-) -> Tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Converts a table (dict of arrays or DataFrame) into an InMemoryGraph and Schema.
 
   The resulting graph will have no edgeset and a single nodeset.

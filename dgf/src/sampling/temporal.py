@@ -14,8 +14,8 @@
 
 """Temporal sampling utilities for filtering and slicing timeseries features."""
 
+from collections.abc import Iterable
 import dataclasses
-from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
@@ -35,8 +35,8 @@ def _compute_group_slices(
     timestamp_values: np.ndarray,
     node_idxs: np.ndarray,
     max_timeseries_len: int,
-    target_timestamp: Optional[int] = None,
-) -> Tuple[np.ndarray, np.ndarray]:
+    target_timestamp: int | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
   """Computes (start_indices, end_indices) for a sequence group on selected nodes.
 
   Args:
@@ -91,16 +91,16 @@ def _crop_timeseries(
 
 
 def _process_entity_set_timeseries(
-    target_val: Union[
-        in_memory_graph.InMemoryNodeSet, in_memory_graph.InMemoryEdgeSet
-    ],
-    source_val: Union[
-        in_memory_graph.InMemoryNodeSet, in_memory_graph.InMemoryEdgeSet
-    ],
+    target_val: (
+        in_memory_graph.InMemoryNodeSet | in_memory_graph.InMemoryEdgeSet
+    ),
+    source_val: (
+        in_memory_graph.InMemoryNodeSet | in_memory_graph.InMemoryEdgeSet
+    ),
     node_idxs: np.ndarray,
-    ts_specs: List[temporal_util.TimeseriesGroupSpec],
+    ts_specs: list[temporal_util.TimeseriesGroupSpec],
     max_timeseries_len: int,
-    target_timestamp: Optional[int] = None,
+    target_timestamp: int | None = None,
 ) -> None:
   """Causally filters and/or clips timeseries features in place or from source into target."""
   timeseries_features = set()
@@ -142,12 +142,12 @@ def extract_features_timeseries(
     graph: in_memory_graph.InMemoryGraph,
     timeseries_schema_cache: temporal_util.TimeseriesSchemaCache,
     max_timeseries_len: int = 32,
-    target_timestamp: Optional[int] = None,
-    source_graph: Optional[in_memory_graph.InMemoryGraph] = None,
+    target_timestamp: int | None = None,
+    source_graph: in_memory_graph.InMemoryGraph | None = None,
 ) -> None:
   """In-place filters and/or extracts `is_timeseries=True` features for `graph`.
 
-  - If `source_graph` is provided: extracts features directly from 
+  - If `source_graph` is provided: extracts features directly from
     `source_graph` for each node set based on the `"#idx"` row indices in a
     single pass. `graph.node_sets` must contain `"#idx"` with 0-based node row
     indices into `source_graph.node_sets`.
@@ -215,9 +215,9 @@ def extract_features_timeseries(
 def propagate_timestamps_to_edges(
     graph: in_memory_graph.InMemoryGraph,
     schema: schema_lib.GraphSchema,
-    edgeset_timestamp_features: Dict[str, str],
+    edgeset_timestamp_features: dict[str, str],
     edgesets: Iterable[str],
-) -> Tuple[in_memory_graph.InMemoryGraph, Dict[str, str]]:
+) -> tuple[in_memory_graph.InMemoryGraph, dict[str, str]]:
   """Gives a creation time to the edgesets that don't have one."""
   targets = [
       name

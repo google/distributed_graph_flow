@@ -17,7 +17,8 @@
 Note: Keeping all the proto io and parsing here, will make open-sourcing easier.
 """
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 from dgf.src.util import filesystem
 from google.protobuf import text_format
 

@@ -21,7 +21,7 @@ reports.
 
 import colorsys
 import logging
-from typing import Any, Dict, Union
+from typing import Any
 import zlib
 
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -57,14 +57,14 @@ def _get_color_for_value(value: Any) -> str:
 
 
 def graph_to_pyvis_data(
-    graph: Union[nx.Graph, in_memory_graph_lib.InMemoryGraph],
+    graph: nx.Graph | in_memory_graph_lib.InMemoryGraph,
     height: str = "500px",
     width: str = "100%",
     nodeset_namespace_delimiter: str = "_",
     color_by_attribute: str | None = None,
     node_label_attribute: str | None = None,
     graph_schema: schema_lib.GraphSchema | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """Converts a graph (NetworkX or InMemoryGraph) to PyVis-compatible data.
 
   Args:
@@ -101,7 +101,7 @@ def graph_to_pyvis_data(
     raise ValueError(f"Unsupported graph type: {type(graph)}")
 
 
-def _attr_str(attrs: Dict[str, Any]) -> str:
+def _attr_str(attrs: dict[str, Any]) -> str:
   """Helper to format attributes for tooltip."""
   if not attrs:
     return ""
@@ -128,7 +128,7 @@ def _nx_graph_to_pyvis_data(
     width: str,
     color_by_attribute: str | None = None,
     node_label_attribute: str | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """Converts a NetworkX graph to PyVis data."""
 
   # Convert Nodes (NetworkX)
@@ -214,7 +214,7 @@ def _in_memory_graph_to_pyvis_data(
     color_by_attribute: str | None = None,
     node_label_attribute: str | None = None,
     graph_schema: schema_lib.GraphSchema | None = None,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
   """Converts an InMemoryGraph to PyVis data, coloring nodes by NodeSet."""
   nodes = []
   edges = []

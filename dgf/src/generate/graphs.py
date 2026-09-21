@@ -16,7 +16,6 @@
 
 import dataclasses
 import random
-from typing import Dict, Set, Tuple, Union
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import feature_format as feature_format_lib
@@ -74,7 +73,7 @@ class SyntheticGraphConfig(SyntheticFeatureConfig):
 
 def generate_synthetic_graph_sample(
     schema: schema_lib.GraphSchema,
-    plan: Union[config_lib.SimpleSamplingConfig, config_lib.SamplingPlan],
+    plan: config_lib.SimpleSamplingConfig | config_lib.SamplingPlan,
     config: SyntheticGraphSampleConfig = SyntheticGraphSampleConfig(),
 ) -> in_memory_graph.InMemoryGraph:
   """Generates a single synthetic graph sample based on a sampling plan.
@@ -92,11 +91,11 @@ def generate_synthetic_graph_sample(
     plan = config_lib.simple_sampling_config_to_sampling_plan(plan, schema)
 
   # Maps each edgeset name to a list of (source, target) node index tuples.
-  edgesets: Dict[str, Set[Tuple[int, int]]] = {
+  edgesets: dict[str, set[tuple[int, int]]] = {
       edgeset: set() for edgeset in schema.edge_sets
   }
   # Number of nodes in each nodeset.
-  nodesets: Dict[str, int] = {nodeset: 0 for nodeset in schema.node_sets}
+  nodesets: dict[str, int] = {nodeset: 0 for nodeset in schema.node_sets}
 
   # Grow the edgesets.
   def grow_sample(src_node_idx: int, plan_node: config_lib.PlanNode):
@@ -215,7 +214,7 @@ def gen_featureset_values(
     num_items: int,
     schema: schema_lib.FeatureSetSchema,
     config: SyntheticFeatureConfig,
-) -> Dict[str, np.ndarray]:
+) -> dict[str, np.ndarray]:
   return {
       feature_name: gen_feature_values(num_items, feature_schema, config)
       for feature_name, feature_schema in schema.items()
@@ -326,7 +325,7 @@ def gen_feature_values(
 
 def write_synthetic_graph_sample_as_tfgnn_graphs(
     schema: schema_lib.GraphSchema,
-    plan: Union[config_lib.SimpleSamplingConfig, config_lib.SamplingPlan],
+    plan: config_lib.SimpleSamplingConfig | config_lib.SamplingPlan,
     path: str,
     num_samples: int,
     config: SyntheticGraphSampleConfig = SyntheticGraphSampleConfig(),

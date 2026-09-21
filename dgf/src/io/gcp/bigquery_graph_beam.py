@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 from dgf.src.data import distributed_graph as distributed_graph_lib
 from dgf.src.io import graph_in_beam as gf_graph_in_beam_lib
@@ -27,7 +27,7 @@ from dgf.src.io.gcp import parquet_export as parquet_export_lib
 from dgf.src.util.weak_dep.weak_dep_apache_beam import beam
 
 
-def _wrap_in_graph_element(record: Dict[str, Any]) -> Dict[str, Any]:
+def _wrap_in_graph_element(record: dict[str, Any]) -> dict[str, Any]:
   """Wraps the bq graph query result in graph element format."""
   gql_formated_record = {}
   if (
