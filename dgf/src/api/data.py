@@ -54,3 +54,5 @@ from dgf.src.data.padding import NodeSetPadding
 
 from dgf.src.data.graph_snapshots_metadata import GraphSnapshotsFormat
 from dgf.src.data.graph_snapshots_metadata import GraphSnapshotsMetadata
+
+from dgf.src.data.graph_snapshots import GraphSnapshots

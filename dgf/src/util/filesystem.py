@@ -117,6 +117,11 @@ def exists(path: str) -> bool:
   return epath.Path(path).exists()
 
 
+def is_dir(path: str) -> bool:
+  """Returns True if the path exists and is a directory."""
+  return epath.Path(path).is_dir()
+
+
 def create_gcs_bucket(
     bucket_name: str,
     client: Optional[storage.Client] = None,
