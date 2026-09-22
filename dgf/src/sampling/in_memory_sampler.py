@@ -418,19 +418,21 @@ def create_sampler(
   if slice_timeseries_by_seed is None:
     slice_timeseries_by_seed = plan.temporal_sampling
 
-  edgeset_timestamp_features = plan.edgeset_timestamp_features
+  # The creation time features are inferred from the schema: they are never
+  # provided by the user.
+  edgeset_timestamp_features = {}
+  if plan.temporal_sampling:
+    edgeset_timestamp_features = temporal_util.edgeset_timestamp_features(
+        schema
+    )
 
-  if edgeset_timestamp_features and edgeset_to_mask is not None:
+  if plan.temporal_sampling and edgeset_to_mask is not None:
     raise ValueError(
         "Temporal filtering and edge masking cannot be used at the same time"
         " (yet)."
     )
 
-  if (
-      plan.propagate_timestamp_to_edges
-      and edgeset_to_mask is None
-      and (plan.temporal_sampling or edgeset_timestamp_features)
-  ):
+  if plan.temporal_sampling and plan.propagate_timestamp_to_edges:
     sampling_graph, edgeset_timestamp_features = (
         sampling_temporal_lib.propagate_timestamps_to_edges(
             graph=graph,

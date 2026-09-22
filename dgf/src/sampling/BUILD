@@ -22,7 +22,6 @@ py_library(
     deps = [
         # dataclasses_json dep,
         "//dgf/src/data:schema",
-        "//dgf/src/util:temporal",
     ],
 )
 

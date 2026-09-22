@@ -73,6 +73,12 @@ _TEMPORAL_SAMPLING = flags.DEFINE_bool(
     False,
     "Whether to perform temporal-aware sampling.",
 )
+_PROPAGATE_TIMESTAMP_TO_EDGES = flags.DEFINE_bool(
+    "propagate_timestamp_to_edges",
+    True,
+    "If true and temporal sampling is enabled, the edgesets without a creation"
+    " time get one derived from their connected nodes.",
+)
 
 
 def main(argv):
@@ -89,6 +95,7 @@ def main(argv):
       hop_width=_HOP_WIDTH.value,
       reverse=_REVERSE.value,
       temporal_sampling=_TEMPORAL_SAMPLING.value,
+      propagate_timestamp_to_edges=_PROPAGATE_TIMESTAMP_TO_EDGES.value,
   )
 
   # Convert the config to a full sampling plan

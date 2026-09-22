@@ -1122,7 +1122,6 @@ class NodePredictionTemporalValidationTest(absltest.TestCase):
     )
     self.assertTrue(model.data().temporal_sampling)
     self.assertTrue(_sampling_plan(model).temporal_sampling)
-    self.assertEmpty(_sampling_plan(model).edgeset_timestamp_features)
 
 
 class NodePredictionTimeseriesTest(absltest.TestCase):

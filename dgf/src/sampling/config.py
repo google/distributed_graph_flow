@@ -29,7 +29,6 @@ import collections
 import dataclasses
 import dataclasses_json
 from dgf.src.data import schema as schema_lib
-from dgf.src.util import temporal as temporal_util
 
 
 @dataclasses_json.dataclass_json
@@ -58,8 +57,17 @@ class SimpleSamplingConfig:
       sampled graph. If true, the sampled graph is a tree where nodes / edges in
       the original graph might lead to multiple nodes / edges in the sampled
       grpah.
-    temporal_sampling: If True, temporal sampling is enabled and causal
-      timestamps are inferred from the schema.
+    temporal_sampling: If True, temporal sampling is enabled. The creation time
+      of the nodes and of the edges is inferred from the schema (see
+      `dgf.util.temporal.edgeset_timestamp_features`).
+    multi_visit: If True (default), a node reached several times at the same
+      step of the plan is expanded (i.e. its own neighbors are sampled) once per
+      visit. If False, only the first visit expands it: the other visits still
+      create edges, but the traversal does not continue through them. Setting it
+      to False bounds the amount of work per sample and matches the default
+      behavior of PyG. Note that a node can still be expanded several times
+      through different steps of the plan. Ignored if `with_replacement` is
+      True.
     max_timeseries_len: The maximum number of historical causal sequence steps
       retained for each timeseries feature.
     propagate_timestamp_to_edges: If true (default) and temporal sampling is
@@ -118,10 +126,12 @@ class SamplingPlan:
     with_replacement: Test if the sampling is done with replacement. See
       documentation for "with_replacement" attribute in SimpleSamplingConfig for
       the full explanation.
-    temporal_sampling: If True, temporal sampling is enabled and causal
-      timestamps are inferred from the schema.
-    edgeset_timestamp_features: Mapping from edgeset name to its timestamp
-      feature name for causal filtering.
+    temporal_sampling: If True, temporal sampling is enabled. The creation time
+      of the nodes and of the edges is inferred from the schema (see
+      `dgf.util.temporal.edgeset_timestamp_features`).
+    multi_visit: Test if a node reached several times at the same step of the
+      plan is expanded once per visit. See documentation for the "multi_visit"
+      attribute in SimpleSamplingConfig for the full explanation.
     max_timeseries_len: The maximum number of historical causal sequence steps
       retained for each timeseries feature.
     propagate_timestamp_to_edges: If true (default) and temporal sampling is
@@ -136,9 +146,6 @@ class SamplingPlan:
   with_replacement: bool = False
   temporal_sampling: bool = False
   multi_visit: bool = True
-  edgeset_timestamp_features: dict[str, str] = dataclasses.field(
-      default_factory=dict
-  )
   max_timeseries_len: int = 32
   propagate_timestamp_to_edges: bool = True
 
@@ -187,16 +194,11 @@ def simple_sampling_config_to_sampling_plan(
         )
     return PlanNode(nodeset, children_list)
 
-  edgeset_ts_features = {}
-  if src.temporal_sampling:
-    edgeset_ts_features = temporal_util.edgeset_timestamp_features(schema)
-
   return SamplingPlan(
       root=rec_build(src.seed_nodeset, depth=0),
       with_replacement=src.with_replacement,
       temporal_sampling=src.temporal_sampling,
       multi_visit=src.multi_visit,
-      edgeset_timestamp_features=edgeset_ts_features,
       max_timeseries_len=src.max_timeseries_len,
       propagate_timestamp_to_edges=src.propagate_timestamp_to_edges,
   )

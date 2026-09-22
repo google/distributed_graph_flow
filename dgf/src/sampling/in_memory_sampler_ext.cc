@@ -443,8 +443,8 @@ absl::StatusOr<nb::list> Sampler::Sample(
   if (seed_timestamps.has_value()) {
     if (!has_temporal_edgesets_) {
       return absl::InvalidArgumentError(
-          "seed_timestamps provided but no temporal edgesets configured. Set "
-          "the 'edgeset_timestamp_features' field in the sampling plan.");
+          "seed_timestamps provided but no temporal edgesets configured. Mark "
+          "a node or edge feature as 'is_creation_time' in the graph schema.");
     }
     if (num_seeds != seed_timestamps->view().shape(0)) {
       return absl::InvalidArgumentError(
