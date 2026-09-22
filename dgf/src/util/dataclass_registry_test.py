@@ -78,6 +78,35 @@ class RegisterTest(parameterized.TestCase):
     with self.assertRaises(dataclasses_json.undefined.UndefinedParameterError):
       _ = B.from_json('{"a": {"x": 2, "y": 3, "__type": "my_registry.A"}}')  # pyrefly: ignore[missing-attribute]
 
+  def test_missing_field_falls_back_to_default_factory(self):
+    """`dataclasses_json` runs substituted defaults through the decoder."""
+
+    @dataclasses_json.dataclass_json
+    @dataclasses.dataclass
+    class D:
+      a: Any = registry.field(default_factory=lambda: A(3))
+
+    d = D.from_json('{}')  # pyrefly: ignore[missing-attribute]
+
+    test_util.assert_are_equal(self, d, D())
+
+  def test_unregistered_default_fails(self):
+    @dataclasses.dataclass
+    class Unregistered:
+      x: int
+
+    @dataclasses_json.dataclass_json
+    @dataclasses.dataclass
+    class D:
+      a: Any = registry.field(default_factory=lambda: Unregistered(3))
+
+    with self.assertRaisesRegex(ValueError, 'Cannot decode'):
+      _ = D.from_json('{}')  # pyrefly: ignore[missing-attribute]
+
+  def test_invalid_json_scalar_value(self):
+    with self.assertRaisesRegex(ValueError, 'Cannot decode'):
+      _ = B.from_json('{"a": 5}')  # pyrefly: ignore[missing-attribute]
+
   def test_invalid_json_wrong_field_type(self):
     with self.assertRaises(ValueError):
       _ = B.from_json('{"a": {"x": "hello", "__type": "my_registry.A"}}')  # pyrefly: ignore[missing-attribute]
