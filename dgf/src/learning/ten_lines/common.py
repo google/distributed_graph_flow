@@ -31,6 +31,7 @@ from dgf.src.util import log
 from dgf.src.util import util
 import jax
 import numpy as np
+import orbax.checkpoint as ocp
 
 # The types of graphs supported.
 Graph = dataset.Graph
@@ -42,6 +43,8 @@ SeedNodeIdxs: TypeAlias = list[int] | np.ndarray
 FILENAME_DONE = "DONE"
 FILENAME_METADATA = "metadata.json"
 FILENAME_DATA = "data.json"
+# Directory containing the model weights as an orbax checkpoint.
+FILENAME_PARAMS = "params"
 
 
 class Architecture(enum.Enum):
@@ -420,6 +423,29 @@ def load_model(path: str) -> Model:
   model.metadata = metadata
   model._internal_load(path)  # pylint: disable=protected-access
   return model
+
+
+def save_params(params: Any, path: str) -> None:
+  """Saves the model weights in the directory of a saved model."""
+
+  checkpointer = ocp.StandardCheckpointer()
+  checkpointer.save(os.path.join(path, FILENAME_PARAMS), params)
+  checkpointer.wait_until_finished()
+
+
+def load_params(path: str) -> Any:
+  """Loads the model weights saved with "save_params"."""
+
+  # Note: "ocp.StandardCheckpointer" does not support restore arguments.
+  checkpointer = ocp.Checkpointer(ocp.StandardCheckpointHandler())
+  return checkpointer.restore(
+      os.path.join(path, FILENAME_PARAMS),
+      args=ocp.args.StandardRestore(
+          fallback_sharding=jax.sharding.SingleDeviceSharding(
+              jax.local_devices()[0]
+          )
+      ),
+  )
 
 
 def build_gnn_config(hparams: HParam) -> jax_common.GenericLayer:

@@ -28,6 +28,7 @@ py_library(
         "//dgf/src/util:util_py",
         # jax dep,
         # numpy dep,
+        # orbax/checkpoint dep,
     ],
 )
 
@@ -79,7 +80,6 @@ py_library(
         # jaxtyping dep,
         # numpy dep,
         # optax dep,
-        # orbax/checkpoint dep,
         # tqdm dep,
     ],
 )
@@ -225,7 +225,6 @@ py_library(
         # jax/experimental/jax2tf dep,
         # jaxtyping dep,
         # numpy dep,
-        # orbax/checkpoint dep,
         # tqdm dep,
     ],
 )
@@ -294,8 +293,10 @@ py_test(
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         "//dgf/src/util:log",
+        "//dgf/src/util:test_util",
         # jax dep,
         # numpy dep,
+        # orbax/checkpoint dep,
     ],
 )
 

@@ -14,12 +14,32 @@
 
 """Test for the basic buildable config class."""
 
+import json
+import os
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.learning.ten_lines import common
 from dgf.src.util import log
+from dgf.src.util import test_util
 import jax
+import jax.numpy as jnp
 import numpy as np
+import orbax.checkpoint as ocp
+
+
+def _set_checkpoint_device(path: str, device: str) -> None:
+  """Rewrites the device on which the weights in "path" were saved."""
+
+  sharding_path = os.path.join(path, common.FILENAME_PARAMS, "_sharding")
+  with open(sharding_path, "r") as f:
+    shardings = json.load(f)
+  for key, sharding in shardings.items():
+    sharding = json.loads(sharding)
+    sharding["device_str"] = device
+    shardings[key] = json.dumps(sharding)
+  with open(sharding_path, "w") as f:
+    json.dump(shardings, f)
 
 
 class TenLines(parameterized.TestCase):
@@ -200,6 +220,30 @@ class TenLines(parameterized.TestCase):
   def test_resolve_tf_function_input_format_conflict_fails(self):
     with self.assertRaisesRegex(ValueError, "cannot be set at the same time"):
       common.resolve_tf_function_input_format("TF_GRAPH", True)
+
+  def test_save_and_load_params(self):
+    path = self.create_tempdir().full_path
+    params = {
+        "layer1": {"w": jnp.ones((3, 2)), "b": jnp.zeros((2,))},
+        "layer2": {"w": jnp.full((2, 1), 0.5)},
+    }
+    common.save_params(params, path)
+    test_util.assert_are_equal(self, common.load_params(path), params)
+
+  def test_load_params_saved_on_another_accelerator(self):
+    # A model trained on a GPU should be loadable on a CPU-only machine.
+    path = self.create_tempdir().full_path
+    params = {"layer1": {"w": jnp.ones((3, 2))}}
+    common.save_params(params, path)
+    _set_checkpoint_device(path, "cuda:0")
+
+    # The default orbax restore looks for the device used at save time.
+    with self.assertRaisesRegex(ValueError, "Topology mismatch detected"):
+      ocp.StandardCheckpointer().restore(
+          os.path.join(path, common.FILENAME_PARAMS)
+      )
+
+    test_util.assert_are_equal(self, common.load_params(path), params)
 
 
 if __name__ == "__main__":

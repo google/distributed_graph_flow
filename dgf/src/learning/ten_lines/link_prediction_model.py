@@ -48,15 +48,12 @@ if getattr(tf, "is_available", lambda: True)():
 import jax.numpy as jnp
 import jaxtyping
 import numpy as np
-import orbax.checkpoint as ocp
 import tqdm
 
 Batch = link_prediction_core_model.Batch
 InferenceBatch = link_prediction_core_model.InferenceBatch
 CoreModel = link_prediction_core_model.CoreModel
 CoreModelConfig = link_prediction_core_model.CoreModelConfig
-
-FILENAME_PARAMS = "params"
 
 
 # TODO(gbm): Populate.
@@ -263,18 +260,10 @@ class LinkPredictionModel(common.Model):
     return self._data
 
   def _internal_save(self, path: str) -> None:
-    checkpointer = ocp.StandardCheckpointer()
-    checkpointer.save(
-        os.path.join(path, FILENAME_PARAMS),
-        self._data.model_params,
-    )
-    checkpointer.wait_until_finished()
+    common.save_params(self._data.model_params, path)
 
   def _internal_load(self, path: str) -> None:
-    checkpointer = ocp.StandardCheckpointer()
-    self._data.model_params = checkpointer.restore(
-        os.path.join(path, FILENAME_PARAMS)
-    )
+    self._data.model_params = common.load_params(path)
 
   def describe(self) -> util.RichDisplay:
     """Rich display for colab."""

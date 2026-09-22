@@ -24,7 +24,6 @@ import copy
 import dataclasses
 import enum
 import itertools
-import os
 import textwrap
 
 import dataclasses_json
@@ -56,15 +55,11 @@ if getattr(tf, "is_available", lambda: True)():
 import jax.numpy as jnp
 import jaxtyping
 import numpy as np
-import orbax.checkpoint as ocp
 import tqdm
 
 Batch = node_prediction_core_model.Batch
 CoreModel = node_prediction_core_model.CoreModel
 CoreModelConfig = node_prediction_core_model.CoreModelConfig
-
-# Filename to save the model weights as an orbax checkpoint.
-FILENAME_PARAMS = "params"
 
 
 @dataclasses.dataclass
@@ -212,21 +207,10 @@ class NodePredictionModel(common.Model):
     return self._data
 
   def _internal_save(self, path: str) -> None:
-    # TODO(gbm): Have the params saving logic in common.
-    checkpointer = ocp.StandardCheckpointer()
-    checkpointer.save(
-        os.path.join(path, FILENAME_PARAMS),
-        self._data.model_params,
-        #  ocp.args.StandardSave(self._data.model_params),
-    )
-    checkpointer.wait_until_finished()
+    common.save_params(self._data.model_params, path)
 
   def _internal_load(self, path: str) -> None:
-    # TODO(gbm): Have the params saving logic in common.
-    checkpointer = ocp.StandardCheckpointer()
-    self._data.model_params = checkpointer.restore(
-        os.path.join(path, FILENAME_PARAMS)  # , ocp.args.StandardRestore(None)
-    )
+    self._data.model_params = common.load_params(path)
 
   def describe(self) -> util.RichDisplay:
     # TODO(gbm): Make a good rich report.
