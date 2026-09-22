@@ -236,6 +236,8 @@ py_test(
     deps = [
         ":print_schema",
         # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/data:schema",
         "//dgf/src/util:gen_test_graph",
     ],
 )
