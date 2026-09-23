@@ -317,6 +317,7 @@ py_test(
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:padding",
         "//dgf/src/data:schema",
         "//dgf/src/generate:graphs",
         "//dgf/src/io:tf",

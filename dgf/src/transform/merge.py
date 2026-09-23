@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 from dgf.src.data import in_memory_graph
 from dgf.src.data import padding as padding_lib
 from dgf.src.data import schema as schema_lib
@@ -332,6 +334,61 @@ class GraphMerger:
     return (
         in_memory_graph.InMemoryGraph(merged_node_sets, merged_edge_sets),
         node_set_offsets,
+    )
+
+  def merge_sub_batches(
+      self,
+      graph_samples: list[in_memory_graph.InMemoryGraph],
+      skip_overflow_padding_error: bool = False,
+      split_overflow_padding_error: bool = False,
+      start_idx: int = 0,
+  ) -> Iterator[
+      tuple[in_memory_graph.InMemoryGraph, dict[str, np.ndarray], slice]
+  ]:
+    """Merges graph samples into sub-batches, handling padding overflow.
+
+    Args:
+      graph_samples: The list of graph samples to merge.
+      skip_overflow_padding_error: If True, skips a batch (or single sample when
+        `split_overflow_padding_error=True`) that exceeds padding instead of
+        raising `InsufficientPaddingError`.
+      split_overflow_padding_error: If True, recursively splits `graph_samples`
+        in two when `InsufficientPaddingError` is raised until the sub-batches
+        fit within the padding.
+      start_idx: The starting index of `graph_samples` within the caller's
+        batch, used to construct the returned `slice(start_idx, start_idx +
+        len)`.
+
+    Yields:
+      Tuples `(merged_graph, merge_offsets, sub_slice)` where `sub_slice` is a
+      `slice` indexing the corresponding elements in the original batch.
+    """
+    try:
+      merged_graph, merge_offsets = self(graph_samples)
+    except InsufficientPaddingError:
+      if split_overflow_padding_error and len(graph_samples) > 1:
+        mid = len(graph_samples) // 2
+        yield from self.merge_sub_batches(
+            graph_samples[:mid],
+            skip_overflow_padding_error=skip_overflow_padding_error,
+            split_overflow_padding_error=split_overflow_padding_error,
+            start_idx=start_idx,
+        )
+        yield from self.merge_sub_batches(
+            graph_samples[mid:],
+            skip_overflow_padding_error=skip_overflow_padding_error,
+            split_overflow_padding_error=split_overflow_padding_error,
+            start_idx=start_idx + mid,
+        )
+        return
+      if not skip_overflow_padding_error:
+        raise
+      return
+
+    yield (
+        merged_graph,
+        merge_offsets,
+        slice(start_idx, start_idx + len(graph_samples)),
     )
 
 

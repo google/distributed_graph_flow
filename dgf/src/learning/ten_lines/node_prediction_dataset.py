@@ -165,6 +165,7 @@ class GNNDatasetPreparator:
   )
   verbose_preparation: bool = True
   skip_overflow_padding_error: bool = False
+  split_overflow_padding_error: bool = False
   temporal_sampling: bool = False
   edgeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
@@ -226,6 +227,7 @@ class GNNDatasetPreparator:
         shuffle=self.shuffle,
         format=self.format,
         skip_overflow_padding_error=self.skip_overflow_padding_error,
+        split_overflow_padding_error=self.split_overflow_padding_error,
         padding=other_live.padding,
         temporal=self.temporal_sampling,
         edgeset_timestamp_features=self.edgeset_timestamp_features,
@@ -301,6 +303,7 @@ class GNNDatasetPreparator:
         shuffle=self.shuffle,
         format=self.format,
         skip_overflow_padding_error=self.skip_overflow_padding_error,
+        split_overflow_padding_error=self.split_overflow_padding_error,
         temporal=self.temporal_sampling,
         edgeset_timestamp_features=self.edgeset_timestamp_features,
         nodeset_timestamp_features=self.nodeset_timestamp_features,
@@ -818,6 +821,7 @@ def prepare_datasets(
       graph=valid_graph if valid_graph is not None else graph,
       seed_node_idxs=valid_seed_node_idxs,
       shuffle=not cache_valid_dataset,
+      split_overflow_padding_error=True,
       **common_kwargs,
   )
   valid_dataset.prepare_from_existing_one(train_dataset)

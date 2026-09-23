@@ -426,42 +426,40 @@ class NodePredictionModel(common.Model):
       else:
         graph_samples = sampler.sample(batch_seed_node_idxs)
 
-      yield from self._predict_sub_batch(
-          live,
-          batch_seed_node_idxs,
+      for (
+          merged_graph,
+          merge_offsets,
+          sub_slice,
+      ) in graph_merger.merge_sub_batches(
           graph_samples,
-          graph_merger=graph_merger,
-      )
+          skip_overflow_padding_error=False,
+          split_overflow_padding_error=True,
+      ):
+        yield self._predict_merged_sub_batch(
+            live,
+            batch_seed_node_idxs[sub_slice],
+            merged_graph,
+            merge_offsets,
+        )
 
-  def _predict_sub_batch(
+  def _predict_merged_sub_batch(
       self,
       live,
       sub_seed_idxs: np.ndarray,
-      sub_samples: list[in_memory_graph.InMemoryGraph],
-      graph_merger: merge_lib.GraphMerger,
-  ) -> Iterator[BatchPrediction]:
-    try:
-      merged_graph, merge_offsets = graph_merger(sub_samples)
-    except merge_lib.InsufficientPaddingError:
-      # The graph is too large to fit in the padding. Let's split it in two
-      # and try again.
-      if len(sub_samples) <= 1:
-        raise
-      mid = len(sub_samples) // 2
-      yield from self._predict_sub_batch(
-          live,
-          sub_seed_idxs[:mid],
-          sub_samples[:mid],
-          graph_merger=graph_merger,
-      )
-      yield from self._predict_sub_batch(
-          live,
-          sub_seed_idxs[mid:],
-          sub_samples[mid:],
-          graph_merger=graph_merger,
-      )
-      return
+      merged_graph: in_memory_graph.InMemoryGraph,
+      merge_offsets: dict[str, np.ndarray],
+  ) -> BatchPrediction:
+    """Predicts on an already merged (sub-)batch of graph samples.
 
+    Args:
+      live: The live model state.
+      sub_seed_idxs: The seed node indices of the samples in `merged_graph`.
+      merged_graph: The merged graph of the (sub-)batch.
+      merge_offsets: The merge offsets returned alongside `merged_graph`.
+
+    Returns:
+      The prediction for this (sub-)batch.
+    """
     # sentinel_offset=True produces N+1 offsets; omit trailing sentinel offset.
     seed_node_idxs = merge_offsets[self._data.task.target_nodeset][:-1]
 
@@ -499,7 +497,7 @@ class NodePredictionModel(common.Model):
         (normalized_merged_jax, jax_seed_node_idxs)
     )
     predictions = np.asarray(probabilities)
-    yield BatchPrediction(
+    return BatchPrediction(
         batch_seed_node_idxs=sub_seed_idxs,
         normalized_merged_graph=normalized_merged,
         merged_seed_node_idxs=seed_node_idxs,
@@ -675,24 +673,36 @@ class NodePredictionModel(common.Model):
       if verbose >= 2:
         iterator = tqdm.tqdm(iterator, desc="Evaluation", total=num_eval_steps)
 
+      def predict_samples(
+          samples: list[in_memory_graph.InMemoryGraph],
+      ) -> Iterator[BatchPrediction]:
+        # The seed node is the first node of each sample, so the seed node
+        # indices in the input graph are unknown (and unused) here.
+        seed_idxs = np.zeros(len(samples), dtype=np.int32)
+        for (
+            merged_graph,
+            merge_offsets,
+            sub_slice,
+        ) in graph_merger.merge_sub_batches(
+            samples,
+            skip_overflow_padding_error=False,
+            split_overflow_padding_error=True,
+        ):
+          yield self._predict_merged_sub_batch(
+              live,
+              seed_idxs[sub_slice],
+              merged_graph,
+              merge_offsets,
+          )
+
       batch = []
       for sample in iterator:
         batch.append(sample)
         if len(batch) == batch_size:
-          yield from self._predict_sub_batch(
-              live,
-              np.zeros(len(batch), dtype=np.int32),
-              batch,
-              graph_merger=graph_merger,
-          )
+          yield from predict_samples(batch)
           batch = []
       if batch:
-        yield from self._predict_sub_batch(
-            live,
-            np.zeros(len(batch), dtype=np.int32),
-            batch,
-            graph_merger=graph_merger,
-        )
+        yield from predict_samples(batch)
 
     if verbose >= 1:
       log.info("Evaluating model on generator")

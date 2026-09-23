@@ -25,6 +25,71 @@ from dgf.src.validate import in_memory_graph as in_memory_graph_validate_lib
 import numpy as np
 
 
+def _make_sample_generator(
+    graph: in_memory_graph.InMemoryGraph,
+    schema: schema_lib.GraphSchema,
+    batch_size: int,
+    **kwargs,
+) -> dataset.SampleGeneratorFromAnything:
+  """Returns a generator sampling the "n1" seed nodes of `graph`."""
+  return dataset.SampleGeneratorFromAnything(
+      graph=graph,
+      schema=schema,
+      batch_size=batch_size,
+      seed_node_idxs=None,
+      sampling_config=sampling_config_lib.SimpleSamplingConfig(
+          seed_nodeset="n1"
+      ),
+      format=dataset.GraphFormat.AUTO,
+      drop_remainder=False,
+      shuffle=False,
+      **kwargs,
+  )
+
+
+def _single_sample_padding(
+    graph: in_memory_graph.InMemoryGraph,
+    schema: schema_lib.GraphSchema,
+) -> dataset.padding_lib.Padding:
+  """Returns a padding that fits a single sample, but not a merged pair.
+
+  The padding is the size of the largest individual sample (plus one for the
+  sentinel node / edge), so merging two samples always overflows it.
+
+  Args:
+    graph: The graph to sample from.
+    schema: The schema of `graph`.
+
+  Returns:
+    A padding fitting the largest individual sample.
+  """
+  single_samples = [
+      sample
+      for sample, _ in _make_sample_generator(
+          graph, schema, batch_size=1
+      ).batch_iterator()
+  ]
+  node_sets = {}
+  for name in schema.node_sets:
+    max_num_nodes = max(
+        (s.node_sets[name].num_nodes or 0) for s in single_samples
+    )
+    node_sets[name] = dataset.padding_lib.NodeSetPadding(
+        num_nodes=max_num_nodes + 1
+    )
+
+  edge_sets = {}
+  for name in schema.edge_sets:
+    max_num_edges = max(s.edge_sets[name].num_edges() for s in single_samples)
+    edge_sets[name] = dataset.padding_lib.EdgeSetPadding(
+        num_edges=max_num_edges + 1
+    )
+
+  return dataset.padding_lib.Padding(
+      node_sets=node_sets, edge_sets=edge_sets
+  )
+
+
 class EvaluationTest(parameterized.TestCase):
 
   def test_in_memory_graph(self):
@@ -333,6 +398,47 @@ class EvaluationTest(parameterized.TestCase):
           drop_remainder=False,
           shuffle=False,
       )
+
+  def test_skip_overflow_padding_error_splits_batch(self):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    padding = _single_sample_padding(graph, schema)
+
+    generator_split = _make_sample_generator(
+        graph,
+        schema,
+        batch_size=2,
+        padding=padding,
+        skip_overflow_padding_error=True,
+        split_overflow_padding_error=True,
+    )
+    batches = list(generator_split.batch_iterator())
+    self.assertLen(batches, 2)
+    total_graphs = sum(len(offsets["n1"]) - 1 for _, offsets in batches)
+    self.assertEqual(total_graphs, 2)
+
+    generator_skip_only = _make_sample_generator(
+        graph,
+        schema,
+        batch_size=2,
+        padding=padding,
+        skip_overflow_padding_error=True,
+        split_overflow_padding_error=False,
+    )
+    self.assertEmpty(list(generator_skip_only.batch_iterator()))
+
+  def test_skip_overflow_padding_error_false_raises(self):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    generator = _make_sample_generator(
+        graph,
+        schema,
+        batch_size=2,
+        padding=_single_sample_padding(graph, schema),
+        skip_overflow_padding_error=False,
+    )
+    with self.assertRaises(dataset.merge_lib.InsufficientPaddingError):
+      list(generator.batch_iterator())
 
 
 if __name__ == "__main__":

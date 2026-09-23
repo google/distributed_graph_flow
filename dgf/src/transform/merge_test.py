@@ -719,6 +719,101 @@ class BatchTest(absltest.TestCase):
     with self.assertRaisesRegex(ValueError, "unknown edge sets"):
       merge_lib.GraphMerger(schema=schema, padding=bad_edge_padding)
 
+  # Each generated graph has 2 nodes per nodeset and 2 edges per edgeset.
+  def _split_test_graphs(
+      self, num_graphs: int
+  ) -> list[in_memory_graph_lib.InMemoryGraph]:
+    return [
+        gen_test_graph.generate_in_memory_graph(False, False)
+        for _ in range(num_graphs)
+    ]
+
+  def _split_test_merger(self, max_n1_nodes: int) -> merge_lib.GraphMerger:
+    """Returns a merger whose "n1" padding fits `max_n1_nodes` nodes."""
+    schema = gen_test_graph.generate_schema(False, False, variable_length=False)
+    padding = padding_lib.Padding(
+        node_sets={
+            "n1": padding_lib.NodeSetPadding(num_nodes=max_n1_nodes + 1),
+            "n2": padding_lib.NodeSetPadding(num_nodes=6 + 1),
+        },
+        edge_sets={
+            "e1": padding_lib.EdgeSetPadding(num_edges=5),
+            "e2": padding_lib.EdgeSetPadding(num_edges=6),
+        },
+    )
+    return merge_lib.GraphMerger(schema=schema, padding=padding)
+
+  def test_merge_sub_batches(self):
+    # The 3 graphs (6 "n1" nodes) do not fit, but 2 of them (4 nodes) do.
+    results = list(
+        self._split_test_merger(max_n1_nodes=4).merge_sub_batches(
+            self._split_test_graphs(3),
+            skip_overflow_padding_error=False,
+            split_overflow_padding_error=True,
+        )
+    )
+    self.assertLen(results, 2)
+    self.assertEqual(results[0][2], slice(0, 1))
+    self.assertEqual(results[1][2], slice(1, 3))
+
+  def test_merge_sub_batches_no_split_needed(self):
+    results = list(
+        self._split_test_merger(max_n1_nodes=4).merge_sub_batches(
+            self._split_test_graphs(2),
+            skip_overflow_padding_error=False,
+            split_overflow_padding_error=True,
+        )
+    )
+    self.assertLen(results, 1)
+    self.assertEqual(results[0][2], slice(0, 2))
+
+  def test_merge_sub_batches_start_idx(self):
+    # The returned slices are offset by `start_idx` so they index the caller's
+    # batch rather than `graph_samples`.
+    results = list(
+        self._split_test_merger(max_n1_nodes=4).merge_sub_batches(
+            self._split_test_graphs(3),
+            skip_overflow_padding_error=False,
+            split_overflow_padding_error=True,
+            start_idx=10,
+        )
+    )
+    self.assertLen(results, 2)
+    self.assertEqual(results[0][2], slice(10, 11))
+    self.assertEqual(results[1][2], slice(11, 13))
+
+  def test_merge_sub_batches_disabled_raises(self):
+    with self.assertRaises(merge_lib.InsufficientPaddingError):
+      list(
+          self._split_test_merger(max_n1_nodes=4).merge_sub_batches(
+              self._split_test_graphs(3),
+              skip_overflow_padding_error=False,
+              split_overflow_padding_error=False,
+          )
+      )
+
+  def test_merge_sub_batches_single_sample_overflow_skips(self):
+    # Splitting bottoms out at single samples that still do not fit; with
+    # skip_overflow_padding_error=True they are dropped.
+    results = list(
+        self._split_test_merger(max_n1_nodes=1).merge_sub_batches(
+            self._split_test_graphs(2),
+            skip_overflow_padding_error=True,
+            split_overflow_padding_error=True,
+        )
+    )
+    self.assertEmpty(results)
+
+  def test_merge_sub_batches_single_sample_overflow_raises(self):
+    with self.assertRaises(merge_lib.InsufficientPaddingError):
+      list(
+          self._split_test_merger(max_n1_nodes=1).merge_sub_batches(
+              self._split_test_graphs(2),
+              skip_overflow_padding_error=False,
+              split_overflow_padding_error=True,
+          )
+      )
+
 
 if __name__ == "__main__":
   absltest.main()

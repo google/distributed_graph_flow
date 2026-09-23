@@ -23,6 +23,7 @@ from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
+from dgf.src.data import padding as padding_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.generate import graphs as synthetic_lib
 from dgf.src.io import tf as tf_io
@@ -193,6 +194,56 @@ def gen_predictible_model_graph():
   return graph, schema
 
 
+def _single_sample_padding(
+    model: node_prediction_lib.NodePredictionModel,
+    graph: in_memory_graph_lib.InMemoryGraph,
+    seed_node_idxs: list[int],
+    num_draws: int = 5,
+) -> padding_lib.Padding:
+  """Returns a padding that fits a single sample, but not a merged pair.
+
+  The padding is the largest sample size observed over `num_draws` independent
+  samplings of each seed node (plus one for the sentinel node / edge). Merging
+  two samples therefore overflows it, which forces "predict_batch" to split its
+  batches.
+
+  Args:
+    model: The model whose sampling plan and schema are used for sampling.
+    graph: The graph to sample from.
+    seed_node_idxs: The seed nodes the padding must accommodate.
+    num_draws: How many times each seed node is sampled. Sampling is random, so
+      several draws make the observed maximum more stable.
+
+  Returns:
+    A padding fitting the largest observed single sample.
+  """
+  data = model.data()
+  schema = node_prediction_model.schema_to_input_feature_schema(
+      data.schema, data.task
+  )
+  sampler = in_memory_sampler_lib.create_sampler(
+      graph=graph,
+      plan=_sampling_plan(model),
+      schema=schema,
+      batch_size=len(seed_node_idxs),
+  )
+  samples = []
+  for _ in range(num_draws):
+    samples.extend(sampler.sample(np.asarray(seed_node_idxs)))
+
+  node_sets = {}
+  for name in schema.node_sets:
+    max_num_nodes = max((s.node_sets[name].num_nodes or 0) for s in samples)
+    node_sets[name] = padding_lib.NodeSetPadding(num_nodes=max_num_nodes + 1)
+
+  edge_sets = {}
+  for name in schema.edge_sets:
+    max_num_edges = max(s.edge_sets[name].num_edges() for s in samples)
+    edge_sets[name] = padding_lib.EdgeSetPadding(num_edges=max_num_edges + 1)
+
+  return padding_lib.Padding(node_sets=node_sets, edge_sets=edge_sets)
+
+
 class NodePredictionRealLookingGraphAttentionNetwork(parameterized.TestCase):
 
   @classmethod
@@ -283,6 +334,37 @@ class NodePredictionRealLooking(parameterized.TestCase):
     predictions = self.model.predict(graph=self.graph, seed_node_idxs=[0, 1, 2])
     self.assertEqual(predictions.shape, (3, self.model.num_label_classes()))
     self.assertTrue(np.allclose(np.sum(predictions, axis=1), 1.0))
+
+  def test_predict_batch_splits_oversized_batches(self):
+    seed_node_idxs = [0, 1, 2, 3]
+    data = self.model.data()
+    original_padding = data.padding
+    data.padding = _single_sample_padding(
+        self.model, self.graph, seed_node_idxs
+    )
+    try:
+      batches = list(
+          self.model.predict_batch(
+              graph=self.graph,
+              seed_node_idxs=seed_node_idxs,
+              input_features_only=True,
+              verbose=0,
+          )
+      )
+    finally:
+      data.padding = original_padding
+
+    # The padding only fits a single sample, so the batches are recursively
+    # split down to individual samples instead of raising.
+    self.assertLen(batches, len(seed_node_idxs))
+    for batch in batches:
+      self.assertIsInstance(batch, node_prediction_model.BatchPrediction)
+      self.assertLen(batch.batch_seed_node_idxs, 1)
+      self.assertLen(batch.predictions, 1)
+    self.assertEqual(
+        [int(batch.batch_seed_node_idxs[0]) for batch in batches],
+        seed_node_idxs,
+    )
 
   def test_predict_without_labels(self):
     graph_without_labels = copy.deepcopy(self.graph)
@@ -658,24 +740,21 @@ class NodePredictionRealLooking(parameterized.TestCase):
     original_graph_merger = node_prediction_model.merge_lib.GraphMerger
     call_count = 0
 
-    def mock_graph_merger(*args, **kwargs):
-      real_graph_merger = original_graph_merger(*args, **kwargs)
+    class MockGraphMerger(original_graph_merger):
 
-      def graph_merger_wrapper(*call_args, **call_kwargs):
+      def __call__(self, *call_args, **call_kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
           raise node_prediction_model.merge_lib.InsufficientPaddingError(
               "Simulated insufficient padding"
           )
-        return real_graph_merger(*call_args, **call_kwargs)
-
-      return graph_merger_wrapper
+        return super().__call__(*call_args, **call_kwargs)
 
     with unittest.mock.patch.object(
         node_prediction_model.merge_lib,
         "GraphMerger",
-        side_effect=mock_graph_merger,
+        side_effect=MockGraphMerger,
     ):
       # In test, batch_size is 5 (from RAPID_TRAINING_KWARGS).
       # We need to call predict with at least 2 examples to trigger splitting.

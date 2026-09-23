@@ -159,8 +159,12 @@ class SampleGeneratorFromAnything:
       the padding after initialization, use "set_padding".
     skip_overflow_padding_error: If padding is set, the merging stage can fail
       if the "padding" is not large enough. If skip_overflow_padding_error=True,
-      such batch is skipped. If skip_overflow_padding_error=False, and error is
-      raised. This has not effect if "padding" is None.
+      such batch is skipped. If skip_overflow_padding_error=False, an error is
+      raised. This has no effect if "padding" is None.
+    split_overflow_padding_error: If True, batches that exceed "padding" are
+      recursively split in half until they fit within the padding (falling back
+      to skip_overflow_padding_error when a single sample still exceeds the
+      padding).
     temporal: True if the data sample should be temporally aware.
     edgeset_timestamp_features: A mapping from edge set name to the feature name
       containing timestamps. Only used if temporal=true.
@@ -188,6 +192,7 @@ class SampleGeneratorFromAnything:
   format: GraphFormat | str = GraphFormat.AUTO
   padding: padding_lib.Padding | None = None
   skip_overflow_padding_error: bool = False
+  split_overflow_padding_error: bool = False
   temporal: bool = False
   edgeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
@@ -348,11 +353,12 @@ class SampleGeneratorFromAnything:
         else:
           graph_samples = self.in_memory_sampler.sample(node_idxs)
 
-        try:
-          yield graph_merger(graph_samples)
-        except merge_lib.InsufficientPaddingError as e:
-          if not self.skip_overflow_padding_error:
-            raise e
+        for merged_graph, merge_offsets, _ in graph_merger.merge_sub_batches(
+            graph_samples,
+            skip_overflow_padding_error=self.skip_overflow_padding_error,
+            split_overflow_padding_error=self.split_overflow_padding_error,
+        ):
+          yield merged_graph, merge_offsets
 
     def single_generator():
       assert self.in_memory_sampler is not None
@@ -400,17 +406,23 @@ class SampleGeneratorFromAnything:
             batch.append(next(it))
         except StopIteration:
           if batch and not self.drop_remainder:
-            try:
-              yield graph_merger(batch)
-            except merge_lib.InsufficientPaddingError as e:
-              if not self.skip_overflow_padding_error:
-                raise e
+            for (
+                merged_graph,
+                merge_offsets,
+                _,
+            ) in graph_merger.merge_sub_batches(
+                batch,
+                skip_overflow_padding_error=self.skip_overflow_padding_error,
+                split_overflow_padding_error=self.split_overflow_padding_error,
+            ):
+              yield merged_graph, merge_offsets
           return
-        try:
-          yield graph_merger(batch)
-        except merge_lib.InsufficientPaddingError as e:
-          if not self.skip_overflow_padding_error:
-            raise e
+        for merged_graph, merge_offsets, _ in graph_merger.merge_sub_batches(
+            batch,
+            skip_overflow_padding_error=self.skip_overflow_padding_error,
+            split_overflow_padding_error=self.split_overflow_padding_error,
+        ):
+          yield merged_graph, merge_offsets
 
     def single_generator():
       return tf_graph_sample.read_tfgnn_graphs(
