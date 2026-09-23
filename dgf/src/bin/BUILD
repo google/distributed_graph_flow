@@ -43,7 +43,6 @@ py_binary(
     name = "import_graph_ai_graph",
     srcs = ["import_graph_ai_graph.py"],
     deps = [
-        "//file/colossus/public:cns",
         # absl:app dep,
         # absl/flags dep,
         # apache_beam dep,

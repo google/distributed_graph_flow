@@ -17,11 +17,11 @@
 import json
 from unittest import mock
 from absl.testing import absltest
-from google.cloud.aiplatform import aiplatform
 from dgf.src.sampling import config as config_lib
 from dgf.src.sampling.offline_distributed import offline_distributed_gcp
 from dgf.src.util import gen_test_graph
 from dgf.src.util import log
+from dgf.src.util.weak_dep.weak_dep_aiplatform import aiplatform
 
 
 class OfflineDistributedGcpTest(absltest.TestCase):

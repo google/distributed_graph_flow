@@ -202,7 +202,7 @@ class GNNDatasetPreparator:
     """Returns the schema of the generated samples."""
     return self.get_live().normalizer.output_schema()
 
-  def prepare_from_existing_one(self, other: GNNDatasetPreparator):
+  def prepare_from_existing_one(self, other: "GNNDatasetPreparator"):
     """Pre-compute data (same as "prepare") but with an already computed cache.
 
     Instead of beeing recomputed, the following are grabbed from "other":

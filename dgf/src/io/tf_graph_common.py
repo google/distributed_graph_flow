@@ -14,6 +14,8 @@
 
 """Common utilities for TF-based graph serialization and processing."""
 
+from __future__ import annotations
+
 import enum
 
 from dgf.src.data import schema as schema_lib

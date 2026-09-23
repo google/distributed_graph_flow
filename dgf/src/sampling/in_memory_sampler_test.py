@@ -1767,6 +1767,7 @@ class InMemorySamplerDiamon(parameterized.TestCase):
         return_features=True,
         return_node_idxs=False,
         batch_size=5,
+        seed=0,
     )
     sample = sampler.sample(0)
     self.assertIsNotNone(sample)

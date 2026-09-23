@@ -821,8 +821,8 @@ def download_jena_climate_csv(source: str | None = None) -> pd.DataFrame:
   date_times = pd.to_datetime(
       climate_df["Date Time"], format="%d.%m.%Y %H:%M:%S"
   )
-  climate_df["timestamp"] = (date_times.astype("int64") // 10**9).astype(
-      np.int64
+  climate_df["timestamp"] = (
+      date_times.to_numpy().astype("datetime64[s]").astype(np.int64)
   )
 
   return climate_df.rename(columns=JENA_CLIMATE_COLUMN_RENAME_MAP)

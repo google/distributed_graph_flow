@@ -35,12 +35,14 @@ test_util.disable_diff_truncation()
 def jena_climate_dataframe(num_rows: int) -> pd.DataFrame:
   """Returns a dummy frame in the format of `download_jena_climate_csv`."""
   date_range = pd.date_range("2009-01-01", periods=num_rows, freq="10min")
-  columns = {
+  columns: dict[str, Any] = {
       name: np.linspace(1.0, 2.0, num_rows, dtype=np.float32)
       for name in dataset_loader.JENA_WEATHER_FEATURE_NAMES
   }
   columns["t_degc"] = np.linspace(-5.0, 25.0, num_rows, dtype=np.float32)
-  columns["timestamp"] = (date_range.astype("int64") // 10**9).astype(np.int64)
+  columns["timestamp"] = (
+      date_range.to_numpy().astype("datetime64[s]").astype(np.int64)
+  )
   return pd.DataFrame(columns)
 
 

@@ -7,7 +7,7 @@
 
 set -vex
 
-sudo apt-get install -y patchelf
+which patchelf >/dev/null 2>&1 || sudo apt-get install -y patchelf
 
 # Create the missing __init__.py files
 find dgf -type d -exec sh -c 'touch "$1/__init__.py"' _ {} \;
@@ -25,9 +25,12 @@ cp LICENSE setup.py requirements.txt README.md package/
 # We will pass the python versions to build.sh
 PYTHON_VERSIONS=( 3.11 3.12 3.13 )
 
+INTERACTIVE_FLAG="-i"
+[ -t 0 ] && INTERACTIVE_FLAG="-it"
+
 DOCKER_OPTS=(
   --rm
-  -it
+  "$INTERACTIVE_FLAG"
   -e PYTHONDONTWRITEBYTECODE=1
   -v dgf_bazel_cache:/root/.cache
   -v "$(pwd):/work"

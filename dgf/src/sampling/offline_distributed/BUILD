@@ -22,7 +22,7 @@ py_library(
         "//dgf/src/sampling:config",
         "//dgf/src/util:filesystem",
         "//dgf/src/util:log",
-        # google/cloud/aiplatform dep,
+        "//dgf/src/util/weak_dep:weak_dep_aiplatform",
         # tqdm dep,
     ],
 )
@@ -45,6 +45,7 @@ py_test(
         "//dgf/src/sampling:config",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:log",
+        "//dgf/src/util/weak_dep:weak_dep_aiplatform",
         # google/cloud/aiplatform dep,
     ],
 )

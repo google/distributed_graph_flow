@@ -203,8 +203,11 @@ def download_traffic_speeds(
   # and every other column holds the speeds of one sensor.
   speeds = pd.read_csv(csv_source, index_col=0)
   timestamps = (
-      pd.to_datetime(speeds.index).astype("int64") // 10**9
-  ).to_numpy(dtype=np.int64)
+      pd.to_datetime(speeds.index)
+      .to_numpy()
+      .astype("datetime64[s]")
+      .astype(np.int64)
+  )
   return (
       speeds.set_axis(timestamps, axis="index")
       .set_axis(

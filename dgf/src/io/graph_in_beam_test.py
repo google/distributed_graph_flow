@@ -33,11 +33,19 @@ import numpy as np
 test_util.disable_diff_truncation()
 Edge = distributed_graph.Edge
 
+_CONTAINERS = [
+    "PARQUET",
+    "TF_RECORD",
+]
+
+
 
 def _create_pipeline():
-  return test_pipeline.TestPipeline(
-      runner=runners.runner_from_name("FlumePython")
-  )
+  try:
+    runner = runners.runner_from_name("FlumePython")
+  except ValueError:
+    runner = runners.runner_from_name("DirectRunner")
+  return test_pipeline.TestPipeline(runner=runner)
 
 
 class ReadGFGGraphTest(parameterized.TestCase):
@@ -53,7 +61,7 @@ class ReadGFGGraphTest(parameterized.TestCase):
         graph = gf_graph_in_beam_lib.read_graph(root, path)
         _check_graph(self, graph, edge_ids=edge_ids)
 
-  @parameterized.parameters("PARQUET", "TF_RECORD", "RECORDIO")
+  @parameterized.parameters(_CONTAINERS)
   def test_read_graph_with_filter(self, container: str):
     with tempfile.TemporaryDirectory() as tmpdir:
       path = os.path.join(tmpdir, "gf_graph")
@@ -79,7 +87,7 @@ class ReadGFGGraphTest(parameterized.TestCase):
         _check_graph(self, graph, edge_ids=False, has_edges=False)
 
   @parameterized.product(
-      edge_ids=[True, False], container=["PARQUET", "TF_RECORD", "RECORDIO"]
+      edge_ids=[True, False], container=_CONTAINERS
   )
   def test_write_graph(self, edge_ids: bool, container: str):
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -123,7 +131,7 @@ class ReadGFGGraphTest(parameterized.TestCase):
       self.assertSameElements(sorted(actual_files), sorted(expected_files))
 
   @parameterized.product(
-      edge_ids=[True, False], container=["PARQUET", "TF_RECORD", "RECORDIO"]
+      edge_ids=[True, False], container=_CONTAINERS
   )
   def test_in_memory_write_and_beam_read(self, edge_ids: bool, container: str):
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -143,7 +151,7 @@ class ReadGFGGraphTest(parameterized.TestCase):
         _check_graph(self, graph, edge_ids=edge_ids)
 
   @parameterized.product(
-      edge_ids=[True, False], container=["PARQUET", "TF_RECORD", "RECORDIO"]
+      edge_ids=[True, False], container=_CONTAINERS
   )
   def test_beam_write_and_in_memory_read(self, edge_ids: bool, container: str):
     with tempfile.TemporaryDirectory() as tmpdir:

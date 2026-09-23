@@ -14,6 +14,8 @@
 
 """Runs the distributed graph sampler on GCP using Vertex AI and Dataflow."""
 
+from __future__ import annotations
+
 import datetime
 import os
 import subprocess
@@ -25,7 +27,7 @@ from dgf.src.io import schema as io_schema
 from dgf.src.sampling import config as config_lib
 from dgf.src.util import filesystem
 from dgf.src.util import log
-from google.cloud.aiplatform import aiplatform
+from dgf.src.util.weak_dep.weak_dep_aiplatform import aiplatform
 import tqdm
 
 _DEFAULT_IMAGE_URI = (
@@ -46,12 +48,15 @@ _LOGGING_ROOT_URL_TEMPLATE = (
     "https://console.cloud.google.com/logs/viewer?project={project}"
 )
 
-_TERMINAL_FAILURE_STATES = {
-    aiplatform.gapic.JobState.JOB_STATE_FAILED,
-    aiplatform.gapic.JobState.JOB_STATE_CANCELLED,
-    aiplatform.gapic.JobState.JOB_STATE_EXPIRED,
-    aiplatform.gapic.JobState.JOB_STATE_PAUSED,
-}
+
+def _get_terminal_failure_states() -> set[Any]:
+  return {
+      aiplatform.gapic.JobState.JOB_STATE_FAILED,
+      aiplatform.gapic.JobState.JOB_STATE_CANCELLED,
+      aiplatform.gapic.JobState.JOB_STATE_EXPIRED,
+      aiplatform.gapic.JobState.JOB_STATE_PAUSED,
+  }
+
 
 _STAGES = [
     "1/4: Job submitted",
@@ -302,7 +307,7 @@ def _monitor_job(
         last_state_name = state_name
 
       if (
-          state in _TERMINAL_FAILURE_STATES
+          state in _get_terminal_failure_states()
           or "FAILED" in state_name.upper()
           or "CANCEL" in state_name.upper()
       ):

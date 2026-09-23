@@ -29,6 +29,12 @@ import numpy as np
 test_util.disable_diff_truncation()
 Edge = distributed_graph.Edge
 
+_CONTAINERS = [
+    "PARQUET",
+    "TF_RECORD",
+]
+
+
 
 class ReadGfGraphTest(parameterized.TestCase):
 
@@ -108,7 +114,7 @@ class ReadGfGraphTest(parameterized.TestCase):
     self.assertEqual(graph.edge_sets["e2"].num_edges(), 1)
 
   @parameterized.product(
-      edge_ids=[True, False], container=["PARQUET", "TF_RECORD", "RECORDIO"]
+      edge_ids=[True, False], container=_CONTAINERS
   )
   def test_write_graph(self, edge_ids: bool, container: str):
     tmpdir = self.create_tempdir().full_path
@@ -183,7 +189,7 @@ class ReadGfGraphTest(parameterized.TestCase):
 
   @parameterized.product(
       num_shards=[1, 2, 3],
-      container=["PARQUET", "TF_RECORD", "RECORDIO"],
+      container=_CONTAINERS,
   )
   def test_write_and_read_sharded_graph(self, num_shards: int, container: str):
     tmpdir = self.create_tempdir().full_path

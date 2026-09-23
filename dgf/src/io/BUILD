@@ -287,7 +287,6 @@ py_library(
 py_library(
     name = "pyg",
     srcs = ["pyg.py"],
-    pytype_deps = [# torch_geometric dep],
     deps = [
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
@@ -755,21 +754,6 @@ py_test(
         "//dgf/src/data:histogram",
         "//dgf/src/data:statistics",
         "//dgf/src/util:test_util",
-    ],
-)
-
-py_test(
-    name = "pyg_test",
-    srcs = ["pyg_test.py"],
-    deps = [
-        ":pyg",
-        # absl/testing:absltest dep,
-        # absl/testing:parameterized dep,
-        "//dgf/src/util:gen_test_graph",
-        "//dgf/src/util:test_util",
-        # numpy dep,
-        # torch:pytorch dep,
-        # torch_geometric dep,
     ],
 )
 

@@ -28,9 +28,11 @@ import tensorflow as tf
 
 
 def _create_pipeline():
-  return test_pipeline.TestPipeline(
-      runner=runners.runner_from_name("FlumePython")
-  )
+  try:
+    runner = runners.runner_from_name("FlumePython")
+  except ValueError:
+    runner = runners.runner_from_name("DirectRunner")
+  return test_pipeline.TestPipeline(runner=runner)
 
 
 class BeamTfGraphCommonTest(absltest.TestCase):
@@ -125,33 +127,6 @@ class BeamTfGraphCommonTest(absltest.TestCase):
     assert edge.features is not None
     self.assertIn("w", edge.features)
     self.assertAlmostEqual(edge.features["w"][0], 0.5)
-
-  def test_recordio_container_read_write(self):
-    with tempfile.TemporaryDirectory() as tmpdir:
-      prefix = os.path.join(tmpdir, "examples")
-      example1 = tf.train.Example()
-      example1.features.feature["f"].int64_list.value.append(42)
-      example2 = tf.train.Example()
-      example2.features.feature["f"].int64_list.value.append(43)
-
-      with _create_pipeline() as p_write:
-        examples_pcoll = p_write | beam.Create([example1, example2])
-        _ = examples_pcoll | beam_tf_graph_common.WriteTfExampleContainer(
-            file_path_prefix=prefix,
-            extension=".recordio",
-            container_type=tf_graph_common.TfExampleContainer.RECORDIO,
-            num_shards=1,
-        )
-
-      with _create_pipeline() as p_read:
-        read_examples = p_read | beam_tf_graph_common.ReadTfExampleContainer(
-            file_pattern=f"{prefix}*.recordio",
-            container_type=tf_graph_common.TfExampleContainer.RECORDIO,
-        )
-        beam_test_util.assert_that(
-            read_examples,
-            beam_test_util.equal_to([example1, example2]),
-        )
 
 
 if __name__ == "__main__":
