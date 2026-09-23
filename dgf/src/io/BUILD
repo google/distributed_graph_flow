@@ -287,7 +287,7 @@ py_library(
 py_library(
     name = "pyg",
     srcs = ["pyg.py"],
-    pytype_deps = ["//third_party/py/torch_geometric"],
+    pytype_deps = [# torch_geometric dep],
     deps = [
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
@@ -768,8 +768,8 @@ py_test(
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
         # numpy dep,
-        "//third_party/py/torch:pytorch",
-        "//third_party/py/torch_geometric",
+        # torch:pytorch dep,
+        # torch_geometric dep,
     ],
 )
 

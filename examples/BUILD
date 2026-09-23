@@ -1,4 +1,4 @@
-load("//devtools/python/blaze:pytype.bzl", "py_binary")
+load("@rules_python//python:py_binary.bzl", "py_binary")
 
 package(
     
@@ -115,10 +115,10 @@ py_binary(
         "//dgf",
         # matplotlib dep,
         # numpy dep,
-        "//third_party/py/torch:pytorch",
-        "//third_party/py/torch_geometric",
-        "//third_party/py/torch_geometric:data",
-        "//third_party/py/torch_geometric:nn",
+        # torch:pytorch dep,
+        # torch_geometric dep,
+        # torch_geometric:data dep,
+        # torch_geometric:nn dep,
         # tqdm dep,
     ],
 )

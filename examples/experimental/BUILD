@@ -1,4 +1,4 @@
-load("//devtools/python/blaze:pytype.bzl", "py_binary")
+load("@rules_python//python:py_binary.bzl", "py_binary")
 
 package(
     
