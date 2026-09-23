@@ -16,6 +16,7 @@ import collections
 from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
+from dgf.src.data import schema as schema_lib
 from dgf.src.generate import edge_neighbor_generator as edge_neighbor_generator_lib
 from dgf.src.io import jax as jax_io_lib
 from dgf.src.learning.ten_lines import link_prediction_dataset
@@ -569,6 +570,126 @@ class GNNLinkDatasetPreparatorTest(parameterized.TestCase):
       )
       num_batches += 1
     self.assertEqual(num_batches, 2)
+
+  @parameterized.named_parameters(
+      ("default", False),
+      ("mask_target_edgeset", True),
+  )
+  def test_in_memory_temporal_timeseries_graph(self, mask_target_edgeset):
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(True)
+    schema.node_sets["n1"].features["ts_time"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        is_timeseries=True,
+        is_creation_time=True,
+        shape=(None,),
+        group="ts_group",
+    )
+    schema.node_sets["n1"].features["ts_val"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        is_timeseries=True,
+        shape=(None,),
+        group="ts_group",
+    )
+    ts_time = np.empty(4, dtype=object)
+    ts_time[0] = np.array([5, 12], dtype=np.int64)
+    ts_time[1] = np.array([10, 20, 30], dtype=np.int64)
+    ts_time[2] = np.array([15], dtype=np.int64)
+    ts_time[3] = np.array([20, 40], dtype=np.int64)
+    ts_val = np.empty(4, dtype=object)
+    ts_val[0] = np.array([1.0, 2.0], dtype=np.float32)
+    ts_val[1] = np.array([3.0, 4.0, 5.0], dtype=np.float32)
+    ts_val[2] = np.array([6.0], dtype=np.float32)
+    ts_val[3] = np.array([7.0, 8.0], dtype=np.float32)
+    graph.node_sets["n1"].features["ts_time"] = ts_time
+    graph.node_sets["n1"].features["ts_val"] = ts_val
+
+    sampling_config = sampling_config_lib.SimpleSamplingConfig(
+        seed_nodeset="n1",
+        num_hops=2,
+        hop_width=3,
+        reverse=True,
+        temporal_sampling=True,
+        max_timeseries_len=4,
+    )
+    preparator = link_prediction_dataset.GNNLinkDatasetPreparator(
+        graph=graph,
+        schema=schema,
+        sampling_config=sampling_config,
+        batch_size=2,
+        drop_remainder=False,
+        shuffle=True,
+        target_edgeset="e1",
+        num_negative_nodes=2,
+        seed_edge_idxs=None,
+        mask_target_edgeset=mask_target_edgeset,
+        temporal_sampling=True,
+        edgeset_timestamp_features={"e1": "timestamp"},
+        auto_normalize_config=normalize_lib.AutoNormalizeConfig(
+            timestamp_normalize=True,
+            calendar_normalize=True,
+            has_seed_timestamps=True,
+        ),
+        edge_neighbor_generator=(
+            edge_neighbor_generator_lib.RandomEdgeNeighborGeneratorConfig()
+        ),
+    )
+    self.assertFalse(preparator.is_prepared())
+    preparator.prepare()
+    self.assertTrue(preparator.is_prepared())
+
+    live = preparator.get_live()
+    self.assertIn("seed_timestamps", live.source_normalizer.accepted_kwargs)
+    self.assertIn("seed_timestamps", live.target_normalizer.accepted_kwargs)
+    self.assertIn(
+        "ts_group_mask",
+        live.source_normalizer.output_schema().node_sets["n1"].features,
+    )
+    self.assertIn(
+        "ts_group_mask",
+        live.target_normalizer.output_schema().node_sets["n1"].features,
+    )
+
+    num_batches = 0
+    for sample in preparator.generate():
+      in_memory_graph_validate_lib.validate_graph(
+          sample.positive_source_graph,
+          live.source_normalizer.output_schema(),
+          raise_on_warning=False,
+      )
+      in_memory_graph_validate_lib.validate_graph(
+          sample.positive_target_graph,
+          live.target_normalizer.output_schema(),
+          raise_on_warning=False,
+      )
+      in_memory_graph_validate_lib.validate_graph(
+          sample.negative_target_graph,
+          live.target_normalizer.output_schema(),
+          raise_on_warning=False,
+      )
+      num_batches += 1
+    self.assertEqual(num_batches, 2)
+
+    num_jax_batches = 0
+    for jax_sample in preparator.generate_jax():
+      in_memory_graph_validate_lib.validate_graph(
+          jax_io_lib.jax_graph_to_graph(jax_sample.positive_source_graph),
+          live.source_normalizer.output_schema(),
+          raise_on_warning=False,
+      )
+      in_memory_graph_validate_lib.validate_graph(
+          jax_io_lib.jax_graph_to_graph(jax_sample.positive_target_graph),
+          live.target_normalizer.output_schema(),
+          raise_on_warning=False,
+      )
+      in_memory_graph_validate_lib.validate_graph(
+          jax_io_lib.jax_graph_to_graph(jax_sample.negative_target_graph),
+          live.target_normalizer.output_schema(),
+          raise_on_warning=False,
+      )
+      num_jax_batches += 1
+    self.assertEqual(num_jax_batches, 2)
 
   def test_temporal_cache_normalized_features_raises(self):
     graph, schema = gen_test_graph.generate_temporal_in_memory_graph(False)

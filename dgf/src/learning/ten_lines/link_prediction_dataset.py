@@ -39,6 +39,7 @@ from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
+from dgf.src.transform import timeseries_padding
 from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
@@ -468,7 +469,7 @@ class GNNLinkDatasetPreparator:
         self.source_sampling_plan
         if self.source_sampling_plan is not None
         else sampling_config_lib.simple_sampling_config_to_sampling_plan(
-            self.sampling_config, self.schema
+            self.sampling_config, sampling_schema
         )
         if isinstance(
             self.sampling_config, sampling_config_lib.SimpleSamplingConfig
@@ -483,7 +484,7 @@ class GNNLinkDatasetPreparator:
         self.target_sampling_plan
         if self.target_sampling_plan is not None
         else sampling_config_lib.simple_sampling_config_to_sampling_plan(
-            target_plan_config, self.schema
+            target_plan_config, sampling_schema
         )
         if isinstance(
             target_plan_config, sampling_config_lib.SimpleSamplingConfig
@@ -594,17 +595,6 @@ class GNNLinkDatasetPreparator:
       log.info("  Source stats:\n%s", source_feature_stats)
       log.info("  Target stats:\n%s", target_feature_stats)
 
-    source_normalizer = normalize_lib.auto_normalize(
-        schema=sampling_schema,
-        stats=source_feature_stats,
-        config=self.auto_normalize_config,
-    )
-    target_normalizer = normalize_lib.auto_normalize(
-        schema=sampling_schema,
-        stats=target_feature_stats,
-        config=self.auto_normalize_config,
-    )
-
     # Generate samples to estimate padding.
     # Note: Unlike feature statistics, positive and negative target samples are
     # processed independently for padding, requiring separate padding
@@ -614,7 +604,7 @@ class GNNLinkDatasetPreparator:
         schema=sampling_schema, padding=None, sentinel_offset=True
     )
 
-    def gen_normalized_merged_positive_source_samples() -> (
+    def gen_merged_positive_source_samples() -> (
         Iterator[in_memory_graph_lib.InMemoryGraph]
     ):
       while True:
@@ -630,9 +620,9 @@ class GNNLinkDatasetPreparator:
               seed_timestamps=batch_seed.seed_timestamps,
           )
           merged_samples, _ = graph_merger(samples)
-          yield source_normalizer.normalize_numpy(merged_samples)
+          yield merged_samples
 
-    def gen_normalized_merged_positive_target_samples() -> (
+    def gen_merged_positive_target_samples() -> (
         Iterator[in_memory_graph_lib.InMemoryGraph]
     ):
       while True:
@@ -648,9 +638,9 @@ class GNNLinkDatasetPreparator:
               seed_timestamps=batch_seed.seed_timestamps,
           )
           merged_samples, _ = graph_merger(samples)
-          yield target_normalizer.normalize_numpy(merged_samples)
+          yield merged_samples
 
-    def gen_normalized_merged_negative_target_samples() -> (
+    def gen_merged_negative_target_samples() -> (
         Iterator[in_memory_graph_lib.InMemoryGraph]
     ):
       while True:
@@ -671,29 +661,29 @@ class GNNLinkDatasetPreparator:
               seed_timestamps=neg_seed_timestamps,
           )
           merged_samples, _ = graph_merger(samples)
-          yield target_normalizer.normalize_numpy(merged_samples)
+          yield merged_samples
 
-    gen_normalized_merged_positive_source_samples_iter = (
-        gen_normalized_merged_positive_source_samples()
+    gen_merged_positive_source_samples_iter = (
+        gen_merged_positive_source_samples()
     )
-    gen_normalized_merged_positive_target_samples_iter = (
-        gen_normalized_merged_positive_target_samples()
+    gen_merged_positive_target_samples_iter = (
+        gen_merged_positive_target_samples()
     )
-    gen_normalized_merged_negative_target_samples_iter = (
-        gen_normalized_merged_negative_target_samples()
+    gen_merged_negative_target_samples_iter = (
+        gen_merged_negative_target_samples()
     )
     if self.num_samples_for_stats is not None:
       # Limit the number of samples used to compute the paddings
-      gen_normalized_merged_positive_source_samples_iter = itertools.islice(
-          gen_normalized_merged_positive_source_samples_iter,
+      gen_merged_positive_source_samples_iter = itertools.islice(
+          gen_merged_positive_source_samples_iter,
           self.num_samples_for_stats // self.batch_size,
       )
-      gen_normalized_merged_positive_target_samples_iter = itertools.islice(
-          gen_normalized_merged_positive_target_samples_iter,
+      gen_merged_positive_target_samples_iter = itertools.islice(
+          gen_merged_positive_target_samples_iter,
           self.num_samples_for_stats // self.batch_size,
       )
-      gen_normalized_merged_negative_target_samples_iter = itertools.islice(
-          gen_normalized_merged_negative_target_samples_iter,
+      gen_merged_negative_target_samples_iter = itertools.islice(
+          gen_merged_negative_target_samples_iter,
           self.num_samples_for_stats
           // (self.batch_size * self.num_negative_nodes),
       )
@@ -703,13 +693,19 @@ class GNNLinkDatasetPreparator:
       log.info("Compute graph statistics for padding")
 
     positive_source_padding = padding_lib.padding_from_graph_generator(
-        sampling_schema, gen_normalized_merged_positive_source_samples_iter
+        sampling_schema,
+        gen_merged_positive_source_samples_iter,
+        max_timeseries_len=source_plan.max_timeseries_len,
     )
     positive_target_padding = padding_lib.padding_from_graph_generator(
-        sampling_schema, gen_normalized_merged_positive_target_samples_iter
+        sampling_schema,
+        gen_merged_positive_target_samples_iter,
+        max_timeseries_len=target_plan.max_timeseries_len,
     )
     negative_target_padding = padding_lib.padding_from_graph_generator(
-        sampling_schema, gen_normalized_merged_negative_target_samples_iter
+        sampling_schema,
+        gen_merged_negative_target_samples_iter,
+        max_timeseries_len=target_plan.max_timeseries_len,
     )
 
     if self.verbose_preparation:
@@ -731,6 +727,43 @@ class GNNLinkDatasetPreparator:
               negative_target_padding, return_output=True, header=False
           ),
       )
+
+    source_padded_schema = sampling_schema
+    if timeseries_padding.has_timeseries_padding(positive_source_padding):
+      source_padded_schema = timeseries_padding.pad_timeseries_schema(
+          sampling_schema, padding=positive_source_padding
+      )
+    target_padded_schema = sampling_schema
+    if timeseries_padding.has_timeseries_padding(positive_target_padding):
+      target_padded_schema = timeseries_padding.pad_timeseries_schema(
+          sampling_schema, padding=positive_target_padding
+      )
+
+    self.auto_normalize_config.has_seed_timestamps = (
+        self._target_edgeset_timestamp_feature() is not None
+    )
+
+    source_normalizer = normalize_lib.auto_normalize(
+        schema=source_padded_schema,
+        stats=source_feature_stats,
+        config=self.auto_normalize_config,
+    )
+    target_normalizer = normalize_lib.auto_normalize(
+        schema=target_padded_schema,
+        stats=target_feature_stats,
+        config=self.auto_normalize_config,
+    )
+
+    # If the normalizer requires seed_timestamps or the schema has timeseries
+    # features, we cannot cache the normalized features because the
+    # normalization depends on the seed timestamps.
+    cannot_cache_normalized_features = (
+        "seed_timestamps" in source_normalizer.accepted_kwargs
+        or "seed_timestamps" in target_normalizer.accepted_kwargs
+        or temporal_util.schema_has_timeseries_features(self.schema)
+    )
+    if self.cache_normalized_features and cannot_cache_normalized_features:
+      self.cache_normalized_features = False
 
     self.live = LiveData(
         source_feature_stats=source_feature_stats,
@@ -865,6 +898,99 @@ class GNNLinkDatasetPreparator:
         negative_target_offsets=neg_trg_offsets,
     )
 
+  def _target_edgeset_timestamp_feature(self) -> str | None:
+    if self.target_edgeset in self.edgeset_timestamp_features:
+      return self.edgeset_timestamp_features[self.target_edgeset]
+    return temporal_util.creation_time_feature_name(
+        self.schema.edge_sets[self.target_edgeset].features
+    )
+
+  def _get_batch_seed_timestamps(
+      self, batch_seed: NodeIdsBatch
+  ) -> np.ndarray:
+    if batch_seed.seed_timestamps is not None:
+      return np.asarray(batch_seed.seed_timestamps).reshape(-1)
+    ts_feature = self._target_edgeset_timestamp_feature()
+    if ts_feature is None:
+      raise ValueError(
+          f"The target edgeset '{self.target_edgeset}' must have a creation"
+          " time feature when the normalizer requires seed_timestamps."
+      )
+    return np.asarray(
+        self.graph.edge_sets[self.target_edgeset].features[ts_feature][
+            batch_seed.edge_idxs
+        ]
+    ).reshape(-1)
+
+  def _normalize_batch_sample(
+      self,
+      sample: in_memory_graph_lib.InMemoryGraph,
+      merge_offsets: dict[str, np.ndarray],
+      normalizer: normalize_lib.GraphNormalizer,
+      sampling_schema: schema_lib.GraphSchema,
+      seed_timestamps: np.ndarray | None,
+  ) -> in_memory_graph_lib.InMemoryGraph:
+    normalizer_kwargs = {}
+    if "seed_timestamps" in normalizer.accepted_kwargs:
+      assert seed_timestamps is not None
+      normalizer_kwargs["seed_timestamps"] = (
+          temporal_util.expand_batch_seed_timestamps(
+              sample=sample,
+              merge_offsets=merge_offsets,
+              schema=sampling_schema,
+              seed_timestamps=seed_timestamps,
+          )
+      )
+    return normalizer.normalize_numpy(sample, **normalizer_kwargs)
+
+  def _normalize_raw_sample(
+      self,
+      live: LiveData,
+      raw: GNNLinkDatasetPreparatorSample,
+      batch_seed: NodeIdsBatch,
+  ) -> tuple[
+      in_memory_graph_lib.InMemoryGraph,
+      in_memory_graph_lib.InMemoryGraph,
+      in_memory_graph_lib.InMemoryGraph,
+  ]:
+    sampling_schema = live.sampling_schema or self._sampling_schema()
+    needs_seed_timestamps = (
+        "seed_timestamps" in live.source_normalizer.accepted_kwargs
+        or "seed_timestamps" in live.target_normalizer.accepted_kwargs
+    )
+    seed_timestamps = (
+        self._get_batch_seed_timestamps(batch_seed)
+        if needs_seed_timestamps
+        else None
+    )
+    neg_seed_timestamps = (
+        np.repeat(seed_timestamps, self.num_negative_nodes)
+        if seed_timestamps is not None
+        else None
+    )
+    pos_src_graph = self._normalize_batch_sample(
+        sample=raw.positive_source_graph,
+        merge_offsets=raw.positive_source_offsets,
+        normalizer=live.source_normalizer,
+        sampling_schema=sampling_schema,
+        seed_timestamps=seed_timestamps,
+    )
+    pos_trg_graph = self._normalize_batch_sample(
+        sample=raw.positive_target_graph,
+        merge_offsets=raw.positive_target_offsets,
+        normalizer=live.target_normalizer,
+        sampling_schema=sampling_schema,
+        seed_timestamps=seed_timestamps,
+    )
+    neg_trg_graph = self._normalize_batch_sample(
+        sample=raw.negative_target_graph,
+        merge_offsets=raw.negative_target_offsets,
+        normalizer=live.target_normalizer,
+        sampling_schema=sampling_schema,
+        seed_timestamps=neg_seed_timestamps,
+    )
+    return pos_src_graph, pos_trg_graph, neg_trg_graph
+
   def _generate_one(
       self,
       live: LiveData,
@@ -905,14 +1031,8 @@ class GNNLinkDatasetPreparator:
           )
       )
     else:
-      pos_src_graph = live.source_normalizer.normalize_numpy(
-          raw.positive_source_graph
-      )
-      pos_trg_graph = live.target_normalizer.normalize_numpy(
-          raw.positive_target_graph
-      )
-      neg_trg_graph = live.target_normalizer.normalize_numpy(
-          raw.negative_target_graph
+      pos_src_graph, pos_trg_graph, neg_trg_graph = self._normalize_raw_sample(
+          live, raw, batch_seed
       )
 
     return GNNLinkDatasetPreparatorSample(
@@ -978,14 +1098,8 @@ class GNNLinkDatasetPreparator:
           norm_trg, raw.negative_target_graph  # pyrefly: ignore[bad-argument-type]
       )
     else:
-      pos_src_norm = live.source_normalizer.normalize_numpy(
-          raw.positive_source_graph
-      )
-      pos_trg_norm = live.target_normalizer.normalize_numpy(
-          raw.positive_target_graph
-      )
-      neg_trg_norm = live.target_normalizer.normalize_numpy(
-          raw.negative_target_graph
+      pos_src_norm, pos_trg_norm, neg_trg_norm = self._normalize_raw_sample(
+          live, raw, batch_seed
       )
 
       pos_src_jax = jax_lib.graph_to_jax_graph(pos_src_norm)
