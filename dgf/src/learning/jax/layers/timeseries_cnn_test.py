@@ -77,6 +77,21 @@ class TimeseriesCNNEncoderTest(parameterized.TestCase):
     self.assertEqual(out1.shape, (2, 16))
     self.assertEqual(out2.shape, (2, 16))
 
+  def test_declared_output_schema_matches_actual_output(self):
+    """The declared `output_schema` is what callers size their layers with."""
+    batch_size, seq_len, in_channels = 2, 6, 8
+    config = lib.TimeseriesCNNEncoderConfig(out_dim=10, conv_channels=32)
+    encoder = config.make(self.feature_schema)
+    x = jnp.ones((batch_size, seq_len, in_channels), dtype=jnp.float32)
+
+    variables = encoder.init(jax.random.PRNGKey(0), x, training=False)
+    output = encoder.apply(variables, x, training=False)
+
+    declared_schema = config.output_schema()
+    self.assertFalse(declared_schema.is_timeseries)
+    self.assertEqual(output.shape, (batch_size,) + declared_schema.shape)
+    self.assertEqual(output.dtype, jnp.float32)
+
   @parameterized.named_parameters(
       ("layer_norm", "layer_norm", 0.1),
       ("rms_norm", "rms_norm", 0.0),

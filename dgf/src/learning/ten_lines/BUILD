@@ -23,6 +23,8 @@ py_library(
         "//dgf/src/learning/jax:common",
         "//dgf/src/learning/jax/layers:hetero_gnn",
         "//dgf/src/learning/jax/layers:hetero_graph_attention_network",
+        "//dgf/src/learning/jax/layers:preprocess",
+        "//dgf/src/learning/jax/layers:timeseries_cnn",
         "//dgf/src/util:filesystem",
         "//dgf/src/util:log",
         "//dgf/src/util:util_py",

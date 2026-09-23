@@ -41,6 +41,7 @@ All the layers follow the 3 steps:
 
 import collections
 import dataclasses
+from typing import Protocol
 import dataclasses_json
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
@@ -462,6 +463,39 @@ class EmbedFeatureGroups(nn.Module):
     return outputs
 
 
+class TimeseriesEncoderConfig(Protocol):
+  """Protocol for a configuration that builds a timeseries sequence encoder.
+
+  A timeseries encoder maps a 3D sequence tensor `(batch_size, seq_len,
+  channels)` and an optional sequence mask `(batch_size, seq_len)` to a 2D
+  static embedding `(batch_size, out_dim)`.
+
+  `TimeseriesCNNEncoderConfig` is the reference implementation.
+  """
+
+  out_dim: int
+
+  def make(
+      self,
+      feature_schema: schema_lib.FeatureSchema,
+      mask_schema: schema_lib.FeatureSchema | None = None,
+      name: str | None = None,
+  ) -> nn.Module:
+    ...
+
+  def output_schema(self) -> schema_lib.FeatureSchema:
+    ...
+
+  def architecture(self) -> str:
+    ...
+
+
+def _default_timeseries_encoder() -> TimeseriesEncoderConfig:
+  """Returns the encoder used when none is configured explicitly."""
+  return timeseries_cnn.TimeseriesCNNEncoderConfig(out_dim=64)
+
+
+@dataclasses_json.dataclass_json
 @dataclasses.dataclass
 class EmbedFeatureSetConfig:
   """Configuration for the EmbedFeatureSet layer.
@@ -469,12 +503,17 @@ class EmbedFeatureSetConfig:
   Attributes:
     categorical_feature_embedding_dim: The dimension of the embedding for
       categorical features.
-    timeseries_embedding_dim: The dimension of the embedding for each timeseries
-      sequence group.
+    timeseries_encoder: Configuration of the encoder applied to each timeseries
+      sequence group. Its `out_dim` is the dimension of the embedding produced
+      for each group. Each group gets its own instance of this encoder, i.e.
+      groups share the configuration but not the weights. Defaults to a
+      `timeseries_cnn.TimeseriesCNNEncoderConfig(out_dim=64)`.
   """
 
   categorical_feature_embedding_dim: int = 64
-  timeseries_embedding_dim: int = 64
+  timeseries_encoder: TimeseriesEncoderConfig = layer_registry.field(
+      default_factory=_default_timeseries_encoder
+  )
 
   def make(
       self, schema: schema_lib.FeatureSetSchema, name: str | None = None
@@ -496,7 +535,7 @@ class EmbedFeatureSetConfig:
         assert feat_schema.semantic == schema_lib.FeatureSemantic.MASK
         continue
       if feat_schema.is_timeseries:
-        total_dim += self.timeseries_embedding_dim
+        total_dim += self.timeseries_encoder.out_dim
       else:
         static_shape = feat_schema.shape
         if (
@@ -527,10 +566,10 @@ class EmbedFeatureSet(nn.Module):
   a single concatenated dense embedding of shape `(batch_size, static_dim)`,
   and to embed each timeseries sequence group `g` into `(batch_size, seq_len,
   ts_dim)` with mask `(batch_size, seq_len)`. Each sequence group is then
-  encoded into a `(batch_size, timeseries_embedding_dim)` embedding via
-  `TimeseriesCNNEncoder`. Finally, all static and timeseries group embeddings
-  are concatenated along the last axis to produce a single dense embedding of
-  shape `(batch_size, total_dim)`.
+  encoded into a `(batch_size, out_dim)` embedding via the configured
+  `config.timeseries_encoder`. Finally, all static and timeseries group
+  embeddings are concatenated along the last axis to produce a single dense
+  embedding of shape `(batch_size, total_dim)`.
 
   Attributes:
     config: The configuration for this layer.
@@ -594,9 +633,7 @@ class EmbedFeatureSet(nn.Module):
     groups_outputs = groups_embedder(features, training=training)
     groups_schemas = groups_config.output_schema(self.schema)
 
-    ts_encoder_config = timeseries_cnn.TimeseriesCNNEncoderConfig(
-        out_dim=self.config.timeseries_embedding_dim
-    )
+    ts_encoder_config = self.config.timeseries_encoder
     embeddings_to_concat = []
     for feat_name, feat_schema in groups_schemas.items():
       if feat_schema.semantic != schema_lib.FeatureSemantic.EMBEDDING:

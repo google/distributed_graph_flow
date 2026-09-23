@@ -25,6 +25,8 @@ from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import common as jax_common
 from dgf.src.learning.jax.layers import hetero_gnn
 from dgf.src.learning.jax.layers import hetero_graph_attention_network
+from dgf.src.learning.jax.layers import preprocess
+from dgf.src.learning.jax.layers import timeseries_cnn
 from dgf.src.learning.ten_lines import dataset
 from dgf.src.util import filesystem as fs
 from dgf.src.util import log
@@ -73,6 +75,30 @@ def parse_architecture(architecture: Architecture | str) -> Architecture:
     return Architecture.HETEROGENEOUS_GRAPH_ATTENTION_NETWORK
   else:
     raise ValueError(f"Unknown architecture: {architecture}")
+
+
+class TimeseriesEncoder(enum.Enum):
+  CNN = "CNN"
+
+
+DEFAULT_TIMESERIES_ENCODER = TimeseriesEncoder.CNN
+
+
+def parse_timeseries_encoder(
+    timeseries_encoder: TimeseriesEncoder | str,
+) -> TimeseriesEncoder:
+  """Parses a string or TimeseriesEncoder enum into a TimeseriesEncoder enum."""
+  if isinstance(timeseries_encoder, TimeseriesEncoder):
+    return timeseries_encoder
+  if not isinstance(timeseries_encoder, str):
+    raise TypeError(
+        f"Expected TimeseriesEncoder or str, got {type(timeseries_encoder)}:"
+        f" {timeseries_encoder}"
+    )
+  if timeseries_encoder.lower() == "cnn":
+    return TimeseriesEncoder.CNN
+  else:
+    raise ValueError(f"Unknown timeseries encoder: {timeseries_encoder}")
 
 
 class TFFunctionInputFormat(enum.Enum):
@@ -333,6 +359,10 @@ class HParam:
     message_pooling: The pooling method used for aggregating messages in GNNs.
       Supported methods are "sum", "mean", and "max".
     architecture: The architecture of the GNN model.
+    timeseries_embedding_dim: The dimension of the embedding computed for each
+      timeseries feature group.
+    timeseries_encoder: The encoder used to turn each timeseries feature group
+      into a `timeseries_embedding_dim` sized embedding.
     early_stopping: The configuration for early stopping. If None, early
       stopping is disabled.
   """
@@ -350,6 +380,8 @@ class HParam:
   dropout: float = 0.1
   message_pooling: str = "sum"
   architecture: Architecture = DEFAULT_ARCHITECTURE
+  timeseries_embedding_dim: int = 64
+  timeseries_encoder: TimeseriesEncoder = DEFAULT_TIMESERIES_ENCODER
   early_stopping: early_stopping_monitor.EarlyStoppingMonitorConfig | None = (
       None
   )
@@ -470,6 +502,23 @@ def build_gnn_config(hparams: HParam) -> jax_common.GenericLayer:
   else:
     raise NotImplementedError(
         f"Unsupported GNN architecture: {hparams.architecture}"
+    )
+
+
+def build_timeseries_encoder_config(
+    hparams: HParam,
+) -> preprocess.TimeseriesEncoderConfig:
+  """Creates the timeseries encoder configuration from the hyper-parameters."""
+
+  if hparams.timeseries_encoder == TimeseriesEncoder.CNN:
+    return timeseries_cnn.TimeseriesCNNEncoderConfig(
+        out_dim=hparams.timeseries_embedding_dim,
+        dropout_rate=hparams.dropout,
+    )
+
+  else:
+    raise NotImplementedError(
+        f"Unsupported timeseries encoder: {hparams.timeseries_encoder}"
     )
 
 

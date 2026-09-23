@@ -85,7 +85,11 @@ def create_core_model_config(
 
   return CoreModelConfig(
       embbed_graph=preprocess.EmbedGraphConfig(
-          feature_embedder=preprocess.EmbedFeatureSetConfig()
+          feature_embedder=preprocess.EmbedFeatureSetConfig(
+              timeseries_encoder=common.build_timeseries_encoder_config(
+                  hparams
+              ),
+          )
       ),
       pre_mlp=standard.ingest_feature(hparams.node_embedding_dim),
       graph_conv=common.build_gnn_config(hparams),  # pyrefly: ignore[bad-argument-type]
@@ -173,6 +177,10 @@ def train_node_model(
     cache_normalized_features_device: Literal["host", "device"] = "device",
     export_metrics_to_xm: bool = False,
     architecture: common.Architecture | str = common.DEFAULT_ARCHITECTURE,
+    timeseries_encoder: common.TimeseriesEncoder | str = (
+        common.DEFAULT_TIMESERIES_ENCODER
+    ),
+    timeseries_embedding_dim: int = 64,
     sampling_plan: sampling_config_lib.SamplingPlan | None = None,
     diagnostic_dir: str | None = None,
     early_stopping: bool | int = True,
@@ -249,6 +257,11 @@ def train_node_model(
     export_metrics_to_xm: If True, metrics from the training and validation
       steps will be exported to XManager.
     architecture: The architecture of the GNN model.
+    timeseries_encoder: The encoder used to turn the timeseries features of a
+      node into a fixed sized embedding. Either a `TimeseriesEncoder` value or
+      its name as a string (e.g. "cnn").
+    timeseries_embedding_dim: The dimension of the embedding computed by
+      `timeseries_encoder` for each timeseries feature group of a node.
     sampling_plan: An advanced option to provide a custom plan for the sampler.
       When you use this option, the sampler ignores standard graph sampling
       arguments and validation checks e.g., num_sampling_hops, sampling_width.
@@ -282,6 +295,7 @@ def train_node_model(
   with log.capture_logs() as captured_logs:
 
     architecture = common.parse_architecture(architecture)
+    timeseries_encoder = common.parse_timeseries_encoder(timeseries_encoder)
     begin_train_time = time.time()
 
     if diagnostic_dir is not None:
@@ -351,6 +365,8 @@ def train_node_model(
         num_layers=num_layers,
         message_pooling=message_pooling,
         architecture=architecture,
+        timeseries_encoder=timeseries_encoder,
+        timeseries_embedding_dim=timeseries_embedding_dim,
         early_stopping=early_stopping_monitor.normalize_early_stopping_config(
             early_stopping
         ),

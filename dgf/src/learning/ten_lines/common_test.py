@@ -113,6 +113,27 @@ class TenLines(parameterized.TestCase):
     with self.assertRaisesRegex(TypeError, "Expected Architecture or str"):
       common.parse_architecture(123)  # pytype: disable=wrong-arg-types
 
+  @parameterized.named_parameters(
+      ("cnn", "cnn", common.TimeseriesEncoder.CNN),
+      ("cnn_upper", "CNN", common.TimeseriesEncoder.CNN),
+      (
+          "cnn_enum",
+          common.TimeseriesEncoder.CNN,
+          common.TimeseriesEncoder.CNN,
+      ),
+  )
+  def test_parse_timeseries_encoder_success(self, input_val, expected):
+    self.assertEqual(common.parse_timeseries_encoder(input_val), expected)
+
+  def test_parse_timeseries_encoder_invalid_fails(self):
+    with self.assertRaisesRegex(
+        ValueError, "Unknown timeseries encoder: invalid"
+    ):
+      common.parse_timeseries_encoder("invalid")
+
+    with self.assertRaisesRegex(TypeError, "Expected TimeseriesEncoder or str"):
+      common.parse_timeseries_encoder(123)  # pytype: disable=wrong-arg-types
+
   def test_check_number_of_seeds_success(self):
     common.check_number_of_seeds(
         batch_size=10, num_training=20, num_validation=15, key="node"

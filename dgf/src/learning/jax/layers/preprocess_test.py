@@ -21,6 +21,7 @@ from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import jax as jax_io_lib
 from dgf.src.learning.jax.layers import preprocess as lib
+from dgf.src.learning.jax.layers import timeseries_cnn
 from dgf.src.util import test_util
 from dgf.src.validate import in_memory_graph as in_memory_graph_validate_lib
 import jax
@@ -356,7 +357,9 @@ class LayersTest(parameterized.TestCase):
 
     config = lib.EmbedFeatureSetConfig(
         categorical_feature_embedding_dim=categorical_embed_dim,
-        timeseries_embedding_dim=timeseries_embedding_dim,
+        timeseries_encoder=timeseries_cnn.TimeseriesCNNEncoderConfig(
+            out_dim=timeseries_embedding_dim
+        ),
     )
     embedder = config.make(schema=input_schema)
 
@@ -417,7 +420,9 @@ class LayersTest(parameterized.TestCase):
     }
 
     config = lib.EmbedFeatureSetConfig(
-        timeseries_embedding_dim=timeseries_embedding_dim
+        timeseries_encoder=timeseries_cnn.TimeseriesCNNEncoderConfig(
+            out_dim=timeseries_embedding_dim
+        )
     )
     embedder = config.make(schema=input_schema)
 
@@ -480,7 +485,9 @@ class LayersTest(parameterized.TestCase):
     input_corrupted = {"feat_a": x_corrupted, "feat_a_mask": mask}
 
     config = lib.EmbedFeatureSetConfig(
-        timeseries_embedding_dim=timeseries_embedding_dim
+        timeseries_encoder=timeseries_cnn.TimeseriesCNNEncoderConfig(
+            out_dim=timeseries_embedding_dim
+        )
     )
     embedder = config.make(schema=input_schema)
 
@@ -1000,6 +1007,48 @@ class LayersTest(parameterized.TestCase):
       outputs = embedder.apply(variables, input_data, training=False)
       self.assertEmpty(outputs)
       self.assertEqual(mock_warn.call_count, 4)
+
+
+class TimeseriesEncoderConfigTest(parameterized.TestCase):
+  """Tests for the pluggable `timeseries_encoder` of `EmbedFeatureSetConfig`."""
+
+  def test_defaults_to_cnn_encoder(self):
+    config = lib.EmbedFeatureSetConfig()
+
+    self.assertIsInstance(
+        config.timeseries_encoder, timeseries_cnn.TimeseriesCNNEncoderConfig
+    )
+    self.assertEqual(config.timeseries_encoder.out_dim, 64)
+
+  def test_explicit_encoder_is_kept(self):
+    encoder = timeseries_cnn.TimeseriesCNNEncoderConfig(
+        out_dim=32, num_layers=4, conv_channels=128
+    )
+    config = lib.EmbedFeatureSetConfig(timeseries_encoder=encoder)
+
+    self.assertEqual(config.timeseries_encoder, encoder)
+
+  def test_json_round_trip_preserves_encoder(self):
+    """`load()` reconstructs the core model config from JSON."""
+    config = lib.EmbedGraphConfig(
+        feature_embedder=lib.EmbedFeatureSetConfig(
+            categorical_feature_embedding_dim=8,
+            timeseries_encoder=timeseries_cnn.TimeseriesCNNEncoderConfig(
+                out_dim=32, num_layers=3, conv_channels=16, kernel_size=5
+            ),
+        )
+    )
+
+    reconstructed = lib.EmbedGraphConfig.from_json(config.to_json())
+
+    test_util.assert_are_equal(self, reconstructed, config)
+
+  def test_default_encoders_are_independent(self):
+    """Mutating one config's default encoder must not affect another's."""
+    config = lib.EmbedFeatureSetConfig()
+    other_config = lib.EmbedFeatureSetConfig()
+
+    self.assertIsNot(config.timeseries_encoder, other_config.timeseries_encoder)
 
 
 if __name__ == "__main__":

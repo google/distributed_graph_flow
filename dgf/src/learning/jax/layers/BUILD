@@ -185,6 +185,7 @@ py_test(
     srcs = ["preprocess_test.py"],
     deps = [
         ":preprocess",
+        ":timeseries_cnn",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         "//dgf/src/data:jax_in_memory_graph",
