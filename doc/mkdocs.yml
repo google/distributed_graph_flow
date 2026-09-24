@@ -93,7 +93,7 @@ nav:
     - Tasks:
       - Node model: tutorial/node_prediction.ipynb
       - Link model: tutorial/link_prediction.ipynb
-    -  Input features:
+    - Input features:
       - Timeseries: tutorial/timeseries_node_prediction.ipynb
   - Advanced API:
     - In-memory graph: tutorial/in_memory_graph.ipynb
