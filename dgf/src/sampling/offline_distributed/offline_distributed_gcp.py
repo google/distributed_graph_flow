@@ -16,12 +16,15 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
+import json
 import os
 import subprocess
 import time
 from typing import Any
 
+import dataclasses_json
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import schema as io_schema
 from dgf.src.sampling import config as config_lib
@@ -122,6 +125,8 @@ def _validate_seed_args(
     num_seeds: int | None,
     num_samples_per_seed: int,
     input_seed_container: str,
+    filter_seed_node: str | None = None,
+    input_seeds: str | None = None,
 ) -> None:
   """Validates the arguments controlling the selection of the seeds.
 
@@ -129,6 +134,8 @@ def _validate_seed_args(
     num_seeds: Number of seeds to select among the available ones, or None.
     num_samples_per_seed: Number of samples to generate for each seed.
     input_seed_container: Container of the input seeds.
+    filter_seed_node: Optional filter on the seed nodes.
+    input_seeds: Optional path to input seeds.
 
   Raises:
     ValueError: If the arguments are inconsistent.
@@ -151,6 +158,12 @@ def _validate_seed_args(
     raise ValueError(
         f"Unsupported input_seed_container {input_seed_container!r}. Supported"
         f" containers are {sorted(_SUPPORTED_INPUT_SEED_CONTAINERS)}."
+    )
+  if filter_seed_node is not None and input_seeds is not None:
+    raise ValueError(
+        "filter_seed_node and input_seeds are exclusive: filter_seed_node only"
+        " applies to the seed nodes taken from the root nodeset of the sampling"
+        " plan."
     )
 
 
@@ -211,6 +224,29 @@ def _write_sampling_plan(
   return sampling_config_path
 
 
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass
+class OfflineDistributedSamplingConfig:
+  """Extra arguments for the offline distributed sampler.
+
+  This config is passed to the sampler as a single JSON encoded `--dgf_config`
+  argument. Each field overrides the default of the sampler flag of the same
+  name, and is ignored if that flag is set on the command line. A `None` field
+  does not override anything.
+
+  See third_party/py/dgf/src/bin/google/offline_distributed_sampling.go.
+  """
+
+  output_container: str | None = None
+  shard_prefix: str | None = None
+  num_samples_per_seed: int | None = None
+  input_seeds: str | None = None
+  input_seed_container: str | None = None
+  filter_seed_node: str | None = None
+  debug_sampling: bool | None = None
+  random_seed: int | None = None
+
+
 def _create_custom_job(
     input_path: str,
     output_path: str,
@@ -223,18 +259,45 @@ def _create_custom_job(
     input_seeds: str | None,
     input_seed_container: str,
     random_seed: int,
+    num_output_shards: int,
+    output_container: str,
+    shard_prefix: str,
+    filter_seed_node: str | None,
+    debug_sampling: bool,
     staging_location: str,
     temp_location: str,
     display_name: str,
 ) -> aiplatform.CustomJob:
   """Builds and instantiates the Vertex AI CustomJob."""
+  # Only the arguments allowlisted for the sampler image in
+  # java/com/google/cloud/ai/platform/boq/shared/configuration/config/template/custom_training_base.pi
+  # can be passed to a Vertex AI CustomJob: the sampler options are grouped into
+  # a single JSON encoded "--dgf_config" argument.
+  config = OfflineDistributedSamplingConfig(
+      output_container=output_container,
+      shard_prefix=shard_prefix,
+      num_samples_per_seed=num_samples_per_seed,
+      input_seeds=input_seeds,
+      input_seed_container=(
+          input_seed_container if input_seeds is not None else None
+      ),
+      filter_seed_node=filter_seed_node,
+      debug_sampling=debug_sampling,
+      random_seed=random_seed,
+  )
+  # Unset fields are not exported: they do not override the sampler defaults.
+  dgf_config = json.dumps({
+      key: value
+      for key, value in dataclasses.asdict(config).items()
+      if value is not None
+  })
   args = [
       f"--input_graph={input_path}",
       f"--output_samples={output_path}",
       f"--sampling_config={sampling_config_path}",
       f"--num_seeds={num_seeds if num_seeds is not None else 0}",
-      f"--num_samples_per_seed={num_samples_per_seed}",
-      f"--random_seed={random_seed}",
+      f"--num_output_shards={num_output_shards}",
+      f"--dgf_config={dgf_config}",
       "--runner=dataflow",
       f"--project={project}",
       f"--region={region}",
@@ -248,9 +311,6 @@ def _create_custom_job(
       f"--sdk_container_image={_DEFAULT_IMAGE_URI}",
       f"--worker_binary={_WORKER_BINARY}",
   ]
-  if input_seeds is not None:
-    args.append(f"--input_seeds={input_seeds}")
-    args.append(f"--input_seed_container={input_seed_container}")
 
   worker_pool_specs = [{
       "machine_spec": {
@@ -365,6 +425,11 @@ def offline_distributed_sampler_gcp(
     num_samples_per_seed: int = 1,
     input_seeds: str | None = None,
     input_seed_container: str = "TFRECORD",
+    filter_seed_node: str | None = None,
+    num_output_shards: int = 20,
+    output_container: str = "TFRECORD",
+    shard_prefix: str = "samples",
+    debug_sampling: bool = False,
     random_seed: int = 42,
     temp_location: str | None = None,
     staging_location: str | None = None,
@@ -427,6 +492,14 @@ def offline_distributed_sampler_gcp(
       generated. If None, the seeds are all the nodes of the seed nodeset of the
       sampling plan.
     input_seed_container: Container of `input_seeds`: "TFRECORD" or "RECORDIO".
+    filter_seed_node: Optional filter on the seed nodes of the root nodeset of
+      the sampling plan, with the syntax '<feature name>=<required value>' (e.g.
+      '#split=train'). Only the nodes whose feature is equal to the required
+      value are used as seeds. Exclusive with `input_seeds`.
+    num_output_shards: Number of shards to write.
+    output_container: Format of output samples: "TFRECORD" or "RECORDIO".
+    shard_prefix: Prefix for output shards (e.g., 'samples' or 'Shard').
+    debug_sampling: Enable deterministic debug sampling mode.
     random_seed: Seed of the random number generator.
     temp_location: Optional GCS temporary directory for Dataflow.
     staging_location: Optional GCS staging directory for Dataflow and Vertex AI.
@@ -441,7 +514,17 @@ def offline_distributed_sampler_gcp(
       be resolved.
   """
   input_path, output_path = _validate_paths(input_path, output_path)
-  _validate_seed_args(num_seeds, num_samples_per_seed, input_seed_container)
+  _validate_seed_args(
+      num_seeds=num_seeds,
+      num_samples_per_seed=num_samples_per_seed,
+      input_seed_container=input_seed_container,
+      filter_seed_node=filter_seed_node,
+      input_seeds=input_seeds,
+  )
+  if num_output_shards < 1:
+    raise ValueError(
+        f"num_output_shards cannot be less than one, got {num_output_shards}."
+    )
 
   if project is None:
     project = _get_default_gcp_project()
@@ -479,6 +562,11 @@ def offline_distributed_sampler_gcp(
       input_seeds=input_seeds,
       input_seed_container=input_seed_container,
       random_seed=random_seed,
+      num_output_shards=num_output_shards,
+      output_container=output_container,
+      shard_prefix=shard_prefix,
+      filter_seed_node=filter_seed_node,
+      debug_sampling=debug_sampling,
       staging_location=staging_location,
       temp_location=temp_location,
       display_name=display_name,

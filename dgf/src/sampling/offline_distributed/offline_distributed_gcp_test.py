@@ -14,7 +14,9 @@
 
 """Unit tests for offline_distributed_gcp."""
 
+from collections.abc import Sequence
 import json
+from typing import Any
 from unittest import mock
 from absl.testing import absltest
 from dgf.src.sampling import config as config_lib
@@ -22,6 +24,23 @@ from dgf.src.sampling.offline_distributed import offline_distributed_gcp
 from dgf.src.util import gen_test_graph
 from dgf.src.util import log
 from dgf.src.util.weak_dep.weak_dep_aiplatform import aiplatform
+
+_DGF_CONFIG_PREFIX = "--dgf_config="
+
+
+def _get_dgf_config(container_args: Sequence[str]) -> dict[str, Any]:
+  """Returns the JSON decoded "--dgf_config" argument of the sampler."""
+  configs = [
+      arg.removeprefix(_DGF_CONFIG_PREFIX)
+      for arg in container_args
+      if arg.startswith(_DGF_CONFIG_PREFIX)
+  ]
+  if len(configs) != 1:
+    raise ValueError(
+        f"Expected exactly one {_DGF_CONFIG_PREFIX} argument, got"
+        f" {container_args}."
+    )
+  return json.loads(configs[0])
 
 
 class OfflineDistributedGcpTest(absltest.TestCase):
@@ -82,15 +101,22 @@ class OfflineDistributedGcpTest(absltest.TestCase):
         container_args,
     )
     self.assertIn("--num_seeds=500", container_args)
-    self.assertIn("--num_samples_per_seed=1", container_args)
-    self.assertIn("--random_seed=42", container_args)
     self.assertIn("--num_workers=3", container_args)
     self.assertIn("--max_num_workers=3", container_args)
     self.assertIn("--runner=dataflow", container_args)
-    # Without input seeds, the sampler seeds on the nodes of the seed nodeset.
-    self.assertNoCommonElements(
-        ["--input_seeds", "--input_seed_container"],
-        [arg.split("=")[0] for arg in container_args],
+    self.assertIn("--num_output_shards=20", container_args)
+    # The sampler options are passed in a single JSON encoded argument. Without
+    # input seeds, the sampler seeds on the nodes of the seed nodeset. Unset
+    # fields are not exported.
+    self.assertEqual(
+        _get_dgf_config(container_args),
+        {
+            "output_container": "TFRECORD",
+            "shard_prefix": "samples",
+            "num_samples_per_seed": 1,
+            "debug_sampling": False,
+            "random_seed": 42,
+        },
     )
 
     mock_job.submit.assert_called_once()
@@ -322,11 +348,10 @@ class OfflineDistributedGcpTest(absltest.TestCase):
 
     _, kwargs = mock_custom_job_cls.call_args
     container_args = kwargs["worker_pool_specs"][0]["container_spec"]["args"]
-    self.assertIn(
-        "--input_seeds=gs://my_bucket/seeds@10.recordio", container_args
-    )
-    self.assertIn("--input_seed_container=RECORDIO", container_args)
-    self.assertIn("--random_seed=7", container_args)
+    config = _get_dgf_config(container_args)
+    self.assertEqual(config["input_seeds"], "gs://my_bucket/seeds@10.recordio")
+    self.assertEqual(config["input_seed_container"], "RECORDIO")
+    self.assertEqual(config["random_seed"], 7)
 
   @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
@@ -346,8 +371,57 @@ class OfflineDistributedGcpTest(absltest.TestCase):
 
     _, kwargs = mock_custom_job_cls.call_args
     container_args = kwargs["worker_pool_specs"][0]["container_spec"]["args"]
-    self.assertIn("--num_samples_per_seed=3", container_args)
+    self.assertEqual(_get_dgf_config(container_args)["num_samples_per_seed"], 3)
     self.assertIn("--num_seeds=0", container_args)
+
+  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(aiplatform, "CustomJob")
+  def test_only_allowed_args_are_passed(
+      self, mock_custom_job_cls, mock_open_write
+  ):
+    mock_open_write.return_value.__enter__.return_value = mock.MagicMock()
+    mock_custom_job_cls.return_value = mock.MagicMock()
+
+    offline_distributed_gcp.offline_distributed_sampler_gcp(
+        input_path="gs://my_bucket/graph",
+        output_path="gs://my_bucket/samples",
+        plan=self.simple_plan,
+        schema=self.mock_schema,
+        project="test-proj",
+        input_seeds="gs://my_bucket/seeds@10.recordio",
+        num_samples_per_seed=3,
+        blocking=False,
+    )
+
+    _, kwargs = mock_custom_job_cls.call_args
+    container_args = kwargs["worker_pool_specs"][0]["container_spec"]["args"]
+    # Vertex AI only accepts the argument keys allowlisted for the sampler image
+    # in
+    # java/com/google/cloud/ai/platform/boq/shared/configuration/config/template/custom_training_base.pi:
+    # the other sampler options must go through "--dgf_config".
+    self.assertContainsSubset(
+        [arg.split("=")[0] for arg in container_args],
+        [
+            "--input_graph",
+            "--output_samples",
+            "--sampling_config",
+            "--num_seeds",
+            "--num_output_shards",
+            "--dgf_config",
+            "--runner",
+            "--project",
+            "--region",
+            "--worker_machine_type",
+            "--num_workers",
+            "--max_num_workers",
+            "--autoscaling_algorithm",
+            "--staging_location",
+            "--temp_location",
+            "--environment_type",
+            "--sdk_container_image",
+            "--worker_binary",
+        ],
+    )
 
   def test_num_seeds_and_num_samples_per_seed_are_exclusive(self):
     with self.assertRaisesRegex(ValueError, "are exclusive"):
@@ -383,6 +457,98 @@ class OfflineDistributedGcpTest(absltest.TestCase):
           schema=self.mock_schema,
           project="test-proj",
           num_seeds=-1,
+      )
+
+  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(aiplatform, "CustomJob")
+  def test_output_options(self, mock_custom_job_cls, mock_open_write):
+    mock_open_write.return_value.__enter__.return_value = mock.MagicMock()
+    mock_custom_job_cls.return_value = mock.MagicMock()
+
+    offline_distributed_gcp.offline_distributed_sampler_gcp(
+        input_path="gs://my_bucket/graph",
+        output_path="gs://my_bucket/samples",
+        plan=self.simple_plan,
+        schema=self.mock_schema,
+        project="test-proj",
+        output_container="RECORDIO",
+        shard_prefix="Shard",
+        num_output_shards=10,
+        blocking=False,
+    )
+
+    _, kwargs = mock_custom_job_cls.call_args
+    container_args = kwargs["worker_pool_specs"][0]["container_spec"]["args"]
+    self.assertIn("--num_output_shards=10", container_args)
+    config = _get_dgf_config(container_args)
+    self.assertEqual(config["output_container"], "RECORDIO")
+    self.assertEqual(config["shard_prefix"], "Shard")
+
+  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(aiplatform, "CustomJob")
+  def test_filter_seed_node(self, mock_custom_job_cls, mock_open_write):
+    mock_open_write.return_value.__enter__.return_value = mock.MagicMock()
+    mock_custom_job_cls.return_value = mock.MagicMock()
+
+    offline_distributed_gcp.offline_distributed_sampler_gcp(
+        input_path="gs://my_bucket/graph",
+        output_path="gs://my_bucket/samples",
+        plan=self.simple_plan,
+        schema=self.mock_schema,
+        project="test-proj",
+        filter_seed_node="#split=train",
+        blocking=False,
+    )
+
+    _, kwargs = mock_custom_job_cls.call_args
+    container_args = kwargs["worker_pool_specs"][0]["container_spec"]["args"]
+    config = _get_dgf_config(container_args)
+    self.assertEqual(config["filter_seed_node"], "#split=train")
+
+  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(aiplatform, "CustomJob")
+  def test_debug_sampling(self, mock_custom_job_cls, mock_open_write):
+    mock_open_write.return_value.__enter__.return_value = mock.MagicMock()
+    mock_custom_job_cls.return_value = mock.MagicMock()
+
+    offline_distributed_gcp.offline_distributed_sampler_gcp(
+        input_path="gs://my_bucket/graph",
+        output_path="gs://my_bucket/samples",
+        plan=self.simple_plan,
+        schema=self.mock_schema,
+        project="test-proj",
+        debug_sampling=True,
+        blocking=False,
+    )
+
+    _, kwargs = mock_custom_job_cls.call_args
+    container_args = kwargs["worker_pool_specs"][0]["container_spec"]["args"]
+    config = _get_dgf_config(container_args)
+    self.assertTrue(config["debug_sampling"])
+
+  def test_filter_seed_node_and_input_seeds_are_exclusive(self):
+    with self.assertRaisesRegex(ValueError, "are exclusive"):
+      offline_distributed_gcp.offline_distributed_sampler_gcp(
+          input_path="gs://my_bucket/graph",
+          output_path="gs://my_bucket/samples",
+          plan=self.simple_plan,
+          schema=self.mock_schema,
+          project="test-proj",
+          input_seeds="gs://my_bucket/seeds",
+          filter_seed_node="#split=train",
+      )
+
+  def test_invalid_num_output_shards_raises_error(self):
+    with self.assertRaisesRegex(
+        ValueError, "num_output_shards cannot be less than one"
+    ):
+      offline_distributed_gcp.offline_distributed_sampler_gcp(
+          input_path="gs://my_bucket/graph",
+          output_path="gs://my_bucket/samples",
+          plan=self.simple_plan,
+          schema=self.mock_schema,
+          project="test-proj",
+          num_output_shards=0,
       )
 
   def test_invalid_input_seed_container_raises_error(self):

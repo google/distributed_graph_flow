@@ -130,5 +130,7 @@ py_binary(
         # absl:app dep,
         # absl/flags dep,
         "//dgf",
+        # Weak dependency of the offline distributed sampler on GCP.
+        # google/cloud/aiplatform dep,  # keep
     ],
 )

@@ -17,6 +17,7 @@ py_library(
     name = "offline_distributed_gcp",
     srcs = ["offline_distributed_gcp.py"],
     deps = [
+        # dataclasses_json dep,
         "//dgf/src/data:schema",
         "//dgf/src/io:schema",
         "//dgf/src/sampling:config",

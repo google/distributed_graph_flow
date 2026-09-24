@@ -16,20 +16,21 @@ r"""Creates a set of graph samples using the offline distributed sampler on GCP.
 
 The sampling pipeline runs on Google Cloud using Vertex AI and Dataflow.
 
-Usage example:
+External usage example:
 
 ```shell
-blaze run -c opt //third_party/py/dgf/examples:create_graph_samples_offline_distributed_gcp -- \
-  --input_graph=gs://gf-experiment-gbm-test/fetch_repo/ogb_mag \
-  --output_samples=gs://gf-experiment-gbm-test/examples/ogb_mag_samples \
-  --project=graphflow-experiments-49784 \
+# This example requires the `google-cloud-aiplatform` pip package:
+pip install google-cloud-aiplatform
+
+python create_graph_samples_offline_distributed_gcp.py --input_graph=gs://gf-experiment-gbm-test/fetch_repo/ogb_mag \
+  --output_samples=gs://gf-experiment-gbm-test/examples/ogb_mag_samples_v2 \
   --seed_nodeset=paper \
   --num_hops=2 \
   --hop_width=10 \
   --num_workers=5 \
-  --num_seeds=1000 \
-  --alsologtostderr
+  --num_seeds=1000
 ```
+
 """
 
 from collections.abc import Sequence
