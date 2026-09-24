@@ -78,7 +78,8 @@ nav:
       - Timeseries: tutorial/timeseries_node_prediction.ipynb
   - Advanced API:
     - In-memory graph: tutorial/in_memory_graph.ipynb
-    - Sampler: tutorial/sampler.ipynb
+    - In-process Sampler: tutorial/sampler.ipynb
+    - Offline Distributed Sampler (GCP): tutorial/gcp_offline_distributed_sampler.ipynb
     - Normaliers: tutorial/normalizer.ipynb
   - Guides:
     -   Graph file format: file_formats.md
