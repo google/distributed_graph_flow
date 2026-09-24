@@ -185,6 +185,7 @@ def train_node_model(
     diagnostic_dir: str | None = None,
     early_stopping: bool | int = True,
     evaluate_final_model: bool = True,
+    padding_margin: float = 0.1,
 ) -> NodePredictionModel:
   """Trains a supervised Graph Neural Network model for node-level prediction.
 
@@ -280,6 +281,8 @@ def train_node_model(
     evaluate_final_model: If True, performs a full final evaluation of the model
       on the validation dataset after training completes. This is in addition to
       the periodic evaluations done during training.
+    padding_margin: Relative margin added to observed maximum node and edge
+      counts when estimating static graph padding.
 
   Returns:
     A trained `NodePredictionModel` instance.
@@ -370,6 +373,7 @@ def train_node_model(
         early_stopping=early_stopping_monitor.normalize_early_stopping_config(
             early_stopping
         ),
+        padding_margin=padding_margin,
     )
 
     task = NodePredictionTask(
@@ -406,6 +410,7 @@ def train_node_model(
             cache_normalized_features=cache_normalized_features,
             cache_normalized_features_device=cache_normalized_features_device,
             sampling_plan=sampling_plan,
+            padding_margin=hparams.padding_margin,
         )
     normalized_schema = train_dataset.generated_schema()
 

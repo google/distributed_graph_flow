@@ -528,6 +528,7 @@ class GNNDatasetPreparatorTest(parameterized.TestCase):
         cache_normalized_features=False,
         cache_normalized_features_device="host",
         sampling_plan=None,
+        padding_margin=0.1,
     )
     self.assertIsNotNone(train_dataset.seed_node_idxs)
     self.assertIsNotNone(valid_dataset)
@@ -539,6 +540,40 @@ class GNNDatasetPreparatorTest(parameterized.TestCase):
     np.testing.assert_array_equal(
         np.sort(valid_dataset.seed_node_idxs), np.array([2, 3])
     )
+
+  def test_padding_margin_scales_padding_size(self):
+    graph = gen_test_graph.generate_in_memory_graph(True, False)
+    schema = gen_test_graph.generate_schema(True, False, True, False)
+    sampling_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
+        sampling_config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1", num_hops=2, hop_width=3, reverse=True
+        ),
+        schema,
+    )
+    prep_zero = node_prediction_dataset.GNNDatasetPreparator(
+        graph=graph,
+        schema=schema,
+        sampling_plan=sampling_plan,
+        batch_size=2,
+        drop_remainder=True,
+        shuffle=False,
+        padding_margin=0.0,
+    )
+    prep_zero.prepare()
+    prep_large = node_prediction_dataset.GNNDatasetPreparator(
+        graph=graph,
+        schema=schema,
+        sampling_plan=sampling_plan,
+        batch_size=2,
+        drop_remainder=True,
+        shuffle=False,
+        padding_margin=1.0,
+    )
+    prep_large.prepare()
+    large_nodes = prep_large.get_live().padding.node_sets["n1"].num_nodes
+    zero_nodes = prep_zero.get_live().padding.node_sets["n1"].num_nodes
+    assert large_nodes is not None and zero_nodes is not None
+    self.assertGreater(large_nodes, zero_nodes)
 
 
 if __name__ == "__main__":

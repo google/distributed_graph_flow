@@ -175,6 +175,7 @@ class GNNDatasetPreparator:
   )
   cache_normalized_features: bool = True
   cache_normalized_features_device: Literal["host", "device"] = "device"
+  padding_margin: float = 0.1
 
   # The is_prepared data computed by the `prepare()` method.
   live: LiveData | None = dataclasses.field(init=False, default=None)
@@ -346,6 +347,7 @@ class GNNDatasetPreparator:
     padding = padding_lib.padding_from_graph_generator(
         self.schema,
         gen_raw_samples_iter,
+        relative_margin=self.padding_margin,
         max_timeseries_len=getattr(
             sample_generator.sampling_config, "max_timeseries_len", None
         ),
@@ -743,6 +745,7 @@ def prepare_datasets(
     cache_normalized_features: bool,
     cache_normalized_features_device: Literal["host", "device"],
     sampling_plan: sampling_config_lib.SamplingPlan | None,
+    padding_margin: float,
     auto_normalize_config: normalize_lib.AutoNormalizeConfig | None = None,
     keep_raw_features: set[tuple[str, str]] | None = None,
 ) -> tuple[GNNDatasetPreparator, GNNDatasetPreparator | None]:
@@ -811,6 +814,7 @@ def prepare_datasets(
       "edgeset_timestamp_features": edgeset_timestamp_features,
       "cache_normalized_features": cache_normalized_features,
       "cache_normalized_features_device": cache_normalized_features_device,
+      "padding_margin": padding_margin,
   }
 
   train_dataset = GNNDatasetPreparator(

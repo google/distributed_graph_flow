@@ -365,6 +365,9 @@ class HParam:
       into a `timeseries_embedding_dim` sized embedding.
     early_stopping: The configuration for early stopping. If None, early
       stopping is disabled.
+    padding_margin: Relative margin added to observed maximum node and edge
+      counts when estimating static graph padding. The margin is estimated from
+      the training data and decreases with batch size.
   """
 
   num_sampling_hops: int = 1
@@ -385,6 +388,7 @@ class HParam:
   early_stopping: early_stopping_monitor.EarlyStoppingMonitorConfig | None = (
       None
   )
+  padding_margin: float = 0.1
 
 
 def save_model(model: Model, path: str) -> None:
