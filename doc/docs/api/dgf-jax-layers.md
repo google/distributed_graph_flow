@@ -20,6 +20,12 @@ hide:
 ## dgf.jax.layers.EmbedAndHomogenizeGraphConfig  # {: #section-embedandhomogenizegraphconfig}
 ::: dgf.jax.layers.EmbedAndHomogenizeGraphConfig
 
+## dgf.jax.layers.EmbedFeatureGroups  # {: #section-embedfeaturegroups}
+::: dgf.jax.layers.EmbedFeatureGroups
+
+## dgf.jax.layers.EmbedFeatureGroupsConfig  # {: #section-embedfeaturegroupsconfig}
+::: dgf.jax.layers.EmbedFeatureGroupsConfig
+
 ## dgf.jax.layers.EmbedFeatureSet  # {: #section-embedfeatureset}
 ::: dgf.jax.layers.EmbedFeatureSet
 
@@ -49,6 +55,9 @@ hide:
 
 ## dgf.jax.layers.GenericBlockConfig  # {: #section-genericblockconfig}
 ::: dgf.jax.layers.GenericBlockConfig
+
+## dgf.jax.layers.GnnPlus  # {: #section-gnnplus}
+::: dgf.jax.layers.GnnPlus
 
 ## dgf.jax.layers.HeterogeneousGraphAttentionNetwork  # {: #section-heterogeneousgraphattentionnetwork}
 ::: dgf.jax.layers.HeterogeneousGraphAttentionNetwork

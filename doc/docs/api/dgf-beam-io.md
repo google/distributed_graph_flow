@@ -44,3 +44,6 @@ hide:
 ## dgf.beam.io.write_tfgnn_graphs  # {: #section-write-tfgnn-graphs}
 ::: dgf.beam.io.write_tfgnn_graphs
 
+## dgf.beam.io.write_topology_statistics  # {: #section-write-topology-statistics}
+::: dgf.beam.io.write_topology_statistics
+

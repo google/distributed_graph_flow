@@ -50,6 +50,8 @@ class GraphMerger:
   (e.g., the padding has space for 100 nodes but 120 nodes are provided),
   raises an `InsufficientPaddingError` exception.
 
+  If `padding` is provided, sentinel nodes will addeds.
+
   Attributes:
     schema: The original input GraphSchema.
     padding: The padding configuration to apply.

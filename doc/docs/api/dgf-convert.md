@@ -14,6 +14,9 @@ hide:
 ## dgf.convert.graph_to_networkx  # {: #section-graph-to-networkx}
 ::: dgf.convert.graph_to_networkx
 
+## dgf.convert.graph_to_pyg_data  # {: #section-graph-to-pyg-data}
+::: dgf.convert.graph_to_pyg_data
+
 ## dgf.convert.graph_to_serialized_tfgnn_graph  # {: #section-graph-to-serialized-tfgnn-graph}
 ::: dgf.convert.graph_to_serialized_tfgnn_graph
 
@@ -41,8 +44,14 @@ hide:
 ## dgf.convert.schema_to_sparse_deferred_schema  # {: #section-schema-to-sparse-deferred-schema}
 ::: dgf.convert.schema_to_sparse_deferred_schema
 
+## dgf.convert.schema_to_tfgnn_graph_parsing_spec  # {: #section-schema-to-tfgnn-graph-parsing-spec}
+::: dgf.convert.schema_to_tfgnn_graph_parsing_spec
+
 ## dgf.convert.schema_to_tfgnn_schema  # {: #section-schema-to-tfgnn-schema}
 ::: dgf.convert.schema_to_tfgnn_schema
+
+## dgf.convert.serialized_tfgnn_graph_to_tf_graph  # {: #section-serialized-tfgnn-graph-to-tf-graph}
+::: dgf.convert.serialized_tfgnn_graph_to_tf_graph
 
 ## dgf.convert.sparse_deferred_struct_to_graph  # {: #section-sparse-deferred-struct-to-graph}
 ::: dgf.convert.sparse_deferred_struct_to_graph
@@ -52,6 +61,9 @@ hide:
 
 ## dgf.convert.tf_graph_to_tf_graph_dict  # {: #section-tf-graph-to-tf-graph-dict}
 ::: dgf.convert.tf_graph_to_tf_graph_dict
+
+## dgf.convert.tfgnn_graph_dict_to_tf_graph  # {: #section-tfgnn-graph-dict-to-tf-graph}
+::: dgf.convert.tfgnn_graph_dict_to_tf_graph
 
 ## dgf.convert.tfgnn_graph_to_graph  # {: #section-tfgnn-graph-to-graph}
 ::: dgf.convert.tfgnn_graph_to_graph

@@ -17,8 +17,14 @@ hide:
 ## dgf.io.fetch_graphland_graph  # {: #section-fetch-graphland-graph}
 ::: dgf.io.fetch_graphland_graph
 
+## dgf.io.fetch_jena_climate_graph  # {: #section-fetch-jena-climate-graph}
+::: dgf.io.fetch_jena_climate_graph
+
 ## dgf.io.fetch_ogb_graph  # {: #section-fetch-ogb-graph}
 ::: dgf.io.fetch_ogb_graph
+
+## dgf.io.fetch_traffic_graph  # {: #section-fetch-traffic-graph}
+::: dgf.io.fetch_traffic_graph
 
 ## dgf.io.read_bigquery_graph  # {: #section-read-bigquery-graph}
 ::: dgf.io.read_bigquery_graph
@@ -32,11 +38,20 @@ hide:
 ## dgf.io.read_graph  # {: #section-read-graph}
 ::: dgf.io.read_graph
 
+## dgf.io.read_graph_snapshots  # {: #section-read-graph-snapshots}
+::: dgf.io.read_graph_snapshots
+
+## dgf.io.read_graph_snapshots_as_temporal_graph  # {: #section-read-graph-snapshots-as-temporal-graph}
+::: dgf.io.read_graph_snapshots_as_temporal_graph
+
 ## dgf.io.read_graphai_hgraph  # {: #section-read-graphai-hgraph}
 ::: dgf.io.read_graphai_hgraph
 
 ## dgf.io.read_schema  # {: #section-read-schema}
 ::: dgf.io.read_schema
+
+## dgf.io.read_snapshot_metadata  # {: #section-read-snapshot-metadata}
+::: dgf.io.read_snapshot_metadata
 
 ## dgf.io.read_spanner_graph  # {: #section-read-spanner-graph}
 ::: dgf.io.read_spanner_graph
@@ -50,6 +65,9 @@ hide:
 ## dgf.io.read_tfgnn_graphs  # {: #section-read-tfgnn-graphs}
 ::: dgf.io.read_tfgnn_graphs
 
+## dgf.io.read_topology_statistics  # {: #section-read-topology-statistics}
+::: dgf.io.read_topology_statistics
+
 ## dgf.io.write_feature_statistics  # {: #section-write-feature-statistics}
 ::: dgf.io.write_feature_statistics
 
@@ -59,9 +77,15 @@ hide:
 ## dgf.io.write_schema  # {: #section-write-schema}
 ::: dgf.io.write_schema
 
+## dgf.io.write_snapshot_metadata  # {: #section-write-snapshot-metadata}
+::: dgf.io.write_snapshot_metadata
+
 ## dgf.io.write_text_proto  # {: #section-write-text-proto}
 ::: dgf.io.write_text_proto
 
 ## dgf.io.write_tfgnn_graphs  # {: #section-write-tfgnn-graphs}
 ::: dgf.io.write_tfgnn_graphs
+
+## dgf.io.write_topology_statistics  # {: #section-write-topology-statistics}
+::: dgf.io.write_topology_statistics
 

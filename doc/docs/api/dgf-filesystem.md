@@ -23,6 +23,9 @@ hide:
 ## dgf.filesystem.open_read  # {: #section-open-read}
 ::: dgf.filesystem.open_read
 
+## dgf.filesystem.open_write  # {: #section-open-write}
+::: dgf.filesystem.open_write
+
 ## dgf.filesystem.remove_paths  # {: #section-remove-paths}
 ::: dgf.filesystem.remove_paths
 

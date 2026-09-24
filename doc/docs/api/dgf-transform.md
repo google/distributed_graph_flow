@@ -8,6 +8,12 @@ hide:
 ## dgf.transform.AutoNormalizeConfig  # {: #section-autonormalizeconfig}
 ::: dgf.transform.AutoNormalizeConfig
 
+## dgf.transform.CalendarFeature  # {: #section-calendarfeature}
+::: dgf.transform.CalendarFeature
+
+## dgf.transform.CalendarNormalizer  # {: #section-calendarnormalizer}
+::: dgf.transform.CalendarNormalizer
+
 ## dgf.transform.ContainsLabelPredicate  # {: #section-containslabelpredicate}
 ::: dgf.transform.ContainsLabelPredicate
 
@@ -16,6 +22,9 @@ hide:
 
 ## dgf.transform.GNNDatasetPreparator  # {: #section-gnndatasetpreparator}
 ::: dgf.transform.GNNDatasetPreparator
+
+## dgf.transform.GraphMerger  # {: #section-graphmerger}
+::: dgf.transform.GraphMerger
 
 ## dgf.transform.GraphNormalizer  # {: #section-graphnormalizer}
 ::: dgf.transform.GraphNormalizer
@@ -29,11 +38,17 @@ hide:
 ## dgf.transform.NumNodesPredicate  # {: #section-numnodespredicate}
 ::: dgf.transform.NumNodesPredicate
 
+## dgf.transform.SequentialNormalizer  # {: #section-sequentialnormalizer}
+::: dgf.transform.SequentialNormalizer
+
 ## dgf.transform.SinusoidTimedeltaNormalizer  # {: #section-sinusoidtimedeltanormalizer}
 ::: dgf.transform.SinusoidTimedeltaNormalizer
 
 ## dgf.transform.SoftQuantileNormalizer  # {: #section-softquantilenormalizer}
 ::: dgf.transform.SoftQuantileNormalizer
+
+## dgf.transform.TimedeltaNormalizer  # {: #section-timedeltanormalizer}
+::: dgf.transform.TimedeltaNormalizer
 
 ## dgf.transform.apply_feature  # {: #section-apply-feature}
 ::: dgf.transform.apply_feature
@@ -43,6 +58,9 @@ hide:
 
 ## dgf.transform.batch_indices_generator  # {: #section-batch-indices-generator}
 ::: dgf.transform.batch_indices_generator
+
+## dgf.transform.combine_graph_snapshots  # {: #section-combine-graph-snapshots}
+::: dgf.transform.combine_graph_snapshots
 
 ## dgf.transform.drop_edge_features  # {: #section-drop-edge-features}
 ::: dgf.transform.drop_edge_features
@@ -64,9 +82,6 @@ hide:
 
 ## dgf.transform.homogenize  # {: #section-homogenize}
 ::: dgf.transform.homogenize
-
-## dgf.transform.merge_graphs  # {: #section-merge-graphs}
-::: dgf.transform.merge_graphs
 
 ## dgf.transform.propagate_timestamp_to_edges  # {: #section-propagate-timestamp-to-edges}
 ::: dgf.transform.propagate_timestamp_to_edges

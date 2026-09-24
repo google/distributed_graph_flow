@@ -137,8 +137,8 @@ def traffic_cns_name(dataset: str, forecast_horizon_seconds: int) -> str:
   if forecast_horizon_seconds not in CACHED_FORECAST_HORIZONS_SECONDS:
     raise ValueError(
         f"Forecast horizon {forecast_horizon_seconds}s is not cached on CNS for"
-        f" dataset {dataset!r}. Cached horizons are: "
-        f"{sorted(CACHED_FORECAST_HORIZONS_SECONDS)} (seconds, corresponding"
+        f" dataset {dataset!r}. Cached horizons are:"
+        f" {sorted(CACHED_FORECAST_HORIZONS_SECONDS)} (seconds, corresponding"
         f" to {[CACHED_FORECAST_HORIZONS_SECONDS[h] for h in sorted(CACHED_FORECAST_HORIZONS_SECONDS)]})."
         " To build a graph with an arbitrary horizon, pass"
         " repo=dgf.io.Repo.WEB."
@@ -278,17 +278,13 @@ def download_traffic_sensor_graph(
       ["sensor_id", "latitude", "longitude"],
       spec.locations_have_header,
   )
-  distances = distances.assign(
-      **{
-          "from": [_decode_sensor_id(value) for value in distances["from"]],
-          "to": [_decode_sensor_id(value) for value in distances["to"]],
-          "cost": distances["cost"].astype(np.float32),
-      }
-  )
+  distances = distances.assign(**{
+      "from": [_decode_sensor_id(value) for value in distances["from"]],
+      "to": [_decode_sensor_id(value) for value in distances["to"]],
+      "cost": distances["cost"].astype(np.float32),
+  })
   locations = locations.assign(
-      sensor_id=[
-          _decode_sensor_id(value) for value in locations["sensor_id"]
-      ],
+      sensor_id=[_decode_sensor_id(value) for value in locations["sensor_id"]],
       latitude=locations["latitude"].astype(np.float32),
       longitude=locations["longitude"].astype(np.float32),
   )
@@ -465,12 +461,12 @@ def build_traffic_graph(
       ),
       "time": sensor_times,
       "speed": sensor_speeds,
-      "latitude": locations["latitude"].to_numpy(dtype=np.float32)[
-          location_positions
-      ],
-      "longitude": locations["longitude"].to_numpy(dtype=np.float32)[
-          location_positions
-      ],
+      "latitude": (
+          locations["latitude"].to_numpy(dtype=np.float32)[location_positions]
+      ),
+      "longitude": (
+          locations["longitude"].to_numpy(dtype=np.float32)[location_positions]
+      ),
   }
   sensor_schema_features: dict[str, schema_lib.FeatureSchema] = {
       "#id": schema_lib.FeatureSchema(
@@ -541,8 +537,9 @@ def build_traffic_graph(
     )
 
   query_times = np.repeat(timestamps[query_time_indices], num_sensors)
-  query_sensors = np.tile(np.arange(num_sensors, dtype=np.int64),
-                          num_query_times)
+  query_sensors = np.tile(
+      np.arange(num_sensors, dtype=np.int64), num_query_times
+  )
   target_speeds = values[target_time_indices].reshape(-1)
 
   # Chronological 70/10/20 split, matching the canonical METR-LA and PEMS-BAY
@@ -677,7 +674,7 @@ def fetch_traffic_graph(
     adjacency_threshold: float = 0.1,
     repo: Repo | str = Repo.AUTO,
 ) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
-  """Downloads and loads a traffic speed forecasting benchmark into memory.
+  """Gets the METR-LA and PEMS-BAY traffic speed forecasting datasets.
 
   Both supported datasets record the speed of highway loop detectors every five
   minutes: METR-LA covers 207 detectors of the Los Angeles county highways over

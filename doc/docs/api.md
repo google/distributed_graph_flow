@@ -30,8 +30,12 @@ Utilities to analyze graphs, e.g., feature and graph statistics.
 
 *   [`dgf.analyse.feature_statistics`](api/dgf-analyse.md#section-feature-statistics): Computes the feature stats from a single graph.
 *   [`dgf.analyse.feature_statistics_from_graphs`](api/dgf-analyse.md#section-feature-statistics-from-graphs): Computes the feature stats from multiple graphs.
+*   [`dgf.analyse.infer_schema_semantic`](api/dgf-analyse.md#section-infer-schema-semantic): Automatically detects the semantic of features with UNKNOWN semantic.
+*   [`dgf.analyse.make_histogram`](api/dgf-analyse.md#section-make-histogram): Helper to create a Histogram from a numpy array of values.
 *   [`dgf.analyse.padding_from_graph_generator`](api/dgf-analyse.md#section-padding-from-graph-generator): Creates a padding configuration from a set of in-memory graphs.
 *   [`dgf.analyse.print_schema`](api/dgf-analyse.md#section-print-schema): Generates a human-readable string representation of a graph schema.
+*   [`dgf.analyse.topology_statistics`](api/dgf-analyse.md#section-topology-statistics): Computes topology statistics for a single InMemoryGraph.
+*   [`dgf.analyse.topology_statistics_from_graphs`](api/dgf-analyse.md#section-topology-statistics-from-graphs): Computes topology statistics for a set of InMemoryGraphs.
 
 
 
@@ -43,6 +47,7 @@ Converts object formats, e.g., a graph to a Sparse Deferred struct.
 *   [`dgf.convert.graph_dict_to_graph`](api/dgf-convert.md#section-graph-dict-to-graph): Converts a TF GNN Graph Sample Dict to an InMemoryGraph.
 *   [`dgf.convert.graph_to_jax_graph`](api/dgf-convert.md#section-graph-to-jax-graph): Converts a (NumPy) in-memory graph into a JAX in-memory graph.
 *   [`dgf.convert.graph_to_networkx`](api/dgf-convert.md#section-graph-to-networkx): Converts an InMemoryGraph into a NetworkX MultiDiGraph.
+*   [`dgf.convert.graph_to_pyg_data`](api/dgf-convert.md#section-graph-to-pyg-data): Converts a normalized DGF InMemoryGraph to a PyG HeteroData object.
 *   [`dgf.convert.graph_to_serialized_tfgnn_graph`](api/dgf-convert.md#section-graph-to-serialized-tfgnn-graph): Converts an InMemoryGraph into a serialized TF-GNN graph sample proto.
 *   [`dgf.convert.graph_to_sparse_deferred_struct`](api/dgf-convert.md#section-graph-to-sparse-deferred-struct): Converts an in-memory graph into a Sparse Deferred struct.
 *   [`dgf.convert.graph_to_tf_graph`](api/dgf-convert.md#section-graph-to-tf-graph): Converts a graph to a TF in-memory graph.
@@ -52,10 +57,13 @@ Converts object formats, e.g., a graph to a Sparse Deferred struct.
 *   [`dgf.convert.networkx_to_graph`](api/dgf-convert.md#section-networkx-to-graph): Converts a NetworkX graph into an InMemoryGraph and its schema.
 *   [`dgf.convert.schema_to_spanner_ddl`](api/dgf-convert.md#section-schema-to-spanner-ddl): Converts a GraphSchema to a string of CREATE statements for Spanner.
 *   [`dgf.convert.schema_to_sparse_deferred_schema`](api/dgf-convert.md#section-schema-to-sparse-deferred-schema): Converts a DGF `GraphSchema` into a Sparse Deferred schema.
+*   [`dgf.convert.schema_to_tfgnn_graph_parsing_spec`](api/dgf-convert.md#section-schema-to-tfgnn-graph-parsing-spec): Builds the parsing spec of a TF GNN Graph Sample from a graph schema.
 *   [`dgf.convert.schema_to_tfgnn_schema`](api/dgf-convert.md#section-schema-to-tfgnn-schema): Converts a GraphSchema object into a TF-GNN schema proto.
+*   [`dgf.convert.serialized_tfgnn_graph_to_tf_graph`](api/dgf-convert.md#section-serialized-tfgnn-graph-to-tf-graph): Converts a serialized TF GNN Graph Sample into a `TFInMemoryGraph`.
 *   [`dgf.convert.sparse_deferred_struct_to_graph`](api/dgf-convert.md#section-sparse-deferred-struct-to-graph): Converts a Sparse Deferred struct into an in-memory graph.
 *   [`dgf.convert.tf_graph_dict_to_tf_graph`](api/dgf-convert.md#section-tf-graph-dict-to-tf-graph): Converts a flattened TFInMemoryGraphDict back into a TFInMemoryGraph.
 *   [`dgf.convert.tf_graph_to_tf_graph_dict`](api/dgf-convert.md#section-tf-graph-to-tf-graph-dict): Converts a TFInMemoryGraph into a flattened TFInMemoryGraphDict.
+*   [`dgf.convert.tfgnn_graph_dict_to_tf_graph`](api/dgf-convert.md#section-tfgnn-graph-dict-to-tf-graph): Converts a parsed TF GNN Graph Sample into a `TFInMemoryGraph`.
 *   [`dgf.convert.tfgnn_graph_to_graph`](api/dgf-convert.md#section-tfgnn-graph-to-graph): Converts a TF GNN Graph Sample to an InMemoryGraph.
 *   [`dgf.convert.tfgnn_schema_to_schema`](api/dgf-convert.md#section-tfgnn-schema-to-schema): Converts a TF-GNN schema proto into a GraphSchema object.
 
@@ -67,8 +75,9 @@ Converts object formats, e.g., a graph to a Sparse Deferred struct.
 Classes that represent graph data. Contains no functions or algorithms.
 
 *   [`dgf.data.EdgeSchema`](api/dgf-data.md#section-edgeschema): EdgeSchema(source: str, target: str, features: dict[str, dgf.src.data.schema.FeatureSchema] = <factory>)
-*   [`dgf.data.EdgeSetPadding`](api/dgf-data.md#section-edgesetpadding): EdgeSetPadding(num_edges: int)
+*   [`dgf.data.EdgeSetPadding`](api/dgf-data.md#section-edgesetpadding): EdgeSetPadding(num_edges: int | None = None, features: dict[str, dgf.src.data.padding.FeaturePadding] = <factory>)
 *   [`dgf.data.FeatureFormat`](api/dgf-data.md#section-featureformat): How a value is represented / stored.
+*   [`dgf.data.FeaturePadding`](api/dgf-data.md#section-featurepadding): FeaturePadding(max_timeseries_len: int | None = None)
 *   [`dgf.data.FeatureSchema`](api/dgf-data.md#section-featureschema): Schema for a single feature.
 *   [`dgf.data.FeatureSemantic`](api/dgf-data.md#section-featuresemantic): How a value should be interpreted.
 *   [`dgf.data.FeatureSetStatistics`](api/dgf-data.md#section-featuresetstatistics): Statistics for a set of features.
@@ -77,6 +86,10 @@ Classes that represent graph data. Contains no functions or algorithms.
 *   [`dgf.data.GraphSchema`](api/dgf-data.md#section-graphschema): GraphSchema(node_sets: dict[str, dgf.src.data.schema.NodeSchema], edge_sets: dict[str, dgf.src.data.schema.EdgeSchema])
 *   [`dgf.data.GraphSchemaFilter`](api/dgf-data.md#section-graphschemafilter): Filters a GraphSchema to sub-select node sets, edge sets, and features.
 *   [`dgf.data.GraphSchemaV2`](api/dgf-data.md#section-graphschemav2): GraphSchema(node_sets: dict[str, dgf.src.data.schema.NodeSchema], edge_sets: dict[str, dgf.src.data.schema.EdgeSchema])
+*   [`dgf.data.GraphSnapshots`](api/dgf-data.md#section-graphsnapshots): A chronologically ordered sequence of graph snapshots.
+*   [`dgf.data.GraphSnapshotsFormat`](api/dgf-data.md#section-graphsnapshotsformat): Format options for snapshots datasets.
+*   [`dgf.data.GraphSnapshotsMetadata`](api/dgf-data.md#section-graphsnapshotsmetadata): Root metadata for a DGF Graph Snapshots dataset.
+*   [`dgf.data.Histogram`](api/dgf-data.md#section-histogram): A dataclass representing a histogram.
 *   [`dgf.data.InMemoryEdgeSet`](api/dgf-data.md#section-inmemoryedgeset): An Edge Set.
 *   [`dgf.data.InMemoryGraph`](api/dgf-data.md#section-inmemorygraph): An in-memory generic graph.
 *   [`dgf.data.InMemoryNodeSet`](api/dgf-data.md#section-inmemorynodeset): A Node Set.
@@ -84,7 +97,7 @@ Classes that represent graph data. Contains no functions or algorithms.
 *   [`dgf.data.JaxInMemoryGraph`](api/dgf-data.md#section-jaxinmemorygraph): An in-memory generic graph.
 *   [`dgf.data.JaxInMemoryNodeSet`](api/dgf-data.md#section-jaxinmemorynodeset): A Node Set.
 *   [`dgf.data.NodeSchema`](api/dgf-data.md#section-nodeschema): NodeSchema(features: dict[str, dgf.src.data.schema.FeatureSchema] = <factory>)
-*   [`dgf.data.NodeSetPadding`](api/dgf-data.md#section-nodesetpadding): NodeSetPadding(num_nodes: int)
+*   [`dgf.data.NodeSetPadding`](api/dgf-data.md#section-nodesetpadding): NodeSetPadding(num_nodes: int | None = None, features: dict[str, dgf.src.data.padding.FeaturePadding] = <factory>)
 *   [`dgf.data.Padding`](api/dgf-data.md#section-padding): Information to pad a graph.
 *   [`dgf.data.TFInMemoryEdgeSet`](api/dgf-data.md#section-tfinmemoryedgeset): An Edge Set.
 *   [`dgf.data.TFInMemoryGraph`](api/dgf-data.md#section-tfinmemorygraph): An in-memory generic graph.
@@ -107,11 +120,12 @@ DGF-specific exceptions.
 GraphFlow unified filesystem API.
 
 *   [`dgf.filesystem.create_gcs_bucket`](api/dgf-filesystem.md#section-create-gcs-bucket): Creates a GCS bucket.
-*   [`dgf.filesystem.exists`](api/dgf-filesystem.md#section-exists): Returns True if the path exists.
+*   [`dgf.filesystem.exists`](api/dgf-filesystem.md#section-exists): Returns True if the file or directory exists.
 *   [`dgf.filesystem.glob`](api/dgf-filesystem.md#section-glob): Returns a list of files and directories matching a pattern.
 *   [`dgf.filesystem.is_gcs_path`](api/dgf-filesystem.md#section-is-gcs-path): Returns True if the path is a Google Cloud Storage (GCS) path.
 *   [`dgf.filesystem.makedirs`](api/dgf-filesystem.md#section-makedirs): Creates directories if it does not exist.
 *   [`dgf.filesystem.open_read`](api/dgf-filesystem.md#section-open-read): Opens a file for reading and return a python file handle.
+*   [`dgf.filesystem.open_write`](api/dgf-filesystem.md#section-open-write): Opens a file for writing and returns a python file handle.
 *   [`dgf.filesystem.remove_paths`](api/dgf-filesystem.md#section-remove-paths): Removes all the files in parallel.
 *   [`dgf.filesystem.rename`](api/dgf-filesystem.md#section-rename): Renames (moves) a file or directory from old_path to new_path.
 *   [`dgf.filesystem.rmtree`](api/dgf-filesystem.md#section-rmtree): Recursively removes a directory and its contents.
@@ -141,22 +155,30 @@ Functions to read and write graphs, schemas, and related data.
 *   [`dgf.io.create_spanner_tables_from_graph_schema`](api/dgf-io.md#section-create-spanner-tables-from-graph-schema): Creates Spanner tables for a graph schema.
 *   [`dgf.io.export_bigquery_to_disk`](api/dgf-io.md#section-export-bigquery-to-disk): Reads a BigQuery Graph in-process and returns a GraphFlow in-memory graph.
 *   [`dgf.io.fetch_graphland_graph`](api/dgf-io.md#section-fetch-graphland-graph): Downloads and loads a Graphland dataset into memory.
+*   [`dgf.io.fetch_jena_climate_graph`](api/dgf-io.md#section-fetch-jena-climate-graph): Downloads and loads the Jena Climate time series benchmark into memory.
 *   [`dgf.io.fetch_ogb_graph`](api/dgf-io.md#section-fetch-ogb-graph): Downloads and loads an OGB node property prediction dataset into memory.
+*   [`dgf.io.fetch_traffic_graph`](api/dgf-io.md#section-fetch-traffic-graph): Gets the METR-LA and PEMS-BAY traffic speed forecasting datasets.
 *   [`dgf.io.read_bigquery_graph`](api/dgf-io.md#section-read-bigquery-graph): Reads a BigQuery Graph in-process and returns a GraphFlow in-memory graph.
 *   [`dgf.io.read_bigquery_graph_schema`](api/dgf-io.md#section-read-bigquery-graph-schema): Reads the schema of a BigQuery graph into a GF schema.
 *   [`dgf.io.read_feature_statistics`](api/dgf-io.md#section-read-feature-statistics): Reads feature statistics from disk in a JSON format.
 *   [`dgf.io.read_graph`](api/dgf-io.md#section-read-graph): Reads a GF graph from a directory to an in-memory graph.
+*   [`dgf.io.read_graph_snapshots`](api/dgf-io.md#section-read-graph-snapshots): Reads a DGF Graph Snapshots dataset from disk into memory.
+*   [`dgf.io.read_graph_snapshots_as_temporal_graph`](api/dgf-io.md#section-read-graph-snapshots-as-temporal-graph): Reads a DGF Graph Snapshots dataset and combines it into a Temporal Graph.
 *   [`dgf.io.read_graphai_hgraph`](api/dgf-io.md#section-read-graphai-hgraph): Reads an on-disk HGraph into an in-memory representation.
 *   [`dgf.io.read_schema`](api/dgf-io.md#section-read-schema): Loads graph schema from disk in a json format.
-*   [`dgf.io.read_spanner_graph`](api/dgf-io.md#section-read-spanner-graph): Reads a Spanner Graph in-process and returns a GraphFlow in-memory graph.
+*   [`dgf.io.read_snapshot_metadata`](api/dgf-io.md#section-read-snapshot-metadata): Reads and parses GraphSnapshotsMetadata from a JSON file.
+*   [`dgf.io.read_spanner_graph`](api/dgf-io.md#section-read-spanner-graph): Reads a Spanner Graph sequentially in-process using direct SQL queries on base tables.
 *   [`dgf.io.read_spanner_graph_schema`](api/dgf-io.md#section-read-spanner-graph-schema): Reads the schema of a Spanner Graph.
 *   [`dgf.io.read_text_proto`](api/dgf-io.md#section-read-text-proto): Read a proto from disk in text format.
 *   [`dgf.io.read_tfgnn_graphs`](api/dgf-io.md#section-read-tfgnn-graphs): Reads a set of in-memory graphs from disk stored as TF Examples.
+*   [`dgf.io.read_topology_statistics`](api/dgf-io.md#section-read-topology-statistics): Reads topology statistics from disk in a JSON format.
 *   [`dgf.io.write_feature_statistics`](api/dgf-io.md#section-write-feature-statistics): Saves feature statistics to disk in a json format.
 *   [`dgf.io.write_graph`](api/dgf-io.md#section-write-graph): Writes an in-memory graph and schema to a GF Graph directory.
 *   [`dgf.io.write_schema`](api/dgf-io.md#section-write-schema): Saves graph schema to disk in a json format.
+*   [`dgf.io.write_snapshot_metadata`](api/dgf-io.md#section-write-snapshot-metadata): Serializes and writes GraphSnapshotsMetadata to a JSON file.
 *   [`dgf.io.write_text_proto`](api/dgf-io.md#section-write-text-proto): Writes a proto to disk in text format.
 *   [`dgf.io.write_tfgnn_graphs`](api/dgf-io.md#section-write-tfgnn-graphs): Writes a set of in-memory graphs to disk as TF Examples.
+*   [`dgf.io.write_topology_statistics`](api/dgf-io.md#section-write-topology-statistics): Saves topology statistics to disk in a json format.
 
 
 
@@ -165,10 +187,6 @@ Functions to read and write graphs, schemas, and related data.
 
 Machine Learning and Graph Neural Networks using JAX.
 
-*   [`dgf.jax.JaxBaseConfig`](api/dgf-jax.md#section-jaxbaseconfig): Base class for a GNN implemented in JAX.
-*   [`dgf.jax.get_activation`](api/dgf-jax.md#section-get-activation): Get an activation function by (string) name.
-*   [`dgf.jax.jnp_dtype_from_string`](api/dgf-jax.md#section-jnp-dtype-from-string): Return a JAX numpy type from a string name.
-*   [`dgf.jax.jnp_name_from_dtype`](api/dgf-jax.md#section-jnp-name-from-dtype): Return a string name for a jnp.dtype object.
 *   [`dgf.jax.train`](api/dgf-jax.md#section-train): Trains a Flax module with a flexible and feature-rich training loop.
 
 
@@ -178,34 +196,37 @@ Flax modules implementing low level GNN operations.
 
 *   [`dgf.jax.layers.ClassificationHead`](api/dgf-jax-layers.md#section-classificationhead): Simple classification head.
 *   [`dgf.jax.layers.ClassificationHeadConfig`](api/dgf-jax-layers.md#section-classificationheadconfig): Configuration for a classification head.
-*   [`dgf.jax.layers.ConditionalGIN`](api/dgf-jax-layers.md#section-conditionalgin): Conditional GIN with a labeling trick: https://arxiv.org/abs/2106.06935.
+*   [`dgf.jax.layers.ConditionalGIN`](api/dgf-jax-layers.md#section-conditionalgin): Homogeneous Conditional GIN with a labeling trick.
 *   [`dgf.jax.layers.EmbedAndHomogenizeGraph`](api/dgf-jax-layers.md#section-embedandhomogenizegraph): Convert a heterogeneous graph into a homogeneous one.
 *   [`dgf.jax.layers.EmbedAndHomogenizeGraphConfig`](api/dgf-jax-layers.md#section-embedandhomogenizegraphconfig): Config for EmbedAndHomogenizeGraph.
-*   [`dgf.jax.layers.EmbedFeatureSet`](api/dgf-jax-layers.md#section-embedfeatureset): Computes a fixed sized dense embedding for a set of feature values.
+*   [`dgf.jax.layers.EmbedFeatureGroups`](api/dgf-jax-layers.md#section-embedfeaturegroups): Computes embeddings for static features and timeseries sequence groups.
+*   [`dgf.jax.layers.EmbedFeatureGroupsConfig`](api/dgf-jax-layers.md#section-embedfeaturegroupsconfig): Configuration for the EmbedFeatureGroups layer.
+*   [`dgf.jax.layers.EmbedFeatureSet`](api/dgf-jax-layers.md#section-embedfeatureset): Computes a fixed sized dense embedding for static and timeseries feature values.
 *   [`dgf.jax.layers.EmbedFeatureSetConfig`](api/dgf-jax-layers.md#section-embedfeaturesetconfig): Configuration for the EmbedFeatureSet layer.
 *   [`dgf.jax.layers.EmbedGraph`](api/dgf-jax-layers.md#section-embedgraph): Compute a fixed sized dense embedding for all the features in a graph.
 *   [`dgf.jax.layers.EmbedGraphConfig`](api/dgf-jax-layers.md#section-embedgraphconfig): Configuration for "EmbedGraph".
-*   [`dgf.jax.layers.GCN`](api/dgf-jax-layers.md#section-gcn): Graph convolutional network: https://arxiv.org/pdf/1609.02907.pdf.
-*   [`dgf.jax.layers.GCNConfig`](api/dgf-jax-layers.md#section-gcnconfig): Makeable GCN config class with sensible defaults.
-*   [`dgf.jax.layers.GIN`](api/dgf-jax-layers.md#section-gin): Graph isomorphism network: https://arxiv.org/pdf/1810.00826.pdf.
-*   [`dgf.jax.layers.GINConfig`](api/dgf-jax-layers.md#section-ginconfig): Makeable GIN config class with sensible defaults.
+*   [`dgf.jax.layers.GCN`](api/dgf-jax-layers.md#section-gcn): Homogeneous Graph Convolutional Network.
+*   [`dgf.jax.layers.GCNConfig`](api/dgf-jax-layers.md#section-gcnconfig): Config for GCN.
+*   [`dgf.jax.layers.GIN`](api/dgf-jax-layers.md#section-gin): Homogeneous Graph Isomorphism Network.
+*   [`dgf.jax.layers.GINConfig`](api/dgf-jax-layers.md#section-ginconfig): Config for GIN.
 *   [`dgf.jax.layers.GenericBlock`](api/dgf-jax-layers.md#section-genericblock): A generic configurable neural network block.
 *   [`dgf.jax.layers.GenericBlockConfig`](api/dgf-jax-layers.md#section-genericblockconfig): Configuration for a generic block parsed from a string.
+*   [`dgf.jax.layers.GnnPlus`](api/dgf-jax-layers.md#section-gnnplus): Generic module for GnnPlus.
 *   [`dgf.jax.layers.HeterogeneousGraphAttentionNetwork`](api/dgf-jax-layers.md#section-heterogeneousgraphattentionnetwork): A single layer of heterogeneous Graph Attention Network.
 *   [`dgf.jax.layers.HeterogeneousGraphAttentionNetworkConfig`](api/dgf-jax-layers.md#section-heterogeneousgraphattentionnetworkconfig): Configuration for HeterogeneousGraphAttentionNetwork.
 *   [`dgf.jax.layers.HeterogeneousGraphConvolution`](api/dgf-jax-layers.md#section-heterogeneousgraphconvolution): A single layer of heterogeneous Graph Neural Network message passing.
 *   [`dgf.jax.layers.HeterogeneousGraphConvolutionConfig`](api/dgf-jax-layers.md#section-heterogeneousgraphconvolutionconfig): Configuration for HeterogeneousGraphConvolution.
 *   [`dgf.jax.layers.MLP`](api/dgf-jax-layers.md#section-mlp): A generic MLP followed by a linear layer.
-*   [`dgf.jax.layers.MPNN`](api/dgf-jax-layers.md#section-mpnn): Message-Passing Neural Network: https://arxiv.org/abs/1704.01212.
-*   [`dgf.jax.layers.MPNNConfig`](api/dgf-jax-layers.md#section-mpnnconfig): Makeable MPNN config class with sensible defaults.
-*   [`dgf.jax.layers.Projector`](api/dgf-jax-layers.md#section-projector): Simple wrapper around the generic MLP layer for graph input/output.
-*   [`dgf.jax.layers.ProjectorConfig`](api/dgf-jax-layers.md#section-projectorconfig): Makeable Projector config class with sensible defaults.
-*   [`dgf.jax.layers.ResidualMLPV2`](api/dgf-jax-layers.md#section-residualmlpv2): A residual MLP layer. See ResidualMLPV2Config.
-*   [`dgf.jax.layers.ResidualMLPV2Config`](api/dgf-jax-layers.md#section-residualmlpv2config): A residual MLP layer.
-*   [`dgf.jax.layers.identity`](api/dgf-jax-layers.md#section-identity): Returns a GenericBlockConfig that acts as an identity block.
-*   [`dgf.jax.layers.ingest_feature`](api/dgf-jax-layers.md#section-ingest-feature): Returns a GenericBlockConfig for feature ingestion.
-*   [`dgf.jax.layers.modern_residual_mlp`](api/dgf-jax-layers.md#section-modern-residual-mlp): Returns a GenericBlockConfig for a modern residual MLP.
-*   [`dgf.jax.layers.sequential_mlp`](api/dgf-jax-layers.md#section-sequential-mlp): Returns a GenericBlockConfig for a sequential MLP.
+*   [`dgf.jax.layers.MPNN`](api/dgf-jax-layers.md#section-mpnn): Homogeneous Message-Passing Neural Network.
+*   [`dgf.jax.layers.MPNNConfig`](api/dgf-jax-layers.md#section-mpnnconfig): Config for MPNN.
+*   [`dgf.jax.layers.Projector`](api/dgf-jax-layers.md#section-projector): Homogeneous Graph Feature Projector.
+*   [`dgf.jax.layers.ProjectorConfig`](api/dgf-jax-layers.md#section-projectorconfig): Config for Projector.
+*   [`dgf.jax.layers.ResidualMLPV2`](api/dgf-jax-layers.md#section-residualmlpv2): A [dense + norm + activation + drop-out + residual] * num_layers MLP layer.
+*   [`dgf.jax.layers.ResidualMLPV2Config`](api/dgf-jax-layers.md#section-residualmlpv2config): A [dense + norm + activation + drop-out + residual] * num_layers MLP layer.
+*   [`dgf.jax.layers.identity`](api/dgf-jax-layers.md#section-identity): Preconfigured GenericBlockConfig that acts as an identity block.
+*   [`dgf.jax.layers.ingest_feature`](api/dgf-jax-layers.md#section-ingest-feature): Preconfigured GenericBlockConfig for feature ingestion.
+*   [`dgf.jax.layers.modern_residual_mlp`](api/dgf-jax-layers.md#section-modern-residual-mlp): Preconfigured GenericBlockConfig for a modern residual MLP.
+*   [`dgf.jax.layers.sequential_mlp`](api/dgf-jax-layers.md#section-sequential-mlp): Preconfigured GenericBlockConfig for a sequential MLP.
 
 
 
@@ -219,6 +240,7 @@ Top-level learning module.
 *   [`dgf.learning.LinkPredictionModel`](api/dgf-learning.md#section-linkpredictionmodel): The user-visible returned model object for edge prediction.
 *   [`dgf.learning.Model`](api/dgf-learning.md#section-model): A generic model from the 10-lines of code API.
 *   [`dgf.learning.NodePredictionModel`](api/dgf-learning.md#section-nodepredictionmodel): The user-visible returned model object.
+*   [`dgf.learning.TFFunctionInputFormat`](api/dgf-learning.md#section-tffunctioninputformat): Input format of a model exported with `to_tensorflow_function`.
 *   [`dgf.learning.load_model`](api/dgf-learning.md#section-load-model): Loads a model previously saved with `model.save()`.
 *   [`dgf.learning.train_link_model`](api/dgf-learning.md#section-train-link-model): Trains a supervised Graph Neural Network model for edge prediction.
 *   [`dgf.learning.train_node_model`](api/dgf-learning.md#section-train-node-model): Trains a supervised Graph Neural Network model for node-level prediction.
@@ -259,6 +281,7 @@ Functions and classes to extract subsets of graphs for GNN training.
 *   [`dgf.sampling.create_graph_spanner_sampler`](api/dgf-sampling.md#section-create-graph-spanner-sampler): Creates a SpannerGraphSampler instance.
 *   [`dgf.sampling.create_sampler`](api/dgf-sampling.md#section-create-sampler): Creates an in-memory sampler.
 *   [`dgf.sampling.extract_beam_nodes_ids`](api/dgf-sampling.md#section-extract-beam-nodes-ids): Extracts all the node ids of a given nodeset.
+*   [`dgf.sampling.offline_distributed_sampler_gcp`](api/dgf-sampling.md#section-offline-distributed-sampler-gcp): Runs the offline distributed graph sampler on GCP.
 *   [`dgf.sampling.sample_with_beam_semi_distributed_sampler`](api/dgf-sampling.md#section-sample-with-beam-semi-distributed-sampler): Samples subgraphs from a distributed graph using a semi-distributed algo.
 *   [`dgf.sampling.sample_with_beam_semi_distributed_sampler_v2`](api/dgf-sampling.md#section-sample-with-beam-semi-distributed-sampler-v2): Samples subgraphs from a distributed graph using a semi-distributed algo.
 *   [`dgf.sampling.simple_sampling_config_to_sampling_plan`](api/dgf-sampling.md#section-simple-sampling-config-to-sampling-plan): Converts a SimpleSamplingConfig to a more general SamplingPlan.
@@ -280,18 +303,24 @@ Functions and classes to train core GNN models.
 Transforms graph data into other graph structures or formats.
 
 *   [`dgf.transform.AutoNormalizeConfig`](api/dgf-transform.md#section-autonormalizeconfig): Configuration for automatic feature normalization for GNNs.
+*   [`dgf.transform.CalendarFeature`](api/dgf-transform.md#section-calendarfeature): Supported calendar features to extract from timestamps.
+*   [`dgf.transform.CalendarNormalizer`](api/dgf-transform.md#section-calendarnormalizer): Extracts normalized UTC calendar components from a TIMESTAMP feature.
 *   [`dgf.transform.ContainsLabelPredicate`](api/dgf-transform.md#section-containslabelpredicate): Predicate for filtering subgraphs if they have a positive label.
 *   [`dgf.transform.DictionaryIndexNormalizer`](api/dgf-transform.md#section-dictionaryindexnormalizer): Normalizes features by mapping dictionary keys to their integer indices.
 *   [`dgf.transform.GNNDatasetPreparator`](api/dgf-transform.md#section-gnndatasetpreparator): Generates graph samples to train node prediction models.
+*   [`dgf.transform.GraphMerger`](api/dgf-transform.md#section-graphmerger): Merges multiple `InMemoryGraph` instances into a single graph.
 *   [`dgf.transform.GraphNormalizer`](api/dgf-transform.md#section-graphnormalizer): Applies a collection of individual AbstractFeatureNormalizer on a graph.
 *   [`dgf.transform.GraphNormalizerConfig`](api/dgf-transform.md#section-graphnormalizerconfig): Raw information of a GraphNormalizer for easy serialization.
 *   [`dgf.transform.IdentityNormalizer`](api/dgf-transform.md#section-identitynormalizer): A normalizer that simply pass a feature without changing it.
 *   [`dgf.transform.NumNodesPredicate`](api/dgf-transform.md#section-numnodespredicate): Predicate for filtering by number of nodes.
+*   [`dgf.transform.SequentialNormalizer`](api/dgf-transform.md#section-sequentialnormalizer): Applies multiple AbstractFeatureNormalizers in sequence.
 *   [`dgf.transform.SinusoidTimedeltaNormalizer`](api/dgf-transform.md#section-sinusoidtimedeltanormalizer): Normalizes a time delta feature by applying sinusoidal embeddings.
 *   [`dgf.transform.SoftQuantileNormalizer`](api/dgf-transform.md#section-softquantilenormalizer): Normalizes a numerical feature by replacing it with its soft quantile -0.5.
+*   [`dgf.transform.TimedeltaNormalizer`](api/dgf-transform.md#section-timedeltanormalizer): Normalizes a TIMESTAMP feature into a TIMEDELTA feature relative to seed timestamps.
 *   [`dgf.transform.apply_feature`](api/dgf-transform.md#section-apply-feature): Applies feature processors to the node and edge sets of a graph.
 *   [`dgf.transform.auto_normalize`](api/dgf-transform.md#section-auto-normalize): Create a generally good GraphNormalizer from feature statistics.
 *   [`dgf.transform.batch_indices_generator`](api/dgf-transform.md#section-batch-indices-generator): Generates batches of indices.
+*   [`dgf.transform.combine_graph_snapshots`](api/dgf-transform.md#section-combine-graph-snapshots): Combines chronologically ordered graph snapshots into a Temporal Graph.
 *   [`dgf.transform.drop_edge_features`](api/dgf-transform.md#section-drop-edge-features): Drops all edge features from a graph and its schema.
 *   [`dgf.transform.drop_edge_features_from_schema`](api/dgf-transform.md#section-drop-edge-features-from-schema): Drops all edge features from a schema.
 *   [`dgf.transform.filter_graph`](api/dgf-transform.md#section-filter-graph): Creates an in-memory graph with a subset of nodesets/edgesets/features.
@@ -299,9 +328,8 @@ Transforms graph data into other graph structures or formats.
 *   [`dgf.transform.filter_schema`](api/dgf-transform.md#section-filter-schema): Extracts a subset of the nodesets/edgesets/features from a schema.
 *   [`dgf.transform.homogeneous_graph_piece_to_nx`](api/dgf-transform.md#section-homogeneous-graph-piece-to-nx): Convert InMemoryGraph to an nx.Graph object.
 *   [`dgf.transform.homogenize`](api/dgf-transform.md#section-homogenize): Homogenizes a heterogeneous graph into a homogeneous one.
-*   [`dgf.transform.merge_graphs`](api/dgf-transform.md#section-merge-graphs): Merges multiple `InMemoryGraph` instances into a single graph.
 *   [`dgf.transform.propagate_timestamp_to_edges`](api/dgf-transform.md#section-propagate-timestamp-to-edges): Propagates timestamps from nodes to edges.
-*   [`dgf.transform.remove_padding_sentinels`](api/dgf-transform.md#section-remove-padding-sentinels): Removes the sentinel nodes and edges added by `merge_graphs`.
+*   [`dgf.transform.remove_padding_sentinels`](api/dgf-transform.md#section-remove-padding-sentinels): Removes the sentinel nodes and edges added by `GraphMerger`.
 *   [`dgf.transform.table2graph`](api/dgf-transform.md#section-table2graph): Converts a table (dict of arrays or DataFrame) into an InMemoryGraph and Schema.
 
 
@@ -311,7 +339,9 @@ Transforms graph data into other graph structures or formats.
 
 Functions to validate graph data.
 
+*   [`dgf.validate.fix_schema`](api/dgf-validate.md#section-fix-schema): Tries to fix broken/invalid schemas by inferring and setting primary keys.
 *   [`dgf.validate.validate_graph`](api/dgf-validate.md#section-validate-graph): Validates an in memory graph object.
+*   [`dgf.validate.validate_snapshots`](api/dgf-validate.md#section-validate-snapshots): Validates the storage layout and contents of DGF Graph Snapshots.
 
 
 
@@ -344,7 +374,7 @@ Classes that represent graph data. Contains no functions or algorithms.
 *   [`dgf.beam.data.HeterogeniousGraph`](api/dgf-beam-data.md#section-heterogeniousgraph): A (potentially distributed) heterogeneous graph.
 *   [`dgf.beam.data.HomogeneousGraph`](api/dgf-beam-data.md#section-homogeneousgraph): A (potentially distributed) homogeneous graph.
 *   [`dgf.beam.data.KeyedInMemoryGraph`](api/dgf-beam-data.md#section-keyedinmemorygraph): KeyedInMemoryGraph(key, graph)
-*   [`dgf.beam.data.Node`](api/dgf-beam-data.md#section-node): Node(id: bytes | int, features: dict[str, numpy.ndarray] | None = None)
+*   [`dgf.beam.data.Node`](api/dgf-beam-data.md#section-node): Node(id: 'NodeId', features: 'Features | None' = None)
 
 
 
@@ -362,10 +392,11 @@ Functions to read and write graphs, schemas, and related data using Beam.
 *   [`dgf.beam.io.write_edge_set_to_spanner`](api/dgf-beam-io.md#section-write-edge-set-to-spanner): Writes an edge set to a Spanner table using SpannerInsertOrUpdate.
 *   [`dgf.beam.io.write_feature_statistics`](api/dgf-beam-io.md#section-write-feature-statistics): Writes a beam pcollection of feature statistics to disk in json format.
 *   [`dgf.beam.io.write_graph`](api/dgf-beam-io.md#section-write-graph): Writes a GF Graph from a distributed graph (beam).
-*   [`dgf.beam.io.write_graphai_hgraph`](api/dgf-beam-io.md#section-write-graphai-hgraph): Initializes the WriteToHGraph PTransform.
+*   [`dgf.beam.io.write_graphai_hgraph`](api/dgf-beam-io.md#section-write-graphai-hgraph): Writes a distributed HGraph using Beam.
 *   [`dgf.beam.io.write_node_set_to_spanner`](api/dgf-beam-io.md#section-write-node-set-to-spanner): Writes a node set to a Spanner table using SpannerInsertOrUpdate.
 *   [`dgf.beam.io.write_spanner`](api/dgf-beam-io.md#section-write-spanner): Writes a heterogeneous graph to Spanner.
 *   [`dgf.beam.io.write_tfgnn_graphs`](api/dgf-beam-io.md#section-write-tfgnn-graphs): Writes a collection of TF Graph Samples on disk.
+*   [`dgf.beam.io.write_topology_statistics`](api/dgf-beam-io.md#section-write-topology-statistics): Writes a beam pcollection of topology statistics to disk in json format.
 
 
 

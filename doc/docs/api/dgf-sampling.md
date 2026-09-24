@@ -26,6 +26,9 @@ hide:
 ## dgf.sampling.extract_beam_nodes_ids  # {: #section-extract-beam-nodes-ids}
 ::: dgf.sampling.extract_beam_nodes_ids
 
+## dgf.sampling.offline_distributed_sampler_gcp  # {: #section-offline-distributed-sampler-gcp}
+::: dgf.sampling.offline_distributed_sampler_gcp
+
 ## dgf.sampling.sample_with_beam_semi_distributed_sampler  # {: #section-sample-with-beam-semi-distributed-sampler}
 ::: dgf.sampling.sample_with_beam_semi_distributed_sampler
 

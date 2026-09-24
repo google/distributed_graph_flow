@@ -14,6 +14,9 @@ hide:
 ## dgf.learning.NodePredictionModel  # {: #section-nodepredictionmodel}
 ::: dgf.learning.NodePredictionModel
 
+## dgf.learning.TFFunctionInputFormat  # {: #section-tffunctioninputformat}
+::: dgf.learning.TFFunctionInputFormat
+
 ## dgf.learning.load_model  # {: #section-load-model}
 ::: dgf.learning.load_model
 

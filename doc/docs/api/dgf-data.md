@@ -14,6 +14,9 @@ hide:
 ## dgf.data.FeatureFormat  # {: #section-featureformat}
 ::: dgf.data.FeatureFormat
 
+## dgf.data.FeaturePadding  # {: #section-featurepadding}
+::: dgf.data.FeaturePadding
+
 ## dgf.data.FeatureSchema  # {: #section-featureschema}
 ::: dgf.data.FeatureSchema
 
@@ -37,6 +40,18 @@ hide:
 
 ## dgf.data.GraphSchemaV2  # {: #section-graphschemav2}
 ::: dgf.data.GraphSchemaV2
+
+## dgf.data.GraphSnapshots  # {: #section-graphsnapshots}
+::: dgf.data.GraphSnapshots
+
+## dgf.data.GraphSnapshotsFormat  # {: #section-graphsnapshotsformat}
+::: dgf.data.GraphSnapshotsFormat
+
+## dgf.data.GraphSnapshotsMetadata  # {: #section-graphsnapshotsmetadata}
+::: dgf.data.GraphSnapshotsMetadata
+
+## dgf.data.Histogram  # {: #section-histogram}
+::: dgf.data.Histogram
 
 ## dgf.data.InMemoryEdgeSet  # {: #section-inmemoryedgeset}
 ::: dgf.data.InMemoryEdgeSet
