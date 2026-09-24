@@ -234,6 +234,16 @@ class GNNDatasetPreparator:
         nodeset_timestamp_features=self.nodeset_timestamp_features,
     )
 
+    # If the normalizer requires seed_timestamps or the schema has timeseries
+    # features, we cannot cache the normalized features because the
+    # normalization depends on the seed timestamps.
+    cannot_cache_normalized_features = (
+        "seed_timestamps" in other_live.normalizer.accepted_kwargs
+        or temporal_util.schema_has_timeseries_features(self.schema)
+    )
+    if self.cache_normalized_features and cannot_cache_normalized_features:
+      self.cache_normalized_features = False
+
     self.live = LiveData(
         feature_stats=other_live.feature_stats,  # from other
         normalizer=other_live.normalizer,  # from other
@@ -245,15 +255,6 @@ class GNNDatasetPreparator:
             self.schema
         ),
     )
-
-    # If the normalizer accepts seed timestamps or the schema has timeseries
-    # features, we cannot cache the normalized features.
-    cannot_cache_normalized_features = (
-        "seed_timestamps" in other_live.normalizer.accepted_kwargs
-        or temporal_util.schema_has_timeseries_features(self.schema)
-    )
-    if self.cache_normalized_features and cannot_cache_normalized_features:
-      self.cache_normalized_features = False
 
     if self.cache_normalized_features:
       if isinstance(self.graph, in_memory_graph_lib.InMemoryGraph):
@@ -377,6 +378,16 @@ class GNNDatasetPreparator:
         config=self.auto_normalize_config,
     )
 
+    # If the normalizer requires seed_timestamps or the schema has timeseries
+    # features, we cannot cache the normalized features because the
+    # normalization depends on the seed timestamps.
+    cannot_cache_normalized_features = (
+        "seed_timestamps" in normalizer.accepted_kwargs
+        or temporal_util.schema_has_timeseries_features(self.schema)
+    )
+    if self.cache_normalized_features and cannot_cache_normalized_features:
+      self.cache_normalized_features = False
+
     self.live = LiveData(
         feature_stats=feature_stats,
         normalizer=normalizer,
@@ -388,13 +399,6 @@ class GNNDatasetPreparator:
             self.schema
         ),
     )
-
-    cannot_cache_normalized_features = (
-        "seed_timestamps" in normalizer.accepted_kwargs
-        or temporal_util.schema_has_timeseries_features(self.schema)
-    )
-    if self.cache_normalized_features and cannot_cache_normalized_features:
-      self.cache_normalized_features = False
 
     if self.cache_normalized_features:
       if isinstance(self.graph, in_memory_graph_lib.InMemoryGraph):

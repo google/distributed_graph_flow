@@ -444,6 +444,61 @@ class GNNLinkDatasetPreparatorTest(parameterized.TestCase):
     self.assertIsNotNone(preparator2.get_live().normalized_jax_source_graph)
     self.assertIsNotNone(preparator2.get_live().normalized_jax_target_graph)
 
+  def test_prepare_from_existing_one_disables_caching_with_timeseries(self):
+    # Use a dedicated graph so the class-level fixtures stay unmutated.
+    graph, schema = gen_test_graph.generate_recommender_like_in_memory_graph()
+    schema.node_sets["n1"].features["ts_val"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        is_timeseries=True,
+        shape=(3,),
+    )
+    graph.node_sets["n1"].features["ts_val"] = np.array(
+        [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0], [6.0, 7.0, 8.0]], dtype=np.float32
+    )
+
+    def _make_preparator():
+      return link_prediction_dataset.GNNLinkDatasetPreparator(
+          graph=graph,
+          schema=schema,
+          sampling_config=sampling_config_lib.SimpleSamplingConfig(
+              seed_nodeset="n1",
+              num_hops=1,
+              hop_width=2,
+              reverse=True,
+          ),
+          batch_size=2,
+          drop_remainder=False,
+          shuffle=True,
+          target_edgeset="e2",
+          num_negative_nodes=3,
+          cache_normalized_features=True,
+          cache_normalized_features_device="device",
+          edge_neighbor_generator=edge_neighbor_generator_lib.RandomEdgeNeighborGeneratorConfig(),
+      )
+
+    preparator1 = _make_preparator()
+    preparator1.prepare()
+    # Timeseries features make the normalization sample-dependent, so `prepare`
+    # turns the caching off.
+    self.assertFalse(preparator1.cache_normalized_features)
+
+    # `prepare_from_existing_one` must apply the same guard.
+    preparator2 = _make_preparator()
+    preparator2.prepare_from_existing_one(preparator1)
+
+    self.assertFalse(preparator2.cache_normalized_features)
+    self.assertIsNone(preparator2.get_live().normalized_jax_source_graph)
+    self.assertIsNone(preparator2.get_live().normalized_jax_target_graph)
+
+    num_batches = 0
+    for sample in preparator2.generate():
+      self.assertIsInstance(
+          sample, link_prediction_dataset.GNNLinkDatasetPreparatorSample
+      )
+      num_batches += 1
+    self.assertEqual(num_batches, 2)
+
   @parameterized.named_parameters(
       ("CacheHost", True, "host"),
       ("CacheDevice", True, "device"),
