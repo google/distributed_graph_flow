@@ -1,0 +1,52 @@
+{#
+  Landing page template for the Graph Flow documentation home page.
+#}
+{% extends "main.html" %}
+
+{% block content %}
+  <section class="gf-hero">
+    <div class="gf-hero__inner">
+      <div class="gf-hero__text">
+        <div class="gf-hero__title">
+          A Python library for Graph Neural Networks
+        </div>
+        <p class="gf-hero__subtitle">
+          Build, train, evaluate, and deploy GNNs on tabular, relational, and
+          temporal data in 10 lines of Python. Developed by the Google GNN team.
+        </p>
+        <div class="gf-hero__buttons">
+          <a class="gf-button gf-button--primary"
+             href="{{ 'tutorial/getting_started_simple_api.html' | url }}">
+            Get started
+          </a>
+          <a class="gf-button"
+             href="https://colab.research.google.com/github/google/distributed_graph_flow/blob/main/doc/docs/tutorial/getting_started_simple_api.ipynb">
+            {% include ".icons/simple/googlecolab.svg" %}
+            Open in Colab
+          </a>
+          <a class="gf-button" href="{{ config.repo_url }}">
+            {% include ".icons/fontawesome/brands/github.svg" %}
+            GitHub
+          </a>
+        </div>
+        <button class="gf-install" type="button" title="Copy to clipboard"
+                onclick="navigator.clipboard.writeText('pip install dgf -U');
+                         this.classList.add('gf-install--copied');
+                         setTimeout(() => this.classList.remove('gf-install--copied'), 1500);">
+          <span class="gf-install__prompt">$</span>
+          <code>pip install dgf -U</code>
+          <span class="gf-install__icon gf-install__icon--copy">
+            {% include ".icons/material/content-copy.svg" %}
+          </span>
+          <span class="gf-install__icon gf-install__icon--done">
+            {% include ".icons/material/check.svg" %}
+          </span>
+        </button>
+      </div>
+      <div class="gf-hero__image">
+        <img src="{{ 'image/logo.png' | url }}" alt="Graph Flow logo" />
+      </div>
+    </div>
+  </section>
+  {{ super() }}
+{% endblock %}

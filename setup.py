@@ -42,10 +42,11 @@ setup(
     description="Distributed Graph Flow",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/google/dgf",
+    url="https://github.com/google/distributed_graph_flow",
     project_urls={
-        "Source": "https://github.com/google/dgf.git",
-        "Tracker": "https://github.com/google/dgf/issues",
+        "Documentation": "https://dgf.readthedocs.io/",
+        "Source": "https://github.com/google/distributed_graph_flow.git",
+        "Tracker": "https://github.com/google/distributed_graph_flow/issues",
     },
     entry_points={
         "console_scripts": [
