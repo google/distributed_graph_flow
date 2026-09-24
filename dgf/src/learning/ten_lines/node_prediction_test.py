@@ -19,6 +19,7 @@ import dataclasses
 import os
 import tempfile
 import unittest
+from unittest import mock
 from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
@@ -34,6 +35,7 @@ from dgf.src.learning.ten_lines import node_prediction_model
 from dgf.src.learning.ten_lines import node_prediction_train as node_prediction_lib
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
+from dgf.src.transform import merge as merge_lib
 from dgf.src.util import filesystem as fs
 from dgf.src.util import gen_test_graph
 from dgf.src.util import log
@@ -1335,6 +1337,139 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
     self.assertEqual(eval_result.num_examples, 2)
     self.assertIsNotNone(eval_result.rmse)
     self.assertLess(eval_result.rmse, 0.5)  # pyrefly: ignore[no-matching-overload]
+
+  def test_padding_margin_and_skipped_samples_warning(self):
+    graph, schema = gen_test_graph.gen_toy_regression_dataset(
+        num_n1_nodes=40, num_n2_nodes=20, label_dim=1, random_seed=0
+    )
+    model_small_margin = node_prediction_lib.train_node_model(
+        graph=graph,
+        schema=schema,
+        target_nodeset="N1",
+        target_column="label",
+        num_train_steps=5,
+        batch_size=4,
+        num_sampling_hops=1,
+        padding_margin=0.1,
+        evaluate_final_model=False,
+        verbose=0,
+    )
+    model_large_margin = node_prediction_lib.train_node_model(
+        graph=graph,
+        schema=schema,
+        target_nodeset="N1",
+        target_column="label",
+        num_train_steps=5,
+        batch_size=4,
+        num_sampling_hops=1,
+        padding_margin=1.0,
+        evaluate_final_model=False,
+        verbose=0,
+    )
+    self.assertEqual(model_large_margin.data().hparams.padding_margin, 1.0)
+    large_nodes = model_large_margin.data().padding.node_sets["N1"].num_nodes
+    small_nodes = model_small_margin.data().padding.node_sets["N1"].num_nodes
+    assert large_nodes is not None and small_nodes is not None
+    self.assertGreater(large_nodes, small_nodes)
+    self.assertEqual(
+        model_large_margin.data().training_stats.num_skipped_train_samples, 0
+    )
+
+    orig_prepare = node_prediction_lib.node_prediction_dataset.prepare_datasets
+
+    # Case 1: A single skipped sample out of 40 (<= 10%) -> warning in model
+    # logs.
+    def mock_prepare_warn(*args, **kwargs):
+      train_ds, valid_ds = orig_prepare(*args, **kwargs)
+      train_ds.get_live().sample_generator.num_skipped_samples = 1
+      return train_ds, valid_ds
+
+    with mock.patch.object(
+        node_prediction_lib.node_prediction_dataset,
+        "prepare_datasets",
+        side_effect=mock_prepare_warn,
+    ):
+      model_warn = node_prediction_lib.train_node_model(
+          graph=graph,
+          schema=schema,
+          target_nodeset="N1",
+          target_column="label",
+          num_train_steps=10,
+          batch_size=4,
+          num_sampling_hops=1,
+          evaluate_final_model=False,
+          verbose=0,
+      )
+    self.assertEqual(
+        model_warn.data().training_stats.num_skipped_train_samples, 1
+    )
+    self.assertTrue(
+        any(
+            msg.severity == log.Severity.WARNING
+            and "Skipped 1 out of" in msg.text
+            for msg in (model_warn.metadata.captured_logs or [])
+        )
+    )
+
+    # Case 2: 20 skipped samples (> 10%). The training is shorter than
+    # `SKIPPED_SAMPLES_CHECK_STEP`, so the check runs at the end of training.
+    def mock_prepare_fail(*args, **kwargs):
+      train_ds, valid_ds = orig_prepare(*args, **kwargs)
+      train_ds.get_live().sample_generator.num_skipped_samples = 20
+      return train_ds, valid_ds
+
+    with mock.patch.object(
+        node_prediction_lib.node_prediction_dataset,
+        "prepare_datasets",
+        side_effect=mock_prepare_fail,
+    ):
+      with self.assertRaisesRegex(
+          merge_lib.InsufficientPaddingError, "Skipped 20 out of"
+      ):
+        node_prediction_lib.train_node_model(
+            graph=graph,
+            schema=schema,
+            target_nodeset="N1",
+            target_column="label",
+            num_train_steps=5,
+            batch_size=4,
+            num_sampling_hops=1,
+            evaluate_final_model=False,
+            verbose=0,
+        )
+
+  def test_skipped_samples_check_raises_at_check_step(self):
+    graph, schema = gen_test_graph.gen_toy_regression_dataset(
+        num_n1_nodes=40, num_n2_nodes=20, label_dim=1, random_seed=0
+    )
+    orig_prepare = node_prediction_lib.node_prediction_dataset.prepare_datasets
+
+    def mock_prepare(*args, **kwargs):
+      train_ds, valid_ds = orig_prepare(*args, **kwargs)
+      train_ds.get_live().sample_generator.num_skipped_samples = 20
+      return train_ds, valid_ds
+
+    with mock.patch.object(
+        node_prediction_lib.node_prediction_dataset,
+        "prepare_datasets",
+        side_effect=mock_prepare,
+    ), mock.patch.object(common_lib, "SKIPPED_SAMPLES_CHECK_STEP", 3):
+      # The check runs at step 3 (before the end of training), when 3 * 4 = 12
+      # samples were generated and 20 were skipped.
+      with self.assertRaisesRegex(
+          merge_lib.InsufficientPaddingError, r"Skipped 20 out of 32 training"
+      ):
+        node_prediction_lib.train_node_model(
+            graph=graph,
+            schema=schema,
+            target_nodeset="N1",
+            target_column="label",
+            num_train_steps=10,
+            batch_size=4,
+            num_sampling_hops=1,
+            evaluate_final_model=False,
+            verbose=0,
+        )
 
 
 if __name__ == "__main__":

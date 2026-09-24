@@ -124,11 +124,14 @@ class TrainingStats:
     num_train_seed_nodes: The number of seed nodes used for training.
     num_valid_seed_nodes: The number of seed nodes used for validation.
     train_duration_seconds: The duration of the training in seconds.
+    num_skipped_train_samples: The number of training samples skipped due to
+      padding overflow.
   """
 
   num_train_seed_nodes: int | None
   num_valid_seed_nodes: int | None
   train_duration_seconds: float
+  num_skipped_train_samples: int = 0
 
 
 @dataclasses_json.dataclass_json
@@ -237,6 +240,7 @@ class NodePredictionModel(common.Model):
       training_stats_summary = f"""
     <tr><td>Number of training seed nodes</td><td>{self._data.training_stats.num_train_seed_nodes}</td></tr>
     <tr><td>Number of validation seed nodes</td><td>{self._data.training_stats.num_valid_seed_nodes}</td></tr>
+    <tr><td>Number of skipped training samples</td><td>{self._data.training_stats.num_skipped_train_samples}</td></tr>
     <tr><td>Training duration</td><td>{util.format_duration(self._data.training_stats.train_duration_seconds)}</td></tr>
 """
 

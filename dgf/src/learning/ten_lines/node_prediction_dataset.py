@@ -200,6 +200,10 @@ class GNNDatasetPreparator:
     """Number of nodes in the seed nodeset."""
     return self.get_live().num_nodes_in_seed_nodeset
 
+  def num_skipped_samples(self) -> int:
+    """Number of samples skipped due to padding overflow."""
+    return self.get_live().sample_generator.num_skipped_samples
+
   def generated_schema(self) -> schema_lib.GraphSchema:
     """Returns the schema of the generated samples."""
     return self.get_live().normalizer.output_schema()

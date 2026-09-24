@@ -203,6 +203,7 @@ class SampleGeneratorFromAnything:
   sampler_returns_node_idxs_only: bool = False
 
   num_seed_nodes: int | None = dataclasses.field(init=False)
+  num_skipped_samples: int = dataclasses.field(init=False, default=0)
   batch_iterator: BatchSampleGeneratorIteratorFn = dataclasses.field(init=False)
   single_iterator: SingleSampleGeneratorIteratorFn = dataclasses.field(
       init=False
@@ -214,6 +215,9 @@ class SampleGeneratorFromAnything:
   _seed_timestamps_all: np.ndarray | None = dataclasses.field(
       init=False, default=None
   )
+
+  def _record_skipped_samples(self, count: int) -> None:
+    self.num_skipped_samples += count
 
   def __post_init__(self):
     if self.seed_node_idxs is not None:
@@ -357,6 +361,7 @@ class SampleGeneratorFromAnything:
             graph_samples,
             skip_overflow_padding_error=self.skip_overflow_padding_error,
             split_overflow_padding_error=self.split_overflow_padding_error,
+            on_skip_samples=self._record_skipped_samples,
         ):
           yield merged_graph, merge_offsets
 
@@ -414,6 +419,7 @@ class SampleGeneratorFromAnything:
                 batch,
                 skip_overflow_padding_error=self.skip_overflow_padding_error,
                 split_overflow_padding_error=self.split_overflow_padding_error,
+                on_skip_samples=self._record_skipped_samples,
             ):
               yield merged_graph, merge_offsets
           return
@@ -421,6 +427,7 @@ class SampleGeneratorFromAnything:
             batch,
             skip_overflow_padding_error=self.skip_overflow_padding_error,
             split_overflow_padding_error=self.split_overflow_padding_error,
+            on_skip_samples=self._record_skipped_samples,
         ):
           yield merged_graph, merge_offsets
 

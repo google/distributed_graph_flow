@@ -605,7 +605,10 @@ def train_node_model(
     # Use for speed.
     jitted_train_step = jax.jit(train_step)
 
+    num_steps = 0
+
     def infinite_train_dataset_iterator():
+      nonlocal num_steps
       num_diagnostic_plots = 0
       while True:
         for sample, merge_offset in train_dataset.generate_jax():
@@ -620,6 +623,15 @@ def train_node_model(
                   num_diagnostic_plots,
               )
               num_diagnostic_plots += 1
+
+            num_steps += 1
+            if num_steps == common.SKIPPED_SAMPLES_CHECK_STEP:
+              # Fail early (i.e., not at the end of training) if too many
+              # samples are skipped due to insufficient padding.
+              common.check_skipped_training_samples(
+                  num_skipped_samples=train_dataset.num_skipped_samples(),
+                  num_generated_samples=num_steps * hparams.batch_size,
+              )
 
             yield process_batch(sample, merge_offset)
 
@@ -710,6 +722,22 @@ def train_node_model(
             **train_kwargs,
         )
 
+    num_skipped_train_samples = train_dataset.num_skipped_samples()
+    num_generated_train_samples = num_steps * hparams.batch_size
+    # Check again at the end, in case training stopped before
+    # `SKIPPED_SAMPLES_CHECK_STEP` (e.g., short training or early stopping).
+    common.check_skipped_training_samples(
+        num_skipped_samples=num_skipped_train_samples,
+        num_generated_samples=num_generated_train_samples,
+    )
+    if num_skipped_train_samples > 0:
+      log.warning(
+          "Skipped %d out of %d training samples due to insufficient padding."
+          " Consider increasing `padding_margin`.",
+          num_skipped_train_samples,
+          num_skipped_train_samples + num_generated_train_samples,
+      )
+
     end_train_time = time.time()
     train_duration = end_train_time - begin_train_time
 
@@ -737,6 +765,7 @@ def train_node_model(
                 if valid_dataset is not None
                 else None,
                 train_duration_seconds=train_duration,
+                num_skipped_train_samples=num_skipped_train_samples,
             ),
         ),
     )

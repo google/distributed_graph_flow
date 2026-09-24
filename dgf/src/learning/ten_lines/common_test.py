@@ -266,6 +266,27 @@ class TenLines(parameterized.TestCase):
 
     test_util.assert_are_equal(self, common.load_params(path), params)
 
+  def test_check_skipped_training_samples_below_threshold_passes(self):
+    common.check_skipped_training_samples(
+        num_skipped_samples=0, num_generated_samples=0
+    )
+    common.check_skipped_training_samples(
+        num_skipped_samples=0, num_generated_samples=100
+    )
+    common.check_skipped_training_samples(
+        num_skipped_samples=10, num_generated_samples=90
+    )
+
+  def test_check_skipped_training_samples_fails_above_ten_percent(self):
+    with self.assertRaisesRegex(
+        common.merge_lib.InsufficientPaddingError,
+        r"Skipped 15 out of 100 training samples \(15\.0%\) due to insufficient"
+        r" padding",
+    ):
+      common.check_skipped_training_samples(
+          num_skipped_samples=15, num_generated_samples=85
+      )
+
 
 if __name__ == "__main__":
   absltest.main()

@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 
 from dgf.src.data import in_memory_graph
 from dgf.src.data import padding as padding_lib
@@ -342,6 +342,7 @@ class GraphMerger:
       skip_overflow_padding_error: bool = False,
       split_overflow_padding_error: bool = False,
       start_idx: int = 0,
+      on_skip_samples: Callable[[int], None] | None = None,
   ) -> Iterator[
       tuple[in_memory_graph.InMemoryGraph, dict[str, np.ndarray], slice]
   ]:
@@ -358,6 +359,8 @@ class GraphMerger:
       start_idx: The starting index of `graph_samples` within the caller's
         batch, used to construct the returned `slice(start_idx, start_idx +
         len)`.
+      on_skip_samples: Optional callback invoked with the number of skipped
+        samples whenever a sub-batch is skipped due to padding overflow.
 
     Yields:
       Tuples `(merged_graph, merge_offsets, sub_slice)` where `sub_slice` is a
@@ -373,16 +376,20 @@ class GraphMerger:
             skip_overflow_padding_error=skip_overflow_padding_error,
             split_overflow_padding_error=split_overflow_padding_error,
             start_idx=start_idx,
+            on_skip_samples=on_skip_samples,
         )
         yield from self.merge_sub_batches(
             graph_samples[mid:],
             skip_overflow_padding_error=skip_overflow_padding_error,
             split_overflow_padding_error=split_overflow_padding_error,
             start_idx=start_idx + mid,
+            on_skip_samples=on_skip_samples,
         )
         return
       if not skip_overflow_padding_error:
         raise
+      if on_skip_samples is not None:
+        on_skip_samples(len(graph_samples))
       return
 
     yield (

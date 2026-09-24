@@ -28,6 +28,7 @@ from dgf.src.learning.jax.layers import hetero_graph_attention_network
 from dgf.src.learning.jax.layers import preprocess
 from dgf.src.learning.jax.layers import timeseries_cnn
 from dgf.src.learning.ten_lines import dataset
+from dgf.src.transform import merge as merge_lib
 from dgf.src.util import filesystem as fs
 from dgf.src.util import log
 from dgf.src.util import util
@@ -47,6 +48,12 @@ FILENAME_METADATA = "metadata.json"
 FILENAME_DATA = "data.json"
 # Directory containing the model weights as an orbax checkpoint.
 FILENAME_PARAMS = "params"
+
+# Training step at which `check_skipped_training_samples` is first called. Large
+# enough for the skipped ratio to be meaningful, small enough to fail early
+# instead of after a long training. The check is run again at the end of
+# training.
+SKIPPED_SAMPLES_CHECK_STEP = 2000
 
 
 class Architecture(enum.Enum):
@@ -603,6 +610,37 @@ def check_number_of_seeds(
         f"The number of validation seed nodes ({num_validation}) is smaller"
         f" than the batch size ({batch_size}). Increase the number of"
         f" validation seed {key}s or decrease the batch size."
+    )
+
+
+def check_skipped_training_samples(
+    num_skipped_samples: int,
+    num_generated_samples: int,
+    max_skipped_ratio: float = 0.1,
+) -> None:
+  """Fails if too many training samples were skipped.
+
+  Args:
+    num_skipped_samples: Number of training samples skipped due to padding
+      overflow.
+    num_generated_samples: Number of training samples successfully generated.
+    max_skipped_ratio: Maximum allowed ratio of skipped samples over total
+      attempted samples before raising an error.
+
+  Raises:
+    merge_lib.InsufficientPaddingError: If the ratio of skipped training
+      samples exceeds `max_skipped_ratio`.
+  """
+  total_samples = num_skipped_samples + num_generated_samples
+  if total_samples == 0:
+    return
+  skipped_ratio = num_skipped_samples / total_samples
+  if skipped_ratio > max_skipped_ratio:
+    raise merge_lib.InsufficientPaddingError(
+        f"Skipped {num_skipped_samples} out of {total_samples} training"
+        f" samples ({skipped_ratio:.1%}) due to insufficient padding, which"
+        f" exceeds the maximum allowed threshold of {max_skipped_ratio:.1%}."
+        " Consider increasing `padding_margin`."
     )
 
 
