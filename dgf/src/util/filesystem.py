@@ -31,6 +31,11 @@ def is_gcs_path(path: str) -> bool:
   return path.startswith("gs://")
 
 
+def is_url(url_or_path: str) -> bool:
+  """Returns True if `url_or_path` is an http(s) URL instead of a path."""
+  return url_or_path.startswith("http://") or url_or_path.startswith("https://")
+
+
 def _parse_gcs_path(path: str) -> Tuple[str, str]:
   """Parses a gs:// path into (bucket_name, blob_path)."""
   gcs_path = path.replace("gs://", "", 1)

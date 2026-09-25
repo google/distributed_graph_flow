@@ -37,6 +37,7 @@ py_library(
     deps = [
         "//dgf/src/io:cache",
         "//dgf/src/io:dataset_loader",
+        "//dgf/src/io:dataset_loader_relbench",
         "//dgf/src/io:dataset_loader_traffic",
         "//dgf/src/io:graph_in_memory",
         "//dgf/src/io:graph_snapshots",

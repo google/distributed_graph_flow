@@ -34,6 +34,13 @@ class FilesystemGcsTest(absltest.TestCase):
     self.assertFalse(fs.is_gcs_path("/tmp/path"))
     self.assertFalse(fs.is_gcs_path("local/path"))
 
+  def test_is_url(self):
+    self.assertTrue(fs.is_url("https://example.com/data.zip"))
+    self.assertTrue(fs.is_url("http://example.com/data.zip"))
+    self.assertFalse(fs.is_url("/tmp/path"))
+    self.assertFalse(fs.is_url("gs://bucket/path"))
+    self.assertFalse(fs.is_url("local/https://path"))
+
   def test_glob(self):
     with tempfile.TemporaryDirectory() as tmpdir:
       # Create some dummy files

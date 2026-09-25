@@ -147,11 +147,6 @@ def traffic_cns_name(dataset: str, forecast_horizon_seconds: int) -> str:
   return f"{dataset}_{suffix}"
 
 
-def _is_url(url_or_path: str) -> bool:
-  """Returns whether `url_or_path` is an http(s) URL instead of a path."""
-  return url_or_path.startswith("http://") or url_or_path.startswith("https://")
-
-
 def _download_bytes(url: str) -> bytes:
   """Returns the content served at `url`.
 
@@ -195,7 +190,7 @@ def download_traffic_speeds(
   spec = traffic_dataset_spec(dataset)
   url_or_path = source or spec.speeds_url
   csv_source: Any = url_or_path
-  if _is_url(url_or_path):
+  if fs.is_url(url_or_path):
     log.info("Downloading the %s speeds from %s", dataset, url_or_path)
     csv_source = io.BytesIO(_download_bytes(url_or_path))
 
@@ -233,7 +228,7 @@ def _read_traffic_csv(
     A frame with exactly the `names` columns.
   """
   source: Any = url_or_path
-  if _is_url(url_or_path):
+  if fs.is_url(url_or_path):
     log.info("Downloading %s", url_or_path)
     source = io.BytesIO(_download_bytes(url_or_path))
 
