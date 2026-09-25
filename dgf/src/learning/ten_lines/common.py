@@ -27,6 +27,7 @@ from dgf.src.learning.jax.layers import hetero_gnn
 from dgf.src.learning.jax.layers import hetero_graph_attention_network
 from dgf.src.learning.jax.layers import preprocess
 from dgf.src.learning.jax.layers import timeseries_cnn
+from dgf.src.learning.jax.layers import timeseries_transformer
 from dgf.src.learning.ten_lines import dataset
 from dgf.src.transform import merge as merge_lib
 from dgf.src.util import filesystem as fs
@@ -86,6 +87,7 @@ def parse_architecture(architecture: Architecture | str) -> Architecture:
 
 class TimeseriesEncoder(enum.Enum):
   CNN = "CNN"
+  TRANSFORMER = "TRANSFORMER"
 
 
 DEFAULT_TIMESERIES_ENCODER = TimeseriesEncoder.CNN
@@ -102,10 +104,13 @@ def parse_timeseries_encoder(
         f"Expected TimeseriesEncoder or str, got {type(timeseries_encoder)}:"
         f" {timeseries_encoder}"
     )
-  if timeseries_encoder.lower() == "cnn":
-    return TimeseriesEncoder.CNN
-  else:
-    raise ValueError(f"Unknown timeseries encoder: {timeseries_encoder}")
+  try:
+    return TimeseriesEncoder[timeseries_encoder.upper()]
+  except KeyError as exc:
+    raise ValueError(
+        f"Unknown timeseries encoder: {timeseries_encoder}. The supported"
+        f" values are: {[item.value for item in TimeseriesEncoder]}."
+    ) from exc
 
 
 class TFFunctionInputFormat(enum.Enum):
@@ -518,6 +523,7 @@ def build_gnn_config(hparams: HParam) -> jax_common.GenericLayer:
 
 def build_timeseries_encoder_config(
     hparams: HParam,
+    max_timeseries_len: int,
 ) -> preprocess.TimeseriesEncoderConfig:
   """Creates the timeseries encoder configuration from the hyper-parameters."""
 
@@ -525,6 +531,30 @@ def build_timeseries_encoder_config(
     return timeseries_cnn.TimeseriesCNNEncoderConfig(
         out_dim=hparams.timeseries_embedding_dim,
         dropout_rate=hparams.dropout,
+    )
+
+  elif hparams.timeseries_encoder == TimeseriesEncoder.TRANSFORMER:
+    # `dims` tracks `timeseries_embedding_dim` so that the blocks are not
+    # bottlenecked relative to the embedding they produce, mirroring how
+    # `build_gnn_config` ties the GNN `dims` to `node_embedding_dim`. This means
+    # `timeseries_embedding_dim` must be divisible by the encoder's `num_heads`,
+    # and the resulting head dimension must be even because RoPE rotates
+    # features in pairs, i.e. `timeseries_embedding_dim` must be a multiple of
+    # `2 * num_heads` (8 with the default `num_heads=4`).
+    num_heads = (
+        timeseries_transformer.TimeseriesTransformerEncoderConfig.num_heads
+    )
+    if hparams.timeseries_embedding_dim % (2 * num_heads) != 0:
+      raise ValueError(
+          "With timeseries_encoder=TRANSFORMER, timeseries_embedding_dim must"
+          f" be a multiple of 2 * num_heads = {2 * num_heads}, got"
+          f" {hparams.timeseries_embedding_dim}."
+      )
+    return timeseries_transformer.TimeseriesTransformerEncoderConfig(
+        out_dim=hparams.timeseries_embedding_dim,
+        dims=hparams.timeseries_embedding_dim,
+        dropout_rate=hparams.dropout,
+        max_timeseries_len=max_timeseries_len,
     )
 
   else:

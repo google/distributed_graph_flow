@@ -67,6 +67,7 @@ def create_core_model_config(
     hparams: HParam,
     task: NodePredictionTask,
     label_spec: schema_lib.FeatureSchema,
+    max_timeseries_len: int,
 ) -> CoreModelConfig:
   """Creates the FLAX core model config from the hyper-parameters.
 
@@ -78,6 +79,7 @@ def create_core_model_config(
     hparams: Hyperparameters for the model.
     task: The node prediction task.
     label_spec: The schema of the label feature.
+    max_timeseries_len: Maximum sequence length from the sampling plan.
 
   Returns:
     The core model config.
@@ -87,7 +89,8 @@ def create_core_model_config(
       embbed_graph=preprocess.EmbedGraphConfig(
           feature_embedder=preprocess.EmbedFeatureSetConfig(
               timeseries_encoder=common.build_timeseries_encoder_config(
-                  hparams
+                  hparams,
+                  max_timeseries_len=max_timeseries_len,
               ),
           )
       ),
@@ -260,7 +263,7 @@ def train_node_model(
     architecture: The architecture of the GNN model.
     timeseries_encoder: The encoder used to turn the timeseries features of a
       node into a fixed sized embedding. Either a `TimeseriesEncoder` value or
-      its name as a string (e.g. "cnn").
+      its name as a string (e.g. "cnn", "transformer").
     timeseries_embedding_dim: The dimension of the embedding computed by
       `timeseries_encoder` for each timeseries feature group of a node.
     sampling_plan: An advanced option to provide a custom plan for the sampler.
@@ -509,7 +512,12 @@ def train_node_model(
     ) -> Batch:
       return graph, merge_offsets[task.target_nodeset][:-1]
 
-    core_model_config = create_core_model_config(hparams, task, label_spec)
+    core_model_config = create_core_model_config(
+        hparams,
+        task,
+        label_spec,
+        max_timeseries_len=train_dataset.sampling_plan.max_timeseries_len,
+    )
     if experimental_preprocess_core_model_config is not None:
       core_model_config = experimental_preprocess_core_model_config(
           core_model_config

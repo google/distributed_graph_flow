@@ -25,6 +25,7 @@ py_library(
         ":regression",
         ":residual_mlp",
         ":timeseries_cnn",
+        ":timeseries_transformer",
     ],
 )
 
@@ -44,6 +45,21 @@ py_library(
 py_library(
     name = "timeseries_cnn",
     srcs = ["timeseries_cnn.py"],
+    deps = [
+        ":registry",
+        ":standard",
+        # dataclasses_json dep,
+        "//dgf/src/data:schema",
+        "//dgf/src/learning/jax:common",
+        # flax:core dep,
+        # jax dep,
+        # jaxtyping dep,
+    ],
+)
+
+py_library(
+    name = "timeseries_transformer",
+    srcs = ["timeseries_transformer.py"],
     deps = [
         ":registry",
         ":standard",
@@ -303,5 +319,21 @@ py_test(
         # absl/testing:parameterized dep,
         "//dgf/src/data:schema",
         # jax dep,
+    ],
+)
+
+py_test(
+    name = "timeseries_transformer_test",
+    srcs = ["timeseries_transformer_test.py"],
+    deps = [
+        ":registry",
+        ":standard",
+        ":timeseries_transformer",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/data:schema",
+        "//dgf/src/util:test_util",
+        # jax dep,
+        # numpy dep,
     ],
 )

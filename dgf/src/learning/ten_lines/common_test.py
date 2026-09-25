@@ -121,6 +121,21 @@ class TenLines(parameterized.TestCase):
           common.TimeseriesEncoder.CNN,
           common.TimeseriesEncoder.CNN,
       ),
+      (
+          "transformer",
+          "transformer",
+          common.TimeseriesEncoder.TRANSFORMER,
+      ),
+      (
+          "transformer_upper",
+          "TRANSFORMER",
+          common.TimeseriesEncoder.TRANSFORMER,
+      ),
+      (
+          "transformer_enum",
+          common.TimeseriesEncoder.TRANSFORMER,
+          common.TimeseriesEncoder.TRANSFORMER,
+      ),
   )
   def test_parse_timeseries_encoder_success(self, input_val, expected):
     self.assertEqual(common.parse_timeseries_encoder(input_val), expected)
@@ -133,6 +148,39 @@ class TenLines(parameterized.TestCase):
 
     with self.assertRaisesRegex(TypeError, "Expected TimeseriesEncoder or str"):
       common.parse_timeseries_encoder(123)  # pytype: disable=wrong-arg-types
+
+  def test_build_timeseries_encoder_config_uses_max_timeseries_len(self):
+    hparams = common.HParam(
+        timeseries_encoder=common.TimeseriesEncoder.TRANSFORMER,
+        timeseries_embedding_dim=64,
+    )
+    config = common.build_timeseries_encoder_config(
+        hparams, max_timeseries_len=96
+    )
+    self.assertEqual(
+        config.max_timeseries_len, 96  # pytype: disable=attribute-error
+    )
+    self.assertAlmostEqual(
+        config.rope_max_wavelength,  # pytype: disable=attribute-error
+        96.0 ** (16.0 / 14.0),
+        places=5,
+    )
+
+  @parameterized.named_parameters(
+      ("not_divisible_by_num_heads", 30),
+      ("odd_head_dim", 36),
+  )
+  def test_build_timeseries_encoder_config_invalid_transformer_dim(
+      self, timeseries_embedding_dim
+  ):
+    hparams = common.HParam(
+        timeseries_encoder=common.TimeseriesEncoder.TRANSFORMER,
+        timeseries_embedding_dim=timeseries_embedding_dim,
+    )
+    with self.assertRaisesRegex(
+        ValueError, "timeseries_embedding_dim must be a multiple of"
+    ):
+      common.build_timeseries_encoder_config(hparams, max_timeseries_len=32)
 
   def test_check_number_of_seeds_success(self):
     common.check_number_of_seeds(

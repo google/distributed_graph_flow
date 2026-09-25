@@ -33,6 +33,7 @@ class RegistryTest(absltest.TestCase):
             "layers.RegressionHeadConfig",
             "layers.ResidualMLPV2Config",
             "layers.TimeseriesCNNEncoderConfig",
+            "layers.TimeseriesTransformerEncoderConfig",
         ],
     )
 

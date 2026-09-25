@@ -25,6 +25,7 @@ py_library(
         "//dgf/src/learning/jax/layers:hetero_graph_attention_network",
         "//dgf/src/learning/jax/layers:preprocess",
         "//dgf/src/learning/jax/layers:timeseries_cnn",
+        "//dgf/src/learning/jax/layers:timeseries_transformer",
         "//dgf/src/transform:merge",
         "//dgf/src/util:filesystem",
         "//dgf/src/util:log",
