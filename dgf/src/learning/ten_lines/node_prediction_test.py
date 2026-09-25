@@ -1399,6 +1399,7 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
           num_sampling_hops=1,
           evaluate_final_model=False,
           verbose=0,
+          padding_margin=0.5,
       )
     self.assertEqual(
         model_warn.data().training_stats.num_skipped_train_samples, 1
