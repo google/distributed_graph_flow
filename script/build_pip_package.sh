@@ -22,17 +22,22 @@ mkdir -p package/dgf
 
 cp LICENSE setup.py requirements.txt README.md package/
 
-# We will pass the python versions to build.sh
-PYTHON_VERSIONS=( 3.11 3.12 3.13 )
+if [ -n "$1" ]; then
+  PYTHON_VERSIONS=( "$1" )
+else
+  PYTHON_VERSIONS=( 3.11 3.12 3.13 )
+fi
 
-INTERACTIVE_FLAG="-i"
-[ -t 0 ] && INTERACTIVE_FLAG="-it"
+INTERACTIVE_FLAG=""
+[ -t 0 ] && INTERACTIVE_FLAG="-it" || INTERACTIVE_FLAG="-i"
+
+BAZEL_CACHE="${BAZEL_CACHE:-dgf_bazel_cache}"
 
 DOCKER_OPTS=(
   --rm
   "$INTERACTIVE_FLAG"
   -e PYTHONDONTWRITEBYTECODE=1
-  -v dgf_bazel_cache:/root/.cache
+  -v "${BAZEL_CACHE}:/root/.cache"
   -v "$(pwd):/work"
   -w /work
 )

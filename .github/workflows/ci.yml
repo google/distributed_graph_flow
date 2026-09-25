@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: build-and-test (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache Bazel
+        uses: actions/cache@v4
+        with:
+          path: .bazel-cache
+          key: bazel-${{ matrix.python-version }}-${{ hashFiles('MODULE.bazel', '**/BUILD', 'requirements*.txt') }}
+          restore-keys: |
+            bazel-${{ matrix.python-version }}-
+            bazel-
+
+      - name: Build and Test Package
+        env:
+          PYVERSION: ${{ matrix.python-version }}
+          BAZEL_CACHE: ${{ github.workspace }}/.bazel-cache
+        run: |
+          mkdir -p .bazel-cache
+          ./script/build_pip_package.sh "${PYVERSION}"
