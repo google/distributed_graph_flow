@@ -1101,5 +1101,94 @@ class LinkPredictionRealLookingTemporal(parameterized.TestCase):
       )
 
 
+class SeedTimestampKwargsTest(absltest.TestCase):
+
+  def _make_sample_and_schema(
+      self,
+  ) -> tuple[
+      in_memory_graph_lib.InMemoryGraph,
+      dict[str, np.ndarray],
+      schema_lib.GraphSchema,
+  ]:
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "A": schema_lib.NodeSchema(features={}),
+            "B": schema_lib.NodeSchema(features={}),
+        },
+        edge_sets={
+            "A_to_B": schema_lib.EdgeSchema(
+                source="A", target="B", features={}
+            ),
+        },
+    )
+    sample = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "A": in_memory_graph_lib.InMemoryNodeSet(num_nodes=3, features={}),
+            "B": in_memory_graph_lib.InMemoryNodeSet(num_nodes=2, features={}),
+        },
+        edge_sets={
+            "A_to_B": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array([[0, 2], [0, 1]], dtype=np.int32),
+                features={},
+            ),
+        },
+    )
+    merge_offsets = {
+        "A": np.array([0, 2, 3], dtype=np.int32),
+        "B": np.array([0, 1, 2], dtype=np.int32),
+    }
+    return sample, merge_offsets, schema
+
+  def test_seed_timestamp_kwargs_not_accepted(self):
+    sample, merge_offsets, schema = self._make_sample_and_schema()
+    normalizer = unittest.mock.MagicMock()
+    normalizer.accepted_kwargs = set()
+
+    kwargs = link_prediction_model._seed_timestamp_kwargs(
+        normalizer,
+        sample,
+        merge_offsets,
+        schema,
+        seed_timestamps=None,
+    )
+    self.assertEqual(kwargs, {})
+
+  def test_seed_timestamp_kwargs_missing_timestamps_raises(self):
+    sample, merge_offsets, schema = self._make_sample_and_schema()
+    normalizer = unittest.mock.MagicMock()
+    normalizer.accepted_kwargs = {"seed_timestamps"}
+
+    with self.assertRaisesRegex(
+        ValueError,
+        "The normalizer requires `seed_timestamps`, but none were provided",
+    ):
+      link_prediction_model._seed_timestamp_kwargs(
+          normalizer,
+          sample,
+          merge_offsets,
+          schema,
+          seed_timestamps=None,
+      )
+
+  def test_seed_timestamp_kwargs_expands_timestamps(self):
+    sample, merge_offsets, schema = self._make_sample_and_schema()
+    normalizer = unittest.mock.MagicMock()
+    normalizer.accepted_kwargs = {"seed_timestamps"}
+    seed_timestamps = np.array([100, 200], dtype=np.int64)
+
+    kwargs = link_prediction_model._seed_timestamp_kwargs(
+        normalizer,
+        sample,
+        merge_offsets,
+        schema,
+        seed_timestamps=seed_timestamps,
+    )
+    self.assertEqual(set(kwargs.keys()), {"seed_timestamps"})
+    expanded = kwargs["seed_timestamps"]
+    np.testing.assert_array_equal(expanded["A"], np.array([100, 100, 200]))
+    np.testing.assert_array_equal(expanded["B"], np.array([100, 200]))
+    np.testing.assert_array_equal(expanded["A_to_B"], np.array([100, 200]))
+
+
 if __name__ == "__main__":
   absltest.main()

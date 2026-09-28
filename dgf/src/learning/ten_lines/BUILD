@@ -222,6 +222,7 @@ py_library(
         "//dgf/src/sampling:in_memory_sampler",
         "//dgf/src/transform:merge",
         "//dgf/src/transform:normalize",
+        "//dgf/src/util:temporal",
         "//dgf/src/util:util_ext",
         "//dgf/src/util:util_py",
         "//dgf/src/util/weak_dep:weak_dep_tensorflow",

@@ -38,6 +38,7 @@ from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
+from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 from dgf.src.util import util_ext
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
@@ -242,6 +243,32 @@ def _rename_spec(spec: Any, name: str) -> Any:
   if isinstance(spec, tf.RaggedTensorSpec):
     return spec
   raise ValueError(f"Unsupported spec type: {type(spec)}")
+
+
+def _seed_timestamp_kwargs(
+    normalizer: normalize_lib.GraphNormalizer,
+    merged: in_memory_graph.InMemoryGraph,
+    merge_offsets: dict[str, np.ndarray],
+    schema: schema_lib.GraphSchema,
+    seed_timestamps: np.ndarray | None,
+) -> dict[str, dict[str, np.ndarray]]:
+  """Builds the `seed_timestamps` kwarg for `normalize_numpy`, if accepted."""
+  if "seed_timestamps" not in normalizer.accepted_kwargs:
+    return {}
+  if seed_timestamps is None:
+    raise ValueError(
+        "The normalizer requires `seed_timestamps`, but none were provided."
+        " Pass `edge_timestamps` (predict) or `node_timestamps`"
+        " (predict_embedding)."
+    )
+  return {
+      "seed_timestamps": temporal_util.expand_batch_seed_timestamps(
+          sample=merged,
+          merge_offsets=merge_offsets,
+          schema=schema,
+          seed_timestamps=np.asarray(seed_timestamps).reshape(-1),
+      )
+  }
 
 
 class LinkPredictionModel(common.Model):
@@ -491,8 +518,12 @@ class LinkPredictionModel(common.Model):
       if len(args[0]) <= 1:
         raise
       mid = len(args[0]) // 2
-      yield from self.execute_with_split_on_error(fn, *[a[:mid] for a in args])
-      yield from self.execute_with_split_on_error(fn, *[a[mid:] for a in args])
+      yield from self.execute_with_split_on_error(
+          fn, *[a[:mid] if a is not None else None for a in args]
+      )
+      yield from self.execute_with_split_on_error(
+          fn, *[a[mid:] if a is not None else None for a in args]
+      )
 
   def _build_samplers(
       self, graph: in_memory_graph.InMemoryGraph
@@ -611,12 +642,12 @@ class LinkPredictionModel(common.Model):
     source_graph_merger = merge_lib.GraphMerger(
         schema=self._data.schema,
         padding=self._data.positive_source_padding,
-        sentinel_offset=False,
+        sentinel_offset=True,
     )
     target_graph_merger = merge_lib.GraphMerger(
         schema=self._data.schema,
         padding=self._data.positive_target_padding,
-        sentinel_offset=False,
+        sentinel_offset=True,
     )
 
     def merge_and_predict(
@@ -624,22 +655,42 @@ class LinkPredictionModel(common.Model):
         sub_trg: np.ndarray,
         sub_src_samples: list[in_memory_graph.InMemoryGraph],
         sub_trg_samples: list[in_memory_graph.InMemoryGraph],
+        sub_timestamps: np.ndarray | None = None,
     ):
 
       source_merged, source_offsets = source_graph_merger(sub_src_samples)
       target_merged, target_offsets = target_graph_merger(sub_trg_samples)
 
-      source_normalized = live.source_normalizer.normalize_numpy(source_merged)
-      target_normalized = live.target_normalizer.normalize_numpy(target_merged)
+      source_normalized = live.source_normalizer.normalize_numpy(
+          source_merged,
+          **_seed_timestamp_kwargs(
+              live.source_normalizer,
+              source_merged,
+              source_offsets,
+              self._data.schema,
+              sub_timestamps,
+          ),
+      )
+      target_normalized = live.target_normalizer.normalize_numpy(
+          target_merged,
+          **_seed_timestamp_kwargs(
+              live.target_normalizer,
+              target_merged,
+              target_offsets,
+              self._data.schema,
+              sub_timestamps,
+          ),
+      )
 
       source_jax = jax_lib.graph_to_jax_graph(source_normalized)
       target_jax = jax_lib.graph_to_jax_graph(target_normalized)
 
+      # sentinel_offset=True produces N+1 offsets; omit trailing sentinel.
       batch = InferenceBatch(
           source_graph=source_jax,
           target_graph=target_jax,
-          source_offset=jnp.asarray(source_offsets[source_nodeset]),
-          target_offset=jnp.asarray(target_offsets[target_nodeset]),
+          source_offset=jnp.asarray(source_offsets[source_nodeset][:-1]),
+          target_offset=jnp.asarray(target_offsets[target_nodeset][:-1]),
       )
 
       logits = live.apply_core_model(batch)
@@ -688,6 +739,7 @@ class LinkPredictionModel(common.Model):
           batch_trg,
           source_samples,
           target_samples,
+          batch_timestamps,
       )
 
   def predict_embedding(
@@ -808,17 +860,30 @@ class LinkPredictionModel(common.Model):
     graph_merger = merge_lib.GraphMerger(
         schema=self._data.schema,
         padding=padding,
-        sentinel_offset=False,
+        sentinel_offset=True,
     )
 
-    def merge_and_predict_emb(sub_samples: list[in_memory_graph.InMemoryGraph]):
+    def merge_and_predict_emb(
+        sub_samples: list[in_memory_graph.InMemoryGraph],
+        sub_timestamps: np.ndarray | None = None,
+    ):
 
       merged, offsets = graph_merger(sub_samples)
 
-      normalized = normalizer.normalize_numpy(merged)
+      normalized = normalizer.normalize_numpy(
+          merged,
+          **_seed_timestamp_kwargs(
+              normalizer,
+              merged,
+              offsets,
+              self._data.schema,
+              sub_timestamps,
+          ),
+      )
       jax_graph = jax_lib.graph_to_jax_graph(normalized)
 
-      emb = apply_fn(jax_graph, jnp.asarray(offsets[nodeset]))
+      # sentinel_offset=True produces N+1 offsets; omit trailing sentinel.
+      emb = apply_fn(jax_graph, jnp.asarray(offsets[nodeset][:-1]))
       yield np.asarray(emb)
 
     embeddings_list = []
@@ -832,7 +897,7 @@ class LinkPredictionModel(common.Model):
       samples = sampler.sample(nodes, seed_timestamps=seed_timestamps)
 
       for emb in self.execute_with_split_on_error(
-          merge_and_predict_emb, samples
+          merge_and_predict_emb, samples, seed_timestamps
       ):
         embeddings_list.append(emb)
 
