@@ -18,29 +18,36 @@ jobs:
   build-and-test:
     name: build-and-test (${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
+      # Actions must be pinned to a commit hash (Google GitHub org policy).
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Cache Bazel
-        uses: actions/cache@v4
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          path: .bazel-cache
-          key: bazel-${{ matrix.python-version }}-${{ hashFiles('MODULE.bazel', '**/BUILD', 'requirements*.txt') }}
-          restore-keys: |
-            bazel-${{ matrix.python-version }}-
-            bazel-
+          persist-credentials: false
+
+      # A single-version build needs >15GB (Python venv with torch/tensorflow,
+      # Bazel cache, and Docker image), which exceeds the free space of a
+      # standard runner. Remove pre-installed toolchains that are not needed.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift \
+            /usr/local/share/boost /usr/local/share/powershell
+          sudo docker image prune --all --force
+          df -h /
 
       - name: Build and Test Package
         env:
           PYVERSION: ${{ matrix.python-version }}
-          BAZEL_CACHE: ${{ github.workspace }}/.bazel-cache
-        run: |
-          mkdir -p .bazel-cache
-          ./script/build_pip_package.sh "${PYVERSION}"
+        run: ./script/build_pip_package.sh "${PYVERSION}"
+
+      - name: Disk usage
+        if: always()
+        run: df -h /
