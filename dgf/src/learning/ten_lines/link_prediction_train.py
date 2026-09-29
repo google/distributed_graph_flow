@@ -233,6 +233,8 @@ def prepare_datasets(
       "auto_normalize_config": normalize_lib.AutoNormalizeConfig(
           keep_raw_features=set(),
           ignore_features_without_stats=True,
+          timestamp_normalize=temporal_sampling,
+          calendar_normalize=True,
       ),
       "skip_overflow_padding_error": True,
       "mask_seed_edge": hparams.message_passing_on_target_edgeset,
@@ -273,15 +275,35 @@ def prepare_datasets(
 
 
 def create_core_model_config(
-    hparams: HParam, task: LinkPredictionTask, schema: schema_lib.GraphSchema
+    hparams: HParam,
+    task: LinkPredictionTask,
+    schema: schema_lib.GraphSchema,
+    max_timeseries_len: int,
 ) -> CoreModelConfig:
-  """Creates the core model architecture from the user inputs."""
+  """Creates the core model architecture from the user inputs.
+
+  Args:
+    hparams: Hyperparameters for the model.
+    task: The link prediction task.
+    schema: The graph schema.
+    max_timeseries_len: Maximum sequence length from the sampling plans. The
+      encoder config is shared by the source and target towers, so this should
+      cover both plans.
+
+  Returns:
+    The core model config.
+  """
   return CoreModelConfig(
       source_nodeset=schema.edge_sets[task.target_edgeset].source,
       target_nodeset=schema.edge_sets[task.target_edgeset].target,
       encoder_config=EncoderConfig(
           embbed_graph=preprocess.EmbedGraphConfig(
-              feature_embedder=preprocess.EmbedFeatureSetConfig()
+              feature_embedder=preprocess.EmbedFeatureSetConfig(
+                  timeseries_encoder=common.build_timeseries_encoder_config(
+                      hparams,
+                      max_timeseries_len=max_timeseries_len,
+                  ),
+              )
           ),
           pre_mlp=standard.ingest_feature(
               dims=hparams.node_embedding_dim,
@@ -330,6 +352,10 @@ def train_link_model(
     cache_normalized_features_device: Literal["host", "device"] = "device",
     export_metrics_to_xm: bool = False,
     architecture: common.Architecture | str = common.DEFAULT_ARCHITECTURE,
+    timeseries_encoder: common.TimeseriesEncoder | str = (
+        common.DEFAULT_TIMESERIES_ENCODER
+    ),
+    timeseries_embedding_dim: int = 64,
     source_sampling_plan: sampling_config_lib.SamplingPlan | None = None,
     target_sampling_plan: sampling_config_lib.SamplingPlan | None = None,
     early_stopping: bool | int = True,
@@ -408,6 +434,11 @@ def train_link_model(
     export_metrics_to_xm: If True, export training and validation metrics to
       XManager.
     architecture: The architecture of the GNN model to use.
+    timeseries_encoder: The encoder used to turn the timeseries features of a
+      node into a fixed sized embedding. Either a `TimeseriesEncoder` value or
+      its name as a string (e.g. "cnn", "transformer").
+    timeseries_embedding_dim: The dimension of the embedding computed by
+      `timeseries_encoder` for each timeseries feature group of a node.
     source_sampling_plan: An advanced option to provide a custom plan for the
       sampler of the source node. When you use this option, the sampler ignores
       standard graph sampling arguments and validation checks e.g.,
@@ -430,6 +461,7 @@ def train_link_model(
   with log.capture_logs() as captured_logs:
 
     architecture = common.parse_architecture(architecture)
+    timeseries_encoder = common.parse_timeseries_encoder(timeseries_encoder)
     begin_train_time = time.time()
 
     if diagnostic_dir is not None:
@@ -484,6 +516,8 @@ def train_link_model(
         random_walk_num_walks_per_negative=random_walk_num_walks_per_negative,
         message_pooling=message_pooling,
         architecture=architecture,
+        timeseries_encoder=timeseries_encoder,
+        timeseries_embedding_dim=timeseries_embedding_dim,
         early_stopping=early_stopping_monitor.normalize_early_stopping_config(
             early_stopping
         ),
@@ -570,7 +604,16 @@ def train_link_model(
         ),
     )
 
-    core_model_config = create_core_model_config(hparams, task, schema)
+    train_live = train_dataset.get_live()
+    core_model_config = create_core_model_config(
+        hparams,
+        task,
+        schema,
+        max_timeseries_len=max(
+            train_live.source_sampling_plan.max_timeseries_len,
+            train_live.target_sampling_plan.max_timeseries_len,
+        ),
+    )
     if experimental_preprocess_core_model_config is not None:
       core_model_config = experimental_preprocess_core_model_config(
           core_model_config

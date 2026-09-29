@@ -1190,5 +1190,184 @@ class SeedTimestampKwargsTest(absltest.TestCase):
     np.testing.assert_array_equal(expanded["A_to_B"], np.array([100, 200]))
 
 
+class LinkPredictionTimeseriesTest(parameterized.TestCase):
+
+  def _create_timeseries_graph_and_schema(
+      self,
+  ) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+    """Creates a sensor node with a timeseries, a query node, and item nodes."""
+
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "query": schema_lib.NodeSchema(features={}),
+            "sensor": schema_lib.NodeSchema(
+                features={
+                    "time": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_timeseries=True,
+                        is_creation_time=True,
+                        shape=(None,),
+                        group="sensor_ts",
+                    ),
+                }
+            ),
+            "item": schema_lib.NodeSchema(
+                features={
+                    "item_id": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_32,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                        num_categorical_values=2,
+                    ),
+                }
+            ),
+        },
+        edge_sets={
+            "query_to_sensor": schema_lib.EdgeSchema(
+                source="query",
+                target="sensor",
+                features={},
+            ),
+            "sensor_to_query": schema_lib.EdgeSchema(
+                source="sensor",
+                target="query",
+                features={},
+            ),
+            "query_to_item": schema_lib.EdgeSchema(
+                source="query",
+                target="item",
+                features={
+                    "timestamp": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_creation_time=True,
+                    ),
+                },
+            ),
+        },
+    )
+
+    time_data = np.empty(1, dtype=object)
+    time_data[0] = np.array([100, 300], dtype=np.int64)
+
+    sensor_nodes = in_memory_graph_lib.InMemoryNodeSet(
+        num_nodes=1,
+        features={"time": time_data},
+    )
+    query_nodes = in_memory_graph_lib.InMemoryNodeSet(
+        num_nodes=1,
+        features={},
+    )
+    item_nodes = in_memory_graph_lib.InMemoryNodeSet(
+        num_nodes=2,
+        features={"item_id": np.array([0, 1], dtype=np.int32)},
+    )
+
+    query_to_sensor = in_memory_graph_lib.InMemoryEdgeSet(
+        adjacency=np.array([[0], [0]], dtype=np.int64),
+        features={},
+    )
+    sensor_to_query = in_memory_graph_lib.InMemoryEdgeSet(
+        adjacency=np.array([[0], [0]], dtype=np.int64),
+        features={},
+    )
+    # Edge 0 (t=120): query 0 -> item 0 (sees sensor event at t=100, delta=20)
+    # Edge 1 (t=180): query 0 -> item 1 (sees sensor event at t=100, delta=80)
+    query_to_item = in_memory_graph_lib.InMemoryEdgeSet(
+        adjacency=np.array([[0, 0], [0, 1]], dtype=np.int64),
+        features={"timestamp": np.array([120, 180], dtype=np.int64)},
+    )
+
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "query": query_nodes,
+            "sensor": sensor_nodes,
+            "item": item_nodes,
+        },
+        edge_sets={
+            "query_to_sensor": query_to_sensor,
+            "sensor_to_query": sensor_to_query,
+            "query_to_item": query_to_item,
+        },
+    )
+    return graph, schema
+
+  @parameterized.parameters("cnn", "transformer")
+  def test_train_and_predict_with_timeseries(self, timeseries_encoder: str):
+    graph, schema = self._create_timeseries_graph_and_schema()
+
+    model = link_prediction_train.train_link_model(
+        graph=graph,
+        valid_graph=graph,
+        schema=schema,
+        target_edgeset="query_to_item",
+        time_aware=True,
+        num_train_steps=100,
+        batch_size=2,
+        sampling_width=2,
+        num_sampling_hops=1,
+        node_embedding_dim=16,
+        timeseries_encoder=timeseries_encoder,
+        timeseries_embedding_dim=16,
+        num_layers=1,
+        num_negative_nodes=2,
+        learning_rate=0.01,
+        verbose=0,
+    )
+
+    live = model._get_live()
+    self.assertIn(
+        "sensor_ts_mask",
+        live.source_normalizer.output_schema().node_sets["sensor"].features,
+    )
+    self.assertIn("seed_timestamps", live.source_normalizer.accepted_kwargs)
+    self.assertIn("seed_timestamps", live.target_normalizer.accepted_kwargs)
+
+    # Both predictions query the exact same node 0 at timestamps 120 and 180
+    # (both < 300, so the sampled subgraph only contains t=100 in both cases).
+    # Their embeddings and scores can only differ via seed_timestamps-relative
+    # timeseries normalization (-20 vs -80).
+    emb = model.predict_embedding(
+        graph,
+        node_idxs=np.array([0, 0]),
+        encoder="source",
+        node_timestamps=np.array([120, 180], dtype=np.int64),
+    )
+    self.assertEqual(emb.shape, (2, 16))
+    self.assertTrue(np.all(np.isfinite(emb)))
+    self.assertFalse(np.allclose(emb[0], emb[1], atol=1e-3))
+
+    preds_item0 = model.predict(
+        graph,
+        source_node_idxs=np.array([0, 0]),
+        target_node_idxs=np.array([0, 0]),
+        edge_timestamps=np.array([120, 180], dtype=np.int64),
+    )
+    preds_item1 = model.predict(
+        graph,
+        source_node_idxs=np.array([0, 0]),
+        target_node_idxs=np.array([1, 1]),
+        edge_timestamps=np.array([120, 180], dtype=np.int64),
+    )
+    self.assertEqual(preds_item0.shape, (2,))
+    self.assertEqual(preds_item1.shape, (2,))
+    self.assertTrue(np.all(np.isfinite(preds_item0)))
+    self.assertTrue(np.all(np.isfinite(preds_item1)))
+    self.assertNotAlmostEqual(
+        float(preds_item0[0]), float(preds_item0[1]), places=3
+    )
+    self.assertNotAlmostEqual(
+        float(preds_item1[0]), float(preds_item1[1]), places=3
+    )
+    # At t=120 item 0 is preferred over item 1; at t=180 item 1 is preferred
+    # over item 0.
+    self.assertGreater(
+        preds_item0[0] - preds_item1[0], preds_item0[1] - preds_item1[1]
+    )
+
+    eval_result = model.evaluate(graph)
+    self.assertEqual(eval_result.num_examples, 2)
+
+
 if __name__ == "__main__":
   absltest.main()
