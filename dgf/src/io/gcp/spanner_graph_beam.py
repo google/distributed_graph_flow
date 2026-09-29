@@ -55,7 +55,7 @@ def _generate_read_partitions(
   """Returns a list of Spanner graph read partitions."""
   spanner_client = gcp_spanner.Client(project=project)
   database = spanner_client.instance(instance).database(database)
-  snapshot = database.batch_snapshot()
+  snapshot = database.batch_snapshot()  # pyrefly: ignore[missing-attribute]
   try:
     partitions = snapshot.generate_query_batches(sql=query)
     is_root_partitionable = any(partitions)

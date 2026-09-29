@@ -121,7 +121,7 @@ def run_beam(runner: str):
       print("Graph validation not implemented for Apache Beam")
 
   runner = dgf.beam.runner_from_name(runner)
-  runner.run(pipeline)
+  runner.run(pipeline)  # pyrefly: ignore[missing-attribute]
 
 
 def main(argv) -> None:
