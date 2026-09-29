@@ -67,6 +67,12 @@ RAPID_TRAINING_KWARGS = {
 # Before submitting, set back TEST_LOCAL_CACHE to None.
 TEST_LOCAL_CACHE = None
 
+# Padding margin large enough that no training sample is skipped due to padding
+# overflow on the toy graphs. Used by tests that mock the number of skipped
+# samples: Since sampling is not seeded, real skipped samples would otherwise be
+# added (non-deterministically) to the mocked count.
+_NO_SKIP_PADDING_MARGIN = 2.0
+
 
 def _sampling_plan(
     model: node_prediction_lib.NodePredictionModel,
@@ -1342,18 +1348,24 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
     graph, schema = gen_test_graph.gen_toy_regression_dataset(
         num_n1_nodes=40, num_n2_nodes=20, label_dim=1, random_seed=0
     )
-    model_small_margin = node_prediction_lib.train_node_model(
-        graph=graph,
-        schema=schema,
-        target_nodeset="N1",
-        target_column="label",
-        num_train_steps=5,
-        batch_size=4,
-        num_sampling_hops=1,
-        padding_margin=0.1,
-        evaluate_final_model=False,
-        verbose=0,
-    )
+    # With a small margin, the padding (estimated on one randomly sampled
+    # epoch) can be exceeded by later (differently sampled) batches. Since the
+    # batch shuffling and neighbor sampling are not seeded, the ratio of skipped
+    # samples is non-deterministic and can exceed the 10% threshold. This model
+    # is only used to compare padding sizes, so the check is disabled.
+    with mock.patch.object(common_lib, "check_skipped_training_samples"):
+      model_small_margin = node_prediction_lib.train_node_model(
+          graph=graph,
+          schema=schema,
+          target_nodeset="N1",
+          target_column="label",
+          num_train_steps=5,
+          batch_size=4,
+          num_sampling_hops=1,
+          padding_margin=0.1,
+          evaluate_final_model=False,
+          verbose=0,
+      )
     model_large_margin = node_prediction_lib.train_node_model(
         graph=graph,
         schema=schema,
@@ -1362,11 +1374,14 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
         num_train_steps=5,
         batch_size=4,
         num_sampling_hops=1,
-        padding_margin=1.0,
+        padding_margin=_NO_SKIP_PADDING_MARGIN,
         evaluate_final_model=False,
         verbose=0,
     )
-    self.assertEqual(model_large_margin.data().hparams.padding_margin, 1.0)
+    self.assertEqual(
+        model_large_margin.data().hparams.padding_margin,
+        _NO_SKIP_PADDING_MARGIN,
+    )
     large_nodes = model_large_margin.data().padding.node_sets["N1"].num_nodes
     small_nodes = model_small_margin.data().padding.node_sets["N1"].num_nodes
     assert large_nodes is not None and small_nodes is not None
@@ -1399,7 +1414,7 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
           num_sampling_hops=1,
           evaluate_final_model=False,
           verbose=0,
-          padding_margin=0.5,
+          padding_margin=_NO_SKIP_PADDING_MARGIN,
       )
     self.assertEqual(
         model_warn.data().training_stats.num_skipped_train_samples, 1
@@ -1437,6 +1452,7 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
             num_sampling_hops=1,
             evaluate_final_model=False,
             verbose=0,
+            padding_margin=_NO_SKIP_PADDING_MARGIN,
         )
 
   def test_skipped_samples_check_raises_at_check_step(self):
@@ -1470,6 +1486,7 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
             num_sampling_hops=1,
             evaluate_final_model=False,
             verbose=0,
+            padding_margin=_NO_SKIP_PADDING_MARGIN,
         )
 
 
