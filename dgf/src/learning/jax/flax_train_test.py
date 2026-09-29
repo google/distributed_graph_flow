@@ -15,6 +15,8 @@
 """Tests for the simple flax train loop."""
 
 import os
+from unittest import mock
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.learning import early_stopping_monitor
@@ -420,6 +422,28 @@ class FlaxTrainTest(parameterized.TestCase):
     self.assertIsNotNone(restored.es_state)
     self.assertEqual(restored.es_state["best_loss"], 0.42)
     self.assertEqual(restored.es_state["best_step"], 5)
+
+  def test_missing_metric_writers_raises(self):
+    def train_step(params, opt_state, batch, rng_key):
+      return params, opt_state, {"loss": jnp.array(1.0)}
+
+    with mock.patch.object(
+        flax_train,
+        "_METRIC_WRITERS_IMPORT_ERROR",
+        ImportError("No module named 'tensorflow'"),
+    ):
+      with self.assertRaisesRegex(
+          ImportError, "`clu.metric_writers` could not be imported"
+      ):
+        flax_train.train(
+            model=SimpleModel(hidden_dim=8),
+            opt=optax.adam(1e-3),
+            train_step=train_step,
+            dataset_iterator=dataset_iterator(num_steps=None),
+            dummy_data_fn=lambda x: x["data"],
+            num_train_steps=1,
+            rng_key=jax.random.PRNGKey(42),
+        )
 
 
 if __name__ == "__main__":

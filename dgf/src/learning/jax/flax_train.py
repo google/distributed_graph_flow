@@ -34,6 +34,7 @@ import os
 import time
 from typing import Any, Protocol, TYPE_CHECKING
 
+_METRIC_WRITERS_IMPORT_ERROR: ImportError | None = None
 if TYPE_CHECKING:
   from clu import metric_writers
 else:
@@ -41,8 +42,9 @@ else:
   # So we only import it if it's actually used or if TYPE_CHECKING is True.
   try:
     from clu import metric_writers
-  except ImportError:
-    pass
+  except ImportError as e:
+    # Raised when a default metric writer is needed. See `train`.
+    _METRIC_WRITERS_IMPORT_ERROR = e
 
 from dgf.src.learning import early_stopping_monitor  # pylint: disable=g-import-not-at-top
 from dgf.src.learning.jax import common
@@ -380,7 +382,7 @@ def train(
 
   if dummy_data is not None and dummy_data_fn is not None:
     raise ValueError(
-        "Do not simulataneously provide dummy data and a dummy data callable"
+        "Do not simultaneously provide dummy data and a dummy data callable"
         " function."
     )
 
@@ -394,6 +396,13 @@ def train(
     )
 
   if metric_writer is None:
+    if _METRIC_WRITERS_IMPORT_ERROR is not None:
+      raise ImportError(
+          "`clu.metric_writers` could not be imported, so no default metric"
+          " writer can be created. It depends on TensorFlow (and on `tf-keras`"
+          " if TF_USE_LEGACY_KERAS=1). Install the missing packages, or pass"
+          " `metric_writer` explicitly."
+      ) from _METRIC_WRITERS_IMPORT_ERROR
     writers = [metric_writers.LoggingWriter()]
     if working_path is not None:
       writers.append(

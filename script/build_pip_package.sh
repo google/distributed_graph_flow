@@ -37,6 +37,10 @@ DOCKER_OPTS=(
   --rm
   "$INTERACTIVE_FLAG"
   -e PYTHONDONTWRITEBYTECODE=1
+  # Lets script/test.sh report failures as GitHub Actions annotations.
+  -e GITHUB_ACTIONS
+  # Optional override of the number of tests run in parallel (see test.sh).
+  -e DGF_TEST_JOBS
   -v "${BAZEL_CACHE}:/root/.cache"
   -v "$(pwd):/work"
   -w /work
@@ -45,18 +49,39 @@ DOCKER_OPTS=(
 chmod +x script/build.sh
 chmod +x script/test.sh
 
+# shellcheck source=script/github_annotations.sh
+source script/github_annotations.sh
+
+# Runs a build stage. On GitHub Actions, a failure is reported as an error
+# annotation with the end of the stage output.
+run_stage() {
+  local stage="$1"
+  shift
+  local stage_log
+  stage_log=$(mktemp)
+  if ! "$@" 2>&1 | tee "${stage_log}"; then
+    set +x
+    emit_github_error "${stage} failed (Python ${PYVERSION})" \
+      "$(tail -n 50 "${stage_log}")"
+    rm -f "${stage_log}"
+    exit 1
+  fi
+  rm -f "${stage_log}"
+}
+
+set -o pipefail
 for PYVERSION in ${PYTHON_VERSIONS[*]} ; do
   # Version-specific venv cache volume
   VENV_VOLUME="dgf_venv_cache_${PYVERSION//./}"
 
   # Run tests
-  docker run "${DOCKER_OPTS[@]}" \
+  run_stage "Tests" docker run "${DOCKER_OPTS[@]}" \
       -v "${VENV_VOLUME}:/tmp/venv" \
       --entrypoint /work/script/test.sh \
       dgf-builder "$PYVERSION"
 
   # Build package
-  docker run "${DOCKER_OPTS[@]}" \
+  run_stage "Package build" docker run "${DOCKER_OPTS[@]}" \
       -v "${VENV_VOLUME}:/tmp/venv" \
       --entrypoint /work/script/build.sh \
       dgf-builder "$PYVERSION"
