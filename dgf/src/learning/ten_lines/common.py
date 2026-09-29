@@ -21,6 +21,8 @@ import os
 from typing import Any, Literal, TypeAlias
 import uuid
 import dataclasses_json
+from dgf.src.data import in_memory_graph
+from dgf.src.data import schema as schema_lib
 from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import common as jax_common
 from dgf.src.learning.jax.layers import hetero_gnn
@@ -690,3 +692,42 @@ def log_jax_backend(verbose: int = 2) -> None:
         "Using CPU JAX backend. Training will be slow. Consider using a GPU"
         " or TPU."
     )
+
+
+def extract_graph_metrics(
+    graph: Graph,
+    schema: schema_lib.GraphSchema,
+) -> dict[str, Any]:
+  """Extracts common graph topology and schema metrics for telemetry."""
+
+  metrics: dict[str, Any] = {
+      "num_nodesets": len(schema.node_sets),
+      "num_edgesets": len(schema.edge_sets),
+  }
+  num_features = 0
+  for _, node_schema in schema.node_sets.items():
+    num_features += len(node_schema.features)
+  for _, edge_schema in schema.edge_sets.items():
+    num_features += len(edge_schema.features)
+  metrics["num_features"] = num_features
+
+  if isinstance(graph, in_memory_graph.InMemoryGraph):
+    num_nodes = 0
+    for nodeset_name in schema.node_sets:
+      if nodeset_name in graph.node_sets:
+        nodeset = graph.node_sets[nodeset_name]
+        if nodeset.num_nodes is not None:
+          num_nodes += nodeset.num_nodes
+        elif nodeset.features:
+          first_arr = next(iter(nodeset.features.values()))
+          num_nodes += len(first_arr)
+    metrics["num_nodes"] = num_nodes
+
+    num_edges = 0
+    for edgeset_name in schema.edge_sets:
+      if edgeset_name in graph.edge_sets:
+        edgeset = graph.edge_sets[edgeset_name]
+        num_edges += edgeset.num_edges()
+    metrics["num_edges"] = num_edges
+
+  return metrics

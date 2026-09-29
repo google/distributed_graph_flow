@@ -20,6 +20,7 @@ import os
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.learning.ten_lines import common
+from dgf.src.util import gen_test_graph
 from dgf.src.util import log
 from dgf.src.util import test_util
 import jax
@@ -334,6 +335,21 @@ class TenLines(parameterized.TestCase):
       common.check_skipped_training_samples(
           num_skipped_samples=15, num_generated_samples=85
       )
+
+  def test_extract_graph_metrics(self):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    metrics = common.extract_graph_metrics(graph, schema)
+    self.assertIn("num_nodesets", metrics)
+    self.assertIn("num_edgesets", metrics)
+    self.assertIn("num_features", metrics)
+    self.assertIn("num_nodes", metrics)
+    self.assertIn("num_edges", metrics)
+    self.assertEqual(metrics["num_nodesets"], len(schema.node_sets))
+    self.assertEqual(metrics["num_edgesets"], len(schema.edge_sets))
+    self.assertGreater(metrics["num_nodes"], 0)
+    self.assertGreater(metrics["num_edges"], 0)
+    self.assertGreater(metrics["num_features"], 0)
 
 
 if __name__ == "__main__":

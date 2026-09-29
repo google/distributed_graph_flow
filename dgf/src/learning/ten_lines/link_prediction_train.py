@@ -857,6 +857,7 @@ def train_link_model(
         valid=train_results.valid_logs,
         num_train_step=train_results.num_train_step,
     )
+
   model.metadata.captured_logs = captured_logs
   return model
 

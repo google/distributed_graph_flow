@@ -19,6 +19,8 @@ py_library(
     deps = [
         ":dataset",
         # dataclasses_json dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
         "//dgf/src/learning:early_stopping_monitor",
         "//dgf/src/learning/jax:common",
         "//dgf/src/learning/jax/layers:hetero_gnn",
@@ -298,6 +300,7 @@ py_test(
         ":common",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
+        "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:log",
         "//dgf/src/util:test_util",
         # jax dep,
