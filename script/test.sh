@@ -112,6 +112,11 @@ if [ -z "${DGF_TEST_JOBS:-}" ]; then
 fi
 echo "Running ${DGF_TEST_JOBS} tests in parallel"
 
+# Fingerprint of the installed Python packages. Bazel does not track the
+# packages installed in the venv, so without it, cached test results would
+# survive a dependency change (e.g. a new jax release).
+VENV_FINGERPRINT=$(${PYBIN} -m pip freeze | sha256sum | cut -d' ' -f1)
+
 # Run all tests via Bazel
 echo "Running all tests via Bazel..."
 BAZEL_TEST_LOG=/tmp/bazel_test_output.log
@@ -125,6 +130,7 @@ if ! bazel test \
     --test_env=TF_USE_LEGACY_KERAS \
     --test_env=PYTHONPATH \
     --test_env=PATH \
+    --test_env=DGF_VENV_FINGERPRINT="${VENV_FINGERPRINT}" \
     --@rules_python//python/config_settings:python_version="${PYVERSION}" \
     //dgf/... 2>&1 | tee "${BAZEL_TEST_LOG}"; then
   report_failures_to_github "${BAZEL_TEST_LOG}"

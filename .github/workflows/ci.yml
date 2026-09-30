@@ -43,11 +43,48 @@ jobs:
           sudo docker image prune --all --force
           df -h /
 
+      # Cache of the build container's /root/.cache: Bazel output base and
+      # repository cache (compiled C++ dependencies, test results), pip wheels,
+      # and bazelisk. Restored from the latest run for this Python version,
+      # even if the dependencies changed since: Bazel and pip only reuse what
+      # is still valid, and script/test.sh invalidates the cached test results
+      # when the installed Python packages change.
+      - name: Restore build cache
+        id: restore-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/dgf-cache
+          key: dgf-cache-${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            dgf-cache-${{ matrix.python-version }}-
+
       - name: Build and Test Package
         env:
           PYVERSION: ${{ matrix.python-version }}
+          # An absolute path is bind-mounted (instead of a Docker volume).
+          BAZEL_CACHE: ${{ runner.temp }}/dgf-cache
         run: ./script/build_pip_package.sh "${PYVERSION}"
 
       - name: Disk usage
         if: always()
         run: df -h /
+
+      # The cache is written by root in the container.
+      - name: Prepare build cache for saving
+        if: always()
+        env:
+          CACHE_DIR: ${{ runner.temp }}/dgf-cache
+        run: |
+          if [ -d "${CACHE_DIR}" ]; then
+            sudo chown -R "$(id -u):$(id -g)" "${CACHE_DIR}"
+            du -sh "${CACHE_DIR}"
+          fi
+
+      # Saved even if the build failed, so that the next run does not have to
+      # recompile everything.
+      - name: Save build cache
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/dgf-cache
+          key: ${{ steps.restore-cache.outputs.cache-primary-key }}
