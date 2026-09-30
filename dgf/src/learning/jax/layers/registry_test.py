@@ -28,6 +28,7 @@ class RegistryTest(absltest.TestCase):
             "layers.ClassificationHeadConfig",
             "layers.EmbedGraphConfig",
             "layers.GenericBlockConfig",
+            "layers.GraphMAEConfig",
             "layers.HeterogeneousGraphAttentionNetworkConfig",
             "layers.HeterogeneousGraphConvolutionConfig",
             "layers.RegressionHeadConfig",
