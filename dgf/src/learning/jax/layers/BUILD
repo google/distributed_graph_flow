@@ -122,6 +122,19 @@ py_library(
 )
 
 py_library(
+    name = "graph_masking",
+    srcs = ["graph_masking.py"],
+    deps = [
+        # dataclasses_json dep,
+        "//dgf/src/data:jax_in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/learning/jax:common",
+        # flax:core dep,
+        # jax dep,
+    ],
+)
+
+py_library(
     name = "hetero_gnn",
     srcs = ["hetero_gnn.py"],
     deps = [
@@ -242,6 +255,21 @@ py_test(
         ":classification",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
+        # jax dep,
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "graph_masking_test",
+    srcs = ["graph_masking_test.py"],
+    deps = [
+        ":graph_masking",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:jax_in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/util:test_util",
+        # flax:core dep,
         # jax dep,
         # numpy dep,
     ],
