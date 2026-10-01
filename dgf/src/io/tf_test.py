@@ -308,11 +308,18 @@ class TfgnnGraphSampleTest(parameterized.TestCase):
         tf_graph.node_sets["n1"].features["f1"].to_list(),
         [[b"a", b"b"], [b"c"]],
     )
-    # The numpy reader returns the same values.
+    # The numpy and C++ readers return the same values.
     test_util.assert_are_equal(
         self,
         tf_graph_sample_lib.tfgnn_graph_to_graph(example, schema),
         graph,
+    )
+    test_util.assert_are_equal(
+        self,
+        tf_graph_sample_lib.create_tfgnn_graph_parser(schema).parse(
+            [example.SerializeToString()]
+        ),
+        [graph],
     )
 
   def test_tfgnn_graph_dict_to_tf_graph_empty_sets(self):

@@ -70,5 +70,6 @@ py_binary(
         "//dgf/src/sampling:config",
         "//dgf/src/util:filesystem",
         "//dgf/src/util:log",
+        # google/cloud/aiplatform dep,
     ],
 )
