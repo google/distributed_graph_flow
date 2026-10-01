@@ -522,13 +522,14 @@ absl::StatusOr<nb::list> Sampler::Sample(
         const auto status = sample_builder->Grow(
             *this, seed_node_idx, seed_timestamp, masked_edge_idx);
 
-        latch.count_down();
-
-        // If the sampling failed, record the failure.
+        // Record the failure before counting down: Once the latch reaches zero,
+        // the calling thread can return and destroy `global_status`.
         if (!status.ok()) {
           util::concurrency::MutexLock l(global_status_mutex);
           global_status.Update(status);
         }
+
+        latch.count_down();
       });
     }
 
@@ -948,12 +949,14 @@ Sampler::RandomWalkNegativeSampling(
                             &global_status]() {
         absl::Status status = helper.SampleForSeed(
             seed_node, output_for_seed_node, &rngs[seed_idx]);
-        latch.count_down();
-
+        // Record the failure before counting down: Once the latch reaches zero,
+        // the calling thread can return and destroy `global_status`.
         if (!status.ok()) {
           util::concurrency::MutexLock l(global_status_mutex);
           global_status.Update(status);
         }
+
+        latch.count_down();
       });
     }
 
@@ -1020,12 +1023,14 @@ absl::StatusOr<nb::list> Sampler::MultiSubGraphs(
                             &latch, &global_status_mutex, &global_status]() {
         const auto status =
             extractors[i].ExtractSubGraph({seed_node_idxs[i]}, this, &rngs[i]);
-        latch.count_down();
-
+        // Record the failure before counting down: Once the latch reaches zero,
+        // the calling thread can return and destroy `global_status`.
         if (!status.ok()) {
           util::concurrency::MutexLock l(global_status_mutex);
           global_status.Update(status);
         }
+
+        latch.count_down();
       });
     }
     latch.wait();

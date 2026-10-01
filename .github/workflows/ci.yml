@@ -44,8 +44,8 @@ jobs:
           df -h /
 
       # Cache of the build container's /root/.cache: Bazel output base and
-      # repository cache (compiled C++ dependencies, test results), pip wheels,
-      # and bazelisk. Restored from the latest run for this Python version,
+      # repository cache (compiled C++ dependencies, test results), and
+      # bazelisk. The pip cache is not saved (see below). Restored from the latest run for this Python version,
       # even if the dependencies changed since: Bazel and pip only reuse what
       # is still valid, and script/test.sh invalidates the cached test results
       # when the installed Python packages change.
@@ -69,15 +69,19 @@ jobs:
         if: always()
         run: df -h /
 
-      # The cache is written by root in the container.
+      # The cache is written by root in the container, and must be readable by
+      # the runner user to be saved. The pip wheels (~3GB) are not saved: they
+      # are quick to download, and the repository cache quota (10GB) must fit
+      # the caches of the three Python versions.
       - name: Prepare build cache for saving
         if: always()
         env:
           CACHE_DIR: ${{ runner.temp }}/dgf-cache
         run: |
           if [ -d "${CACHE_DIR}" ]; then
+            sudo rm -rf "${CACHE_DIR}/pip"
             sudo chown -R "$(id -u):$(id -g)" "${CACHE_DIR}"
-            du -sh "${CACHE_DIR}"
+            sudo du -sh "${CACHE_DIR}"/* "${CACHE_DIR}"
           fi
 
       # Saved even if the build failed, so that the next run does not have to

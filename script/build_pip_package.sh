@@ -46,6 +46,16 @@ DOCKER_OPTS=(
   -w /work
 )
 
+# A cache given as a host directory (e.g. restored by GitHub Actions) can be
+# owned by another user. Bazel refuses to use an output directory that is not
+# owned by the current user (root in the container), and fails with
+# "mkdir(...): Permission denied".
+if [[ "${BAZEL_CACHE}" == /* ]]; then
+  mkdir -p "${BAZEL_CACHE}"
+  docker run --rm -v "${BAZEL_CACHE}:/root/.cache" --entrypoint chown \
+      dgf-builder -R 0:0 /root/.cache
+fi
+
 chmod +x script/build.sh
 chmod +x script/test.sh
 
