@@ -106,6 +106,10 @@ def main(argv):
       lib.ReadTFGraphSamplesInMemory(
           tf_graph_samples_path=local_tfgnn_graph_samples,
       ).set_extra_name("from local"),
+      lib.ReadTFGraphSamplesInMemory(
+          tf_graph_samples_path=local_tfgnn_graph_samples,
+          implementation="python",
+      ).set_extra_name("from local (python implementation)"),
       lib.WriteTFGraphSamplesInMemory(
           work_dir=work_dir,
           tf_graph_samples_path=local_tfgnn_graph_samples,

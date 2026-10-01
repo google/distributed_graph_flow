@@ -89,6 +89,21 @@ class TestUtilTest(absltest.TestCase):
 
     self.assertFalse(test_util.are_equal(Point(1, 2), Point3D(1, 2, 3)))
 
+  def test_are_equal_strict(self):
+    for obj1, obj2 in [
+        (np.array([1, 2], np.int32), np.array([1, 2], np.int64)),
+        ({"a": 1, "b": 2}, {"b": 2, "a": 1}),
+        ([1, 2], (1, 2)),
+        ({"a": [np.array([1.0])]}, {"a": [np.array([1.0], np.float32)]}),
+    ]:
+      self.assertTrue(test_util.are_equal(obj1, obj2))
+      self.assertFalse(test_util.are_equal(obj1, obj2, strict=True))
+    self.assertTrue(
+        test_util.are_equal(
+            {"a": np.array([1])}, {"a": np.array([1])}, strict=True
+        )
+    )
+
   def test_unique_subset_of_length(self):
     allowed = [1, 2, 3, 4, 5]
 

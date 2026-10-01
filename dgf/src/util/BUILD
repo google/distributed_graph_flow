@@ -301,6 +301,7 @@ cc_test(
         ":test_util_cc",
         "@googletest//:gtest_main",
         "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/synchronization",
         "@abseil-cpp//absl/time",
     ],
 )

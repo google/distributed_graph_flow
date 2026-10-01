@@ -107,4 +107,24 @@ absl::StatusOr<std::vector<std::string>> ListOfBytesToVectorOfStrings(
   return result;
 }
 
+absl::StatusOr<std::vector<std::string_view>> SequenceOfBytesToStringViews(
+    const nb::handle& sequence) {
+  std::vector<std::string_view> views;
+  if (PyList_Check(sequence.ptr()) || PyTuple_Check(sequence.ptr())) {
+    views.reserve(nb::len(sequence));
+  }
+  for (nb::handle item : sequence) {
+    char* buffer;
+    Py_ssize_t length;
+    if (PyBytes_AsStringAndSize(item.ptr(), &buffer, &length) != 0) {
+      PyErr_Clear();
+      return absl::InvalidArgumentError(
+          absl::StrCat("Expecting a sequence of bytes. Got an item of type ",
+                       nb::type_name(item.type()).c_str()));
+    }
+    views.emplace_back(buffer, length);
+  }
+  return views;
+}
+
 }  // namespace dgf

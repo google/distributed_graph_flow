@@ -1,6 +1,7 @@
 #include "dgf/src/util/concurrency.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -8,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "absl/synchronization/blocking_counter.h"
+#include "absl/synchronization/notification.h"
 
 namespace dgf::util::concurrency {
 
@@ -122,6 +123,54 @@ void ThreadVector::JoinAndClear() {
   threads_.clear();
 }
 
+void ScheduleConcurrentForLoop(
+    const size_t num_blocks, ThreadPool* thread_pool, const size_t num_items,
+    std::function<void(size_t block_idx, size_t begin_item_idx,
+                       size_t end_item_idx)>
+        function,
+    std::function<void()> done) {
+  const size_t effective_num_blocks = std::min(num_blocks, num_items);
+  if (effective_num_blocks == 0) {
+    done();
+    return;
+  }
+
+  // Shared by the blocks since they outlive this call.
+  struct State {
+    std::function<void(size_t, size_t, size_t)> function;
+    std::function<void()> done;
+    std::atomic<size_t> remaining_blocks;
+
+    void FinishBlock() {
+      if (remaining_blocks.fetch_sub(1, std::memory_order_acq_rel) != 1) {
+        return;
+      }
+      // The caller may tear down `function`'s captures once `done` is called.
+      function = nullptr;
+      std::function<void()> local_done = std::move(done);
+      local_done();
+    }
+  };
+  auto state = std::make_shared<State>();
+  state->function = std::move(function);
+  state->done = std::move(done);
+  state->remaining_blocks = effective_num_blocks;
+
+  // The first `num_larger_blocks` blocks get one extra item.
+  const size_t min_block_size = num_items / effective_num_blocks;
+  const size_t num_larger_blocks = num_items % effective_num_blocks;
+  for (size_t block_idx = 0; block_idx < effective_num_blocks; block_idx++) {
+    const size_t begin_idx =
+        block_idx * min_block_size + std::min(block_idx, num_larger_blocks);
+    const size_t end_idx =
+        begin_idx + min_block_size + (block_idx < num_larger_blocks ? 1 : 0);
+    thread_pool->Schedule([state, block_idx, begin_idx, end_idx]() {
+      state->function(block_idx, begin_idx, end_idx);
+      state->FinishBlock();
+    });
+  }
+}
+
 void ConcurrentForLoop(
     const size_t num_blocks, ThreadPool* thread_pool, const size_t num_items,
     const std::function<void(size_t block_idx, size_t begin_item_idx,
@@ -130,25 +179,10 @@ void ConcurrentForLoop(
     function(0, 0, num_items);
     return;
   }
-  const size_t effective_num_blocks = std::min(num_blocks, num_items);
-  absl::BlockingCounter blocker(effective_num_blocks);
-  size_t begin_idx = 0;
-  const size_t block_size =
-      (num_items + effective_num_blocks - 1) / effective_num_blocks;
-  for (size_t block_idx = 0; block_idx < effective_num_blocks; block_idx++) {
-    const auto end_idx = std::min(begin_idx + block_size, num_items);
-    if (begin_idx <= end_idx) {
-      thread_pool->Schedule(
-          [block_idx, begin_idx, end_idx, &blocker, &function]() -> void {
-            function(block_idx, begin_idx, end_idx);
-            blocker.DecrementCount();
-          });
-      begin_idx += block_size;
-    } else {
-      blocker.DecrementCount();
-    }
-  }
-  blocker.Wait();
+  absl::Notification done;
+  ScheduleConcurrentForLoop(num_blocks, thread_pool, num_items, function,
+                            [&done]() { done.Notify(); });
+  done.WaitForNotification();
 }
 
 }  // namespace dgf::util::concurrency

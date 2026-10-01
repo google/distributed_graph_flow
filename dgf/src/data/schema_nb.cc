@@ -46,9 +46,9 @@ absl::StatusOr<GraphSchema::Feature> ParseFeatureSchema(
   DGF_GET_ATTR_OR_RETURN(nb::object, py_shape, py_feature_schema, "shape");
   if (py_shape.is_none()) {
     // Shape is []
-  } else if (nb::isinstance<nb::tuple>(py_shape)) {
-    nb::tuple shape_list = nb::cast<nb::tuple>(py_shape);
-    for (const auto& dim : shape_list) {
+  } else if (nb::isinstance<nb::tuple>(py_shape) ||
+             nb::isinstance<nb::list>(py_shape)) {
+    for (const auto& dim : py_shape) {
       if (dim.is_none()) {
         feature.shape.push_back(-1);
       } else if (nb::isinstance<nb::int_>(dim)) {

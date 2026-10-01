@@ -12,6 +12,9 @@ bazel_dep(name = "rules_proto", version = "7.1.0")
 bazel_dep(name = "rules_python", version = "1.7.0")
 bazel_dep(name = "nanobind_bazel", version = "2.12.0")
 
+numpy_headers = use_extension("//:numpy_headers.bzl", "numpy_headers")
+use_repo(numpy_headers, "numpy_headers")
+
 # Hermetic Python toolchains. They provide the Python headers used to compile
 # the nanobind extensions for the version selected with
 # `--@rules_python//python/config_settings:python_version=<version>`. Without

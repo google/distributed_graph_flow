@@ -177,11 +177,17 @@ class ReadPickleInMemoryGraph(benchmark_utils.Benchmark):
 class ReadTFGraphSamplesInMemory(benchmark_utils.Benchmark):
   """Read TF Graph samples in memory."""
 
-  def __init__(self, tf_graph_samples_path: str, max_samples: int = 10000):
+  def __init__(
+      self,
+      tf_graph_samples_path: str,
+      max_samples: int = 10000,
+      implementation: str = "auto",
+  ):
     self.num_samples = -1
     self.tf_graph_samples_path = tf_graph_samples_path
     self.schema = None
     self.max_samples = max_samples
+    self.implementation = implementation
 
   def setup(self):
     self.schema = dgf.io.read_schema(
@@ -196,6 +202,7 @@ class ReadTFGraphSamplesInMemory(benchmark_utils.Benchmark):
     generator = dgf.io.read_tfgnn_graphs(
         os.path.join(self.tf_graph_samples_path, "data@*.tfrecord.gz"),
         self.schema,
+        implementation=self.implementation,
     )
     self.num_samples = 0
     for sample in generator:
@@ -208,7 +215,9 @@ class ReadTFGraphSamplesInMemory(benchmark_utils.Benchmark):
     return self.num_samples
 
   def details(self) -> str:
-    return f"num_samples={self.num_samples}"
+    return (
+        f"num_samples={self.num_samples} implementation={self.implementation}"
+    )
 
 
 class WriteTFGraphSamplesInMemory(benchmark_utils.Benchmark):

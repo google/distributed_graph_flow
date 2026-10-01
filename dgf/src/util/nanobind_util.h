@@ -99,6 +99,11 @@ struct NumpyBytesArray {
 absl::StatusOr<std::vector<std::string>> ListOfBytesToVectorOfStrings(
     const nanobind::object& list);
 
+// Gets views (i.e. no copy) to the content of a sequence of python bytes. The
+// caller should keep `sequence` alive while using the views.
+absl::StatusOr<std::vector<std::string_view>> SequenceOfBytesToStringViews(
+    const nanobind::handle& sequence);
+
 // Converts a c++ list of string values into a numpy array of multi-bytes.
 // The array can be: {span, vector}<{string, string_view}> and
 // ProtoRepeatedField<string>.

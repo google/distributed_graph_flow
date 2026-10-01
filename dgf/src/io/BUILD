@@ -1,6 +1,7 @@
 load("@rules_python//python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("@rules_cc//cc:cc_test.bzl", "cc_test")
 load("@rules_python//python:py_test.bzl", "py_test")
 load("@nanobind_bazel//:build_defs.bzl", "nanobind_extension")
 
@@ -128,10 +129,45 @@ cc_library(
     srcs = ["tf_graph_sample.cc"],
     hdrs = ["tf_graph_sample.h"],
     deps = [
+        "@abseil-cpp//absl/functional:function_ref",
         "@abseil-cpp//absl/strings",
         "//dgf/src/data:in_memory_graph_cc",
         "//dgf/src/data:tensorflow_cc_proto",
         "//dgf/src/util:tf_feature_util",
+    ],
+)
+
+# Fast parsing of serialized TF-GNN Graph Samples. Does not depend on TensorFlow.
+cc_library(
+    name = "tf_graph_sample_parser",
+    srcs = ["tf_graph_sample_parser.cc"],
+    hdrs = ["tf_graph_sample_parser.h"],
+    deps = [
+        ":tf_graph_sample_cc",
+        "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/functional:function_ref",
+        "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/types:span",
+        "@protobuf//:protobuf" , #:arena",
+        "//dgf/src/data:schema_cc",
+        "//dgf/src/data:tensorflow_cc_proto",
+        "//dgf/src/util",
+    ],
+)
+
+cc_test(
+    name = "tf_graph_sample_parser_test",
+    srcs = ["tf_graph_sample_parser_test.cc"],
+    deps = [
+        ":tf_graph_sample_parser",
+        "@googletest//:gtest_main",
+        "@abseil-cpp//absl/status:statusor",
+        "@abseil-cpp//absl/types:span",
+        "//dgf/src/data:schema_cc",
+        "//dgf/src/data:tensorflow_cc_proto",
+        "//dgf/src/util:test_util_cc",
     ],
 )
 
@@ -459,16 +495,22 @@ nanobind_extension(
     linkopts = ["-Wl,-Bsymbolic"],
     deps = [
         ":tf_graph_sample_cc",
+        ":tf_graph_sample_parser",
+        "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/log",
         "@abseil-cpp//absl/status",
         "@abseil-cpp//absl/status:statusor",
-        "@abseil-cpp//absl/strings",
+        "@abseil-cpp//absl/synchronization",
+        "@abseil-cpp//absl/types:span",
         "//dgf/src/data:in_memory_graph_cc",
         "//dgf/src/data:in_memory_graph_nb",
+        "//dgf/src/data:schema_cc",
+        "//dgf/src/data:schema_nb",
         "//dgf/src/util",
         "//dgf/src/util:concurrency",
         "//dgf/src/util:nanobind_util",
         "//dgf/src/util:status_caster",
+        "@numpy_headers//:headers",
     ],
 )
 # Test
@@ -550,6 +592,7 @@ py_test(
     srcs = ["tf_graph_sample_test.py"],
     shard_count = 4,
     deps = [
+        ":feature_format",
         ":tf_graph_sample",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,

@@ -16,7 +16,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator, Mapping, Sequence
+import collections
+from collections.abc import Callable, Generator, Iterable, Iterator, Mapping, Sequence
 import enum
 import os
 import typing
@@ -33,6 +34,12 @@ from dgf.src.util.weak_dep.weak_dep_apache_beam import PTransform, beam
 from dgf.src.util.weak_dep.weak_dep_bagz import bag_io, bagz
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import numpy as np
+
+# Number of serialized graph samples parsed together by the C++ parser.
+_CPP_BATCH_SIZE = 128
+# Number of batches parsed in advance by the C++ parser.
+_CPP_NUM_BATCHES_IN_FLIGHT = 16
+_CPP_DEFAULT_MAX_NUM_THREADS = 8
 
 
 class TFGraphSampleContainerType(enum.Enum):
@@ -285,7 +292,7 @@ def graph_to_tfgnn_graph(
 
 
 def _flatten_feature_value(value: Any, np_dtype: Any) -> np.ndarray:
-  """Flattens a (possibly nested) feature value into a 1D array of `np_dtype`."""
+  """Flattens a (possibly nested) feature value into a 1D `np_dtype` array."""
   array = np.asarray(value)
   if array.dtype == np.object_:
     # Note: The nested arrays are merged (which is only possible if the nested
@@ -741,6 +748,253 @@ schema_to_tfgnn_graph_parsing_spec = (
 )
 
 
+class ReadImplementation(enum.Enum):
+  """Implementation used to parse the TF GNN Graph Samples.
+
+  Attributes:
+    AUTO: Selects the fastest available implementation.
+    PYTHON: Parses the samples with `tf.io.parse_example` and converts the
+      result into `InMemoryGraph`s with NumPy.
+    CPP: Parses the samples directly into their final NumPy arrays with a
+      multi-threaded C++ parser. Significantly faster than PYTHON, and returns
+      exactly the same graphs.
+  """
+
+  AUTO = "auto"
+  PYTHON = "python"
+  CPP = "cpp"
+
+
+def _check_imported_ids(
+    set_schemas: (
+        Mapping[str, schema_lib.NodeSchema]
+        | Mapping[str, schema_lib.EdgeSchema]
+    ),
+    feature_name: str | None,
+    set_type: str,
+) -> None:
+  """Checks that an imported id feature is defined in all the sets."""
+  if feature_name is None:
+    return
+  for set_name, set_schema in set_schemas.items():
+    if feature_name not in set_schema.features:
+      raise ValueError(
+          f"The {set_type} id feature {feature_name!r} is not defined in the"
+          f" schema of the {set_type} set {set_name!r}. Available features:"
+          f" {list(set_schema.features)}."
+      )
+
+
+def _serialized_tfgnn_graph_dataset(
+    paths: Sequence[str],
+    container_type: TFGraphSampleContainerType,
+    compression: str,
+    deterministic: bool,
+) -> tf.data.Dataset:
+  """Dataset of the serialized TF GNN Graph Samples in a set of files."""
+
+  if container_type == TFGraphSampleContainerType.TF_RECORD:
+
+    def read_file(path):
+      # 16 MiB read buffer aggregates CNS/remote reads into larger, more
+      # efficient network requests.
+      return tf.data.TFRecordDataset(
+          path, compression_type=compression, buffer_size=16 * 1024 * 1024
+      )  # pyrefly: ignore[bad-instantiation]
+
+  else:
+    raise ValueError("Non supported container type")
+
+  def read_file_with_prefetch(path):
+    # Hides the latency of remote file systems (e.g. CNS, GCS) without
+    # blocking the interleaving on the slowest file.
+    return read_file(path).prefetch(64)
+
+  # For sharded remote files, interleaving across multiple files in parallel
+  # saturates the network pipe.
+  cycle_length = min(len(paths), 16) if len(paths) > 1 else 1
+
+  path_dataset = tf.data.Dataset.from_tensor_slices(list(paths))
+  return path_dataset.interleave(
+      read_file_with_prefetch,
+      cycle_length=cycle_length,
+      num_parallel_calls=tf.data.AUTOTUNE,
+      deterministic=deterministic,
+  )
+
+
+def _parse_tfgnn_graphs_python(
+    dataset: tf.data.Dataset,
+    schema: schema_lib.GraphSchema,
+    import_node_ids: str | None,
+    import_edge_ids: str | None,
+    deterministic: bool,
+) -> Iterator[in_memory_graph.InMemoryGraph]:
+  """Parses serialized TF GNN Graph Samples with TensorFlow and NumPy."""
+  feature_spec = schema_to_tfgnn_graph_parsing_spec(schema)
+
+  def parse_examples(x):
+    x = tf.io.parse_example(x, feature_spec)
+    x = {k: tf.sparse.to_dense(v) for k, v in x.items()}
+    return x
+
+  dataset = dataset.map(
+      parse_examples,
+      num_parallel_calls=tf.data.AUTOTUNE,
+      deterministic=deterministic,
+  )
+
+  dataset = dataset.prefetch(tf.data.AUTOTUNE)
+  for tf_dict in dataset:
+    np_dict = {}
+    for key, tf_value in tf_dict.items():
+      np_value = tf_value.numpy()
+      if np_value.dtype == object:
+        np_value = np_value.astype(np.bytes_)
+      np_dict[key] = np_value
+
+    yield graph_dict_to_graph(
+        np_dict,
+        schema,
+        import_node_ids=import_node_ids,
+        import_edge_ids=import_edge_ids,
+    )
+
+
+def _build_ragged_feature(
+    values: np.ndarray,
+    row_lengths: list[np.ndarray],
+    num_items: int,
+    feature_key: str,
+    feature_schema: schema_lib.FeatureSchema,
+) -> np.ndarray:
+  """Builds a variable-length feature from the output of the C++ parser.
+
+  Args:
+    values: The flat feature values, with the schema dtype.
+    row_lengths: The row lengths of each variable-length dimension, from the
+      outer-most to the inner-most dimension.
+    num_items: The number of nodes or edges.
+    feature_key: The key of the feature in the TF GNN Graph Sample.
+    feature_schema: The schema of the feature.
+
+  Returns:
+    The feature value, as returned by the Python implementation.
+  """
+  # Delegates to the Python implementation to guarantee the same results.
+  example = {feature_key: values}
+  ragged_dim_idxs = [
+      dim_idx + 1
+      for dim_idx, dim in enumerate(feature_schema.shape or [])
+      if dim is None
+  ]
+  for dim_idx, dim_row_lengths in zip(
+      ragged_dim_idxs, row_lengths, strict=True
+  ):
+    example[io_tf_lib.tfgnn_ragged_dim_key(feature_key, dim_idx)] = (
+        dim_row_lengths
+    )
+  return _tfgnn_feature_to_array(
+      example, feature_key, feature_schema, num_items
+  )
+
+
+def _check_ragged_features(
+    feature_sets: Iterable[tuple[str, Mapping[str, schema_lib.FeatureSchema]]],
+    feature_key_fn: Callable[[str, str], str],
+    import_ids: str | None,
+) -> None:
+  """Checks the variable-length features supported by the C++ parser."""
+  for set_name, features in feature_sets:
+    for feature_name, feature_schema in features.items():
+      if feature_name != import_ids and feature_schema.shape:
+        _check_at_most_one_ragged_dim(
+            feature_key_fn(set_name, feature_name), list(feature_schema.shape)
+        )
+
+
+def create_tfgnn_graph_parser(
+    schema: schema_lib.GraphSchema,
+    import_node_ids: str | None = None,
+    import_edge_ids: str | None = None,
+    num_threads: int = 0,
+) -> Any:
+  """Creates a C++ parser of serialized TF GNN Graph Samples.
+
+  The parser converts serialized TF GNN Graph Samples (i.e. `tf.train.Example`
+  protos) into `InMemoryGraph`s. It is equivalent to (but significantly faster
+  than) `graph_dict_to_graph(tf.io.parse_example(...))`.
+
+  Usage example:
+
+  ```python
+  parser = create_tfgnn_graph_parser(schema, num_threads=4)
+  # Synchronous parsing.
+  graphs = parser.parse([serialized_1, serialized_2])
+  # Asynchronous parsing.
+  future = parser.submit([serialized_1, serialized_2])
+  graphs = future.result()
+  ```
+
+  Args:
+    schema: The graph schema.
+    import_node_ids: If set, name of the node feature containing the node ids.
+    import_edge_ids: If set, name of the edge feature containing the edge ids.
+    num_threads: Number of parsing threads. If 0, the parsing is done in the
+      calling thread (with the GIL released).
+
+  Returns:
+    A `tf_graph_sample_ext.GraphSampleParser`.
+  """
+  _check_imported_ids(schema.node_sets, import_node_ids, "node")
+  _check_imported_ids(schema.edge_sets, import_edge_ids, "edge")
+  _check_ragged_features(
+      ((name, s.features) for name, s in schema.node_sets.items()),
+      io_tf_lib.tfgnn_node_key,
+      import_node_ids,
+  )
+  _check_ragged_features(
+      ((name, s.features) for name, s in schema.edge_sets.items()),
+      io_tf_lib.tfgnn_edge_key,
+      import_edge_ids,
+  )
+  return tf_graph_sample_ext.GraphSampleParser.create(
+      schema=schema,
+      import_node_ids=import_node_ids,
+      import_edge_ids=import_edge_ids,
+      build_ragged_feature=_build_ragged_feature,
+      graph_cls=in_memory_graph.InMemoryGraph,
+      node_set_cls=in_memory_graph.InMemoryNodeSet,
+      edge_set_cls=in_memory_graph.InMemoryEdgeSet,
+      num_threads=num_threads,
+  )
+
+
+def _parse_tfgnn_graphs_cpp(
+    dataset: tf.data.Dataset,
+    schema: schema_lib.GraphSchema,
+    import_node_ids: str | None,
+    import_edge_ids: str | None,
+    num_threads: int,
+) -> Iterator[in_memory_graph.InMemoryGraph]:
+  """Parses serialized TF GNN Graph Samples with the C++ parser."""
+  parser = create_tfgnn_graph_parser(
+      schema,
+      import_node_ids=import_node_ids,
+      import_edge_ids=import_edge_ids,
+      num_threads=num_threads,
+  )
+  dataset = dataset.batch(_CPP_BATCH_SIZE).prefetch(_CPP_NUM_BATCHES_IN_FLIGHT)
+  # Batches being parsed in the background, in order.
+  futures = collections.deque()
+  for batch in dataset:
+    futures.append(parser.submit(batch.numpy().tolist()))
+    if len(futures) >= _CPP_NUM_BATCHES_IN_FLIGHT:
+      yield from futures.popleft().result()
+  while futures:
+    yield from futures.popleft().result()
+
+
 def read_tfgnn_graphs(
     path: str | Sequence[str],
     schema: schema_lib.GraphSchema,
@@ -750,11 +1004,17 @@ def read_tfgnn_graphs(
         TFGraphSampleContainerType | str
     ) = TFGraphSampleContainerType.TF_RECORD,
     compression: str = "GZIP",
+    *,
+    implementation: ReadImplementation | str = ReadImplementation.AUTO,
+    deterministic: bool = False,
+    num_threads: int | None = None,
 ) -> Generator[in_memory_graph.InMemoryGraph, None, None]:
   """Reads a set of in-memory graphs from disk stored as TF Examples.
 
   The reading is done in process, which is different from
-  "ReadFromTFGraphSample" which runs with Beam.
+  "ReadFromTFGraphSample" which runs with Beam. The files are read with
+  TensorFlow (and therefore support all the TensorFlow file systems e.g.
+  local, CNS, GCS), and the graph samples are parsed in parallel.
 
   Usage example:
 
@@ -786,56 +1046,43 @@ def read_tfgnn_graphs(
     container_type: Container format.
     compression: TFRecord compression level. Can be "ZLIB", "GZIP", or "" (no
       compression). Ignored for other container types.
+    implementation: Implementation used to parse the graph samples. See
+      `ReadImplementation`. All the implementations return the same graphs.
+    deterministic: If True, the graphs are returned in a deterministic order
+      (i.e. the files are interleaved in a round-robin fashion). If False, the
+      graphs are returned as soon as they are available, which can be faster
+      when the files are read from a remote file system with a variable latency.
+    num_threads: Number of threads used by the C++ parser. If None, uses min(8,
+      number of CPUs). Ignored by the Python implementation.
+
+  Yields:
+    The `InMemoryGraph`s.
   """
 
   if isinstance(container_type, str):
     container_type = TFGraphSampleContainerType[container_type]
+  if isinstance(implementation, str):
+    implementation = ReadImplementation(implementation)
+  _check_imported_ids(schema.node_sets, import_node_ids, "node")
+  _check_imported_ids(schema.edge_sets, import_edge_ids, "edge")
+
   paths = shard_lib.expand_input_paths(path)
-  path_dataset = tf.data.Dataset.from_tensor_slices(paths)  # pyrefly: ignore[bad-argument-type]
-
-  # Build the tf parsing spec.
-  feature_spec = schema_to_tfgnn_graph_parsing_spec(schema)
-
-  if container_type == TFGraphSampleContainerType.TF_RECORD:
-
-    def read_serialized_proto_dataset(path):
-      return tf.data.TFRecordDataset(path, compression_type=compression)  # pyrefly: ignore[bad-instantiation]
-
-  else:
-    raise ValueError("Non supported container type")
-
-  dataset = path_dataset.interleave(
-      read_serialized_proto_dataset,
-      cycle_length=tf.data.AUTOTUNE,
-      num_parallel_calls=tf.data.AUTOTUNE,
+  dataset = _serialized_tfgnn_graph_dataset(
+      paths, container_type, compression, deterministic
   )
 
-  def parse_examples(x):
-    x = tf.io.parse_example(x, feature_spec)
-    x = {k: tf.sparse.to_dense(v) for k, v in x.items()}
-    return x
-
-  dataset = dataset.map(
-      parse_examples,
-      num_parallel_calls=tf.data.AUTOTUNE,
-  )
-
-  dataset = dataset.prefetch(tf.data.AUTOTUNE)
-  for tf_dict in dataset:
-    np_dict = {}
-    for key, tf_value in tf_dict.items():
-      np_value = tf_value.numpy()
-      if np_value.dtype == object:
-        np_value = np_value.astype(np.bytes_)
-      np_dict[key] = np_value
-
-    in_memory_example = graph_dict_to_graph(
-        np_dict,
-        schema,
-        import_node_ids=import_node_ids,
-        import_edge_ids=import_edge_ids,
+  if implementation == ReadImplementation.PYTHON:
+    yield from _parse_tfgnn_graphs_python(
+        dataset, schema, import_node_ids, import_edge_ids, deterministic
     )
-    yield in_memory_example
+  elif implementation in (ReadImplementation.AUTO, ReadImplementation.CPP):
+    if num_threads is None:
+      num_threads = min(_CPP_DEFAULT_MAX_NUM_THREADS, os.cpu_count() or 1)
+    yield from _parse_tfgnn_graphs_cpp(
+        dataset, schema, import_node_ids, import_edge_ids, num_threads
+    )
+  else:
+    raise ValueError(f"Unsupported implementation: {implementation}")
 
 
 def graph_to_serialized_tfgnn_graph(

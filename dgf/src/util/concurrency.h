@@ -161,10 +161,24 @@ class ThreadVector {
 };
 
 // Applies "function" over a range of elements using multi-threading.
+// The items are split into `min(num_blocks, num_items)` non-empty contiguous
+// blocks of balanced sizes. If `num_blocks <= 1`, "function" is called once
+// synchronously on [0, num_items).
 void ConcurrentForLoop(
     size_t num_blocks, ThreadPool* thread_pool, size_t num_items,
     const std::function<void(size_t block_idx, size_t begin_item_idx,
                              size_t end_item_idx)>& function);
+
+// Non-blocking version of `ConcurrentForLoop`: Schedules the blocks in
+// `thread_pool` and returns immediately. `done` is called (possibly in a thread
+// of `thread_pool`) once all the blocks are processed, after "function" is
+// destroyed.
+void ScheduleConcurrentForLoop(
+    size_t num_blocks, ThreadPool* thread_pool, size_t num_items,
+    std::function<void(size_t block_idx, size_t begin_item_idx,
+                       size_t end_item_idx)>
+        function,
+    std::function<void()> done);
 
 }  // namespace dgf::util::concurrency
 

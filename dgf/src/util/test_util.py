@@ -66,17 +66,26 @@ def disable_diff_truncation():
 
 
 # TODO(gbm): Improve error message.
-def assert_are_equal(test, obj1: Any, obj2: Any, abs_tol: float | None = None):
-  test.assertTrue(
-      are_equal(obj1, obj2, abs_tol=abs_tol),
+def assert_are_equal(
+    test,
+    obj1: Any,
+    obj2: Any,
+    abs_tol: float | None = None,
+    strict: bool = False,
+):
+  global _last_diff
+  _last_diff = None
+  if are_equal(obj1, obj2, abs_tol=abs_tol, strict=strict):
+    return
+  test.fail(
       "Objects are not"
       f" equal:\nobj1={pprint.pformat(obj1)}\nobj2={pprint.pformat(obj2)}\n\nDiff"
-      f" part:\n{pprint.pformat(_last_diff)}",
+      f" part:\n{pprint.pformat(_last_diff)}"
   )
 
 
 def _ragged_arrays_equal(
-    a: np.ndarray, b: np.ndarray, abs_tol: float | None = None
+    a: np.ndarray, b: np.ndarray, abs_tol: float | None, strict: bool
 ) -> bool:
   """Tests if two ragged arrays are equal."""
   if a.shape != b.shape:
@@ -85,13 +94,25 @@ def _ragged_arrays_equal(
     return False
   if b.dtype != object:
     return False
-  return all(are_equal(a, b, abs_tol=abs_tol) for a, b in zip(a.flat, b.flat))
+  return all(
+      are_equal(a, b, abs_tol=abs_tol, strict=strict)
+      for a, b in zip(a.flat, b.flat)
+  )
 
 
-def are_equal(obj1: Any, obj2: Any, abs_tol: float | None = None) -> bool:
+def are_equal(
+    obj1: Any, obj2: Any, abs_tol: float | None = None, strict: bool = False
+) -> bool:
   """Tests if two objects are equal.
 
   Set _last_diff with the first two different objects.
+
+  Args:
+    obj1: First object.
+    obj2: Second object.
+    abs_tol: Absolute tolerance for float comparisons.
+    strict: If true, the objects should also have the same types, the arrays the
+      same dtypes, and the dictionaries the same key order.
   """
 
   try:
@@ -102,10 +123,20 @@ def are_equal(obj1: Any, obj2: Any, abs_tol: float | None = None) -> bool:
         _last_diff = TwoDiffObjects(obj1, obj2)
       return equal_result
 
+    if strict:
+      if type(obj1) is not type(obj2):
+        return ret(False)
+      if isinstance(obj1, np.ndarray) and obj1.dtype != obj2.dtype:
+        return ret(False)
+      if isinstance(obj1, (dict, immutabledict)) and list(obj1) != list(obj2):
+        return ret(False)
+
     # NumPy arrays
     if isinstance(obj1, np.ndarray) and isinstance(obj2, np.ndarray):
       if obj1.dtype == object and obj2.dtype == object:
-        return ret(_ragged_arrays_equal(obj1, obj2, abs_tol=abs_tol))
+        return ret(
+            _ragged_arrays_equal(obj1, obj2, abs_tol=abs_tol, strict=strict)
+        )
       if (
           abs_tol is not None
           and obj1.dtype != np.bytes_
@@ -153,23 +184,23 @@ def are_equal(obj1: Any, obj2: Any, abs_tol: float | None = None) -> bool:
 
     # TensorFlow vs non-Tensor
     if isinstance(obj1, tf.Tensor) and not isinstance(obj2, tf.Tensor):
-      return ret(are_equal(obj1.numpy(), obj2, abs_tol=abs_tol))
+      return ret(are_equal(obj1.numpy(), obj2, abs_tol=abs_tol, strict=strict))
     if not isinstance(obj1, tf.Tensor) and isinstance(obj2, tf.Tensor):
-      return ret(are_equal(obj1, obj2.numpy(), abs_tol=abs_tol))
+      return ret(are_equal(obj1, obj2.numpy(), abs_tol=abs_tol, strict=strict))
 
     # TensorFlow Ragged vs Numpy/List
     if isinstance(obj1, tf.RaggedTensor) and isinstance(obj2, np.ndarray):
       list1 = obj1.to_list()
       list2 = obj2.tolist()
-      return ret(are_equal(list1, list2, abs_tol=abs_tol))
+      return ret(are_equal(list1, list2, abs_tol=abs_tol, strict=strict))
     if isinstance(obj1, np.ndarray) and isinstance(obj2, tf.RaggedTensor):
       list1 = obj1.tolist()
       list2 = obj2.to_list()
-      return ret(are_equal(list1, list2, abs_tol=abs_tol))
+      return ret(are_equal(list1, list2, abs_tol=abs_tol, strict=strict))
     if isinstance(obj1, tf.RaggedTensor) and isinstance(obj2, tf.RaggedTensor):
       list1 = obj1.to_list()
       list2 = obj2.to_list()
-      return ret(are_equal(list1, list2, abs_tol=abs_tol))
+      return ret(are_equal(list1, list2, abs_tol=abs_tol, strict=strict))
 
     # Dictionaries
     if isinstance(obj1, (dict, immutabledict)) and isinstance(
@@ -178,7 +209,10 @@ def are_equal(obj1: Any, obj2: Any, abs_tol: float | None = None) -> bool:
       if obj1.keys() != obj2.keys():
         return ret(False)
       return ret(
-          all(are_equal(obj1[k], obj2[k], abs_tol=abs_tol) for k in obj1)
+          all(
+              are_equal(obj1[k], obj2[k], abs_tol=abs_tol, strict=strict)
+              for k in obj1
+          )
       )
 
     # Sets (unordered and unique)
@@ -186,7 +220,8 @@ def are_equal(obj1: Any, obj2: Any, abs_tol: float | None = None) -> bool:
       return ret(
           len(obj1) == len(obj2)
           and all(
-              any(are_equal(x, y, abs_tol=abs_tol) for y in obj2) for x in obj1
+              any(are_equal(x, y, abs_tol=abs_tol, strict=strict) for y in obj2)
+              for x in obj1
           )
       )
 
@@ -194,7 +229,10 @@ def are_equal(obj1: Any, obj2: Any, abs_tol: float | None = None) -> bool:
     if isinstance(obj1, (list, tuple)) and isinstance(obj2, (list, tuple)):
       return ret(
           len(obj1) == len(obj2)
-          and all(are_equal(x, y, abs_tol=abs_tol) for x, y in zip(obj1, obj2))
+          and all(
+              are_equal(x, y, abs_tol=abs_tol, strict=strict)
+              for x, y in zip(obj1, obj2)
+          )
       )
 
     # Floats with tolerance
@@ -216,6 +254,7 @@ def are_equal(obj1: Any, obj2: Any, abs_tol: float | None = None) -> bool:
                   getattr(obj1, field.name),
                   getattr(obj2, field.name),
                   abs_tol=abs_tol,
+                  strict=strict,
               )
               for field in dataclasses.fields(obj1)
           )
@@ -235,7 +274,10 @@ def are_equal(obj1: Any, obj2: Any, abs_tol: float | None = None) -> bool:
 
       for attr in a_attrs:
         if not are_equal(
-            getattr(obj1, attr), getattr(obj2, attr), abs_tol=abs_tol
+            getattr(obj1, attr),
+            getattr(obj2, attr),
+            abs_tol=abs_tol,
+            strict=strict,
         ):
 
           return ret(False)
