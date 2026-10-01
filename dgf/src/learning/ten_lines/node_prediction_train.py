@@ -466,6 +466,23 @@ def train_node_model(
             f" '{task.target_nodeset}' must have `num_categorical_values`"
             " defined for classification tasks."
         )
+      if (
+          schema.node_sets[task.target_nodeset]
+          .features[task.target_column]
+          .format.is_integer()
+      ):
+        label_stats = dataset_preparator.feature_stats.node_sets[
+            task.target_nodeset
+        ].features[task.target_column]
+        if label_stats.minimum < 0:
+          raise ValueError(
+              f"Target column '{task.target_column}' in nodeset"
+              f" '{task.target_nodeset}' is an integer categorical feature, so"
+              " its values should be non-negative. However, its minimum value"
+              f" is {label_stats.minimum:g}. Negative values generally indicate"
+              " missing labels. Make sure that all the nodes have a valid"
+              " label."
+          )
     elif task.task_type == node_prediction_model.TaskType.NODE_REGRESSION:
       if label_spec.semantic != schema_lib.FeatureSemantic.NUMERICAL:
         raise ValueError(
