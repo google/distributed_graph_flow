@@ -1299,6 +1299,9 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
   def test_train_and_predict_with_timeseries(self):
     graph, schema = self._create_timeseries_graph_and_schema()
 
+    # The training is not seeded. With a larger learning rate, it sometimes
+    # collapses to predicting the mean label (1.5) for both queries (~5% of the
+    # runs with learning_rate=0.01 and 100 steps, 0/40 with these values).
     model = node_prediction_lib.train_node_model(
         graph=graph,
         valid_graph=graph,
@@ -1306,13 +1309,13 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
         target_nodeset="query",
         target_column="label",
         time_aware=True,
-        num_train_steps=100,
+        num_train_steps=300,
         batch_size=2,
         sampling_width=2,
         num_sampling_hops=1,
         node_embedding_dim=16,
         num_layers=1,
-        learning_rate=0.01,
+        learning_rate=0.005,
         verbose=0,
     )
 
