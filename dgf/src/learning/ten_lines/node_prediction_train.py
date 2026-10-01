@@ -671,27 +671,38 @@ def train_node_model(
             num_batches_to_cache = num_valid_steps
           else:
             num_batches_to_cache = min(num_batches_to_cache, num_valid_steps)
-        with util.print_timer("Caching validation dataset", verbose >= 1):
-          if verbose >= 2:
-            valid_dataset_list = list(
-                tqdm.tqdm(
-                    valid_dataset_iterator_fn(),
-                    total=num_batches_to_cache,
-                    desc="Caching validation dataset",
-                )
+        valid_dataset_list = []
+        try:
+          with util.print_timer("Caching validation dataset", verbose >= 1):
+            valid_iter = valid_dataset_iterator_fn()
+            if verbose >= 2:
+              valid_iter = tqdm.tqdm(
+                  valid_iter,
+                  total=num_batches_to_cache,
+                  desc="Caching validation dataset",
+              )
+            for batch in valid_iter:
+              valid_dataset_list.append(batch)
+
+          if verbose >= 1:
+            log.info(
+                "Number of cache validation batches: %d",
+                len(valid_dataset_list),
             )
-          else:
-            valid_dataset_list = list(valid_dataset_iterator_fn())
 
-        if verbose >= 1:
-          log.info(
-              "Number of cache validation batches: %d", len(valid_dataset_list)
+          def cached_valid_dataset_iterator_fn():
+            yield from valid_dataset_list
+
+          valid_dataset_iterator_fn = cached_valid_dataset_iterator_fn
+        except (jax.errors.JaxRuntimeError, RuntimeError, ValueError) as e:
+          valid_dataset_list.clear()
+          if "RESOURCE_EXHAUSTED" not in str(e):
+            raise
+          log.warning(
+              "Out of device memory while caching validation dataset (%s);"
+              " falling back to uncached validation dataset.",
+              e,
           )
-
-        def cached_valid_dataset_iterator_fn():
-          yield from valid_dataset_list
-
-        valid_dataset_iterator_fn = cached_valid_dataset_iterator_fn
 
       def valid_step(params, opt_state, batch: Batch):
         graph, seed_node_idxs = batch
@@ -786,6 +797,9 @@ def train_node_model(
     if evaluate_final_model and valid_dataset is not None:
       if verbose >= 1:
         log.info("Final model evaluation")
+      valid_dataset.get_live().sample_generator.set_sampler_returns_node_idxs_only(
+          False
+      )
       model.data().final_evaluation = model.evaluate_generator(
           valid_dataset.get_live().sample_generator.single_iterator()
       )

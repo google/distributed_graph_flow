@@ -1489,6 +1489,24 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
             padding_margin=_NO_SKIP_PADDING_MARGIN,
         )
 
+  def test_evaluate_final_model_with_cache_normalized_features(self):
+    graph, schema = gen_test_graph.gen_toy_classification_dataset(
+        num_n1_nodes=40, num_n2_nodes=20, random_seed=0
+    )
+    model = node_prediction_lib.train_node_model(
+        graph=graph,
+        schema=schema,
+        target_nodeset="N1",
+        target_column="label",
+        num_train_steps=2,
+        batch_size=4,
+        num_sampling_hops=1,
+        cache_normalized_features=True,
+        evaluate_final_model=True,
+        verbose=0,
+    )
+    self.assertIsNotNone(model.data().final_evaluation)
+
 
 if __name__ == "__main__":
   absltest.main()

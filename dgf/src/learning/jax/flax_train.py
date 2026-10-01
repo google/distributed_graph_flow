@@ -251,7 +251,11 @@ def _restore_checkpoint(
 
   restored_state = checkpoint_manager.restore(
       latest_step,
-      args=ocp.args.PyTreeRestore(item=target_item, partial_restore=True),
+      args=ocp.args.PyTreeRestore(
+          item=target_item,
+          restore_args=ocp.checkpoint_utils.construct_restore_args(target_item),
+          partial_restore=True,
+      ),
   )
   if "params" not in restored_state:
     raise ValueError("Restored state does not contain 'params'.")
