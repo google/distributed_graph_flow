@@ -15,6 +15,7 @@ py_library(
         ":analyse",
         ":convert",
         ":data",
+        ":deploy",
         ":exception",
         ":filesystem",
         ":generate",
@@ -203,5 +204,13 @@ py_library(
         "//dgf/src/analyse:padding",
         "//dgf/src/analyse:print_schema",
         "//dgf/src/analyse:sampling",
+    ],
+)
+
+py_library(
+    name = "deploy",
+    srcs = ["deploy.py"],
+    deps = [
+        "//dgf/src/deploy:vertex",
     ],
 )

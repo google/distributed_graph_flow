@@ -19,6 +19,7 @@ import os
 
 from absl.testing import absltest
 from absl.testing import parameterized
+from dgf.src.data import schema as schema_lib
 from dgf.src.learning.ten_lines import common
 from dgf.src.util import gen_test_graph
 from dgf.src.util import log
@@ -350,6 +351,72 @@ class TenLines(parameterized.TestCase):
     self.assertGreater(metrics["num_nodes"], 0)
     self.assertGreater(metrics["num_edges"], 0)
     self.assertGreater(metrics["num_features"], 0)
+
+  def test_schema_to_serving_signature_dict(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "f_none": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        shape=None,
+                    ),
+                    "f_none_23": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        shape=(None, 23),
+                    ),
+                    "f_none_1": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        shape=(None, 1),
+                    ),
+                }
+            )
+        },
+        edge_sets={},
+    )
+    signature = common.schema_to_serving_signature_dict(
+        schema_=schema,
+        target_nodeset="n1",
+        model_name="test_model",
+        model_uuid="test_uuid",
+    )
+
+    f_none = signature["gnn_n1_nodes_n1_f_none"]
+    self.assertEqual(f_none["shape"], "(None,)")
+
+    f_none_23 = signature["gnn_n1_nodes_n1_f_none_23"]
+    self.assertEqual(f_none_23["shape"], "(-1, 23)")
+
+    f_none_1 = signature["gnn_n1_nodes_n1_f_none_1"]
+    self.assertEqual(f_none_1["shape"], "(-1, 1)")
+
+  def test_schema_to_serving_signature_dict_link_prediction(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(),
+        },
+        edge_sets={
+            "e1": schema_lib.EdgeSchema(
+                source="n1",
+                target="n1",
+                features={
+                    "f_none": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        shape=None,
+                    ),
+                }
+            )
+        },
+    )
+    signature = common.schema_to_serving_signature_dict(
+        schema_=schema,
+        target_nodeset=None,
+        target_edgeset="e1",
+        model_name="test_model",
+        model_uuid="test_uuid",
+    )
+    f_none = signature["source_edges_e1_f_none"]
+    self.assertEqual(f_none["shape"], "(None,)")
 
 
 if __name__ == "__main__":

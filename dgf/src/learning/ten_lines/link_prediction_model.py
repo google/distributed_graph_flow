@@ -102,6 +102,7 @@ class ModelData:
   target_sampling_plan: sampling_config_lib.SamplingPlan
   training_stats: TrainingStats
   temporal_sampling: bool = False
+
   nodeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
   )
@@ -291,6 +292,25 @@ class LinkPredictionModel(common.Model):
 
   def _internal_load(self, path: str) -> None:
     self._data.model_params = common.load_params(path)
+
+  def _extract_serving_schemata(
+      self,
+  ) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Extracts (instance_schema, prediction_schema) dicts for Vertex AI serving."""
+    if not self.metadata.uuid:
+      raise ValueError("Model UUID is not set.")
+    model_uuid = self.metadata.uuid
+    instance_schema = common.schema_to_serving_signature_dict(
+        schema_=self.data().schema,
+        target_nodeset=None,
+        target_edgeset=self.data().task.target_edgeset,
+        model_name=self.name(),
+        model_uuid=model_uuid,
+        source_sampling_plan=self.data().source_sampling_plan,
+        target_sampling_plan=self.data().target_sampling_plan,
+    )
+    prediction_schema = {"type": "array", "items": {"type": "number"}}
+    return instance_schema, prediction_schema
 
   def describe(self) -> util.RichDisplay:
     """Rich display for colab."""

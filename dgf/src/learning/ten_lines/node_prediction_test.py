@@ -270,6 +270,169 @@ class NodePredictionRealLookingGraphAttentionNetwork(parameterized.TestCase):
         **RAPID_TRAINING_KWARGS,
     )
 
+  def test_extract_serving_schemata(self):
+    signature, pred_schema = self.model._extract_serving_schemata()
+    self.assertEqual(
+        pred_schema, {"type": "array", "items": {"type": "number"}}
+    )
+
+    # Verify the entire signature dictionary matches expectations
+    expected_dict = {
+        "x-google-gnn-input-graphs": [{
+            "input_node": "client",
+            "sampling_plan": [{
+                "edge": "transation_to_client",
+                "width": 5,
+                "reverse": True,
+            }],
+        }],
+        "title": f"NodePrediction_client_{self.model.metadata.uuid}",
+        "type": "object",
+        "required": [
+            "gnn_client_seed_node_idxs",
+            "gnn_client_nodes_client_reserved_size",
+            "gnn_client_nodes_client_#id",
+            "gnn_client_nodes_client_city",
+            "gnn_client_nodes_client_age",
+            "gnn_client_nodes_client_created_at",
+            "gnn_client_nodes_client_categorical_label",
+            "gnn_client_nodes_transaction_reserved_size",
+            "gnn_client_nodes_transaction_#id",
+            "gnn_client_nodes_transaction_date",
+            "gnn_client_nodes_transaction_amount",
+            "gnn_client_nodes_transaction_country",
+            "gnn_client_edges_transation_to_client_reserved_size",
+            "gnn_client_edges_transation_to_client_reserved_adjacency",
+        ],
+        "gnn_client_seed_node_idxs": {
+            "shape": "(None,)",
+            "dtype": "tf.int32",
+            "input_node": "client",
+            "field_kind": "seed_node_idxs",
+        },
+        "gnn_client_nodes_client_#id": {
+            "shape": "(None,)",
+            "dtype": "tf.string",
+            "input_node": "client",
+            "node_label": "client",
+            "property": "#id",
+            "field_kind": "feature",
+        },
+        "gnn_client_nodes_client_city": {
+            "shape": "(None,)",
+            "dtype": "tf.int64",
+            "input_node": "client",
+            "node_label": "client",
+            "property": "city",
+            "field_kind": "feature",
+        },
+        "gnn_client_nodes_client_age": {
+            "shape": "(None,)",
+            "dtype": "tf.int64",
+            "input_node": "client",
+            "node_label": "client",
+            "property": "age",
+            "field_kind": "feature",
+        },
+        "gnn_client_nodes_client_created_at": {
+            "shape": "(None,)",
+            "dtype": "tf.int64",
+            "input_node": "client",
+            "node_label": "client",
+            "property": "created_at",
+            "field_kind": "feature",
+        },
+        "gnn_client_nodes_client_categorical_label": {
+            "shape": "(None,)",
+            "dtype": "tf.int64",
+            "input_node": "client",
+            "node_label": "client",
+            "property": "categorical_label",
+            "field_kind": "feature",
+        },
+        "gnn_client_nodes_client_reserved_size": {
+            "shape": "()",
+            "dtype": "tf.int32",
+            "input_node": "client",
+            "node_label": "client",
+            "field_kind": "size",
+        },
+        "gnn_client_nodes_transaction_#id": {
+            "shape": "(None,)",
+            "dtype": "tf.string",
+            "input_node": "client",
+            "node_label": "transaction",
+            "property": "#id",
+            "field_kind": "feature",
+        },
+        "gnn_client_nodes_transaction_date": {
+            "shape": "(None,)",
+            "dtype": "tf.int64",
+            "input_node": "client",
+            "node_label": "transaction",
+            "property": "date",
+            "field_kind": "feature",
+        },
+        "gnn_client_nodes_transaction_amount": {
+            "shape": "(None,)",
+            "dtype": "tf.int64",
+            "input_node": "client",
+            "node_label": "transaction",
+            "property": "amount",
+            "field_kind": "feature",
+        },
+        "gnn_client_nodes_transaction_country": {
+            "shape": "(None,)",
+            "dtype": "tf.int64",
+            "input_node": "client",
+            "node_label": "transaction",
+            "property": "country",
+            "field_kind": "feature",
+        },
+        "gnn_client_nodes_transaction_reserved_size": {
+            "shape": "()",
+            "dtype": "tf.int32",
+            "input_node": "client",
+            "node_label": "transaction",
+            "field_kind": "size",
+        },
+        "gnn_client_edges_transation_to_client_reserved_size": {
+            "shape": "()",
+            "dtype": "tf.int32",
+            "input_node": "client",
+            "edge_label": "transation_to_client",
+            "field_kind": "size",
+        },
+        "gnn_client_edges_transation_to_client_reserved_adjacency": {
+            "shape": "(2, None)",
+            "dtype": "tf.int64",
+            "input_node": "client",
+            "edge_label": "transation_to_client",
+            "field_kind": "adjacency",
+        },
+    }
+    self.assertDictEqual(signature, expected_dict)
+
+    # Manually hack the schema to test multi-dimensional shape
+    original_shape = (
+        self.model.data().schema.node_sets["client"].features["age"].shape
+    )
+    self.model.data().schema.node_sets["client"].features["age"].shape = (
+        1,
+        128,
+        64,
+    )
+    try:
+      signature_with_shape, _ = self.model._extract_serving_schemata()
+      self.assertEqual(
+          signature_with_shape["gnn_client_nodes_client_age"]["shape"],
+          "(1, 128, 64)",
+      )
+    finally:
+      self.model.data().schema.node_sets["client"].features[
+          "age"
+      ].shape = original_shape
+
   def test_predict(self):
     predictions = self.model.predict(graph=self.graph, seed_node_idxs=[0, 1, 2])
     self.assertEqual(predictions.shape, (3, self.model.num_label_classes()))

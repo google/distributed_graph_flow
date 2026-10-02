@@ -30,6 +30,7 @@ from dgf.src.api import learning
 from dgf.src.api import jax
 from dgf.src.api import exception
 from dgf.src.api import print
+from dgf.src.api import deploy
 
 # TODO(gbm): Remove this alias. Instead, users have to do "from dgf import beam".
 from dgf.src.api import beam

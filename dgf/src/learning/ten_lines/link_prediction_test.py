@@ -901,6 +901,177 @@ class LinkPredictionPredictibleModelTest(absltest.TestCase):
     self.assertEqual(self.model.data().training_stats.num_train_seed_edges, 2)
     self.assertEqual(self.model.data().training_stats.num_valid_seed_edges, 2)
 
+  def test_extract_serving_schemata(self):
+    signature, pred_schema = self.model._extract_serving_schemata()
+    self.assertEqual(
+        pred_schema, {"type": "array", "items": {"type": "number"}}
+    )
+    expected_dict = {
+        "x-google-gnn-input-graphs": [{
+            "input_node": "A",
+            "sampling_plan": [],
+        }, {
+            "input_node": "B",
+            "sampling_plan": [],
+        }],
+        "title": f"LinkPrediction_A_to_B_{self.model.metadata.uuid}",
+        "type": "object",
+        "required": [
+            "source_seed_node_idxs",
+            "source_nodes_A_reserved_size",
+            "source_nodes_A_#id",
+            "source_nodes_A_f",
+            "source_nodes_B_reserved_size",
+            "source_nodes_B_#id",
+            "source_nodes_B_f",
+            "source_edges_A_to_B_reserved_size",
+            "source_edges_A_to_B_reserved_adjacency",
+            "target_seed_node_idxs",
+            "target_nodes_A_reserved_size",
+            "target_nodes_A_#id",
+            "target_nodes_A_f",
+            "target_nodes_B_reserved_size",
+            "target_nodes_B_#id",
+            "target_nodes_B_f",
+            "target_edges_A_to_B_reserved_size",
+            "target_edges_A_to_B_reserved_adjacency",
+        ],
+        "source_seed_node_idxs": {
+            "shape": "(None,)",
+            "dtype": "tf.int32",
+            "input_node": "A",
+            "field_kind": "seed_node_idxs",
+        },
+        "source_nodes_A_reserved_size": {
+            "shape": "()",
+            "dtype": "tf.int32",
+            "input_node": "A",
+            "node_label": "A",
+            "field_kind": "size",
+        },
+        "source_nodes_A_#id": {
+            "shape": "(None,)",
+            "dtype": "tf.int32",
+            "input_node": "A",
+            "node_label": "A",
+            "property": "#id",
+            "field_kind": "feature",
+        },
+        "source_nodes_A_f": {
+            "shape": "(None,)",
+            "dtype": "tf.float32",
+            "input_node": "A",
+            "node_label": "A",
+            "property": "f",
+            "field_kind": "feature",
+        },
+        "source_nodes_B_reserved_size": {
+            "shape": "()",
+            "dtype": "tf.int32",
+            "input_node": "A",
+            "node_label": "B",
+            "field_kind": "size",
+        },
+        "source_nodes_B_#id": {
+            "shape": "(None,)",
+            "dtype": "tf.int32",
+            "input_node": "A",
+            "node_label": "B",
+            "property": "#id",
+            "field_kind": "feature",
+        },
+        "source_nodes_B_f": {
+            "shape": "(None,)",
+            "dtype": "tf.float32",
+            "input_node": "A",
+            "node_label": "B",
+            "property": "f",
+            "field_kind": "feature",
+        },
+        "source_edges_A_to_B_reserved_size": {
+            "shape": "()",
+            "dtype": "tf.int32",
+            "input_node": "A",
+            "edge_label": "A_to_B",
+            "field_kind": "size",
+        },
+        "source_edges_A_to_B_reserved_adjacency": {
+            "shape": "(2, None)",
+            "dtype": "tf.int64",
+            "input_node": "A",
+            "edge_label": "A_to_B",
+            "field_kind": "adjacency",
+        },
+        "target_seed_node_idxs": {
+            "shape": "(None,)",
+            "dtype": "tf.int32",
+            "input_node": "B",
+            "field_kind": "seed_node_idxs",
+        },
+        "target_nodes_A_reserved_size": {
+            "shape": "()",
+            "dtype": "tf.int32",
+            "input_node": "B",
+            "node_label": "A",
+            "field_kind": "size",
+        },
+        "target_nodes_A_#id": {
+            "shape": "(None,)",
+            "dtype": "tf.int32",
+            "input_node": "B",
+            "node_label": "A",
+            "property": "#id",
+            "field_kind": "feature",
+        },
+        "target_nodes_A_f": {
+            "shape": "(None,)",
+            "dtype": "tf.float32",
+            "input_node": "B",
+            "node_label": "A",
+            "property": "f",
+            "field_kind": "feature",
+        },
+        "target_nodes_B_reserved_size": {
+            "shape": "()",
+            "dtype": "tf.int32",
+            "input_node": "B",
+            "node_label": "B",
+            "field_kind": "size",
+        },
+        "target_nodes_B_#id": {
+            "shape": "(None,)",
+            "dtype": "tf.int32",
+            "input_node": "B",
+            "node_label": "B",
+            "property": "#id",
+            "field_kind": "feature",
+        },
+        "target_nodes_B_f": {
+            "shape": "(None,)",
+            "dtype": "tf.float32",
+            "input_node": "B",
+            "node_label": "B",
+            "property": "f",
+            "field_kind": "feature",
+        },
+        "target_edges_A_to_B_reserved_size": {
+            "shape": "()",
+            "dtype": "tf.int32",
+            "input_node": "B",
+            "edge_label": "A_to_B",
+            "field_kind": "size",
+        },
+        "target_edges_A_to_B_reserved_adjacency": {
+            "shape": "(2, None)",
+            "dtype": "tf.int64",
+            "input_node": "B",
+            "edge_label": "A_to_B",
+            "field_kind": "adjacency",
+        },
+    }
+    self.maxDiff = None
+    self.assertDictEqual(signature, expected_dict)
+
   def test_predict(self):
     predictions = self.model.predict(
         self.graph, source_node_idxs=[0, 1], target_node_idxs=[0, 1, 1, 2]

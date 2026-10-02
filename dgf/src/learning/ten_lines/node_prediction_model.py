@@ -25,6 +25,7 @@ import dataclasses
 import enum
 import itertools
 import textwrap
+from typing import Any
 
 import dataclasses_json
 from dgf.src.data import in_memory_graph
@@ -157,6 +158,7 @@ class ModelData:
   feature_stats: statistics_lib.GraphFeatureStatistics
   training_stats: TrainingStats
   temporal_sampling: bool
+
   nodeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
   )
@@ -214,6 +216,29 @@ class NodePredictionModel(common.Model):
 
   def _internal_load(self, path: str) -> None:
     self._data.model_params = common.load_params(path)
+
+  def _extract_serving_schemata(
+      self,
+  ) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Extracts (instance_schema, prediction_schema) dicts for Vertex AI serving."""
+    if not self.metadata.uuid:
+      raise ValueError("Model UUID is not set.")
+    model_uuid = self.metadata.uuid
+    instance_schema = common.schema_to_serving_signature_dict(
+        schema_=self.data().schema,
+        target_nodeset=self.data().task.target_nodeset,
+        model_name=self.name(),
+        model_uuid=model_uuid,
+        source_sampling_plan=self.data().sampling_plan,
+    )
+    task_type = self.data().task.task_type
+    if task_type == TaskType.NODE_REGRESSION:
+      prediction_schema = {"type": "number"}
+    elif task_type == TaskType.NODE_CLASSIFICATION:
+      prediction_schema = {"type": "array", "items": {"type": "number"}}
+    else:
+      raise ValueError(f"Unsupported task_type: {task_type}")
+    return instance_schema, prediction_schema
 
   def describe(self) -> util.RichDisplay:
     # TODO(gbm): Make a good rich report.
