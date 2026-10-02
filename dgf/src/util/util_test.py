@@ -320,5 +320,31 @@ class SplitTrainValidTest(parameterized.TestCase):
       )
 
 
+class PrefetchIteratorTest(absltest.TestCase):
+
+  def test_prefetch_basic(self):
+    items = list(range(10))
+    prefetched = list(util.prefetch_iterator(iter(items), prefetch_size=2))
+    self.assertEqual(prefetched, items)
+
+  def test_prefetch_disabled(self):
+    items = list(range(5))
+    self.assertEqual(
+        list(util.prefetch_iterator(iter(items), prefetch_size=0)), items
+    )
+
+  def test_prefetch_error_propagation(self):
+    def failing_iterator():
+      yield 1
+      yield 2
+      raise RuntimeError("Failure in iterator")
+
+    it = util.prefetch_iterator(failing_iterator(), prefetch_size=2)
+    self.assertEqual(next(it), 1)
+    self.assertEqual(next(it), 2)
+    with self.assertRaises(RuntimeError):
+      next(it)
+
+
 if __name__ == "__main__":
   absltest.main()

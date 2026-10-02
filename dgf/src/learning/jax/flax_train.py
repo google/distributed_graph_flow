@@ -307,6 +307,8 @@ def train(
         early_stopping_monitor.EarlyStoppingMonitorConfig | None
     ) = None,
     early_stopping_keep_best_param: bool = True,
+    aot_compile: bool = True,
+    prefetch: bool | int = 2,
 ) -> TrainResult:
   """Trains a Flax module with a flexible and feature-rich training loop.
 
@@ -375,6 +377,11 @@ def train(
     early_stopping_keep_best_param: If true, and if early stopping is enabled,
       returns the lowest loss. This option leads to better quality model but
       consumes more memory.
+    aot_compile: If True and `train_step` is a jitted function, compiles the
+      training step ahead of time before the training loop starts, separating
+      compilation time from training throughput measurements.
+    prefetch: Number of batches to prefetch asynchronously on a background
+      thread. If True, defaults to 2. If False or 0, prefetching is disabled.
 
   Returns:
     A `TrainResult` dataclass containing:
@@ -419,13 +426,24 @@ def train(
         pass
     metric_writer = metric_writers.MultiWriter(writers)
 
+  if prefetch:
+    prefetch_size = 2 if isinstance(prefetch, bool) else int(prefetch)
+    if prefetch_size > 0:
+      dataset_iterator = util.prefetch_iterator(
+          dataset_iterator, prefetch_size=prefetch_size
+      )
+
+  first_batch = None
   if model_params is None:
     if dummy_data is None:
       log.info("Generate first batch to initialize model")
+      first_batch = next(dataset_iterator)
       if dummy_data_fn is not None:
-        dummy_data = dummy_data_fn(next(dataset_iterator))
+        dummy_data = dummy_data_fn(first_batch)
       else:
-        dummy_data = next(dataset_iterator)
+        dummy_data = first_batch
+    else:
+      first_batch = dummy_data
 
     with util.print_timer("Create model variables", True):
       rng_key, model_key = jax.random.split(rng_key, 2)
@@ -567,7 +585,19 @@ def train(
   if checkpoint_every_n_steps is not None:
     log.info("Will checkpoint model every %s step(s)", checkpoint_every_n_steps)
 
-  log.info("Start training. The first two steps are generally slow.")
+  if aot_compile and hasattr(train_step, "lower"):
+    sample_batch = first_batch if first_batch is not None else dummy_data
+    if sample_batch is not None:
+      with util.print_timer("Compile train step", True):
+        rng_key, aot_step_key = jax.random.split(state.rng_key, 2)
+        train_step = train_step.lower(
+            state.model_params,
+            state.opt_state,
+            sample_batch,
+            aot_step_key,
+        ).compile()
+
+  log.info("Start training.")
   start_time = time.time()
   pbar = tqdm.tqdm(
       range(state.step + 1, num_train_steps + 1),
@@ -579,6 +609,7 @@ def train(
   effective_num_train_steps = 0
   for step in pbar:
     with jax.profiler.StepTraceAnnotation("train", step_num=step):
+      t_step_start = time.perf_counter()
       if max_training_time_seconds is not None:
         elapsed_time = time.time() - start_time
         if elapsed_time > max_training_time_seconds:
@@ -708,6 +739,10 @@ def train(
     metric_writer.flush()
 
   log.info(f"Final metrics: {list_display_dict}")
+
+  if hasattr(dataset_iterator, "close"):
+    dataset_iterator.close()
+
   return TrainResult(
       model_params=state.model_params,
       opt_state=state.opt_state,

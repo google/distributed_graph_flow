@@ -17,7 +17,10 @@
 from collections.abc import Iterator
 import contextlib
 import math
+import queue
+import threading
 import time
+from typing import Any, TypeVar
 from dgf.src.util import log
 import numpy as np
 
@@ -311,3 +314,109 @@ def indent_string(s: str, num_spaces: int = 8) -> str:
   """Indents a multi-line string by num_spaces."""
   indent = " " * num_spaces
   return s.strip().replace("\n", f"\n{indent}")
+
+
+T = TypeVar("T")
+
+
+class BackgroundPrefetcher(Iterator[T]):
+  """Prefetches items from an iterator in a background thread.
+
+  Up to `prefetch_size` items are computed ahead of time, so that the consumer
+  does not wait on the source iterator (e.g. while it loads data from disk).
+
+  Usage example:
+
+  ```python
+    def load_batches():
+      for path in paths:
+        yield read_batch(path)  # Slow I/O.
+
+    for batch in BackgroundPrefetcher(load_batches(), prefetch_size=4):
+      train_step(batch)  # Runs while the next batches are being loaded.
+  ```
+
+  Exceptions raised by the source iterator are re-raised in the consumer thread
+  by `__next__`. Call `close()` to stop the background thread early (e.g. when
+  breaking out of the loop); it is also called automatically on exhaustion.
+  """
+
+  _SENTINEL = object()
+
+  def __init__(self, iterator: Iterator[T], prefetch_size: int = 2):
+    if prefetch_size <= 0:
+      raise ValueError(f"`prefetch_size` must be positive, got {prefetch_size}")
+    self._iterator = iterator
+    self._prefetch_size = prefetch_size
+    self._queue: queue.Queue[Any] = queue.Queue(maxsize=prefetch_size)
+    self._stop_event = threading.Event()
+    self._thread = threading.Thread(target=self._worker, daemon=True)
+    self._thread.start()
+
+  def _put(self, item: Any) -> bool:
+    """Puts `item` in the queue, retrying while the queue is full.
+
+    Returns:
+      True if the item was enqueued, False if the prefetcher was stopped before
+      the item could be enqueued.
+    """
+    while not self._stop_event.is_set():
+      try:
+        self._queue.put(item, timeout=0.1)
+        return True
+      except queue.Full:
+        pass
+    return False
+
+  def _worker(self):
+    try:
+      for item in self._iterator:
+        if not self._put(item):
+          return
+      self._put(self._SENTINEL)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+      self._put(e)
+
+  def __iter__(self) -> Iterator[T]:
+    return self
+
+  def __next__(self) -> T:
+    if self._stop_event.is_set():
+      raise StopIteration
+    item = self._queue.get()
+    if item is self._SENTINEL:
+      self.close()
+      raise StopIteration
+    if isinstance(item, Exception):
+      self.close()
+      raise item
+    return item
+
+  def close(self):
+    """Stops the background prefetcher thread and drains queued items."""
+    self._stop_event.set()
+    while not self._queue.empty():
+      try:
+        self._queue.get_nowait()
+      except queue.Empty:
+        break
+
+  def __del__(self):
+    self.close()
+
+
+def prefetch_iterator(
+    iterator: Iterator[T], prefetch_size: int = 2
+) -> Iterator[T]:
+  """Wraps an iterator to prefetch elements asynchronously on a background thread.
+
+  Args:
+    iterator: The source iterator.
+    prefetch_size: The number of elements to prefetch ahead in the buffer.
+
+  Returns:
+    An iterator that yields prefetched elements.
+  """
+  if prefetch_size <= 0:
+    return iterator
+  return BackgroundPrefetcher(iterator, prefetch_size=prefetch_size)

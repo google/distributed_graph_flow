@@ -445,6 +445,29 @@ class FlaxTrainTest(parameterized.TestCase):
             rng_key=jax.random.PRNGKey(42),
         )
 
+  def test_aot_compile_and_prefetch(self):
+    @jax.jit
+    def train_step(params, opt_state, batch, rng_key):
+      return params, opt_state, {"loss": jnp.array(1.0)}
+
+    model = SimpleModel(hidden_dim=8)
+    opt = optax.adam(1e-3)
+
+    result = flax_train.train(
+        model=model,
+        opt=opt,
+        train_step=train_step,
+        dataset_iterator=dataset_iterator(num_steps=None),
+        dummy_data_fn=lambda x: x["data"],
+        num_train_steps=5,
+        rng_key=jax.random.PRNGKey(42),
+        aot_compile=True,
+        prefetch=2,
+    )
+    self.assertEqual(
+        result.model_params["params"]["Dense_0"]["kernel"].shape, (8, 8)
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

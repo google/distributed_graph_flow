@@ -47,6 +47,7 @@ from dgf.src.util import filesystem as fs
 from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
+
 import jax
 import jax.numpy as jnp
 import jaxtyping
@@ -189,6 +190,7 @@ def train_node_model(
     early_stopping: bool | int = True,
     evaluate_final_model: bool = True,
     padding_margin: float = 0.1,
+    fast_compile: bool = False,
 ) -> NodePredictionModel:
   """Trains a supervised Graph Neural Network model for node-level prediction.
 
@@ -286,6 +288,10 @@ def train_node_model(
       the periodic evaluations done during training.
     padding_margin: Relative margin added to observed maximum node and edge
       counts when estimating static graph padding.
+    fast_compile: If True, optimizes compilation speed at the expense of slight
+      runtime execution speed. Useful for fast iteration, interactive debugging,
+      and unit tests. Specifically, this disables expensive XLA GEMM autotuning
+      (--xla_gpu_autotune_level=0).
 
   Returns:
     A trained `NodePredictionModel` instance.
@@ -299,6 +305,9 @@ def train_node_model(
   # "cache_normalized_features_device".
 
   with log.capture_logs() as captured_logs:
+
+    if fast_compile:
+      common.enable_fast_compile()
 
     architecture = common.parse_architecture(architecture)
     timeseries_encoder = common.parse_timeseries_encoder(timeseries_encoder)
@@ -688,38 +697,49 @@ def train_node_model(
             num_batches_to_cache = num_valid_steps
           else:
             num_batches_to_cache = min(num_batches_to_cache, num_valid_steps)
-        valid_dataset_list = []
-        try:
-          with util.print_timer("Caching validation dataset", verbose >= 1):
-            valid_iter = valid_dataset_iterator_fn()
-            if verbose >= 2:
-              valid_iter = tqdm.tqdm(
-                  valid_iter,
-                  total=num_batches_to_cache,
-                  desc="Caching validation dataset",
+        raw_valid_dataset_iterator_fn = valid_dataset_iterator_fn
+        cached_valid_dataset_list = None
+        valid_dataset_caching_failed = False
+
+        def cached_valid_dataset_iterator_fn():
+          nonlocal cached_valid_dataset_list, valid_dataset_caching_failed
+          if valid_dataset_caching_failed:
+            yield from raw_valid_dataset_iterator_fn()
+            return
+          if cached_valid_dataset_list is None:
+            valid_dataset_list = []
+            try:
+              with util.print_timer("Caching validation dataset", verbose >= 1):
+                valid_iter = raw_valid_dataset_iterator_fn()
+                if verbose >= 2:
+                  valid_iter = tqdm.tqdm(
+                      valid_iter,
+                      total=num_batches_to_cache,
+                      desc="Caching validation dataset",
+                  )
+                for batch in valid_iter:
+                  valid_dataset_list.append(batch)
+            except (jax.errors.JaxRuntimeError, RuntimeError, ValueError) as e:
+              valid_dataset_list.clear()
+              if "RESOURCE_EXHAUSTED" not in str(e):
+                raise
+              log.warning(
+                  "Out of device memory while caching validation dataset (%s);"
+                  " falling back to uncached validation dataset.",
+                  e,
               )
-            for batch in valid_iter:
-              valid_dataset_list.append(batch)
+              valid_dataset_caching_failed = True
+              yield from raw_valid_dataset_iterator_fn()
+              return
+            if verbose >= 1:
+              log.info(
+                  "Number of cache validation batches: %d",
+                  len(valid_dataset_list),
+              )
+            cached_valid_dataset_list = valid_dataset_list
+          yield from cached_valid_dataset_list
 
-          if verbose >= 1:
-            log.info(
-                "Number of cache validation batches: %d",
-                len(valid_dataset_list),
-            )
-
-          def cached_valid_dataset_iterator_fn():
-            yield from valid_dataset_list
-
-          valid_dataset_iterator_fn = cached_valid_dataset_iterator_fn
-        except (jax.errors.JaxRuntimeError, RuntimeError, ValueError) as e:
-          valid_dataset_list.clear()
-          if "RESOURCE_EXHAUSTED" not in str(e):
-            raise
-          log.warning(
-              "Out of device memory while caching validation dataset (%s);"
-              " falling back to uncached validation dataset.",
-              e,
-          )
+        valid_dataset_iterator_fn = cached_valid_dataset_iterator_fn
 
       def valid_step(params, opt_state, batch: Batch):
         graph, seed_node_idxs = batch

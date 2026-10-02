@@ -359,6 +359,7 @@ def train_link_model(
     source_sampling_plan: sampling_config_lib.SamplingPlan | None = None,
     target_sampling_plan: sampling_config_lib.SamplingPlan | None = None,
     early_stopping: bool | int = True,
+    fast_compile: bool = False,
 ) -> LinkPredictionModel:
   """Trains a supervised Graph Neural Network model for edge prediction.
 
@@ -450,6 +451,10 @@ def train_link_model(
     early_stopping: If True, use early stopping with default parameters
       (patience=5). If an integer, use early stopping with the given patience.
       If False, do not use early stopping.
+    fast_compile: If True, optimizes compilation speed at the expense of slight
+      runtime execution speed. Useful for fast iteration, interactive debugging,
+      and unit tests. Specifically, this disables expensive XLA GEMM autotuning
+      (--xla_gpu_autotune_level=0).
 
   Returns:
     A LinkPredictionModel instance.
@@ -459,6 +464,9 @@ def train_link_model(
   # TODO(gbm): Add support for other type of graph inputs.
 
   with log.capture_logs() as captured_logs:
+
+    if fast_compile:
+      common.enable_fast_compile()
 
     architecture = common.parse_architecture(architecture)
     timeseries_encoder = common.parse_timeseries_encoder(timeseries_encoder)
@@ -750,42 +758,46 @@ def train_link_model(
           yield jax_sample_to_batch(batch)
 
       if cache_valid_dataset:
-        with util.print_timer("Caching validation dataset", verbose >= 1):
-          if verbose >= 2:
-            num_examples_to_cache = valid_dataset.num_edge_in_seed_edgeset()
-            num_batches_to_cache = (
-                util.num_batches(
-                    num_examples_to_cache,
-                    batch_size=valid_dataset.batch_size,
-                    drop_remainder=valid_dataset.drop_remainder,
-                )
-                if num_examples_to_cache is not None
-                else None
+        num_examples_to_cache = valid_dataset.num_edge_in_seed_edgeset()
+        num_batches_to_cache = (
+            util.num_batches(
+                num_examples_to_cache,
+                batch_size=valid_dataset.batch_size,
+                drop_remainder=valid_dataset.drop_remainder,
             )
-            if num_valid_steps is not None:
-              if num_batches_to_cache is None:
-                num_batches_to_cache = num_valid_steps
-              else:
-                num_batches_to_cache = min(
-                    num_batches_to_cache, num_valid_steps
-                )
-            valid_dataset_list = list(
-                tqdm.tqdm(
-                    valid_dataset_iterator_fn(),
-                    total=num_batches_to_cache,
-                    desc="Caching validation dataset",
-                )
-            )
+            if num_examples_to_cache is not None
+            else None
+        )
+        if num_valid_steps is not None:
+          if num_batches_to_cache is None:
+            num_batches_to_cache = num_valid_steps
           else:
-            valid_dataset_list = list(valid_dataset_iterator_fn())
-
-        if verbose >= 1:
-          log.info(
-              "Number of cache validation batches: %d", len(valid_dataset_list)
-          )
+            num_batches_to_cache = min(num_batches_to_cache, num_valid_steps)
+        raw_valid_dataset_iterator_fn = valid_dataset_iterator_fn
+        cached_valid_dataset_list: list[Batch] | None = None
 
         def cached_valid_dataset_iterator_fn() -> Iterator[Batch]:
-          yield from valid_dataset_list
+          nonlocal cached_valid_dataset_list
+          if cached_valid_dataset_list is None:
+            with util.print_timer("Caching validation dataset", verbose >= 1):
+              if verbose >= 2:
+                cached_valid_dataset_list = list(
+                    tqdm.tqdm(
+                        raw_valid_dataset_iterator_fn(),
+                        total=num_batches_to_cache,
+                        desc="Caching validation dataset",
+                    )
+                )
+              else:
+                cached_valid_dataset_list = list(
+                    raw_valid_dataset_iterator_fn()
+                )
+            if verbose >= 1:
+              log.info(
+                  "Number of cache validation batches: %d",
+                  len(cached_valid_dataset_list),
+              )
+          yield from cached_valid_dataset_list
 
         valid_dataset_iterator_fn = cached_valid_dataset_iterator_fn
 

@@ -115,6 +115,18 @@ def parse_timeseries_encoder(
     ) from exc
 
 
+def enable_fast_compile() -> None:
+  """Configures XLA for fast compilation during development and testing.
+
+  Disables expensive XLA GPU GEMM autotuning benchmarks.
+  """
+  xla_flags = os.environ.get("XLA_FLAGS", "")
+  if "--xla_gpu_autotune_level" not in xla_flags:
+    os.environ["XLA_FLAGS"] = (
+        xla_flags + " --xla_gpu_autotune_level=0"
+    ).strip()
+
+
 class TFFunctionInputFormat(enum.Enum):
   """Input format of a model exported with `to_tensorflow_function`.
 
