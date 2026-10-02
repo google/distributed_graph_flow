@@ -1216,6 +1216,34 @@ class NodePredictionNegativeLabelTest(absltest.TestCase):
           **RAPID_TRAINING_KWARGS,
       )
 
+  def test_negative_label_on_non_seed_neighbors_succeeds(self):
+    num_n1 = self.graph.node_sets["N1"].num_nodes
+    assert num_n1 is not None
+    # Connect labeled seed nodes (10..num_n1-1) directly to unlabeled neighbor
+    # nodes (0..9) in N1 so 1-hop sampling includes unlabeled N1 neighbors.
+    graph = copy.deepcopy(self.graph)
+    schema = copy.deepcopy(self.schema)
+    src = np.arange(10, dtype=np.int64)
+    dst = np.arange(10, 20, dtype=np.int64)
+    graph.edge_sets["n1_to_n1"] = in_memory_graph_lib.InMemoryEdgeSet(
+        adjacency=np.stack([src, dst], axis=0)
+    )
+    schema.edge_sets["n1_to_n1"] = schema_lib.EdgeSchema(
+        source="N1", target="N1"
+    )
+    model = node_prediction_lib.train_node_model(
+        graph=graph,
+        schema=schema,
+        target_nodeset="N1",
+        target_column="label",
+        train_seed_nodes=list(range(10, 40)),
+        valid_seed_nodes=list(range(40, 50)),
+        padding_margin=_NO_SKIP_PADDING_MARGIN,
+        **RAPID_TRAINING_KWARGS,
+    )
+    label_stats = model.data().feature_stats.node_sets["N1"].features["label"]
+    self.assertGreaterEqual(label_stats.minimum, 0)
+
 
 class NodePredictionRegressionToy(parameterized.TestCase):
 

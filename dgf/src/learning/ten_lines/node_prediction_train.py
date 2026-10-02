@@ -423,6 +423,7 @@ def train_node_model(
             cache_normalized_features_device=cache_normalized_features_device,
             sampling_plan=sampling_plan,
             padding_margin=hparams.padding_margin,
+            target_column=task.target_column,
         )
     normalized_schema = train_dataset.generated_schema()
 
