@@ -36,3 +36,4 @@ fastavro
 datasketch
 protobuf
 pyvis
+scipy
