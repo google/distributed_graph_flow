@@ -214,7 +214,7 @@ def read_tfrecord(
   """
 
   def _read_tfrecord_dataset(path):
-    return tf.data.TFRecordDataset(  # pyrefly: ignore[bad-instantiation]
+    return tf.data.TFRecordDataset(
         path, compression_type="GZIP" if compressed else ""
     )
 

@@ -401,7 +401,7 @@ class Homogenizer:
       )
     return (
         engine.graph_cls(
-            node_sets={  # pyrefly: ignore[bad-argument-type]
+            node_sets={
                 self._homogenized_nodeset_name: engine.nodeset_cls(  # pyrefly: ignore[bad-assignment]
                     num_nodes=dst_num_nodes,
                     features=new_nodeset_featureset,

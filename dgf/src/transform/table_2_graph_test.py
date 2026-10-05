@@ -173,7 +173,7 @@ class Table2GraphTest(absltest.TestCase):
 
   def test_invalid_input_type(self):
     with self.assertRaises(TypeError):
-      table_2_graph_lib.table2graph([1, 2, 3])  # pytype: disable=wrong-arg-types
+      table_2_graph_lib.table2graph([1, 2, 3])  # pyrefly: ignore[bad-argument-type]
 
   def test_empty_input(self):
     with self.assertRaises(ValueError):

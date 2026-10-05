@@ -30,7 +30,7 @@ def read_metadata(
   """Reads and parses GraphSnapshotsMetadata from a JSON file."""
   with filesystem.open_read(metadata_path) as f:
     data = json.loads(f.read())
-  return snapshot_metadata_data.GraphSnapshotsMetadata.from_dict(data)  # pytype: disable=attribute-error  # pyrefly: ignore[missing-attribute]
+  return snapshot_metadata_data.GraphSnapshotsMetadata.from_dict(data)  # pyrefly: ignore[missing-attribute]
 
 
 def write_metadata(
@@ -39,5 +39,5 @@ def write_metadata(
   """Serializes and writes GraphSnapshotsMetadata to a JSON file."""
   with filesystem.open_write(metadata_path) as f:
     f.write(
-        json.dumps(metadata.to_dict(), indent=2)  # pytype: disable=attribute-error  # pyrefly: ignore[missing-attribute]
+        json.dumps(metadata.to_dict(), indent=2)  # pyrefly: ignore[missing-attribute]
     )

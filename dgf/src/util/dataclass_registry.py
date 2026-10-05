@@ -109,7 +109,7 @@ class Registry:
     if default_factory is not dataclasses.MISSING:
       kwargs["default_factory"] = default_factory
 
-    return dataclasses.field(  # pytype: disable=wrong-keyword-args
+    return dataclasses.field(
         **kwargs,
         metadata=dataclasses_json.config(
             encoder=self._encode, decoder=self._decode

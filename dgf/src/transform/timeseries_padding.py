@@ -14,7 +14,6 @@
 
 """Padding and capping for timeseries sequence features in graphs."""
 
-# pytype: disable=module-attr
 import dataclasses
 from typing import Any
 
@@ -289,7 +288,7 @@ def pad_timeseries_feature_set(
     padded_matrix, mask_matrix = _pad_and_cap_single_feature(
         raw_series=val,
         seq_len=seq_len,
-        feat_shape=feat_shape,
+        feat_shape=feat_shape,  # pyrefly: ignore[bad-argument-type]
         padding_value=feature_padding_val,
         dtype=dtype,
         is_static_shape=feature_schema.is_static_shape(),

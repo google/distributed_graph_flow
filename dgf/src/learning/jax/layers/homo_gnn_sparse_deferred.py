@@ -176,7 +176,7 @@ class ProjectorConfig(JaxBaseConfig):
   def name(self) -> str:
     return "Projector"
 
-  def make(  # pytype: disable=signature-mismatch  # pyrefly: ignore[bad-override]
+  def make(
       self, name: str | None = None
   ) -> "Projector":
     return Projector(config=self, name=name)
@@ -233,7 +233,7 @@ class GCNConfig(JaxBaseConfig):
   def name(self) -> str:
     return "GCN"
 
-  def make(  # pytype: disable=signature-mismatch  # pyrefly: ignore[bad-override]
+  def make(
       self, name: str | None = None
   ) -> "GCN":
     return GCN(config=self, name=name)
@@ -323,7 +323,7 @@ class MPNNConfig(JaxBaseConfig):
   def name(self) -> str:
     return "MPNN"
 
-  def make(  # pytype: disable=signature-mismatch  # pyrefly: ignore[bad-override]
+  def make(
       self, name: str | None = None
   ) -> "MPNN":
     return MPNN(config=self, name=name)
@@ -464,7 +464,7 @@ class GINConfig(JaxBaseConfig):
   def name(self) -> str:
     return "GIN"
 
-  def make(  # pytype: disable=signature-mismatch  # pyrefly: ignore[bad-override]
+  def make(
       self, name: str | None = None
   ) -> "GIN":
     return GIN(config=self, name=name)
@@ -555,7 +555,7 @@ class ConditionalGIN(GIN):
         name_prefix=f"{self.config.name_prefix}/labeling_projection",
     )
 
-  def __call__(self, graph: GraphStruct, idx: int, training: bool = False) -> GraphStruct:  # pytype: disable=signature-mismatch  # overriding-return-type-checks
+  def __call__(self, graph: GraphStruct, idx: int, training: bool = False) -> GraphStruct:
     x = get_node_features(
         graph,
         nodeset_name=self.config.nodeset_name,

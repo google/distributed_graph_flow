@@ -48,7 +48,7 @@ class Config(Protocol[_T]):  # pyrefly: ignore[bad-class-definition]
 
   def to_dict(self) -> dict[str, Any]:
     """Convert the configuration to a dictionary."""
-    params = dataclasses.asdict(self)  # pyrefly: ignore[bad-argument-type]
+    params = dataclasses.asdict(self)
     params["name"] = self.name()
     return params
 

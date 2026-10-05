@@ -444,7 +444,7 @@ def write_node_set_to_spanner(
       nodes
       | f"NodesToSpannerRows_{node_set_name}"
       >> beam.Map(
-          functools.partial(  # pytype: disable=wrong-arg-count
+          functools.partial(
               node_to_spanner_row, cls=node_row_type, id_key=id_key
           )
       ).with_output_types(node_row_type)
@@ -524,7 +524,7 @@ def write_edge_set_to_spanner(
       edges
       | f"EdgesToSpannerRows_{edge_set_name}"
       >> beam.Map(
-          functools.partial(  # pytype: disable=wrong-arg-count
+          functools.partial(
               edge_to_spanner_row, cls=edge_row_type, id_key=id_key
           )
       ).with_output_types(edge_row_type)

@@ -70,7 +70,7 @@ def py_arrow_chunked_binary_to_np_bytes(column: pa.ChunkedArray) -> np.ndarray:
     A numpy array of type `bytes`.
   """
   # TODO(gbm): Implement the full function in c++.
-  max_len = pc.max(pa.compute.binary_length(column)).as_py()  # pytype: disable=module-attr
+  max_len = pc.max(pa.compute.binary_length(column)).as_py()  # pyrefly: ignore[missing-attribute]
   if max_len is None:
     max_len = 1
   num_values = len(column)

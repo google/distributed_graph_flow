@@ -224,7 +224,7 @@ class DictionaryIndexNormalizer(AbstractFeatureNormalizer):
           initializer,
           default_value=tf.constant(self.out_of_vocab_value, dtype=tf.int64),
       )
-    return [self.tf_table]  # pyrefly: ignore[bad-return]
+    return [self.tf_table]
 
   def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
     self.tensorflow_resources()

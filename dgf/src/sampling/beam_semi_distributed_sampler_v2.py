@@ -483,7 +483,7 @@ def Stage8AddFeatureValueToSample(
         continue
       values = [None] * num_nodes  # pyrefly: ignore[unsupported-operation]
       num_values = 0
-      for node_idx, row_features in src_features:  # pytype: disable=attribute-error
+      for node_idx, row_features in src_features:  # pyrefly: ignore[not-iterable]
         values[node_idx] = row_features[feature_name]  # pyrefly: ignore[unsupported-operation]
         num_values += 1
       assert num_nodes == num_values

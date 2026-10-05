@@ -590,9 +590,7 @@ def write_tfgnn_graphs_beam(
   if not has_dynamic_shape:
     coder = beam.coders.BytesCoder()
     tf_examples = graphs | "ToSerializedBytes" >> beam.MapTuple(
-        # pytype: disable=module-attr
         lambda key, graph: (key, tf_graph_sample_ext.serialize_graph(graph))
-        # pytype: enable=module-attr
     )
   else:
     coder = beam.coders.ProtoCoder(tf.train.Example)
@@ -800,7 +798,7 @@ def _serialized_tfgnn_graph_dataset(
       # efficient network requests.
       return tf.data.TFRecordDataset(
           path, compression_type=compression, buffer_size=16 * 1024 * 1024
-      )  # pyrefly: ignore[bad-instantiation]
+      )
 
   else:
     raise ValueError("Non supported container type")

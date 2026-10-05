@@ -24,7 +24,7 @@ from dgf.benchmark import utils as benchmark_utils
 
 
 def _compute_num_nodes_edges(graph) -> tuple[int, int]:
-  num_nodes = sum([x.num_nodes for x in graph.node_sets.values()])  # pyrefly: ignore[no-matching-overload]
+  num_nodes = sum([x.num_nodes for x in graph.node_sets.values()])
   num_edges = sum([x.adjacency.shape[1] for x in graph.edge_sets.values()])
   return num_nodes, num_edges
 

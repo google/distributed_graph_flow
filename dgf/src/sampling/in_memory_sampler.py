@@ -318,7 +318,7 @@ class Sampler:
         )
         sampling_temporal_lib.extract_features_timeseries(
             graph=sample,
-            timeseries_schema_cache=self._timeseries_schema_cache,  # pyrefly: ignore[bad-argument-type]
+            timeseries_schema_cache=self._timeseries_schema_cache,
             target_timestamp=target_timestamp,
             max_timeseries_len=self._max_timeseries_len,
         )
