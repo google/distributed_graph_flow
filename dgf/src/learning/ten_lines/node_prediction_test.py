@@ -640,7 +640,7 @@ class NodePredictionRealLooking(parameterized.TestCase):
 
     tf_predict_fn = self.model.to_tensorflow_function(input_format=input_format)
 
-    prediction_sample_1 = tf_predict_fn(**kwargs_call_1)  # pyrefly: ignore[not-callable]
+    prediction_sample_1 = tf_predict_fn(**kwargs_call_1)
 
     # Expected prediction
     expected_prediction_sample_1 = self.model.predict(sample_1, [0])
@@ -757,7 +757,7 @@ class NodePredictionRealLooking(parameterized.TestCase):
         input_format="SERIALIZED_TFGNN_GRAPHS"
     )
 
-    predictions = tf_predict_fn(serialized_samples)  # pyrefly: ignore[not-callable]
+    predictions = tf_predict_fn(serialized_samples)
     self.assertEqual(
         predictions.shape.as_list(), list(expected_predictions.shape)
     )
@@ -796,7 +796,7 @@ class NodePredictionRealLooking(parameterized.TestCase):
         consume_tf_graph_dict=True
     )
 
-    prediction = tf_predict_fn(  # pyrefly: ignore[not-callable]
+    prediction = tf_predict_fn(
         **tf_io.tf_graph_to_tf_graph_dict(tf_sample),
         seed_node_idxs=tf.constant([0]),
     )
@@ -994,7 +994,7 @@ class NodePredictionGraphSamplesWithoutSamplingPlanTest(parameterized.TestCase):
     self.assertIsNotNone(captured_logs)
     warnings = [
         message.text
-        for message in captured_logs  # pyrefly: ignore[bad-argument-type]
+        for message in captured_logs
         if message.severity == log.Severity.WARNING
         and "`sampling_plan`" in message.text
     ]
@@ -1034,7 +1034,7 @@ class NodePredictionGraphSamplesWithoutSamplingPlanTest(parameterized.TestCase):
     tf_predict_fn = self.model.to_tensorflow_function(
         input_format="SERIALIZED_TFGNN_GRAPHS"
     )
-    predictions = tf_predict_fn(serialized_samples)  # pyrefly: ignore[not-callable]
+    predictions = tf_predict_fn(serialized_samples)
     np.testing.assert_allclose(
         predictions.numpy(), expected_predictions, atol=1e-5
     )
@@ -1566,7 +1566,7 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
     eval_result = model.evaluate(graph)
     self.assertEqual(eval_result.num_examples, 2)
     self.assertIsNotNone(eval_result.rmse)
-    self.assertLess(eval_result.rmse, 0.5)  # pyrefly: ignore[no-matching-overload]
+    self.assertLess(eval_result.rmse, 0.5)
 
   def test_padding_margin_and_skipped_samples_warning(self):
     graph, schema = gen_test_graph.gen_toy_regression_dataset(

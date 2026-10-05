@@ -505,7 +505,7 @@ def load_model(path: str) -> Model:
   with fs.open_read(os.path.join(path, FILENAME_DATA)) as f:
     data = registered_model.data_class.from_json(f.read())
 
-  model = registered_model.model_class(data)  # pytype: disable=not-instantiable
+  model = registered_model.model_class(data)
   model.metadata = metadata
   model._internal_load(path)  # pylint: disable=protected-access
   return model

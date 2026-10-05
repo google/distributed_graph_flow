@@ -224,7 +224,7 @@ class EvaluationTest(parameterized.TestCase):
     schema = gen_test_graph.generate_schema()
     with self.assertRaises(ValueError):
       dataset.SampleGeneratorFromAnything(
-          graph=[1, 2, 3],  # pytype: disable=wrong-arg-types
+          graph=[1, 2, 3],  # pyrefly: ignore[bad-argument-type]
           schema=schema,
           batch_size=2,
           seed_node_idxs=None,

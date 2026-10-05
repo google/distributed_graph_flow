@@ -226,7 +226,7 @@ class GNNDatasetPreparator:
         graph=self.graph,
         schema=self.schema,
         batch_size=self.batch_size,
-        seed_node_idxs=self.seed_node_idxs,  # pyrefly: ignore[bad-argument-type]
+        seed_node_idxs=self.seed_node_idxs,
         sampling_config=other_live.sampling_plan,  # from other
         drop_remainder=self.drop_remainder,
         shuffle=self.shuffle,
@@ -303,7 +303,7 @@ class GNNDatasetPreparator:
         graph=self.graph,
         schema=self.schema,
         batch_size=self.batch_size,
-        seed_node_idxs=self.seed_node_idxs,  # pyrefly: ignore[bad-argument-type]
+        seed_node_idxs=self.seed_node_idxs,
         sampling_config=self.sampling_plan,
         drop_remainder=self.drop_remainder,
         shuffle=self.shuffle,
@@ -604,7 +604,7 @@ def attach_features_from_jax_graph_and_cast_to_jax(
     if isinstance(graph, jax_in_memory_graph.JaxInMemoryGraph):
       node_idxs = jax.numpy.asarray(node_idxs)
       gathered_features = jax_common_lib.jit_gather_features(
-          features, node_idxs  # pyrefly: ignore[bad-argument-type]
+          features, node_idxs
       )
     else:
       gathered_features = {

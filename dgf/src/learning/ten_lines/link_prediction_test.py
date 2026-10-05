@@ -637,7 +637,7 @@ class LinkPredictionToyTest(parameterized.TestCase):
       else:
         kwargs = {"graph": tf_source_sample, "seed_node_idxs": tf.constant([0])}
 
-      prediction = tf_predict_fn(**kwargs)  # pyrefly: ignore[not-callable]
+      prediction = tf_predict_fn(**kwargs)
       expected_prediction = model.predict_embedding(
           source_sample, [0], encoder="source"
       )
@@ -654,7 +654,7 @@ class LinkPredictionToyTest(parameterized.TestCase):
       else:
         kwargs = {"graph": tf_target_sample, "seed_node_idxs": tf.constant([0])}
 
-      prediction = tf_predict_fn(**kwargs)  # pyrefly: ignore[not-callable]
+      prediction = tf_predict_fn(**kwargs)
       expected_prediction = model.predict_embedding(
           target_sample, [0], encoder="target"
       )
@@ -679,7 +679,7 @@ class LinkPredictionToyTest(parameterized.TestCase):
             "target_seed_node_idxs": tf.constant([0]),
         }
 
-      prediction = tf_predict_fn(**kwargs)  # pyrefly: ignore[not-callable]
+      prediction = tf_predict_fn(**kwargs)
       expected_prediction = model.predict(
           graph, [0], [1], all_combinations=False, verbose=0
       )

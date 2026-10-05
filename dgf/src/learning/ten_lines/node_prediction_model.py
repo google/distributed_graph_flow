@@ -642,17 +642,17 @@ class NodePredictionModel(common.Model):
     if num_eval_steps is not None and num_eval_steps < num_nodes:  # pyrefly: ignore[unsupported-operation]
       # Sub-select seed nodes.
       rng = np.random.default_rng(random_seed)
-      seed_node_idxs = rng.choice(  # pyrefly: ignore[bad-assignment]
+      seed_node_idxs = rng.choice(
           seed_node_idxs, size=num_eval_steps, replace=False
       )
 
-    num_examples = len(seed_node_idxs)  # pyrefly: ignore[bad-argument-type]
+    num_examples = len(seed_node_idxs)
     if verbose >= 1:
       log.info("Evaluating model on %d samples", num_examples)
 
     return self._evaluate_on_batch_iterator(
         self.predict_batch(
-            graph, seed_node_idxs, verbose=verbose, input_features_only=False  # pyrefly: ignore[bad-argument-type]
+            graph, seed_node_idxs, verbose=verbose, input_features_only=False
         )
     )
 
@@ -831,7 +831,7 @@ class NodePredictionModel(common.Model):
         # TODO(gbm): Add softmax.
         assert core_model is not None
         logits = core_model.apply(
-            self._data.model_params, batch, training=False  # pyrefly: ignore[bad-argument-type]
+            self._data.model_params, batch, training=False
         )
         if self._data.task.task_type == TaskType.NODE_REGRESSION:
           return regression_lib.RegressionHead.logits_to_predictions(logits)  # pyrefly: ignore[bad-argument-type]

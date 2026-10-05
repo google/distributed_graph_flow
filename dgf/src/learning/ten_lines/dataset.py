@@ -234,7 +234,7 @@ class SampleGeneratorFromAnything:
           )
       )
 
-    self._target_nodeset = self.sampling_config.root.nodeset  # pyrefly: ignore[missing-attribute]
+    self._target_nodeset = self.sampling_config.root.nodeset
     self._ts_feature = temporal_util.creation_time_feature_name(
         self.schema.node_sets[self._target_nodeset].features
     )
@@ -339,7 +339,7 @@ class SampleGeneratorFromAnything:
           schema=merge_schema, padding=self.padding
       )
       for node_idxs in util.batch_indices_generator(
-          self.seed_node_idxs  # pyrefly: ignore[bad-argumet-type]
+          self.seed_node_idxs
           if self.seed_node_idxs is not None
           else self.num_seed_nodes,
           batch_size=self.batch_size,
@@ -368,7 +368,7 @@ class SampleGeneratorFromAnything:
     def single_generator():
       assert self.in_memory_sampler is not None
       for node_idxs in util.batch_indices_generator(
-          self.seed_node_idxs  # pyrefly: ignore[bad-argument-type]
+          self.seed_node_idxs
           if self.seed_node_idxs is not None
           else self.num_seed_nodes,
           batch_size=1,

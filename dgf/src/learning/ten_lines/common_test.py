@@ -113,7 +113,7 @@ class TenLines(parameterized.TestCase):
       common.parse_architecture("invalid")
 
     with self.assertRaisesRegex(TypeError, "Expected Architecture or str"):
-      common.parse_architecture(123)  # pytype: disable=wrong-arg-types
+      common.parse_architecture(123)  # pyrefly: ignore[bad-argument-type]
 
   @parameterized.named_parameters(
       ("cnn", "cnn", common.TimeseriesEncoder.CNN),
@@ -149,7 +149,7 @@ class TenLines(parameterized.TestCase):
       common.parse_timeseries_encoder("invalid")
 
     with self.assertRaisesRegex(TypeError, "Expected TimeseriesEncoder or str"):
-      common.parse_timeseries_encoder(123)  # pytype: disable=wrong-arg-types
+      common.parse_timeseries_encoder(123)  # pyrefly: ignore[bad-argument-type]
 
   def test_build_timeseries_encoder_config_uses_max_timeseries_len(self):
     hparams = common.HParam(
@@ -160,10 +160,10 @@ class TenLines(parameterized.TestCase):
         hparams, max_timeseries_len=96
     )
     self.assertEqual(
-        config.max_timeseries_len, 96  # pytype: disable=attribute-error
+        config.max_timeseries_len, 96  # pyrefly: ignore[missing-attribute]
     )
     self.assertAlmostEqual(
-        config.rope_max_wavelength,  # pytype: disable=attribute-error
+        config.rope_max_wavelength,  # pyrefly: ignore[missing-attribute]
         96.0 ** (16.0 / 14.0),
         places=5,
     )
@@ -260,7 +260,7 @@ class TenLines(parameterized.TestCase):
     with self.assertRaisesRegex(
         TypeError, "Expected TFFunctionInputFormat or str"
     ):
-      common.parse_tf_function_input_format(123)  # pytype: disable=wrong-arg-types
+      common.parse_tf_function_input_format(123)  # pyrefly: ignore[bad-argument-type]
 
   def test_resolve_tf_function_input_format_default(self):
     self.assertEqual(
