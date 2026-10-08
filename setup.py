@@ -12,6 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import re
+
 from setuptools import find_packages
 from setuptools import setup
 from setuptools.command.install import install
@@ -35,9 +38,19 @@ class BinaryDistribution(Distribution):
     return False
 
 
+def _read_version() -> str:
+  """Returns `__version__` from dgf/__init__.py (the single source of truth)."""
+  with open(os.path.join("dgf", "__init__.py")) as f:
+    match = re.search(r'^__version__ = "([^"]+)"$', f.read(), re.MULTILINE)
+  if not match:
+    raise ValueError("Cannot find __version__ in dgf/__init__.py")
+  return match.group(1)
+
+
 setup(
-    name="dgf",
-    version="0.1.0",
+    # "dgf-nightly" for the nightly package (see script/build_pip_package.sh).
+    name=os.environ.get("DGF_PACKAGE_NAME", "dgf"),
+    version=_read_version(),
     author="Mathieu Guillame-Bert, Brandon Mayer",
     description="Distributed Graph Flow",
     long_description=open("README.md").read(),

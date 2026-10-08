@@ -13,8 +13,8 @@ py_library(
         "//dgf/src/learning/ten_lines:common",
         "//dgf/src/util:filesystem",
         "//dgf/src/util:log",
+        "//dgf/src/util/weak_dep:weak_dep_aiplatform",
         "//dgf/src/util/weak_dep:weak_dep_tensorflow",
-        # google/cloud/aiplatform dep,
         # yaml dep,
     ],
 )
@@ -28,6 +28,7 @@ py_test(
         # absl/testing:absltest dep,
         "//dgf/src/learning/ten_lines:common",
         "//dgf/src/util/weak_dep:weak_dep_tensorflow",
+        # google/cloud/aiplatform dep,
         # yaml dep,
     ],
 )

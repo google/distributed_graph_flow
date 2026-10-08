@@ -24,19 +24,32 @@ else
 fi
 source /tmp/venv/bin/activate
 
+# Name and version overrides, set by build_pip_package.sh for the nightly.
+PACKAGE_NAME="${DGF_PACKAGE_NAME:-dgf}"
+# Wheel file names use "_" instead of "-" (e.g. dgf_nightly-0.1.1.dev20261008-...).
+WHEEL_NAME="${PACKAGE_NAME//-/_}"
+
 bazel build -c opt //dgf --@rules_python//python/config_settings:python_version=${PYVERSION}
 cd /work/bazel-bin/dgf
 find . -name '*.so' -type f -exec cp --parents {} /work/package/dgf \;
+if [ -n "${DGF_PACKAGE_VERSION:-}" ]; then
+  # Patched in the packaged copy only: dgf.__version__ and setup.py (which
+  # reads it) report the nightly version.
+  sed -i "s/^__version__ = \".*\"$/__version__ = \"${DGF_PACKAGE_VERSION}\"/" /work/package/dgf/__init__.py
+  grep -q "^__version__ = \"${DGF_PACKAGE_VERSION}\"$" /work/package/dgf/__init__.py
+fi
 export PIP_EXTRA_INDEX_URL="https://pypi.org/simple/"
 ${PYBIN} -m pip install setuptools auditwheel
 cd /work/package
 ${PYBIN} setup.py bdist_wheel --dist-dir /work/dist
 cd /work
 chmod -R a+rw package
-${PYBIN} -m auditwheel repair --plat manylinux_2_28_x86_64 -w dist dist/dgf-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-linux_x86_64.whl
+${PYBIN} -m auditwheel repair --plat manylinux_2_28_x86_64 -w dist dist/${WHEEL_NAME}-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-linux_x86_64.whl
 chmod -R a+rw dist
-${PYBIN} -m pip uninstall dgf -y
-${PYBIN} -m pip install dist/dgf-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+# "dgf" and "dgf-nightly" both provide the "dgf" import package. Uninstalling a
+# package that is not installed is a no-op for pip.
+${PYBIN} -m pip uninstall -y dgf dgf-nightly
+${PYBIN} -m pip install dist/${WHEEL_NAME}-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
 # export TF_USE_LEGACY_KERAS=1 # TF_USE_LEGACY_KERAS=1 is not needed for this toy example.
 ${PYBIN} script/toy.py
 
@@ -54,7 +67,18 @@ else
 fi
 
 source /tmp/venv_serving/bin/activate
-${PYBIN} -m pip uninstall dgf -y
+${PYBIN} -m pip uninstall -y dgf dgf-nightly
 ${PYBIN} -m pip install -r requirements.txt
-${PYBIN} -m pip install dist/dgf-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+${PYBIN} -m pip install dist/${WHEEL_NAME}-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
 ${PYBIN} script/toy.py
+
+# The installed package reports the expected version. Run outside of /work:
+# with /work as cwd, "import dgf" would import the source tree instead of the
+# installed wheel.
+if [ -n "${DGF_PACKAGE_VERSION:-}" ]; then
+  INSTALLED_VERSION=$(cd /tmp && ${PYBIN} -c "import dgf; print(dgf.__version__)")
+  if [ "${INSTALLED_VERSION}" != "${DGF_PACKAGE_VERSION}" ]; then
+    echo "ERROR: dgf.__version__ is ${INSTALLED_VERSION}, expected ${DGF_PACKAGE_VERSION}."
+    exit 1
+  fi
+fi

@@ -20,8 +20,8 @@ from typing import Any, Optional
 from dgf.src.learning.ten_lines import common
 from dgf.src.util import filesystem
 from dgf.src.util import log
+from dgf.src.util.weak_dep.weak_dep_aiplatform import aiplatform  # pylint: disable=g-importing-member
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf  # pylint: disable=g-importing-member
-from google.cloud.aiplatform import aiplatform
 import yaml
 
 

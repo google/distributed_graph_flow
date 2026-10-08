@@ -34,73 +34,8 @@ jobs:
         with:
           persist-credentials: false
 
-      # A single-version build needs >15GB (Python venv with torch/tensorflow,
-      # Bazel cache, and Docker image), which exceeds the free space of a
-      # standard runner. Remove pre-installed toolchains that are not needed.
-      - name: Free disk space
-        run: |
-          df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
-            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift \
-            /usr/local/share/boost /usr/local/share/powershell
-          sudo docker image prune --all --force
-          df -h /
-
-      # Cache of the build container's /root/.cache: Bazel output base and
-      # repository cache (compiled C++ dependencies, test results), and
-      # bazelisk. The pip cache is not saved (see below). Restored from the
-      # latest run for this Python version, even if the dependencies changed
-      # since: Bazel and pip only reuse what is still valid, and script/test.sh
-      # invalidates the cached test results when the installed Python packages
-      # change.
-      - name: Restore build cache
-        id: restore-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      # Build, test, and Bazel cache handling (shared with nightly.yml).
+      - name: Build and test
+        uses: ./.github/actions/build-and-test
         with:
-          path: ${{ runner.temp }}/dgf-cache
-          key: dgf-cache-${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            dgf-cache-${{ matrix.python-version }}-
-
-      - name: Build and Test Package
-        env:
-          PYVERSION: ${{ matrix.python-version }}
-          # An absolute path is bind-mounted (instead of a Docker volume).
-          BAZEL_CACHE: ${{ runner.temp }}/dgf-cache
-        run: ./script/build_pip_package.sh "${PYVERSION}"
-
-      - name: Disk usage
-        if: always()
-        run: df -h /
-
-      # The cache is written by root in the container, and must be readable by
-      # the runner user to be saved. The pip wheels (~3GB) are not saved: they
-      # are quick to download, and the repository cache quota (10GB) must fit
-      # the caches of the three Python versions.
-      # Nothing is saved if there is no Bazel cache (e.g. the run was cancelled
-      # before the build started): an empty cache would be restored by the next
-      # run instead of a complete one.
-      - name: Prepare build cache for saving
-        id: prepare-cache
-        if: always()
-        env:
-          CACHE_DIR: ${{ runner.temp }}/dgf-cache
-        run: |
-          if [ ! -d "${CACHE_DIR}/bazel" ]; then
-            echo "No Bazel cache to save."
-            exit 0
-          fi
-          sudo rm -rf "${CACHE_DIR}/pip"
-          sudo chown -R "$(id -u):$(id -g)" "${CACHE_DIR}"
-          du -sh "${CACHE_DIR}"/* "${CACHE_DIR}"
-          echo "save=true" >> "${GITHUB_OUTPUT}"
-
-      # Saved even if the build failed or was cancelled (Bazel's cache remains
-      # valid if it is interrupted), so that the next run does not have to
-      # recompile everything.
-      - name: Save build cache
-        if: ${{ always() && steps.prepare-cache.outputs.save == 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/dgf-cache
-          key: ${{ steps.restore-cache.outputs.cache-primary-key }}
+          python-version: ${{ matrix.python-version }}
