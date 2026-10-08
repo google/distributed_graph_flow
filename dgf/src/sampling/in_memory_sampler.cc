@@ -11,6 +11,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
+#include "absl/random/distributions.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -21,8 +22,7 @@ namespace dgf::sampling::in_memory_sampler {
 
 absl::Status AdjacencyIndex::SampleRandomUniform(
     const InputIdx source_node, const std::size_t num_samples,
-    std::vector<InputIdx>* result, std::mt19937_64* rng,
-    InputIdx masked_edge_idx) const {
+    std::vector<InputIdx>* result, Rng* rng, InputIdx masked_edge_idx) const {
   if (!timestamps.empty()) {
     return absl::FailedPreconditionError(
         "Cannot use SampleRandomUniform when timestamps are available. Use "
@@ -40,7 +40,6 @@ absl::Status AdjacencyIndex::SampleRandomUniform(
   const InputIdx start_idx = source_blocks[source_node];
   const InputIdx end_idx = source_blocks[source_node + 1];
   const InputIdx num_neighbors = end_idx - start_idx;
-  std::uniform_int_distribution<size_t> dist(0, num_neighbors - 1);
 
   if (num_neighbors == 0) {
     return absl::OkStatus();
@@ -85,7 +84,7 @@ absl::Status AdjacencyIndex::SampleRandomUniform(
         size_t selected_indices[16];
         for (size_t i = 0; i < num_samples; i++) {
           while (true) {
-            size_t idx = dist(*rng);
+            size_t idx = absl::Uniform<size_t>(*rng, 0, num_neighbors);
             if (edge_idxs[start_idx + idx] == masked_edge_idx) {
               continue;  // Skip masked
             }
@@ -113,8 +112,7 @@ absl::Status AdjacencyIndex::SampleRandomUniform(
             if (result->size() - initial_size < num_samples) {
               result->push_back(target_node_idxs[start_idx + i]);
             } else {
-              std::uniform_int_distribution<size_t> dist(0, valid_count - 1);
-              size_t r = dist(*rng);
+              size_t r = absl::Uniform<size_t>(*rng, 0, valid_count);
               if (r < num_samples) {
                 (*result)[initial_size + r] = target_node_idxs[start_idx + i];
               }
@@ -137,7 +135,7 @@ absl::Status AdjacencyIndex::SampleRandomUniform(
         size_t selected_indices[16];
         for (size_t i = 0; i < num_samples; i++) {
           while (true) {
-            size_t idx = dist(*rng);
+            size_t idx = absl::Uniform<size_t>(*rng, 0, num_neighbors);
             bool duplicate = false;
             for (size_t j = 0; j < i; ++j) {
               if (selected_indices[j] == idx) {
@@ -302,7 +300,7 @@ absl::StatusOr<const SamplingPlan::Node&> SamplingPlan::StepIdxToNode(
 absl::Status AdjacencyIndex::SampleRandomUniformWithTimestamp(
     const InputIdx source_node, Timestamp seed_timestamp,
     const std::size_t num_samples, std::vector<InputIdx>* result,
-    std::mt19937_64* rng) const {
+    Rng* rng) const {
   if (source_node + 1 >= source_blocks.size()) {
     return absl::InvalidArgumentError(absl::StrCat(
         "The source node idx ", source_node,
