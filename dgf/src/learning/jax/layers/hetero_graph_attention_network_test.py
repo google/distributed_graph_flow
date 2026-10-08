@@ -20,8 +20,10 @@ from absl.testing import parameterized
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.learning.jax.layers import hetero_graph_attention_network
+from dgf.src.learning.jax.layers import standard
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 
 class HeteroGraphAttentionNetworkTest(parameterized.TestCase):
@@ -105,6 +107,197 @@ class HeteroGraphAttentionNetworkTest(parameterized.TestCase):
         output.node_sets["n2"].features["embedding"].shape,
         (2, 128),
     )
+
+  def test_cross_regime_and_edge_permutation_equivalence(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(features={}),
+            "n2": schema_lib.NodeSchema(features={}),
+        },
+        edge_sets={
+            "e1": schema_lib.EdgeSchema(source="n1", target="n2"),
+        },
+    )
+    gnn = (
+        hetero_graph_attention_network.HeterogeneousGraphAttentionNetworkConfig(
+            dims=16,
+            num_heads=4,
+        ).make(schema)
+    )
+    sparse_graph = jax_in_memory_graph.JaxInMemoryGraph(
+        node_sets={
+            "n1": jax_in_memory_graph.JaxInMemoryNodeSet(
+                features={"embedding": jnp.ones((8, 16))}, num_nodes=8
+            ),
+            "n2": jax_in_memory_graph.JaxInMemoryNodeSet(
+                features={"embedding": jnp.ones((5, 16))}, num_nodes=5
+            ),
+        },
+        edge_sets={
+            "e1": jax_in_memory_graph.JaxInMemoryEdgeSet(
+                adjacency=jnp.array([[0, 1], [1, 2]], dtype=jnp.int32)
+            ),
+        },
+    )
+    variables = gnn.init(jax.random.PRNGKey(0), sparse_graph, training=False)
+
+    k1, k2, k3, k4 = jax.random.split(jax.random.PRNGKey(3), 4)
+    n1_feat = jax.random.normal(k1, (5, 16))
+    n2_feat = jax.random.normal(k2, (8, 16))
+    src_idx = jax.random.randint(k3, (30,), 0, 5, dtype=jnp.int32)
+    dst_idx = jax.random.randint(k4, (30,), 0, 8, dtype=jnp.int32)
+    perm = jax.random.permutation(jax.random.PRNGKey(5), 30)
+
+    dense_graph_a = jax_in_memory_graph.JaxInMemoryGraph(
+        node_sets={
+            "n1": jax_in_memory_graph.JaxInMemoryNodeSet(
+                features={"embedding": n1_feat}, num_nodes=5
+            ),
+            "n2": jax_in_memory_graph.JaxInMemoryNodeSet(
+                features={"embedding": n2_feat}, num_nodes=8
+            ),
+        },
+        edge_sets={
+            "e1": jax_in_memory_graph.JaxInMemoryEdgeSet(
+                adjacency=jnp.stack([src_idx, dst_idx], axis=0)
+            ),
+        },
+    )
+    dense_graph_b = jax_in_memory_graph.JaxInMemoryGraph(
+        node_sets=dense_graph_a.node_sets,
+        edge_sets={
+            "e1": jax_in_memory_graph.JaxInMemoryEdgeSet(
+                adjacency=jnp.stack([src_idx[perm], dst_idx[perm]], axis=0)
+            ),
+        },
+    )
+
+    def loss_fn(p, g):
+      out = gnn.apply(p, g, training=False)
+      return jnp.sum(out.node_sets["n1"].features["embedding"] ** 2) + jnp.sum(
+          out.node_sets["n2"].features["embedding"] ** 2
+      )
+
+    val_a, grad_a = jax.value_and_grad(loss_fn)(variables, dense_graph_a)
+    val_b, grad_b = jax.value_and_grad(loss_fn)(variables, dense_graph_b)
+    np.testing.assert_allclose(val_a, val_b, rtol=1e-5, atol=1e-5)
+    for leaf_a, leaf_b in zip(
+        jax.tree_util.tree_leaves(grad_a), jax.tree_util.tree_leaves(grad_b)
+    ):
+      np.testing.assert_allclose(leaf_a, leaf_b, rtol=1e-5, atol=1e-5)
+
+  @parameterized.parameters(2, 30)  # Fewer / more edges than nodes.
+  def test_optimized_matches_basic_implementation(self, num_edges: int):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(features={}),
+            "n2": schema_lib.NodeSchema(features={}),
+        },
+        edge_sets={"e1": schema_lib.EdgeSchema(source="n1", target="n2")},
+    )
+    config_cls = (
+        hetero_graph_attention_network.HeterogeneousGraphAttentionNetworkConfig
+    )
+    fast = config_cls(dims=16, num_heads=4).make(schema)
+    basic = config_cls(
+        dims=16, num_heads=4, force_basic_implementation=True
+    ).make(schema)
+
+    k1, k2, k3, k4 = jax.random.split(jax.random.PRNGKey(3), 4)
+    graph = jax_in_memory_graph.JaxInMemoryGraph(
+        node_sets={
+            "n1": jax_in_memory_graph.JaxInMemoryNodeSet(
+                features={"embedding": jax.random.normal(k1, (6, 16))},
+                num_nodes=6,
+            ),
+            "n2": jax_in_memory_graph.JaxInMemoryNodeSet(
+                features={"embedding": jax.random.normal(k2, (5, 16))},
+                num_nodes=5,
+            ),
+        },
+        edge_sets={
+            "e1": jax_in_memory_graph.JaxInMemoryEdgeSet(
+                adjacency=jnp.stack([
+                    jax.random.randint(k3, (num_edges,), 0, 6),
+                    jax.random.randint(k4, (num_edges,), 0, 5),
+                ])
+            ),
+        },
+    )
+    fast_vars = fast.init(jax.random.PRNGKey(0), graph, training=False)
+
+    # Map the (src, dst, out) dense layers of the optimized implementation onto
+    # the single "LAL" block applied to concat([src, dst]) by the basic one.
+    params = dict(fast_vars["params"])
+    for rel in ["e1_fwd", "e1_rev"]:
+      src = params.pop(f"msg_{rel}_src")
+      dst = params.pop(f"msg_{rel}_dst")
+      out = params.pop(f"msg_{rel}_out")
+      params[f"message_{rel}"] = {
+          "dense_0": {
+              "kernel": jnp.concatenate([src["kernel"], dst["kernel"]], axis=0),
+              "bias": dst["bias"],
+          },
+          "dense_2": out,
+      }
+    basic_vars = {**fast_vars, "params": params}
+
+    def loss(model, variables, g):
+      out = model.apply(variables, g, training=False)
+      return sum(
+          jnp.sum(ns.features["embedding"] ** 2)
+          for ns in out.node_sets.values()
+      ), out
+
+    (loss_fast, out_fast), grad_fast = jax.value_and_grad(
+        loss, argnums=2, has_aux=True, allow_int=True
+    )(fast, fast_vars, graph)
+    (loss_basic, out_basic), grad_basic = jax.value_and_grad(
+        loss, argnums=2, has_aux=True, allow_int=True
+    )(basic, basic_vars, graph)
+
+    np.testing.assert_allclose(loss_fast, loss_basic, rtol=1e-4)
+    for ns in ["n1", "n2"]:
+      np.testing.assert_allclose(
+          out_fast.node_sets[ns].features["embedding"],
+          out_basic.node_sets[ns].features["embedding"],
+          rtol=1e-4,
+          atol=1e-4,
+      )
+      np.testing.assert_allclose(
+          grad_fast.node_sets[ns].features["embedding"],
+          grad_basic.node_sets[ns].features["embedding"],
+          rtol=1e-4,
+          atol=1e-4,
+      )
+
+  def test_non_lal_message_fallback(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={"n1": schema_lib.NodeSchema(features={})},
+        edge_sets={"e1": schema_lib.EdgeSchema(source="n1", target="n1")},
+    )
+    gnn = (
+        hetero_graph_attention_network.HeterogeneousGraphAttentionNetworkConfig(
+            dims=16,
+            num_heads=4,
+            message=standard.GenericBlockConfig("LA", dims=16),
+        ).make(schema)
+    )
+    graph = jax_in_memory_graph.JaxInMemoryGraph(
+        node_sets={
+            "n1": jax_in_memory_graph.JaxInMemoryNodeSet(
+                features={"embedding": jnp.ones((3, 16))}, num_nodes=3
+            )
+        },
+        edge_sets={
+            "e1": jax_in_memory_graph.JaxInMemoryEdgeSet(
+                adjacency=jnp.array([[0, 1], [1, 2]], dtype=jnp.int32)
+            )
+        },
+    )
+    variables = gnn.init(jax.random.PRNGKey(0), graph, training=False)
+    out = gnn.apply(variables, graph, training=False)
+    self.assertEqual(out.node_sets["n1"].features["embedding"].shape, (3, 16))
 
   def test_architecture(self):
     config = (

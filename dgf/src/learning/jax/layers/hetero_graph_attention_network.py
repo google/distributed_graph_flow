@@ -20,14 +20,16 @@ import dataclasses_json
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.learning.jax import common
+from dgf.src.learning.jax.layers import hetero_gnn
 from dgf.src.learning.jax.layers import standard
-from dgf.src.learning.jax.layers.hetero_gnn import Plan
-from dgf.src.learning.jax.layers.hetero_gnn import sort_plan
-from dgf.src.learning.jax.layers.hetero_gnn import SortedPlan
 from dgf.src.learning.jax.layers.registry import registry as layer_registry  # pylint: disable=g-importing-member
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
+
+Plan = hetero_gnn.Plan
+sort_plan = hetero_gnn.sort_plan
+SortedPlan = hetero_gnn.SortedPlan
 
 
 @layer_registry.register
@@ -54,6 +56,9 @@ class HeterogeneousGraphAttentionNetworkConfig(common.ArchitectureProvider):
       single-layer MLP with layer norm and activation.
     post: Optional module applied after the update step, typically a
       transformer-like MLP. Defaults to a two-layer ResidualMLP.
+    force_basic_implementation: If True, always compute messages with the
+      generic per-edge implementation (no node-level projection, no edge
+      sorting). Mostly useful in tests to validate the optimized paths.
   """
 
   plan: list[tuple[str, bool]] | None = None
@@ -62,10 +67,11 @@ class HeterogeneousGraphAttentionNetworkConfig(common.ArchitectureProvider):
   dropout_rate: float = 0.1
   message_pooling: str = "sum"
   num_heads: int = 4
+  force_basic_implementation: bool = False
 
-  message: common.BuildableModule | None = layer_registry.field(default=None)
-  update: common.BuildableModule | None = layer_registry.field(default=None)
-  post: common.BuildableModule | None = layer_registry.field(default=None)
+  message: common.GenericLayer | None = layer_registry.field(default=None)
+  update: common.GenericLayer | None = layer_registry.field(default=None)
+  post: common.GenericLayer | None = layer_registry.field(default=None)
 
   def __post_init__(self):
     if self.message is None:
@@ -87,18 +93,21 @@ class HeterogeneousGraphAttentionNetworkConfig(common.ArchitectureProvider):
     )
 
   def architecture(self) -> str:
+    assert self.message is not None
+    assert self.update is not None
+    assert self.post is not None
     parts = []
     parts.append("X = ...")
     parts.append(
         f"HeterogeneousGraphAttentionNetwork (heads={self.num_heads}):"
     )
     parts.append("  Message/Value:")
-    parts.append(textwrap.indent(self.message.architecture(), prefix="    "))  # pyrefly: ignore[missing-attribute]
+    parts.append(textwrap.indent(self.message.architecture(), prefix="    "))
     parts.append("  Update:")
-    parts.append(textwrap.indent(self.update.architecture(), prefix="    "))  # pyrefly: ignore[missing-attribute]
+    parts.append(textwrap.indent(self.update.architecture(), prefix="    "))
     parts.append("Residual(X)")
     parts.append("# Post Attention FFN")
-    parts.append(self.post.architecture())  # pyrefly: ignore[missing-attribute]
+    parts.append(self.post.architecture())
     return "\n".join(parts)
 
 
@@ -141,6 +150,12 @@ class HeterogeneousGraphAttentionNetwork(nn.Module):
         dims % num_heads == 0
     ), f"dims ({dims}) must be divisible by num_heads ({num_heads})"
     head_dim = dims // num_heads
+    scale = 1.0 / jnp.sqrt(head_dim)
+    lal = None
+    if not config.force_basic_implementation and isinstance(
+        config.message, standard.GenericBlockConfig
+    ):
+      lal = config.message.as_linear_activation_linear()
 
     # Initialize with all original node sets to avoid dropping any.
     new_node_sets = dict(graph.node_sets)
@@ -160,6 +175,7 @@ class HeterogeneousGraphAttentionNetwork(nn.Module):
         ns_name: nn.Dense(dims, name=f"k_proj_{ns_name}")
         for ns_name in self.schema.node_sets
     }
+    k_cache: dict[str, jax.Array] = {}
 
     # Message passing for each nodeset.
     for dst_nodeset_name in sorted(self.sorted_plan.keys()):
@@ -173,11 +189,11 @@ class HeterogeneousGraphAttentionNetwork(nn.Module):
         combined = jnp.concatenate(
             [dst_values, jnp.zeros((num_dst_nodes, dims))], axis=1
         )
-        combined = config.update.make(name=f"update_{dst_nodeset_name}")(  # pyrefly: ignore[unexpected-keyword]
+        combined = config.update.make(name=f"update_{dst_nodeset_name}")(
             combined, training=training
         )
         node_values = combined + dst_values
-        node_values = config.post.make(name=f"post_{dst_nodeset_name}")(  # pyrefly: ignore[unexpected-keyword]
+        node_values = config.post.make(name=f"post_{dst_nodeset_name}")(
             node_values, training=training
         )
         new_node_sets[dst_nodeset_name] = (
@@ -201,14 +217,28 @@ class HeterogeneousGraphAttentionNetwork(nn.Module):
           source_idxs, target_idxs = target_idxs, source_idxs
 
         src_values = res_node_features[message_src_nodeset]
+        num_src_nodes = src_values.shape[0]
+        num_edges = source_idxs.shape[0]
+        do_sort = (
+            not config.force_basic_implementation
+            and hetero_gnn.should_sort_edges(
+                num_src_nodes, num_dst_nodes, num_edges
+            )
+        )
+        if do_sort:
+          source_idxs, target_idxs = hetero_gnn.sort_edges_by_dst(
+              source_idxs, target_idxs, num_src_nodes, num_dst_nodes
+          )
 
-        # 1. Compute relation-specific attention
-        # Gather Q and K for edges
-        q_t = q_dst[target_idxs]  # [E, H, head_dim]
-
-        k_src = k_projs[message_src_nodeset](src_values)
-        k_src = k_src.reshape(src_values.shape[0], num_heads, head_dim)
-        k_s = k_src[source_idxs]  # [E, H, head_dim]
+        # 1. Compute relation-specific attention logits.
+        # Project K for the source nodeset (once per nodeset, shared across
+        # relations).
+        if message_src_nodeset not in k_cache:
+          k_src_proj = k_projs[message_src_nodeset](src_values)
+          k_cache[message_src_nodeset] = k_src_proj.reshape(
+              num_src_nodes, num_heads, head_dim
+          )
+        k_src = k_cache[message_src_nodeset]  # [N_src, H, head_dim]
 
         relation_name = f"{edgeset_name}_{'rev' if reverse else 'fwd'}"
         w_att = self.param(
@@ -217,49 +247,81 @@ class HeterogeneousGraphAttentionNetwork(nn.Module):
             (num_heads, head_dim, head_dim),
         )
 
-        # Project Key with relation-specific matrix
-        k_s_rel = jnp.einsum("ehd,hdk->ehk", k_s, w_att)
+        # logits[e] = <q[dst(e)], w_att k[src(e)]>. The relation-specific
+        # matrix is applied on the smallest of (source nodes, target nodes,
+        # edges), then Q and K are gathered on the edges.
+        if num_src_nodes <= num_dst_nodes and num_src_nodes <= num_edges:
+          k_src_rel = jnp.einsum("nhd,hdk->nhk", k_src, w_att)
+          logits = jnp.sum(q_dst[target_idxs] * k_src_rel[source_idxs], -1)
+        elif num_dst_nodes <= num_edges:
+          q_dst_rel = jnp.einsum("nhk,hdk->nhd", q_dst, w_att)
+          logits = jnp.sum(q_dst_rel[target_idxs] * k_src[source_idxs], -1)
+        else:
+          k_s_rel = jnp.einsum("ehd,hdk->ehk", k_src[source_idxs], w_att)
+          logits = jnp.sum(q_dst[target_idxs] * k_s_rel, -1)
+        logits = logits * scale  # [E, H]
 
-        # Compute attention logits
-        logits = jnp.einsum("ehd,ehd->eh", q_t, k_s_rel) / jnp.sqrt(head_dim)
+        # 2. Compute the edge messages (values) using config.message.
+        if lal is not None:
+          # The message block is LAL (linear, activation, linear). Project the
+          # source and target nodes separately and sum on the edges, which is
+          # equivalent to the linear on concat([src, dst]) but cheaper when
+          # there are fewer nodes than edges.
+          dense_src = nn.Dense(
+              lal.hidden_dims, use_bias=False, name=f"msg_{relation_name}_src"
+          )
+          dense_dst = nn.Dense(
+              lal.hidden_dims, use_bias=True, name=f"msg_{relation_name}_dst"
+          )
+          dense_out = nn.Dense(
+              lal.output_dims, use_bias=True, name=f"msg_{relation_name}_out"
+          )
+          ps_edge = (
+              dense_src(src_values)[source_idxs]
+              if num_src_nodes < num_edges
+              else dense_src(src_values[source_idxs])
+          )  # [E, hidden_dims]
+          pd_edge = (
+              dense_dst(dst_values)[target_idxs]
+              if num_dst_nodes < num_edges
+              else dense_dst(dst_values[target_idxs])
+          )  # [E, hidden_dims]
+          messages = dense_out(lal.activation(ps_edge + pd_edge))  # [E, dims]
+        else:
+          # Basic / expensive fallback: apply config.message on the edges.
+          edge_values = jnp.concatenate(
+              [src_values[source_idxs], dst_values[target_idxs]], axis=-1
+          )  # [E, 2 * dims]
+          messages = config.message.make(name=f"message_{relation_name}")(
+              edge_values, training=training
+          )  # [E, dims]
+        messages = messages.reshape(num_edges, num_heads, head_dim)
 
-        # 2. Compute Edge Messages using config.message
-        src_edge_values = src_values[source_idxs]
-        dst_edge_values = dst_values[target_idxs]
-        edge_values = jnp.concatenate(
-            [src_edge_values, dst_edge_values], axis=-1
-        )
-
-        # Apply config.message on the edges to get Values
-        messages = config.message.make(name=f"message_{relation_name}")(  # pyrefly: ignore[unexpected-keyword]
-            edge_values, training=training
-        )  # [E, dims]
-        messages = messages.reshape(messages.shape[0], num_heads, head_dim)
-
-        # Softmax + aggregation (per edgeset)
-        # Local max logit per target node for this relation
-        local_max = jax.ops.segment_max(logits, target_idxs, num_dst_nodes)
-
-        # Local exp logits
-        exp_logits = jnp.exp(logits - local_max[target_idxs])
-
-        # Local sum of exp
-        local_sum_exp = jax.ops.segment_sum(
-            exp_logits, target_idxs, num_dst_nodes
-        )
-
-        # Local attention weights
-        attn_weights = exp_logits / (
-            local_sum_exp[target_idxs] + 1e-9
-        )  # [E, H]
-
-        # Weighted sum of messages for this relation
-        weighted_messages = (
-            attn_weights[..., None] * messages
-        )  # [E, H, head_dim]
-        agg_msg = jax.ops.segment_sum(
-            weighted_messages, target_idxs, num_dst_nodes
+        # 3. Softmax over the incoming edges of each target node + weighted
+        # sum of the messages (per relation).
+        # Local max logit per target node, for numerical stability.
+        local_max = jax.ops.segment_max(
+            jax.lax.stop_gradient(logits),
+            target_idxs,
+            num_dst_nodes,
+            indices_are_sorted=do_sort,
+        )  # [N_dst, H]
+        exp_logits = jnp.exp(logits - local_max[target_idxs])  # [E, H]
+        # Unnormalized weighted sum of messages and softmax denominator. The
+        # normalization is applied once per node rather than once per edge.
+        agg_numer = jax.ops.segment_sum(
+            exp_logits[..., None] * messages,
+            target_idxs,
+            num_dst_nodes,
+            indices_are_sorted=do_sort,
         )  # [N_dst, H, head_dim]
+        agg_denom = jax.ops.segment_sum(
+            exp_logits,
+            target_idxs,
+            num_dst_nodes,
+            indices_are_sorted=do_sort,
+        )  # [N_dst, H]
+        agg_msg = agg_numer / (agg_denom[..., None] + 1e-9)
 
         all_aggregated_messages.append(agg_msg)
 
@@ -272,7 +334,7 @@ class HeterogeneousGraphAttentionNetwork(nn.Module):
 
       # Join messages + update
       combined = jnp.concatenate([dst_values, aggregated_messages], axis=1)
-      combined = config.update.make(name=f"update_{dst_nodeset_name}")(  # pyrefly: ignore[unexpected-keyword]
+      combined = config.update.make(name=f"update_{dst_nodeset_name}")(
           combined, training=training
       )
 
@@ -280,7 +342,7 @@ class HeterogeneousGraphAttentionNetwork(nn.Module):
       node_values = combined + dst_values
 
       # Feed-forward
-      node_values = config.post.make(name=f"post_{dst_nodeset_name}")(  # pyrefly: ignore[unexpected-keyword]
+      node_values = config.post.make(name=f"post_{dst_nodeset_name}")(
           node_values, training=training
       )
 

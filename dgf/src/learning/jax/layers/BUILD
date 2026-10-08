@@ -295,6 +295,7 @@ py_test(
     srcs = ["hetero_graph_attention_network_test.py"],
     deps = [
         ":hetero_graph_attention_network",
+        ":standard",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         "//dgf/src/data:jax_in_memory_graph",
