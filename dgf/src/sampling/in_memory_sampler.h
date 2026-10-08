@@ -20,6 +20,7 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/log/check.h"
+#include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -37,6 +38,24 @@ typedef std::size_t InputIdx;
 
 // Timestamp type for temporal graphs.
 typedef std::int64_t Timestamp;
+
+// Random number generator used by the samplers.
+//
+// `absl::InsecureBitGen` (PCG64) is significantly faster than
+// `std::mt19937_64`. Note that, unlike the std generators, absl generators mix
+// the user seed with a per-build salt: seeded sampling is reproducible within
+// a given binary, but not necessarily across different builds.
+//
+// Note: absl generators cannot be re-seeded in place. Use `MakeRng` to create a
+// new (seeded) generator instead.
+using Rng = absl::InsecureBitGen;
+
+// Creates a random number generator seeded with `seed`.
+inline Rng MakeRng(uint64_t seed) {
+  std::seed_seq seq{static_cast<uint32_t>(seed),
+                    static_cast<uint32_t>(seed >> 32)};
+  return Rng(seq);
+}
 
 // Index for fast retrieval of target nodes from source nodes in a directed
 // graph. Represents outgoing edges where the `i`-th source node's targets are
@@ -136,8 +155,7 @@ struct AdjacencyIndex {
   // node indices are appended to the `result` vector.
   absl::Status SampleRandomUniform(InputIdx source_node,
                                    std::size_t num_samples,
-                                   std::vector<InputIdx>* result,
-                                   std::mt19937_64* rng,
+                                   std::vector<InputIdx>* result, Rng* rng,
                                    InputIdx masked_edge_idx = -1) const;
 
   // Samples the first `num_samples` target nodes connected to the given
@@ -153,7 +171,7 @@ struct AdjacencyIndex {
                                                 Timestamp seed_timestamp,
                                                 std::size_t num_samples,
                                                 std::vector<InputIdx>* result,
-                                                std::mt19937_64* rng) const;
+                                                Rng* rng) const;
 
   // Samples the first `num_samples` target nodes anterior to `seed_timestamp`.
   absl::Status SampleFirstWithTimestamp(InputIdx source_node,

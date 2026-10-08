@@ -55,7 +55,7 @@ TEST(InMemorySamplerTest, SampleFirst_NoNeighbors) {
 
 TEST(InMemorySamplerTest, SampleRandomUniform_LessThanAvailable) {
   AdjacencyIndex index = CreateTestIndex();
-  std::mt19937_64 rng(42);
+  Rng rng = MakeRng(42);
   std::vector<std::size_t> result;
   EXPECT_OK(index.SampleRandomUniform(/*source_node=*/0, /*num_samples=*/2,
                                       &result, &rng));
@@ -65,7 +65,7 @@ TEST(InMemorySamplerTest, SampleRandomUniform_LessThanAvailable) {
 
 TEST(InMemorySamplerTest, SampleRandomUniform_MoreThanAvailable) {
   AdjacencyIndex index = CreateTestIndex();
-  std::mt19937_64 rng(42);
+  Rng rng = MakeRng(42);
   std::vector<std::size_t> result;
   EXPECT_OK(index.SampleRandomUniform(/*source_node=*/0, /*num_samples=*/5,
                                       &result, &rng));
@@ -74,7 +74,7 @@ TEST(InMemorySamplerTest, SampleRandomUniform_MoreThanAvailable) {
 
 TEST(InMemorySamplerTest, SampleRandomUniform_NoNeighbors) {
   AdjacencyIndex index = CreateTestIndex();
-  std::mt19937_64 rng(42);
+  Rng rng = MakeRng(42);
   std::vector<std::size_t> result;
   EXPECT_OK(index.SampleRandomUniform(/*source_node=*/1, /*num_samples=*/1,
                                       &result, &rng));
@@ -181,7 +181,7 @@ TEST(InMemorySamplerTest, SampleWithTimestamp_FiltersFutureEdges) {
   ASSERT_OK_AND_ASSIGN(AdjacencyIndex index,
                        (AdjacencyIndex::CreateFromEdgeList<true, false>(
                            std::move(edges), 4, 4)));
-  std::mt19937_64 rng(42);
+  Rng rng = MakeRng(42);
   std::vector<std::size_t> result;
   EXPECT_OK(index.SampleRandomUniformWithTimestamp(
       /*source_node=*/0, /*seed_timestamp=*/20, /*num_samples=*/2, &result,
@@ -213,7 +213,7 @@ TEST(InMemorySamplerTest, SampleRandomUniform_WithMasking) {
   ASSERT_OK_AND_ASSIGN(AdjacencyIndex index,
                        (AdjacencyIndex::CreateFromEdgeList<false, true>(
                            std::move(edges), 1, 4)));
-  std::mt19937_64 rng(42);
+  Rng rng = MakeRng(42);
   std::vector<std::size_t> result;
   EXPECT_OK(index.SampleRandomUniform(/*source_node=*/0, /*num_samples=*/2,
                                       &result, &rng, /*masked_edge_idx=*/1));
@@ -229,7 +229,7 @@ TEST(InMemorySamplerTest, SampleRandomUniform_AllMasked) {
   ASSERT_OK_AND_ASSIGN(AdjacencyIndex index,
                        (AdjacencyIndex::CreateFromEdgeList<false, true>(
                            std::move(edges), 1, 4)));
-  std::mt19937_64 rng(42);
+  Rng rng = MakeRng(42);
   std::vector<std::size_t> result;
   EXPECT_OK(index.SampleRandomUniform(/*source_node=*/0, /*num_samples=*/2,
                                       &result, &rng, /*masked_edge_idx=*/5));
@@ -244,7 +244,7 @@ TEST(InMemorySamplerTest, SampleRandomUniform_NoneMasked) {
   ASSERT_OK_AND_ASSIGN(AdjacencyIndex index,
                        (AdjacencyIndex::CreateFromEdgeList<false, true>(
                            std::move(edges), 1, 4)));
-  std::mt19937_64 rng(42);
+  Rng rng = MakeRng(42);
   std::vector<std::size_t> result;
   EXPECT_OK(index.SampleRandomUniform(/*source_node=*/0, /*num_samples=*/2,
                                       &result, &rng, /*masked_edge_idx=*/5));
@@ -260,7 +260,7 @@ TEST(InMemorySamplerTest, SampleRandomUniform_NumSamplesLargerThanAvailable) {
   ASSERT_OK_AND_ASSIGN(AdjacencyIndex index,
                        (AdjacencyIndex::CreateFromEdgeList<false, true>(
                            std::move(edges), 1, 4)));
-  std::mt19937_64 rng(42);
+  Rng rng = MakeRng(42);
   std::vector<std::size_t> result;
   EXPECT_OK(index.SampleRandomUniform(/*source_node=*/0, /*num_samples=*/5,
                                       &result, &rng, /*masked_edge_idx=*/1));
@@ -277,7 +277,7 @@ TEST(InMemorySamplerTest, SampleRandomUniform_MoreCandidates) {
   ASSERT_OK_AND_ASSIGN(AdjacencyIndex index,
                        (AdjacencyIndex::CreateFromEdgeList<false, true>(
                            std::move(edges), 1, 6)));
-  std::mt19937_64 rng(42);
+  Rng rng = MakeRng(42);
   std::vector<std::size_t> result;
   EXPECT_OK(index.SampleRandomUniform(/*source_node=*/0, /*num_samples=*/2,
                                       &result, &rng,

@@ -31,6 +31,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/log.h"
+#include "absl/random/distributions.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -92,7 +93,7 @@ struct Sampler {
 
   // Random number generator.
   // TODO(gbm): Create a pool for when using multi-threaded sampling.
-  std::mt19937_64 rng_;
+  Rng rng_;
 
   // If true, the sampler runs a deterministic sampling useful for debugging:
   //   - When sampling k unique edges, the k edges comming from the k nodes with
@@ -220,11 +221,8 @@ struct SampleBuilder {
   // step.
   std::vector<absl::flat_hash_set<InputIdx>> visited_node_idxs;
 
-  // Random number generator.
-  std::mt19937_64 rng;
-
-  explicit SampleBuilder(std::mt19937_64::result_type rng_seed)
-      : rng(rng_seed) {}
+  // Random number generator. Re-seeded (via `MakeRng`) before each sample.
+  Rng rng;
 
   absl::Status RecursiveGrow(const Sampler& sampler,
                              const SamplingPlan::Node& plan_node,
@@ -472,7 +470,7 @@ absl::StatusOr<nb::list> Sampler::Sample(
         active_builders[seed_idx] = std::move(sample_builder_pool_.back());
         sample_builder_pool_.pop_back();
       } else {
-        active_builders[seed_idx] = std::make_unique<SampleBuilder>(rng_());
+        active_builders[seed_idx] = std::make_unique<SampleBuilder>();
       }
     }
   }
@@ -517,7 +515,7 @@ absl::StatusOr<nb::list> Sampler::Sample(
       thread_pool.Schedule([this, sample_builder, seed, seed_node_idx,
                             seed_timestamp, masked_edge_idx, &latch,
                             &global_status_mutex, &global_status]() {
-        sample_builder->rng.seed(seed);
+        sample_builder->rng = MakeRng(seed);
 
         const auto status = sample_builder->Grow(
             *this, seed_node_idx, seed_timestamp, masked_edge_idx);
@@ -644,8 +642,7 @@ struct SubGraphExtractor {
   absl::Status RecursiveGrow(const Sampler& sampler,
                              const SamplingPlan::Node& plan_node,
                              InputIdx source_node,
-                             SampleIdx source_sampled_node,
-                             std::mt19937_64* rng) {
+                             SampleIdx source_sampled_node, Rng* rng) {
     for (const auto& plan_edge : plan_node.children) {
       // Get the edge data to sample from.
       const Sampler::EdgeSet& edgeset =
@@ -727,7 +724,7 @@ struct SubGraphExtractor {
 
   // Extracts the subgraph.
   absl::Status ExtractSubGraph(const std::vector<InputIdx>& seed_node_idxs,
-                               const Sampler* sampler, std::mt19937_64* rng) {
+                               const Sampler* sampler, Rng* rng) {
     // Initialize the working memory.
     working_nodesets.resize(sampler->nodesets_.size());
     working_edgesets.resize(sampler->edgesets_.size());
@@ -805,7 +802,7 @@ struct RandomWalkNegativeSamplerHelper {
   int num_negatives_per_seed;
 
   absl::Status SampleForSeed(InputIdx seed_node, int64_t* output_for_seed_node,
-                             std::mt19937_64* local_rng) const {
+                             Rng* local_rng) const {
     absl::flat_hash_map<InputIdx, int> visit_counts;
     const int target_nodeset_idx = edgeset->target_nodeset;
 
@@ -815,9 +812,9 @@ struct RandomWalkNegativeSamplerHelper {
       const SamplingPlan::Node* cur_plan_node = sampler->plan_.root.get();
 
       while (!cur_plan_node->children.empty()) {
-        std::uniform_int_distribution<size_t> e_dist(
-            0, cur_plan_node->children.size() - 1);
-        const auto& plan_edge = cur_plan_node->children[e_dist(*local_rng)];
+        const auto& plan_edge =
+            cur_plan_node->children[absl::Uniform<size_t>(
+                *local_rng, 0, cur_plan_node->children.size())];
 
         const auto& current_edgeset = sampler->edgesets_[plan_edge.edgeset_idx];
         const auto& index = plan_edge.reversed ? current_edgeset.backward_index
@@ -832,8 +829,8 @@ struct RandomWalkNegativeSamplerHelper {
         auto neighbors = index->Targets(cur_node);
         if (neighbors.empty()) break;
 
-        std::uniform_int_distribution<size_t> n_dist(0, neighbors.size() - 1);
-        cur_node = neighbors[n_dist(*local_rng)];
+        cur_node =
+            neighbors[absl::Uniform<size_t>(*local_rng, 0, neighbors.size())];
         cur_plan_node = plan_edge.node.get();
 
         if (cur_plan_node->nodeset_idx == target_nodeset_idx) {
@@ -883,9 +880,9 @@ struct RandomWalkNegativeSamplerHelper {
       // Note: The remaining slots are filled by randomly sampling nodes with
       // replacement. We only ensure the sampled node is not the seed node,
       // without checking for existing edges.
-      std::uniform_int_distribution<InputIdx> t_dist(0, num_target_nodes - 1);
       while (num_filled < num_negatives_per_seed) {
-        InputIdx candidate = t_dist(*local_rng);
+        const InputIdx candidate =
+            absl::Uniform<InputIdx>(*local_rng, 0, num_target_nodes);
         if (is_homogeneous && candidate == seed_node) {
           continue;
         }
@@ -923,7 +920,7 @@ Sampler::RandomWalkNegativeSampling(
 
   int64_t* output_data = new int64_t[num_seeds * num_negatives_per_seed];
 
-  std::vector<std::mt19937_64> rngs;
+  std::vector<Rng> rngs;
   rngs.reserve(num_seeds);
 
   absl::Status global_status;
@@ -933,7 +930,7 @@ Sampler::RandomWalkNegativeSampling(
     nb::gil_scoped_release release;
 
     for (size_t i = 0; i < num_seeds; i++) {
-      rngs.emplace_back(rng_());
+      rngs.push_back(MakeRng(rng_()));
     }
 
     std::latch latch(num_seeds);
@@ -990,7 +987,7 @@ absl::StatusOr<nb::object> Sampler::SubGraph(
     // Release the GIL.
     nb::gil_scoped_release release;
     // Create a local RNG
-    std::mt19937_64 rng(rng_());
+    Rng rng = MakeRng(rng_());
     DGF_RETURN_IF_ERROR(extractor.ExtractSubGraph(seed_node_idxs, this, &rng));
   }
 
@@ -1002,8 +999,8 @@ absl::StatusOr<nb::list> Sampler::MultiSubGraphs(
     const std::vector<InputIdx>& seed_node_idxs) {
   std::size_t num_seeds = seed_node_idxs.size();
   std::vector<SubGraphExtractor> extractors(num_seeds);
-  // TODO(gbm): Don't re-create mt19937_64s at each sampling.
-  std::vector<std::mt19937_64> rngs;
+  // TODO(gbm): Don't re-create RNGs at each sampling.
+  std::vector<Rng> rngs;
   rngs.reserve(num_seeds);
 
   {
@@ -1011,7 +1008,7 @@ absl::StatusOr<nb::list> Sampler::MultiSubGraphs(
     nb::gil_scoped_release release;
 
     for (size_t i = 0; i < num_seeds; ++i) {
-      rngs.emplace_back(rng_());
+      rngs.push_back(MakeRng(rng_()));
     }
 
     absl::Status global_status;
@@ -1266,10 +1263,9 @@ absl::StatusOr<std::unique_ptr<Sampler>> CreateSampler(
   DGF_RETURN_IF_ERROR(
       sampler->IndexEdgeSets(graph, edgeset_timestamp_features));
   if (seed >= 0) {
-    sampler->rng_.seed(seed);
-  } else {
-    sampler->rng_.seed(std::random_device()());
+    sampler->rng_ = MakeRng(seed);
   }
+  // Note: If seed < 0, `rng_` keeps its default, non-deterministic seeding.
   sampler->debug_sampling_ = debug_sampling;
   return std::move(sampler);
 }
