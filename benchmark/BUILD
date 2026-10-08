@@ -48,6 +48,20 @@ py_library(
     ],
 )
 
+py_library(
+    name = "mpnn",
+    srcs = ["mpnn.py"],
+    deps = [
+        ":utils",
+        "//dgf",
+        "//dgf/src/sampling:config",
+        "//dgf/src/util:log",
+        # flax:core dep,
+        # jax dep,
+        # numpy dep,
+    ],
+)
+
 # Binaries
 # ========
 
@@ -85,6 +99,17 @@ py_binary(
     ],
 )
 
+py_binary(
+    name = "mpnn_main",
+    srcs = ["mpnn_main.py"],
+    deps = [
+        ":mpnn",
+        "//learning/brain/research/jax:gpu_support",  # buildcleaner: keep
+        # absl:app dep,
+        # absl/flags dep,
+    ],
+)
+
 # Tests
 # =====
 
@@ -107,5 +132,16 @@ py_test(
         ":in_process_sampling",
         # absl/testing:absltest dep,
         "//dgf/src/util:gen_test_graph",
+    ],
+)
+
+py_test(
+    name = "mpnn_test",
+    srcs = ["mpnn_test.py"],
+    deps = [
+        ":mpnn",
+        # absl/testing:absltest dep,
+        "//dgf",
+        # jax dep,
     ],
 )
