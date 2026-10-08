@@ -146,6 +146,9 @@ class GNNDatasetPreparator:
       features on the same device used for training reduces host-device
       communication, potentially speeding up training, but increases memory
       consumption on the device.
+    target_column: Optional name of the target feature column on the seed
+      nodeset. When specified, feature statistics for this column are computed
+      over seed nodes only rather than all sampled neighbor nodes.
   """
 
   # Required arguments
@@ -176,6 +179,7 @@ class GNNDatasetPreparator:
   cache_normalized_features: bool = True
   cache_normalized_features_device: Literal["host", "device"] = "device"
   padding_margin: float = 0.1
+  target_column: str | None = None
 
   # The is_prepared data computed by the `prepare()` method.
   live: LiveData | None = dataclasses.field(init=False, default=None)
@@ -315,12 +319,42 @@ class GNNDatasetPreparator:
         nodeset_timestamp_features=self.nodeset_timestamp_features,
     )
 
+    target_nodeset = sample_generator.sampling_config.root.nodeset  # pyrefly: ignore[missing-attribute]
+
     # A generator of non-normalized graph samples.
     def gen_raw_samples():
       for sample, _ in sample_generator.batch_iterator():
         yield sample
 
-    gen_raw_samples_iter = gen_raw_samples()
+    def gen_raw_samples_for_stats():
+      # The statistics of the target/label column are only computed on the
+      # target nodes i.e., the nodes where the target/label column are actually
+      # used.
+      for sample, merge_offsets in sample_generator.batch_iterator():
+        if (
+            self.target_column is not None
+            and target_nodeset in sample.node_sets
+            and self.target_column in sample.node_sets[target_nodeset].features
+        ):
+          seed_node_idxs = merge_offsets[target_nodeset][:-1]
+          target_ns = sample.node_sets[target_nodeset]
+          target_features = dict(target_ns.features)
+          target_features[self.target_column] = target_features[
+              self.target_column
+          ][seed_node_idxs]
+          node_sets = dict(sample.node_sets)
+          node_sets[target_nodeset] = in_memory_graph_lib.InMemoryNodeSet(
+              num_nodes=target_ns.num_nodes,
+              features=target_features,
+          )
+          sample = in_memory_graph_lib.InMemoryGraph(
+              node_sets=node_sets,
+              edge_sets=sample.edge_sets,
+              timestamp=sample.timestamp,
+          )
+        yield sample
+
+    gen_raw_samples_iter = gen_raw_samples_for_stats()
     if self.num_samples_for_stats is not None:
       gen_raw_samples_iter = itertools.islice(
           gen_raw_samples_iter,
@@ -752,6 +786,7 @@ def prepare_datasets(
     padding_margin: float,
     auto_normalize_config: normalize_lib.AutoNormalizeConfig | None = None,
     keep_raw_features: set[tuple[str, str]] | None = None,
+    target_column: str | None = None,
 ) -> tuple[GNNDatasetPreparator, GNNDatasetPreparator | None]:
   """Prepares the training dataset by sampling, normalizing, and padding."""
   if not cache_valid_dataset or num_valid_steps is None:
@@ -819,6 +854,7 @@ def prepare_datasets(
       "cache_normalized_features": cache_normalized_features,
       "cache_normalized_features_device": cache_normalized_features_device,
       "padding_margin": padding_margin,
+      "target_column": target_column,
   }
 
   train_dataset = GNNDatasetPreparator(
