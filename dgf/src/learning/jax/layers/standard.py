@@ -14,6 +14,7 @@
 
 """A collection of modern standard layers."""
 
+from collections.abc import Callable
 import dataclasses
 import re
 import dataclasses_json
@@ -138,6 +139,19 @@ def validate_config(layers: list[tuple[str, int]]) -> None:
       )
 
 
+@dataclasses.dataclass(frozen=True)
+class LinearActivationLinear:
+  """Decomposition of a "LAL" block: Dense(hidden) -> activation -> Dense(out).
+
+  Lets callers apply the two dense layers separately (e.g. on nodes rather
+  than on edges) while remaining equivalent to the original block.
+  """
+
+  hidden_dims: int
+  activation: Callable[[jnp.ndarray], jnp.ndarray]
+  output_dims: int
+
+
 @layer_registry.register
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass
@@ -188,6 +202,21 @@ class GenericBlockConfig(common.ArchitectureProvider):
 
   def make(self, name: str | None = None) -> "GenericBlock":
     return GenericBlock(config=self, name=name)
+
+  def as_linear_activation_linear(self) -> LinearActivationLinear | None:
+    """Returns the "LAL" decomposition of the block, or None if not applicable.
+
+    Only blocks whose config is exactly "L{a}AL{b}" (Dense, activation, Dense)
+    can be decomposed.
+    """
+    parsed = parse_config(self.config)
+    if [t for t, _ in parsed] != ["L", "A", "L"] or self.activation is None:
+      return None
+    return LinearActivationLinear(
+        hidden_dims=self.dims * parsed[0][1],
+        activation=common.get_activation(self.activation),
+        output_dims=self.dims * parsed[2][1],
+    )
 
   def architecture(self) -> str:
     if not self.config:

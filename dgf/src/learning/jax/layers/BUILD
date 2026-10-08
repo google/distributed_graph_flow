@@ -280,11 +280,13 @@ py_test(
     srcs = ["hetero_gnn_test.py"],
     deps = [
         ":hetero_gnn",
+        ":standard",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         "//dgf/src/data:jax_in_memory_graph",
         "//dgf/src/data:schema",
         # jax dep,
+        # numpy dep,
     ],
 )
 
@@ -298,6 +300,7 @@ py_test(
         "//dgf/src/data:jax_in_memory_graph",
         "//dgf/src/data:schema",
         # jax dep,
+        # numpy dep,
     ],
 )
 
