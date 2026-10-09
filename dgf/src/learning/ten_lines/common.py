@@ -18,7 +18,7 @@ import abc
 import dataclasses
 import enum
 import os
-from typing import Any, Optional, Literal, TypeAlias
+from typing import Any, Literal, Optional, TypeAlias
 import uuid
 import dataclasses_json
 from dgf.src.data import in_memory_graph
@@ -40,7 +40,6 @@ from dgf.src.util import util
 import jax
 import numpy as np
 import orbax.checkpoint as ocp
-
 
 # The types of graphs supported.
 Graph = dataset.Graph
@@ -67,6 +66,8 @@ class Architecture(enum.Enum):
   HETEROGENEOUS_GRAPH_ATTENTION_NETWORK = (
       "HETEROGENEOUS_GRAPH_ATTENTION_NETWORK"
   )
+  GRAPH_SAGE = "GRAPH_SAGE"
+  GRAPH_CONVOLUTIONAL_NETWORK = "GRAPH_CONVOLUTIONAL_NETWORK"
 
 
 DEFAULT_ARCHITECTURE = Architecture.HETEROGENEOUS_MESSAGE_PASSING
@@ -86,6 +87,10 @@ def parse_architecture(architecture: Architecture | str) -> Architecture:
     return Architecture.HETEROGENEOUS_MESSAGE_PASSING
   elif arch_lower in ("hgat", "han", "heterogeneous_graph_attention_network"):
     return Architecture.HETEROGENEOUS_GRAPH_ATTENTION_NETWORK
+  elif arch_lower in ("sage", "graphsage", "graph_sage"):
+    return Architecture.GRAPH_SAGE
+  elif arch_lower in ("gcn", "graph_convolutional_network"):
+    return Architecture.GRAPH_CONVOLUTIONAL_NETWORK
   else:
     raise ValueError(f"Unknown architecture: {architecture}")
 
@@ -406,8 +411,9 @@ class HParam:
     opt_weight_decay: The strength of the weight decay regularization of the
       optimizer. See https://optax.readthedocs.io/en/latest/api/optimizers.html.
     dropout: The dropout rate used for training.
-    message_pooling: The pooling method used for aggregating messages in GNNs.
-      Supported methods are "sum", "mean", and "max".
+    message_aggregation: How the messages received by a node are aggregated. See
+      `hetero_gnn.MessageAggregation`. Only used by the
+      `HETEROGENEOUS_MESSAGE_PASSING` architecture.
     architecture: The architecture of the GNN model.
     timeseries_embedding_dim: The dimension of the embedding computed for each
       timeseries feature group.
@@ -431,7 +437,9 @@ class HParam:
   learning_rate: float = 0.0005
   opt_weight_decay: float = 0.0001
   dropout: float = 0.1
-  message_pooling: str = "sum"
+  message_aggregation: hetero_gnn.MessageAggregation = (
+      hetero_gnn.MessageAggregation.SUM
+  )
   architecture: Architecture = DEFAULT_ARCHITECTURE
   timeseries_embedding_dim: int = 64
   timeseries_encoder: TimeseriesEncoder = DEFAULT_TIMESERIES_ENCODER
@@ -541,7 +549,7 @@ def build_gnn_config(hparams: HParam) -> jax_common.GenericLayer:
     return hetero_gnn.HeterogeneousGraphConvolutionConfig(  # pyrefly: ignore[bad-return]
         dims=hparams.node_embedding_dim,
         dropout_rate=hparams.dropout,
-        message_pooling=hparams.message_pooling,
+        message_aggregation=hparams.message_aggregation,
     )
 
   elif (
@@ -550,7 +558,19 @@ def build_gnn_config(hparams: HParam) -> jax_common.GenericLayer:
     return hetero_graph_attention_network.HeterogeneousGraphAttentionNetworkConfig(  # pyrefly: ignore[bad-return]
         dims=hparams.node_embedding_dim,
         dropout_rate=hparams.dropout,
-        message_pooling=hparams.message_pooling,
+        message_aggregation=hparams.message_aggregation.value,
+    )
+
+  elif hparams.architecture == Architecture.GRAPH_SAGE:
+    return hetero_gnn.HeterogeneousGraphConvolutionConfig.graphsage(  # pyrefly: ignore[bad-return]
+        dims=hparams.node_embedding_dim,
+        dropout_rate=hparams.dropout,
+    )
+
+  elif hparams.architecture == Architecture.GRAPH_CONVOLUTIONAL_NETWORK:
+    return hetero_gnn.HeterogeneousGraphConvolutionConfig.gcn(  # pyrefly: ignore[bad-return]
+        dims=hparams.node_embedding_dim,
+        dropout_rate=hparams.dropout,
     )
 
   else:

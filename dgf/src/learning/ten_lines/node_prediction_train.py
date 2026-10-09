@@ -31,6 +31,7 @@ from dgf.src.io import jax as jax_lib
 from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import flax_train
 from dgf.src.learning.jax.layers import classification as classification_lib
+from dgf.src.learning.jax.layers import hetero_gnn
 from dgf.src.learning.jax.layers import preprocess
 from dgf.src.learning.jax.layers import regression as regression_lib
 from dgf.src.learning.jax.layers import standard
@@ -173,7 +174,7 @@ def train_node_model(
     learning_rate: float = 1e-3,
     cache_valid_dataset: bool = True,
     time_aware: bool = False,
-    message_pooling: str = "sum",
+    message_aggregation: hetero_gnn.MessageAggregation | str = "sum",
     experimental_preprocess_core_model_config: (
         Callable[[CoreModelConfig], CoreModelConfig] | None
     ) = None,
@@ -247,7 +248,9 @@ def train_node_model(
       from the schema (via features marked as creation timestamps), the target
       nodeset is required to have a creation timestamp, and the train and
       validation sets are split temporally instead of randomly.
-    message_pooling: The pooling method to use for aggregating messages.
+    message_aggregation: How the messages received by a node are aggregated. One
+      of `hetero_gnn.MessageAggregation` or its string value ("sum", "mean" or
+      "symmetric").
     experimental_preprocess_core_model_config: Advanced option. An optional
       callable to modify the `CoreModelConfig` before it is used to build the
       core model.
@@ -262,7 +265,8 @@ def train_node_model(
       consumption on the device.
     export_metrics_to_xm: If True, metrics from the training and validation
       steps will be exported to XManager.
-    architecture: The architecture of the GNN model.
+    architecture: The architecture of the GNN model. Either an `Architecture`
+      value or its name as a string (e.g. "hmpnn", "hgat", "graphsage", "gcn").
     timeseries_encoder: The encoder used to turn the timeseries features of a
       node into a fixed sized embedding. Either a `TimeseriesEncoder` value or
       its name as a string (e.g. "cnn", "transformer").
@@ -378,7 +382,7 @@ def train_node_model(
         node_embedding_dim=node_embedding_dim,
         learning_rate=learning_rate,
         num_layers=num_layers,
-        message_pooling=message_pooling,
+        message_aggregation=hetero_gnn.MessageAggregation(message_aggregation),
         architecture=architecture,
         timeseries_encoder=timeseries_encoder,
         timeseries_embedding_dim=timeseries_embedding_dim,

@@ -20,6 +20,7 @@ import os
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.data import schema as schema_lib
+from dgf.src.learning.jax.layers import hetero_gnn
 from dgf.src.learning.ten_lines import common
 from dgf.src.util import gen_test_graph
 from dgf.src.util import log
@@ -104,9 +105,40 @@ class TenLines(parameterized.TestCase):
           common.Architecture.HETEROGENEOUS_GRAPH_ATTENTION_NETWORK,
           common.Architecture.HETEROGENEOUS_GRAPH_ATTENTION_NETWORK,
       ),
+      ("sage", "graph_sage", common.Architecture.GRAPH_SAGE),
+      ("sage_alias", "GraphSAGE", common.Architecture.GRAPH_SAGE),
+      (
+          "gcn",
+          "graph_convolutional_network",
+          common.Architecture.GRAPH_CONVOLUTIONAL_NETWORK,
+      ),
+      ("gcn_alias", "gcn", common.Architecture.GRAPH_CONVOLUTIONAL_NETWORK),
   )
   def test_parse_architecture_success(self, input_val, expected):
     self.assertEqual(common.parse_architecture(input_val), expected)
+
+  @parameterized.parameters(
+      (common.Architecture.HETEROGENEOUS_MESSAGE_PASSING, "Aggregation(mean)"),
+      (
+          common.Architecture.HETEROGENEOUS_GRAPH_ATTENTION_NETWORK,
+          "HeterogeneousGraphAttentionNetwork",
+      ),
+      (common.Architecture.GRAPH_SAGE, "Aggregation(mean)"),
+      (
+          common.Architecture.GRAPH_CONVOLUTIONAL_NETWORK,
+          "Aggregation(symmetric)",
+      ),
+  )
+  def test_build_gnn_config(
+      self, architecture: common.Architecture, expected_in_architecture: str
+  ):
+    hparams = common.HParam(
+        node_embedding_dim=8,
+        message_aggregation=hetero_gnn.MessageAggregation.MEAN,
+        architecture=architecture,
+    )
+    config = common.build_gnn_config(hparams)
+    self.assertIn(expected_in_architecture, config.architecture())
 
   def test_parse_architecture_invalid_fails(self):
     with self.assertRaisesRegex(ValueError, "Unknown architecture: invalid"):
@@ -404,7 +436,7 @@ class TenLines(parameterized.TestCase):
                         format=schema_lib.FeatureFormat.FLOAT_32,
                         shape=None,
                     ),
-                }
+                },
             )
         },
     )

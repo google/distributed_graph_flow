@@ -146,6 +146,7 @@ py_library(
         "//dgf/src/learning/jax:common",
         # flax:core dep,
         # jax dep,
+        # jaxtyping dep,
     ],
 )
 

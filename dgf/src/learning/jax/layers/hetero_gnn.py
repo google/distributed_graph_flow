@@ -17,6 +17,7 @@
 import collections
 from collections.abc import Callable
 import dataclasses
+import enum
 import functools
 import textwrap
 import dataclasses_json
@@ -28,6 +29,7 @@ from dgf.src.learning.jax.layers.registry import registry as layer_registry  # p
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
+import jaxtyping as jt
 
 # A plan is a list of (edge name, is_reversed) indicating which edge
 # is used to propagate the message.
@@ -37,6 +39,28 @@ Plan = list[tuple[str, bool]]
 # sorted plan maps for each target nodesets, the list of
 # (edgeset name, source nodeset, is_reversed).
 SortedPlan = dict[str, list[tuple[str, str, bool]]]
+
+
+class MessageAggregation(enum.Enum):
+  """How the messages received by a node are aggregated, per relation.
+
+  See `HeterogeneousGraphConvolutionConfig.message_aggregation`.
+  """
+
+  SUM = "sum"
+  MEAN = "mean"
+  SYMMETRIC = "symmetric"
+
+
+class Combine(enum.Enum):
+  """How the node embedding is combined with the aggregated messages.
+
+  See `HeterogeneousGraphConvolutionConfig.combine`.
+  """
+
+  CONCAT = "concat"
+  SUM = "sum"
+
 
 # Minimum number of edges for sorting by target to pay off on GPU.
 _SORT_MIN_EDGES = 50000
@@ -85,6 +109,42 @@ def sort_edges_by_dst(
       target_keys, source_values
   )
   return sorted_sources.astype(jnp.int32), sorted_targets.astype(jnp.int32)
+
+
+def node_degrees(
+    node_idxs: jt.Int[jt.Array, " num_edges"],
+    num_nodes: int,
+    dtype: jnp.dtype,
+    indices_are_sorted: bool = False,
+) -> jt.Num[jt.Array, "num_nodes 1"]:
+  """Gets the number of edges incident to each node.
+
+  Usage example:
+
+  ```python
+  adjacency = jnp.array([[0, 0, 2],   # sources
+                         [0, 1, 2]])  # targets
+  node_degrees(adjacency[0], num_nodes=3, dtype=jnp.int32)
+  # [[2], [0], [1]]: node 0 has two outgoing edges, node 1 none, node 2 one.
+  ```
+
+  Args:
+    node_idxs: Node index of each edge, shape [num_edges]. `node_idxs[i] == j`
+      means edge `i` is incident to node `j`. Pass the target side of the
+      adjacency for in-degrees, the source side for out-degrees.
+    num_nodes: Number of nodes.
+    dtype: Dtype of the result.
+    indices_are_sorted: Whether `node_idxs` is sorted.
+
+  Returns:
+    The node degrees, shape [num_nodes, 1].
+  """
+  return jax.ops.segment_sum(
+      jnp.ones((node_idxs.shape[0], 1), dtype=dtype),
+      node_idxs,
+      num_nodes,
+      indices_are_sorted=indices_are_sorted,
+  )
 
 
 @functools.lru_cache(maxsize=None)
@@ -200,9 +260,15 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
       default values of `message`, `update`, and `post`.
     dropout_rate: Dropout rate. Used to build the default values of `update` and
       `post`.
-    activation: Activation function to use. Used to build the default values of
-      `update` and `post`.
-    message_pooling: Pooling method for aggregating messages ('sum' or 'mean').
+    message_aggregation: Aggregation of the messages received by a node, per
+      relation. 'mean' also averages over the relations. 'symmetric' is the GCN
+      normalization `1 / sqrt((1 + out_deg(src)) * (1 + in_deg(dst)))` and
+      requires `message_consumes_target=False`.
+    message_consumes_target: If True, the message module sees `concat([source,
+      target])`; if False, only `source` (GraphSAGE / GCN style).
+    combine: Input of the update module: 'concat' for `concat([X, messages])`
+      (GraphSAGE) or 'sum' for `X + messages` (GCN, requires matching dims).
+    residual: Whether to add a residual connection around the update step.
     message: Optional module to apply to edge features to generate messages.
       Defaults to a single-layer MLP.
     update: Optional module to apply to node embeddings after message passing,
@@ -213,20 +279,38 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
     force_basic_implementation: If True, always compute messages with the
       generic per-edge implementation (no node-level projection, no edge
       sorting). Mostly useful in tests to validate the optimized paths.
+    message_pooling: Deprecated string alias of `message_aggregation`.
   """
 
   plan: list[tuple[str, bool]] | None = None
   embedding_feature: str = "embedding"
   dims: int = 128
   dropout_rate: float = 0.1
-  message_pooling: str = "sum"
+  message_aggregation: MessageAggregation = MessageAggregation.SUM
+  message_consumes_target: bool = True
+  combine: Combine = Combine.CONCAT
+  residual: bool = True
   force_basic_implementation: bool = False
 
   message: common.GenericLayer | None = layer_registry.field(default=None)
   update: common.GenericLayer | None = layer_registry.field(default=None)
   post: common.GenericLayer | None = layer_registry.field(default=None)
 
+  message_pooling: str | None = None
+
   def __post_init__(self):
+    if self.message_pooling is not None:
+      self.message_aggregation = MessageAggregation(self.message_pooling)
+      self.message_pooling = None
+
+    if (
+        self.message_aggregation == MessageAggregation.SYMMETRIC
+        and self.message_consumes_target
+    ):
+      raise ValueError(
+          "message_aggregation='symmetric' requires"
+          " message_consumes_target=False."
+      )
 
     if self.message is None:
       self.message = standard.GenericBlockConfig("LAL", dims=self.dims)
@@ -240,6 +324,65 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
           dims=self.dims, dropout_rate=self.dropout_rate
       )
 
+  @classmethod
+  def graphsage(
+      cls,
+      dims: int = 128,
+      activation: str = "relu",
+      dropout_rate: float = 0.0,
+      plan: Plan | None = None,
+  ) -> "HeterogeneousGraphConvolutionConfig":
+    """GraphSAGE template: `h_v' = act(W [h_v ; mean_{u in N(v)} h_u] + b)`."""
+    return cls(
+        plan=plan,
+        dims=dims,
+        dropout_rate=dropout_rate,
+        message_aggregation=MessageAggregation.MEAN,
+        message_consumes_target=False,
+        combine=Combine.CONCAT,
+        residual=False,
+        message=standard.identity(),
+        update=standard.GenericBlockConfig(
+            "LAD" if dropout_rate > 0.0 else "LA",
+            dims=dims,
+            activation=activation,
+            dropout_rate=dropout_rate,
+        ),
+        post=standard.identity(),
+    )
+
+  @classmethod
+  def gcn(
+      cls,
+      dims: int = 128,
+      activation: str = "relu",
+      dropout_rate: float = 0.0,
+      plan: Plan | None = None,
+  ) -> "HeterogeneousGraphConvolutionConfig":
+    """GCN template: `H' = act((D^-1/2 A D^-1/2 H + H) W + b)`.
+
+    Each relation of the plan is normalized with its own degrees (`D = 1 +
+    degree`) and the relations are summed. Unlike the original GCN, the
+    self-connection `H` is not part of the normalized adjacency.
+    """
+    return cls(
+        plan=plan,
+        dims=dims,
+        dropout_rate=dropout_rate,
+        message_aggregation=MessageAggregation.SYMMETRIC,
+        message_consumes_target=False,
+        combine=Combine.SUM,
+        residual=False,
+        message=standard.identity(),
+        update=standard.GenericBlockConfig(
+            "LAD" if dropout_rate > 0.0 else "LA",
+            dims=dims,
+            activation=activation,
+            dropout_rate=dropout_rate,
+        ),
+        post=standard.identity(),
+    )
+
   def make(
       self, schema: schema_lib.GraphSchema, name: str | None = None
   ) -> "HeterogeneousGraphConvolution":
@@ -249,14 +392,25 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
     assert self.message is not None
     assert self.update is not None
     assert self.post is not None
+    message_input = (
+        "concat(source, target)" if self.message_consumes_target else "source"
+    )
+    if self.combine == Combine.CONCAT:
+      combine_input = "concat(X, messages)"
+    elif self.combine == Combine.SUM:
+      combine_input = "X + messages"
+    else:
+      raise ValueError(f"Unsupported combine: {self.combine}")
     parts = []
     parts.append("X = ...")
     parts.append("MPNN:")
-    parts.append("  Message:")
+    parts.append(f"  Message({message_input}):")
     parts.append(textwrap.indent(self.message.architecture(), prefix="    "))
-    parts.append("  Update:")
+    parts.append(f"  Aggregation({self.message_aggregation.value})")
+    parts.append(f"  Update({combine_input}):")
     parts.append(textwrap.indent(self.update.architecture(), prefix="    "))
-    parts.append("Residual(X)")
+    if self.residual:
+      parts.append("Residual(X)")
     parts.append("# Post MPNN")
     parts.append(self.post.architecture())
     return "\n".join(parts)
@@ -269,6 +423,10 @@ class HeterogeneousGraphConvolution(nn.Module):
   two main blocks:
   1.  A GNN step with a residual connection.
   2.  A transformer-like residual Multi-Layer Perceptron (MLP).
+
+  Classic architectures are available as templates of the config, e.g.
+  `HeterogeneousGraphConvolutionConfig.graphsage(dims=64)` and
+  `HeterogeneousGraphConvolutionConfig.gcn(dims=64)`.
 
   All node sets are assumed to have a feature specified by
   `config.embedding_feature` (defaulting to "embedding"), and these features
@@ -372,8 +530,10 @@ class HeterogeneousGraphConvolution(nn.Module):
     }
 
     linear_activation_linear = None
-    if not config.force_basic_implementation and isinstance(
-        config.message, standard.GenericBlockConfig
+    if (
+        config.message_consumes_target
+        and not config.force_basic_implementation
+        and isinstance(config.message, standard.GenericBlockConfig)
     ):
       linear_activation_linear = config.message.as_linear_activation_linear()
 
@@ -413,7 +573,69 @@ class HeterogeneousGraphConvolution(nn.Module):
           )
         relation_name = f"{edgeset_name}_{'rev' if reverse else 'fwd'}"
 
-        if linear_activation_linear is not None:
+        # Normalization of the messages, per relation. `src_scale` [N_src, 1]
+        # weights the messages sent by each source node and `dst_scale`
+        # [N_dst, 1] the sum of the messages received by each target node.
+        src_scale = None
+        dst_scale = None
+        if config.message_aggregation == MessageAggregation.MEAN:
+          in_degrees = node_degrees(
+              target_idxs, num_dst_nodes, dst_values.dtype, sort_edges
+          )
+          # Nodes without incoming edges keep a zero aggregate.
+          dst_scale = 1.0 / jnp.maximum(in_degrees, 1.0)
+        elif config.message_aggregation == MessageAggregation.SYMMETRIC:
+          # GCN: `1 / sqrt((1 + out_deg(src)) * (1 + in_deg(dst)))`. The "+1"
+          # follows GCN's self-loop convention and keeps isolated nodes finite.
+          in_degrees = node_degrees(
+              target_idxs, num_dst_nodes, dst_values.dtype, sort_edges
+          )
+          out_degrees = node_degrees(
+              source_idxs, num_src_nodes, src_values.dtype
+          )
+          src_scale = jax.lax.rsqrt(1.0 + out_degrees)
+          dst_scale = jax.lax.rsqrt(1.0 + in_degrees)
+        elif config.message_aggregation == MessageAggregation.SUM:
+          pass
+        else:
+          raise ValueError(
+              f"Unsupported message_aggregation: {config.message_aggregation}"
+          )
+
+        if not config.message_consumes_target:
+          # The message only depends on the source node.
+          message_fn = config.message.make(name=f"msg_{relation_name}")
+
+          if config.force_basic_implementation or num_src_nodes > num_edges:
+            # Weights + activation on the edges.
+            messages = message_fn(
+                src_values[source_idxs], training=training
+            )  # [E, msg_dims]
+            if src_scale is not None:
+              messages = messages * src_scale[source_idxs]
+            # Group by target nodeset.
+            neighbor_aggregate = jax.ops.segment_sum(
+                messages,
+                target_idxs,
+                num_dst_nodes,
+                indices_are_sorted=sort_edges,
+            )
+          else:
+            # Weights + activation on the nodes, then gather on the edges.
+            node_messages = message_fn(
+                src_values, training=training
+            )  # [N_src, msg_dims]
+            if src_scale is not None:
+              node_messages = node_messages * src_scale
+            # Group by target nodeset.
+            neighbor_aggregate = jax.ops.segment_sum(
+                node_messages[source_idxs],
+                target_idxs,
+                num_dst_nodes,
+                indices_are_sorted=sort_edges,
+            )
+
+        elif linear_activation_linear is not None:
           # The message function starts with a LAL (linear, activation, linear).
           # In this case, run the compute before the scatter.
 
@@ -503,37 +725,32 @@ class HeterogeneousGraphConvolution(nn.Module):
               indices_are_sorted=sort_edges,
           )
 
-        if self.config.message_pooling == "mean":
-          degrees = jax.ops.segment_sum(
-              jnp.ones((num_edges, 1), dtype=neighbor_aggregate.dtype),
-              target_idxs,
-              num_dst_nodes,
-              indices_are_sorted=sort_edges,
-          )
-          degrees = jnp.maximum(degrees, 1.0)
-          neighbor_aggregate = neighbor_aggregate / degrees
-        elif self.config.message_pooling == "sum":
-          pass
-        else:
-          raise ValueError("Unsupported message_pooling:")
+        if dst_scale is not None:
+          neighbor_aggregate = neighbor_aggregate * dst_scale
         neighbor_aggregates.append(neighbor_aggregate)
 
-      # Join messages + first residual
+      # Join messages
       combined_aggregates = neighbor_aggregates[0]
       for aggregate in neighbor_aggregates[1:]:
         combined_aggregates = combined_aggregates + aggregate
-      if self.config.message_pooling == "mean":
+      if config.message_aggregation == MessageAggregation.MEAN:
         combined_aggregates = combined_aggregates * (
             1.0 / len(neighbor_aggregates)
         )
-      elif self.config.message_pooling != "sum":
-        raise ValueError("Unsupported message_pooling")
 
-      combined = jnp.concatenate([dst_values, combined_aggregates], axis=1)
-      combined = config.update.make()(combined, training=training)
+      # Update
+      if config.combine == Combine.CONCAT:
+        combined = jnp.concatenate([dst_values, combined_aggregates], axis=1)
+      elif config.combine == Combine.SUM:
+        assert combined_aggregates.shape[-1] == dst_values.shape[-1]
+        combined = combined_aggregates + dst_values
+      else:
+        raise ValueError(f"Unsupported combine: {config.combine}")
+      node_values = config.update.make()(combined, training=training)
 
       # Residual
-      node_values = combined + res_node_features[dst_nodeset_name]
+      if config.residual:
+        node_values = node_values + res_node_features[dst_nodeset_name]
 
       # Feed-forward
       node_values = config.post.make()(node_values, training=training)

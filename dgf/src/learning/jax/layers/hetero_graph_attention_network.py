@@ -46,8 +46,8 @@ class HeterogeneousGraphAttentionNetworkConfig(common.ArchitectureProvider):
       default values of `message`, `update`, and `post`.
     dropout_rate: Dropout rate. Used to build the default values of `update` and
       `post`.
-    message_pooling: Pooling method (unused in GAT attention aggregation but
-      kept for signature compatibility).
+    message_aggregation: Aggregation method (unused in GAT attention aggregation
+      but kept for signature compatibility).
     num_heads: Number of attention heads.
     message: Optional module to apply to edge features to generate values.
       Defaults to a single-layer MLP.
@@ -65,7 +65,7 @@ class HeterogeneousGraphAttentionNetworkConfig(common.ArchitectureProvider):
   embedding_feature: str = "embedding"
   dims: int = 128
   dropout_rate: float = 0.1
-  message_pooling: str = "sum"
+  message_aggregation: str = "sum"
   num_heads: int = 4
   force_basic_implementation: bool = False
 

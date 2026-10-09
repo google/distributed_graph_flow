@@ -5,11 +5,12 @@ Norm(layer_norm)
 Graph Convolution Block x2:
     X = ...
     MPNN:
-      Message:
+      Message(concat(source, target)):
         Dense(8)
         Activation(silu)
         Dense(8)
-      Update:
+      Aggregation(sum)
+      Update(concat(X, messages)):
         Dense(8)
         Activation(silu)
         Dropout(0.1)

@@ -27,6 +27,7 @@ from dgf.src.generate import edge_neighbor_generator as edge_neighbor_generator_
 from dgf.src.io import jax as jax_lib
 from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import flax_train
+from dgf.src.learning.jax.layers import hetero_gnn
 from dgf.src.learning.jax.layers import preprocess
 from dgf.src.learning.jax.layers import standard
 from dgf.src.learning.ten_lines import common
@@ -344,7 +345,7 @@ def train_link_model(
     negative_edges: Literal["random", "random-walk"] = "random",
     random_walk_num_walks_per_negative: int = 10,
     diagnostic_dir: str | None = None,
-    message_pooling: str = "sum",
+    message_aggregation: hetero_gnn.MessageAggregation | str = "sum",
     experimental_preprocess_core_model_config: (
         Callable[[CoreModelConfig], CoreModelConfig] | None
     ) = None,
@@ -420,6 +421,9 @@ def train_link_model(
       negative sample when `negative_edges` is "random-walk".
     diagnostic_dir: If provided, creates this directory and export to it
       artefacts that can be useful to understand and debug the model training.
+    message_aggregation: How the messages received by a node are aggregated. One
+      of `hetero_gnn.MessageAggregation` or its string value ("sum", "mean" or
+      "symmetric").
     experimental_preprocess_core_model_config: An optional function to
       preprocess the `CoreModelConfig` before it is used to create the core
       model.
@@ -434,7 +438,8 @@ def train_link_model(
       consumption on the device.
     export_metrics_to_xm: If True, export training and validation metrics to
       XManager.
-    architecture: The architecture of the GNN model to use.
+    architecture: The architecture of the GNN model. Either an `Architecture`
+      value or its name as a string (e.g. "hmpnn", "hgat", "graphsage", "gcn").
     timeseries_encoder: The encoder used to turn the timeseries features of a
       node into a fixed sized embedding. Either a `TimeseriesEncoder` value or
       its name as a string (e.g. "cnn", "transformer").
@@ -522,7 +527,7 @@ def train_link_model(
         message_passing_on_target_edgeset=message_passing_on_target_edgeset,
         negative_edges=negative_edges,
         random_walk_num_walks_per_negative=random_walk_num_walks_per_negative,
-        message_pooling=message_pooling,
+        message_aggregation=hetero_gnn.MessageAggregation(message_aggregation),
         architecture=architecture,
         timeseries_encoder=timeseries_encoder,
         timeseries_embedding_dim=timeseries_embedding_dim,

@@ -1159,6 +1159,38 @@ class NodePredictionClassificationToy(absltest.TestCase):
     self.assertIn("does not have a string dictionary", str(ctx.exception))
 
 
+class NodePredictionArchitecturesToy(parameterized.TestCase):
+
+  @parameterized.parameters("graphsage", "gcn")
+  def test_train_and_evaluate(self, architecture: str):
+    graph_kwargs = {"num_n1_nodes": 1000, "num_n2_nodes": 500, "accuracy": 0.8}
+    graph_train, schema = gen_test_graph.gen_toy_classification_dataset(
+        **graph_kwargs, random_seed=0
+    )
+    graph_test, _ = gen_test_graph.gen_toy_classification_dataset(
+        **graph_kwargs, random_seed=1
+    )
+    model = node_prediction_lib.train_node_model(
+        graph=graph_train,
+        schema=schema,
+        target_nodeset="N1",
+        target_column="label",
+        architecture=architecture,
+        num_train_steps=100,
+        valid_every_n_steps=25,
+        num_sampling_hops=1,
+    )
+    self.assertEqual(
+        model.data().hparams.architecture,
+        common_lib.parse_architecture(architecture),
+    )
+    logging.info(
+        "architecture:\n%s", model.data().core_model_config.architecture()
+    )
+    evaluation = model.evaluate(graph_test)
+    self.assertGreater(evaluation.accuracy, 0.6)  # pyrefly: ignore[no-matching-overload]
+
+
 class NodePredictionNegativeLabelTest(absltest.TestCase):
   """Integer classification labels must be non-negative.
 
