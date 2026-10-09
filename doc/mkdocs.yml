@@ -90,6 +90,9 @@ nav:
   - 📖 Examples: https://github.com/google/distributed_graph_flow/tree/main/examples
   - 🤸 For Googlers: http://go/graph-flow
   - Simple API:
+    - Importing data:
+      - Introduction: importing_data.md
+      - Build in-memory graph manually: tutorial/in_memory_graph.ipynb
     - Tasks:
       - Node model: tutorial/node_prediction.ipynb
       - Link model: tutorial/link_prediction.ipynb
