@@ -907,35 +907,27 @@ class NodePredictionRealLooking(parameterized.TestCase):
 
   def test_predict_batch_insufficient_padding(self):
     """Tests that predict_batch handles InsufficientPaddingError by splitting."""
+    seed_node_idxs = [0, 1, 2]
+    data = self.model.data()
+    original_padding = data.padding
+    data.padding = _single_sample_padding(
+        self.model, self.graph, seed_node_idxs
+    )
+    try:
+      with unittest.mock.patch.object(
+          in_memory_sampler_lib.Sampler,
+          "_merge_sub_batches",
+          autospec=True,
+          wraps=in_memory_sampler_lib.Sampler._merge_sub_batches,
+      ) as mock_merge_sub_batches:
+        predictions = self.model.predict(
+            graph=self.graph, seed_node_idxs=seed_node_idxs
+        )
+    finally:
+      data.padding = original_padding
 
-    original_graph_merger = node_prediction_model.merge_lib.GraphMerger
-    call_count = 0
-
-    class MockGraphMerger(original_graph_merger):
-
-      def __call__(self, *call_args, **call_kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-          raise node_prediction_model.merge_lib.InsufficientPaddingError(
-              "Simulated insufficient padding"
-          )
-        return super().__call__(*call_args, **call_kwargs)
-
-    with unittest.mock.patch.object(
-        node_prediction_model.merge_lib,
-        "GraphMerger",
-        side_effect=MockGraphMerger,
-    ):
-      # In test, batch_size is 5 (from RAPID_TRAINING_KWARGS).
-      # We need to call predict with at least 2 examples to trigger splitting.
-      # We use 3 examples to be safe.
-      predictions = self.model.predict(
-          graph=self.graph, seed_node_idxs=[0, 1, 2]
-      )
-
-      self.assertEqual(predictions.shape, (3, self.model.num_label_classes()))
-      self.assertGreater(call_count, 1)
+    self.assertEqual(predictions.shape, (3, self.model.num_label_classes()))
+    self.assertGreater(mock_merge_sub_batches.call_count, 1)
 
   def test_architecture(self):
     test_util.assert_golden_string(

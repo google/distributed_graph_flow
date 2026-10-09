@@ -32,6 +32,92 @@ class InsufficientPaddingError(ValueError):
   pass
 
 
+def validate_padding(
+    schema: schema_lib.GraphSchema, padding: padding_lib.Padding | None
+):
+  """Checks that `padding` only refers to node / edge sets of `schema`."""
+  if padding is None:
+    return
+  unknown_node_sets = set(padding.node_sets) - set(schema.node_sets)
+  if unknown_node_sets:
+    raise ValueError(
+        f"Padding specifies unknown node sets: {sorted(unknown_node_sets)}."
+    )
+  unknown_edge_sets = set(padding.edge_sets) - set(schema.edge_sets)
+  if unknown_edge_sets:
+    raise ValueError(
+        f"Padding specifies unknown edge sets: {sorted(unknown_edge_sets)}."
+    )
+
+
+def padded_num_nodes(
+    padding: padding_lib.Padding | None, node_set_name: str
+) -> int | None:
+  """Padded number of nodes of a node set, or None if it is not padded."""
+  if padding and node_set_name in padding.node_sets:
+    return padding.node_sets[node_set_name].num_nodes
+  return None
+
+
+def padded_num_edges(
+    padding: padding_lib.Padding | None, edge_set_name: str
+) -> int | None:
+  """Padded number of edges of an edge set, or None if it is not padded."""
+  if padding and edge_set_name in padding.edge_sets:
+    return padding.edge_sets[edge_set_name].num_edges
+  return None
+
+
+def insufficient_node_padding_message(
+    node_set_name: str, num_real_nodes: int, num_nodes: int
+) -> str:
+  return (
+      f"Padding for node set '{node_set_name}' is insufficient."
+      f" Required at least {num_real_nodes + 1} nodes (including the"
+      f" sentinel node), but the padder only defines {num_nodes}."
+  )
+
+
+def insufficient_edge_padding_message(
+    edge_set_name: str, num_real_edges: int, num_edges: int
+) -> str:
+  return (
+      f"Padding for edge set '{edge_set_name}' is insufficient. "
+      f"Required at least {num_real_edges} edges, but the padder only "
+      f"defines {num_edges}."
+  )
+
+
+def missing_sentinel_message(
+    edge_set_name: str, edge_set_schema: schema_lib.EdgeSchema
+) -> str:
+  return (
+      f"Padding for edge set '{edge_set_name}' requires sentinel nodes"
+      f" on both source '{edge_set_schema.source}' and target"
+      f" '{edge_set_schema.target}', but one or both node sets are not"
+      " padded with sentinel nodes."
+  )
+
+
+def gather_rows_numpy(src: np.ndarray, idxs: np.ndarray, dst: np.ndarray):
+  """Sets dst[:len(idxs)] = src[idxs] and pads the remaining rows of dst.
+
+  The padding value is the same as the one used by `GraphMerger`: None for
+  object arrays, b"" for bytes, and 0 otherwise.
+
+  Args:
+    src: The array to gather rows from.
+    idxs: The row indices to gather.
+    dst: The destination array. Should have at least len(idxs) rows.
+  """
+  num_idxs = len(idxs)
+  np.take(src, idxs, axis=0, out=dst[:num_idxs])
+  if dst.dtype == np.object_:
+    dst[num_idxs:] = None
+  else:
+    dst[num_idxs:] = np.zeros((), dtype=dst.dtype)
+
+
 class GraphMerger:
   """Merges multiple `InMemoryGraph` instances into a single graph.
 
@@ -71,17 +157,7 @@ class GraphMerger:
     self.padding = padding
     self.sentinel_offset = sentinel_offset
 
-    if padding is not None:
-      unknown_node_sets = set(padding.node_sets) - set(schema.node_sets)
-      if unknown_node_sets:
-        raise ValueError(
-            f"Padding specifies unknown node sets: {sorted(unknown_node_sets)}."
-        )
-      unknown_edge_sets = set(padding.edge_sets) - set(schema.edge_sets)
-      if unknown_edge_sets:
-        raise ValueError(
-            f"Padding specifies unknown edge sets: {sorted(unknown_edge_sets)}."
-        )
+    validate_padding(schema, padding)
 
     self._has_timeseries_padding = timeseries_padding.has_timeseries_padding(
         padding
@@ -182,11 +258,7 @@ class GraphMerger:
       num_real_nodes = node_offsets[-1]
       num_sentinel_nodes = 0
 
-      target_num_nodes = (
-          padding.node_sets[node_set_name].num_nodes
-          if padding and node_set_name in padding.node_sets
-          else None
-      )
+      target_num_nodes = padded_num_nodes(padding, node_set_name)
 
       # Pad the nodeset with sentinel nodes if a padding configuration is
       # provided.
@@ -198,9 +270,9 @@ class GraphMerger:
         node_set_sentinel_idx[node_set_name] = num_nodes - 1
         if num_sentinel_nodes < 1:
           raise InsufficientPaddingError(
-              f"Padding for node set '{node_set_name}' is insufficient."
-              f" Required at least {num_real_nodes + 1} nodes (including the"
-              f" sentinel node), but the padder only defines {num_nodes}."
+              insufficient_node_padding_message(
+                  node_set_name, num_real_nodes, num_nodes
+              )
           )
       else:
         num_nodes = num_real_nodes
@@ -254,11 +326,7 @@ class GraphMerger:
       num_real_edges = edge_offsets[-1]
       num_padding = 0
 
-      target_num_edges = (
-          padding.edge_sets[edge_set_name].num_edges
-          if padding and edge_set_name in padding.edge_sets
-          else None
-      )
+      target_num_edges = padded_num_edges(padding, edge_set_name)
 
       # Pad the edgeset with sentinel edges if a padding configuration is
       # provided.
@@ -267,9 +335,9 @@ class GraphMerger:
         num_padding = num_edges - num_real_edges
         if num_padding < 0:
           raise InsufficientPaddingError(
-              f"Padding for edge set '{edge_set_name}' is insufficient. "
-              f"Required at least {num_real_edges} edges, but the padder only "
-              f"defines {num_edges}."
+              insufficient_edge_padding_message(
+                  edge_set_name, num_real_edges, num_edges
+              )
           )
 
         # Add padding edges pointing to sentinel nodes.
@@ -278,10 +346,7 @@ class GraphMerger:
             or edge_set_schema.target not in node_set_sentinel_idx
         ):
           raise ValueError(
-              f"Padding for edge set '{edge_set_name}' requires sentinel nodes"
-              f" on both source '{edge_set_schema.source}' and target"
-              f" '{edge_set_schema.target}', but one or both node sets are not"
-              " padded with sentinel nodes."
+              missing_sentinel_message(edge_set_name, edge_set_schema)
           )
         padding_node_src = node_set_sentinel_idx[edge_set_schema.source]
         padding_node_trg = node_set_sentinel_idx[edge_set_schema.target]

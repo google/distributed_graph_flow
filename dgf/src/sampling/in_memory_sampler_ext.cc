@@ -12,6 +12,7 @@
 //   - AdjacencyIndex: A set of edges indexed for efficient sampling.
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -53,7 +54,10 @@
 
 namespace dgf::sampling::in_memory_sampler {
 
-struct SampleBuilder;  // Forward declaration
+struct SampleBuilder;   // Forward declaration
+struct SampledBatch;    // Forward declaration
+struct MergeConfig;     // Forward declaration
+struct RawMergedBatch;  // Forward declaration
 
 // In-memory index used for graph sampling. This struct stores node and edge
 // indices, as well as edge pairs, but does not include feature values.
@@ -153,11 +157,60 @@ struct Sampler {
 
   // Creates a new sample.
   absl::StatusOr<nb::list> Sample(
-      const nb::ndarray<int64_t, nb::numpy, nb::shape<-1>>& seed_node_idxs,
-      std::optional<nb::ndarray<int64_t, nb::numpy, nb::shape<-1>>>
-          seed_timestamps = std::nullopt,
-      std::optional<nb::ndarray<int64_t, nb::numpy, nb::shape<-1>>>
-          masked_edge_idxs = std::nullopt);
+      const NodeIdxs& seed_node_idxs,
+      std::optional<TimestampsArray> seed_timestamps = std::nullopt,
+      std::optional<EdgeIdxs> masked_edge_idxs = std::nullopt);
+
+  // Samples and merges a batch of subgraphs. Returns
+  // ((InMemoryGraph, offsets), None, None) if the batch fits in the padding, or
+  // (None, SampledBatch, (is_nodeset, set_name, required, padded)) on padding
+  // overflow so the caller can split the batch without re-sampling.
+  absl::StatusOr<nb::tuple> SampleMerged(
+      const NodeIdxs& seed_node_idxs,
+      std::optional<TimestampsArray> seed_timestamps,
+      std::optional<EdgeIdxs> masked_edge_idxs, const MergeConfig& config);
+
+  // Grows one sample per seed node in the thread pool. Called without the GIL.
+  // The returned builders should be returned to the pool with
+  // `ReleaseBuilders`.
+  absl::StatusOr<std::vector<std::unique_ptr<SampleBuilder>>> GrowSamplesNoGil(
+      const NodeIdxs& seed_node_idxs,
+      const std::optional<TimestampsArray>& seed_timestamps,
+      const std::optional<EdgeIdxs>& masked_edge_idxs);
+
+  // Returns sample builders to the pool for re-use.
+  void ReleaseBuilders(std::vector<std::unique_ptr<SampleBuilder>>* builders);
+
+  // Merges the builders [begin, end) into raw buffers. Called without the GIL.
+  // If the samples overflow the padding, populates `overflow` and returns
+  // `std::nullopt`.
+  absl::StatusOr<std::optional<RawMergedBatch>> MergeBuildersNoGil(
+      std::span<const std::unique_ptr<SampleBuilder>> builders,
+      std::size_t begin, std::size_t end, const MergeConfig& config,
+      std::optional<PaddingOverflow>* overflow);
+
+  // Wraps `raw` into a python tuple (InMemoryGraph, offsets).
+  nb::tuple ExportMergedBatch(const MergeConfig& config,
+                              RawMergedBatch* raw) const;
+
+  // Converts `overflow` into a python tuple (is_nodeset, set_name, required,
+  // padded).
+  nb::tuple ExportPaddingOverflow(const PaddingOverflow& overflow) const;
+
+  // Creates the configuration of `SampleMerged` and `SampledBatch::Merge`.
+  //
+  // Args:
+  //   padding_num_nodes: Dict nodeset name -> padded number of nodes.
+  //   padding_num_edges: Dict edgeset name -> padded number of edges.
+  //   features: Dict nodeset name -> list of features to export, as tuples
+  //     (name, source values or None, output numpy dtype, output reshape
+  //     argument). The source values are C-contiguous arrays (one row per
+  //     node) gathered in c++. If None, the feature is exported as None (to be
+  //     gathered in python).
+  //   return_node_idxs: Whether to export the "#idx" feature.
+  absl::StatusOr<std::unique_ptr<MergeConfig>> CreateMergeConfig(
+      const nb::dict& padding_num_nodes, const nb::dict& padding_num_edges,
+      const nb::dict& features, bool return_node_idxs);
 
   // Extracts the graph subset around the provided seed nodes.
   absl::StatusOr<nb::object> SubGraph(
@@ -179,9 +232,9 @@ struct Sampler {
   // Target nodes that are direct neighbors of a seed node are excluded from the
   // sampled negative nodes.
   absl::StatusOr<nb::ndarray<int64_t, nb::numpy, nb::shape<-1, -1>>>
-  RandomWalkNegativeSampling(
-      const nb::ndarray<int64_t, nb::numpy, nb::shape<-1>>& seed_node_idxs,
-      int target_edgeset_idx, int num_walks, int num_negatives_per_seed);
+  RandomWalkNegativeSampling(const NodeIdxs& seed_node_idxs,
+                             int target_edgeset_idx, int num_walks,
+                             int num_negatives_per_seed);
 
   // Returns the edgeset index give an edgeset name. Fails if the edgeset does
   // not exist.
@@ -426,15 +479,104 @@ struct SampleBuilder {
   }
 };
 
+// Pre-computed configuration of `Sampler::SampleMerged` and
+// `SampledBatch::Merge`. Created once with `Sampler::CreateMergeConfig` and
+// used for all the batches.
+struct MergeConfig {
+  struct Feature {
+    nb::str name;
+    // If false, the feature is exported as None and gathered in python (e.g.
+    // object arrays).
+    bool gather_in_cc = false;
+    RawArray src;
+    const char* src_data = nullptr;
+    std::size_t src_num_rows = 0;
+    std::size_t row_bytes = 0;
+    // The output is a uint8 array of shape [num_nodes, row_bytes] converted
+    // with `.view(dtype).reshape(reshape)`.
+    nb::object dtype;
+    nb::tuple reshape;
+  };
+
+  MergePadding padding;
+  // Features to export, indexed by nodeset idx.
+  std::vector<std::vector<Feature>> features;
+  // Whether to export the "#idx" feature, indexed by nodeset idx.
+  std::vector<bool> export_node_idxs;
+
+  MergeConfig() = default;
+  MergeConfig(const MergeConfig&) = delete;
+  MergeConfig& operator=(const MergeConfig&) = delete;
+};
+
+// Raw buffers produced by `Sampler::MergeBuildersNoGil`, before wrapping into
+// python objects.
+struct RawMergedBatch {
+  MergeLayout layout;
+  std::vector<std::unique_ptr<InputIdx[]>> node_bufs;
+  std::vector<std::unique_ptr<int64_t[]>> edge_bufs;
+  std::vector<std::vector<std::unique_ptr<uint8_t[]>>> feature_bufs;
+};
+
+// Samples kept in c++ memory when a batch overflows the padding, to be split
+// and exported with `Merge`. The python object holding a `SampledBatch` keeps
+// the `Sampler` alive.
+struct SampledBatch {
+  nb::object py_sampler;
+  Sampler* sampler = nullptr;
+  std::vector<std::unique_ptr<SampleBuilder>> builders;
+
+  SampledBatch(Sampler* sampler,
+               std::vector<std::unique_ptr<SampleBuilder>> builders)
+      : py_sampler(nb::find(sampler)),
+        sampler(sampler),
+        builders(std::move(builders)) {}
+  ~SampledBatch() { sampler->ReleaseBuilders(&builders); }
+  SampledBatch(const SampledBatch&) = delete;
+  SampledBatch& operator=(const SampledBatch&) = delete;
+
+  // Merges the samples [begin, end). Returns ((InMemoryGraph, offsets), None)
+  // if the samples fit in the padding, or (None, (is_nodeset, set_name,
+  // required, padded)) on padding overflow.
+  absl::StatusOr<nb::tuple> Merge(std::size_t begin, std::size_t end,
+                                  const MergeConfig& config);
+};
+
 // Creates a graph sample starting from a given seed node.
 // The returned `nb::object` is an instance of `InMemoryGraph`
 // containing the sampled subgraph.
 absl::StatusOr<nb::list> Sampler::Sample(
-    const nb::ndarray<int64_t, nb::numpy, nb::shape<-1>>& seed_node_idxs,
-    std::optional<nb::ndarray<int64_t, nb::numpy, nb::shape<-1>>>
-        seed_timestamps,
-    std::optional<nb::ndarray<int64_t, nb::numpy, nb::shape<-1>>>
-        masked_edge_idxs) {
+    const NodeIdxs& seed_node_idxs,
+    std::optional<TimestampsArray> seed_timestamps,
+    std::optional<EdgeIdxs> masked_edge_idxs) {
+  std::vector<std::unique_ptr<SampleBuilder>> active_builders;
+  {
+    nb::gil_scoped_release release;
+    DGF_ASSIGN_OR_RETURN(
+        active_builders,
+        GrowSamplesNoGil(seed_node_idxs, seed_timestamps, masked_edge_idxs));
+  }
+
+  // Convert samples into python objects.
+  nb::list graphs;
+  for (auto& sample_builder : active_builders) {
+    auto graph = sample_builder->ExportToInMemoryGraph(*this);
+    if (!graph.ok()) {
+      ReleaseBuilders(&active_builders);
+      return graph.status();
+    }
+    graphs.append(*graph);
+  }
+
+  // Release builders back to pool in bulk.
+  ReleaseBuilders(&active_builders);
+  return graphs;
+}
+
+absl::StatusOr<std::vector<std::unique_ptr<SampleBuilder>>>
+Sampler::GrowSamplesNoGil(const NodeIdxs& seed_node_idxs,
+                          const std::optional<TimestampsArray>& seed_timestamps,
+                          const std::optional<EdgeIdxs>& masked_edge_idxs) {
   auto seed_node_idxs_view = seed_node_idxs.view();
   std::size_t num_seeds = seed_node_idxs_view.shape(0);
 
@@ -475,84 +617,392 @@ absl::StatusOr<nb::list> Sampler::Sample(
     }
   }
 
-  // Release builders back to pool even on failure.
-  const auto release_builders = [&]() {
-    util::concurrency::MutexLock lock(sample_builder_pool_mutex_);
-    for (auto& builder : active_builders) {
+  // Generate seeds sequentially in the main thread to ensure determinism.
+  std::vector<uint64_t> seeds(num_seeds);
+  for (size_t i = 0; i < num_seeds; i++) {
+    seeds[i] = rng_();
+  }
+
+  // Start the sampling.
+  absl::Status global_status;
+  util::concurrency::Mutex global_status_mutex;
+  std::latch latch(num_seeds);
+
+  for (size_t seed_idx = 0; seed_idx < num_seeds; seed_idx++) {
+    const auto seed_node_idx =
+        static_cast<InputIdx>(seed_node_idxs_view(seed_idx));
+    std::optional<Timestamp> seed_timestamp = std::nullopt;
+    if (seed_timestamps.has_value()) {
+      seed_timestamp = seed_timestamps->view()(seed_idx);
+    }
+    InputIdx masked_edge_idx = -1;
+    if (masked_edge_idxs.has_value()) {
+      masked_edge_idx = masked_edge_idxs->view()(seed_idx);
+    }
+    const uint64_t seed = seeds[seed_idx];
+    SampleBuilder* sample_builder = active_builders[seed_idx].get();
+    thread_pool.Schedule([this, sample_builder, seed, seed_node_idx,
+                          seed_timestamp, masked_edge_idx, &latch,
+                          &global_status_mutex, &global_status]() {
+      sample_builder->rng = MakeRng(seed);
+
+      const auto status = sample_builder->Grow(*this, seed_node_idx,
+                                               seed_timestamp, masked_edge_idx);
+
+      // Record the failure before counting down: Once the latch reaches zero,
+      // the calling thread can return and destroy `global_status`.
+      if (!status.ok()) {
+        util::concurrency::MutexLock l(global_status_mutex);
+        global_status.Update(status);
+      }
+
+      latch.count_down();
+    });
+  }
+
+  // Wait for all the sampling to be done.
+  latch.wait();
+
+  // Return an error if any of the samplers failed.
+  if (!global_status.ok()) {
+    ReleaseBuilders(&active_builders);
+    return global_status;
+  }
+  return active_builders;
+}
+
+void Sampler::ReleaseBuilders(
+    std::vector<std::unique_ptr<SampleBuilder>>* builders) {
+  util::concurrency::MutexLock lock(sample_builder_pool_mutex_);
+  for (auto& builder : *builders) {
+    if (builder) {
       sample_builder_pool_.push_back(std::move(builder));
     }
-  };
+  }
+  builders->clear();
+}
 
-  // Create samples
-  {
-    // Release the GIL during the non-python sampling process.
-    nb::gil_scoped_release release;
+absl::StatusOr<std::optional<RawMergedBatch>> Sampler::MergeBuildersNoGil(
+    std::span<const std::unique_ptr<SampleBuilder>> builders,
+    const std::size_t begin, const std::size_t end, const MergeConfig& config,
+    std::optional<PaddingOverflow>* overflow) {
+  // Minimum number of feature rows gathered by a task.
+  constexpr std::size_t kMinRowsPerGatherTask = 2048;
 
-    // Generate seeds sequentially in the main thread to ensure determinism.
-    std::vector<uint64_t> seeds(num_seeds);
-    for (size_t i = 0; i < num_seeds; ++i) {
-      seeds[i] = rng_();
+  if (begin > end || end > builders.size()) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("Invalid sample range [", begin, ", ", end,
+                     ") for a batch of ", builders.size(), " samples"));
+  }
+  const std::size_t num_nodesets = nodesets_.size();
+  const std::size_t num_edgesets = edgesets_.size();
+  const std::size_t num_samples = end - begin;
+
+  std::vector<std::vector<std::size_t>> num_nodes(num_nodesets);
+  std::vector<std::vector<std::size_t>> num_edges(num_edgesets);
+  for (std::size_t ns = 0; ns < num_nodesets; ns++) {
+    num_nodes[ns].reserve(num_samples);
+  }
+  for (std::size_t es = 0; es < num_edgesets; es++) {
+    num_edges[es].reserve(num_samples);
+  }
+  for (std::size_t i = begin; i < end; i++) {
+    for (std::size_t ns = 0; ns < num_nodesets; ns++) {
+      num_nodes[ns].push_back(
+          builders[i]->nodesets[ns].sampled_node_idx_to_node_idx.size());
     }
+    for (std::size_t es = 0; es < num_edgesets; es++) {
+      num_edges[es].push_back(builders[i]->edgesets[es].edges.size());
+    }
+  }
 
-    // Start the sampling.
-    absl::Status global_status;
-    util::concurrency::Mutex global_status_mutex;
-    std::latch latch(num_seeds);
+  RawMergedBatch raw;
+  raw.layout = ComputeMergeLayout(num_nodes, num_edges, config.padding);
+  *overflow = FindPaddingOverflow(raw.layout, config.padding);
+  if (overflow->has_value()) {
+    return std::nullopt;
+  }
 
-    for (size_t seed_idx = 0; seed_idx < num_seeds; seed_idx++) {
-      const auto seed_node_idx =
-          static_cast<InputIdx>(seed_node_idxs_view(seed_idx));
-      std::optional<Timestamp> seed_timestamp = std::nullopt;
-      if (seed_timestamps.has_value()) {
-        seed_timestamp = seed_timestamps->view()(seed_idx);
+  // Allocate the outputs.
+  // The node idxs are exported as int64 numpy arrays.
+  static_assert(sizeof(InputIdx) == sizeof(int64_t));
+  raw.node_bufs.resize(num_nodesets);
+  for (std::size_t ns = 0; ns < num_nodesets; ns++) {
+    raw.node_bufs[ns] = std::make_unique_for_overwrite<InputIdx[]>(
+        std::max<std::size_t>(1, raw.layout.num_nodes[ns]));
+  }
+  raw.edge_bufs.resize(num_edgesets);
+  for (std::size_t es = 0; es < num_edgesets; es++) {
+    raw.edge_bufs[es] = std::make_unique_for_overwrite<int64_t[]>(
+        std::max<std::size_t>(1, 2 * raw.layout.num_edges[es]));
+  }
+  raw.feature_bufs.resize(num_nodesets);
+  std::size_t total_feature_rows = 0;
+  for (std::size_t ns = 0; ns < num_nodesets; ns++) {
+    raw.feature_bufs[ns].reserve(config.features[ns].size());
+    for (const auto& feature : config.features[ns]) {
+      if (!feature.gather_in_cc) {
+        raw.feature_bufs[ns].push_back(nullptr);
+        continue;
       }
-      InputIdx masked_edge_idx = -1;
-      if (masked_edge_idxs.has_value()) {
-        masked_edge_idx = masked_edge_idxs->view()(seed_idx);
-      }
-      const uint64_t seed = seeds[seed_idx];
-      SampleBuilder* sample_builder = active_builders[seed_idx].get();
-      thread_pool.Schedule([this, sample_builder, seed, seed_node_idx,
-                            seed_timestamp, masked_edge_idx, &latch,
-                            &global_status_mutex, &global_status]() {
-        sample_builder->rng = MakeRng(seed);
+      raw.feature_bufs[ns].push_back(
+          std::make_unique_for_overwrite<uint8_t[]>(std::max<std::size_t>(
+              1, raw.layout.num_nodes[ns] * feature.row_bytes)));
+      total_feature_rows += raw.layout.num_nodes[ns];
+    }
+  }
 
-        const auto status = sample_builder->Grow(
-            *this, seed_node_idx, seed_timestamp, masked_edge_idx);
+  // Feature gathering tasks (~4 tasks per thread).
+  const std::size_t rows_per_task = std::max<std::size_t>(
+      kMinRowsPerGatherTask,
+      total_feature_rows / (4 * std::max(1, thread_pool.num_threads())) + 1);
+  std::vector<GatherRowsTask> gather_tasks;
+  for (std::size_t ns = 0; ns < num_nodesets; ns++) {
+    for (std::size_t f = 0; f < config.features[ns].size(); f++) {
+      const auto& feature = config.features[ns][f];
+      if (!feature.gather_in_cc) continue;
+      AppendGatherRowsTasks(
+          feature.src_data, feature.src_num_rows, raw.node_bufs[ns].get(),
+          raw.layout.node_offsets[ns].back(),
+          reinterpret_cast<char*>(raw.feature_bufs[ns][f].get()),
+          raw.layout.num_nodes[ns], feature.row_bytes, rows_per_task,
+          &gather_tasks);
+    }
+  }
 
-        // Record the failure before counting down: Once the latch reaches zero,
-        // the calling thread can return and destroy `global_status`.
-        if (!status.ok()) {
-          util::concurrency::MutexLock l(global_status_mutex);
-          global_status.Update(status);
+  // Copy the graph structure. Each sample writes in its own slice.
+  util::concurrency::ConcurrentForLoop(
+      std::min<std::size_t>(num_samples,
+                            std::max(1, thread_pool.num_threads())),
+      &thread_pool, num_samples,
+      [&](std::size_t, std::size_t begin_item, std::size_t end_item) {
+        for (std::size_t i = begin_item; i < end_item; i++) {
+          const SampleBuilder& b = *builders[begin + i];
+          for (std::size_t ns = 0; ns < num_nodesets; ns++) {
+            const auto& src = b.nodesets[ns].sampled_node_idx_to_node_idx;
+            std::copy(src.begin(), src.end(),
+                      raw.node_bufs[ns].get() + raw.layout.node_offsets[ns][i]);
+          }
+          for (std::size_t es = 0; es < num_edgesets; es++) {
+            const auto& edgeset = schema_->edgesets[es];
+            const std::size_t src_offset =
+                raw.layout.node_offsets[edgeset.source_nodeset][i];
+            const std::size_t trg_offset =
+                raw.layout.node_offsets[edgeset.target_nodeset][i];
+            int64_t* dst_src =
+                raw.edge_bufs[es].get() + raw.layout.edge_offsets[es][i];
+            int64_t* dst_trg = dst_src + raw.layout.num_edges[es];
+            for (const auto& [src, trg] : b.edgesets[es].edges) {
+              *(dst_src++) = static_cast<int64_t>(src + src_offset);
+              *(dst_trg++) = static_cast<int64_t>(trg + trg_offset);
+            }
+          }
         }
-
-        latch.count_down();
       });
+
+  // Padding of the graph structure.
+  for (std::size_t ns = 0; ns < num_nodesets; ns++) {
+    std::fill(raw.node_bufs[ns].get() + raw.layout.node_offsets[ns].back(),
+              raw.node_bufs[ns].get() + raw.layout.num_nodes[ns], 0);
+  }
+  for (std::size_t es = 0; es < num_edgesets; es++) {
+    if (!config.padding.num_edges[es].has_value()) continue;
+    const auto& edgeset = schema_->edgesets[es];
+    // The padding edges connect the sentinel (i.e. last) nodes.
+    const auto src_sentinel = static_cast<int64_t>(
+        *config.padding.num_nodes[edgeset.source_nodeset] - 1);
+    const auto trg_sentinel = static_cast<int64_t>(
+        *config.padding.num_nodes[edgeset.target_nodeset] - 1);
+    int64_t* dst_src = raw.edge_bufs[es].get();
+    int64_t* dst_trg = dst_src + raw.layout.num_edges[es];
+    const std::size_t num_real = raw.layout.edge_offsets[es].back();
+    std::fill(dst_src + num_real, dst_src + raw.layout.num_edges[es],
+              src_sentinel);
+    std::fill(dst_trg + num_real, dst_trg + raw.layout.num_edges[es],
+              trg_sentinel);
+  }
+
+  // Gather the features (requires the node idxs).
+  std::atomic<bool> any_out_of_bounds = false;
+  util::concurrency::ConcurrentForLoop(
+      gather_tasks.size(), &thread_pool, gather_tasks.size(),
+      [&](std::size_t, std::size_t begin_item, std::size_t end_item) {
+        for (std::size_t i = begin_item; i < end_item; i++) {
+          if (!GatherRows(gather_tasks[i])) {
+            any_out_of_bounds.store(true, std::memory_order_relaxed);
+          }
+        }
+      });
+  if (any_out_of_bounds.load()) {
+    return absl::InvalidArgumentError(
+        "Node indices out of the bounds of the feature values. Make sure the "
+        "features have one value per node.");
+  }
+  return raw;
+}
+
+nb::tuple Sampler::ExportMergedBatch(const MergeConfig& config,
+                                     RawMergedBatch* raw) const {
+  const std::size_t num_nodesets = nodesets_.size();
+  const std::size_t num_edgesets = edgesets_.size();
+  nb::dict py_nodesets;
+  nb::dict py_offsets;
+  for (std::size_t ns = 0; ns < num_nodesets; ns++) {
+    const std::size_t num_nodes = raw->layout.num_nodes[ns];
+    nb::dict py_features;
+    for (std::size_t f = 0; f < config.features[ns].size(); f++) {
+      const auto& feature = config.features[ns][f];
+      if (!feature.gather_in_cc) {
+        py_features[feature.name] = nb::none();
+        continue;
+      }
+      uint8_t* data = raw->feature_bufs[ns][f].release();
+      nb::capsule owner(data, [](void* p) noexcept { delete[] (uint8_t*)p; });
+      const nb::object arr = nb::cast(nb::ndarray<uint8_t, nb::numpy>(
+          data, {num_nodes, feature.row_bytes}, owner));
+      py_features[feature.name] =
+          arr.attr("view")(feature.dtype).attr("reshape")(feature.reshape);
     }
+    InputIdx* idx_data = raw->node_bufs[ns].release();
+    nb::capsule idx_owner(idx_data,
+                          [](void* p) noexcept { delete[] (InputIdx*)p; });
+    if (config.export_node_idxs[ns]) {
+      py_features[module_index_.key_idx_feature] = NodeIdxs(
+          reinterpret_cast<int64_t*>(idx_data), {num_nodes}, idx_owner);
+    }
+    const nb::str name = string_to_py_str(nodesets_[ns].name);
+    py_nodesets[name] = module_index_.nodeset_cls(num_nodes, py_features);
+    py_offsets[name] = CCVectorToNumpyArray<int64_t, std::size_t>(
+        raw->layout.node_offsets[ns]);
+  }
+  nb::dict py_edgesets;
+  for (std::size_t es = 0; es < num_edgesets; es++) {
+    int64_t* data = raw->edge_bufs[es].release();
+    nb::capsule owner(data, [](void* p) noexcept { delete[] (int64_t*)p; });
+    py_edgesets[string_to_py_str(edgesets_[es].name)] =
+        module_index_.edgeset_cls(
+            Adjacency(data, {2, raw->layout.num_edges[es]}, owner));
+  }
+  return nb::make_tuple(module_index_.graph_cls(py_nodesets, py_edgesets),
+                        py_offsets);
+}
 
-    // Wait for all the sampling to be done.
-    latch.wait();
+nb::tuple Sampler::ExportPaddingOverflow(
+    const PaddingOverflow& overflow) const {
+  const std::string& name = overflow.is_nodeset
+                                ? nodesets_[overflow.set_idx].name
+                                : edgesets_[overflow.set_idx].name;
+  return nb::make_tuple(overflow.is_nodeset, name, overflow.required,
+                        overflow.padded);
+}
 
-    // Return an error if any of the samplers failed.
-    if (!global_status.ok()) {
-      release_builders();
-      return global_status;
+absl::StatusOr<nb::tuple> Sampler::SampleMerged(
+    const NodeIdxs& seed_node_idxs,
+    std::optional<TimestampsArray> seed_timestamps,
+    std::optional<EdgeIdxs> masked_edge_idxs, const MergeConfig& config) {
+  std::vector<std::unique_ptr<SampleBuilder>> builders;
+  std::optional<RawMergedBatch> raw;
+  std::optional<PaddingOverflow> overflow;
+  {
+    nb::gil_scoped_release release;
+    DGF_ASSIGN_OR_RETURN(
+        builders,
+        GrowSamplesNoGil(seed_node_idxs, seed_timestamps, masked_edge_idxs));
+    auto raw_or =
+        MergeBuildersNoGil(builders, 0, builders.size(), config, &overflow);
+    if (!raw_or.ok()) {
+      ReleaseBuilders(&builders);
+      return raw_or.status();
+    }
+    raw = *std::move(raw_or);
+    if (raw.has_value()) {
+      ReleaseBuilders(&builders);
+    }
+  }
+  if (raw.has_value()) {
+    return nb::make_tuple(ExportMergedBatch(config, &*raw), nb::none(),
+                          nb::none());
+  }
+  return nb::make_tuple(
+      nb::none(), std::make_unique<SampledBatch>(this, std::move(builders)),
+      ExportPaddingOverflow(*overflow));
+}
+
+absl::StatusOr<nb::tuple> SampledBatch::Merge(const std::size_t begin,
+                                              const std::size_t end,
+                                              const MergeConfig& config) {
+  std::optional<RawMergedBatch> raw;
+  std::optional<PaddingOverflow> overflow;
+  {
+    nb::gil_scoped_release release;
+    DGF_ASSIGN_OR_RETURN(raw, sampler->MergeBuildersNoGil(builders, begin, end,
+                                                          config, &overflow));
+  }
+  if (raw.has_value()) {
+    return nb::make_tuple(sampler->ExportMergedBatch(config, &*raw),
+                          nb::none());
+  }
+  return nb::make_tuple(nb::none(), sampler->ExportPaddingOverflow(*overflow));
+}
+
+absl::StatusOr<std::unique_ptr<MergeConfig>> Sampler::CreateMergeConfig(
+    const nb::dict& padding_num_nodes, const nb::dict& padding_num_edges,
+    const nb::dict& features, const bool return_node_idxs) {
+  auto config = std::make_unique<MergeConfig>();
+  config->padding.num_nodes.assign(nodesets_.size(), std::nullopt);
+  config->padding.num_edges.assign(edgesets_.size(), std::nullopt);
+  config->features.resize(nodesets_.size());
+  config->export_node_idxs.assign(nodesets_.size(), return_node_idxs);
+
+  for (const auto item : padding_num_nodes) {
+    DGF_ASSIGN_OR_RETURN(const int idx,
+                         GetItem(schema_->nodeset_name_to_idx,
+                                 nb::cast<std::string>(item.first)));
+    config->padding.num_nodes[idx] = nb::cast<std::size_t>(item.second);
+  }
+  for (const auto item : padding_num_edges) {
+    const auto name = nb::cast<std::string>(item.first);
+    DGF_ASSIGN_OR_RETURN(const int idx,
+                         GetItem(schema_->edgeset_name_to_idx, name));
+    config->padding.num_edges[idx] = nb::cast<std::size_t>(item.second);
+    const auto& edgeset = schema_->edgesets[idx];
+    if (!config->padding.num_nodes[edgeset.source_nodeset].has_value() ||
+        !config->padding.num_nodes[edgeset.target_nodeset].has_value()) {
+      return absl::InvalidArgumentError(absl::StrCat(
+          "Padding for edge set '", name,
+          "' requires sentinel nodes on both source and target node sets."));
     }
   }
 
-  // Convert samples into python objects.
-  nb::list graphs;
-
-  for (auto& sample_builder : active_builders) {
-    DGF_ASSIGN_OR_RETURN(auto graph,
-                         sample_builder->ExportToInMemoryGraph(*this));
-    graphs.append(graph);
+  for (const auto item : features) {
+    DGF_ASSIGN_OR_RETURN(const int ns,
+                         GetItem(schema_->nodeset_name_to_idx,
+                                 nb::cast<std::string>(item.first)));
+    for (const auto py_feature : nb::cast<nb::list>(item.second)) {
+      const auto py_tuple = nb::cast<nb::tuple>(py_feature);
+      DGF_STATUS_CHECK(py_tuple.size() == 4);
+      MergeConfig::Feature feature;
+      feature.name = nb::cast<nb::str>(py_tuple[0]);
+      if (py_tuple[1].is_none()) {
+        // Gathered in python, which requires the node idxs.
+        config->export_node_idxs[ns] = true;
+      } else {
+        feature.gather_in_cc = true;
+        feature.src = nb::cast<RawArray>(py_tuple[1]);
+        DGF_STATUS_CHECK(feature.src.ndim() >= 1);
+        feature.src_data = static_cast<const char*>(feature.src.data());
+        feature.src_num_rows = feature.src.shape(0);
+        feature.row_bytes = feature.src.itemsize();
+        for (std::size_t d = 1; d < feature.src.ndim(); d++) {
+          feature.row_bytes *= feature.src.shape(d);
+        }
+      }
+      feature.dtype = py_tuple[2];
+      feature.reshape = nb::cast<nb::tuple>(py_tuple[3]);
+      config->features[ns].push_back(std::move(feature));
+    }
   }
-
-  // Release builders back to pool in bulk.
-  release_builders();
-  return graphs;
+  return config;
 }
 
 namespace {
@@ -894,9 +1344,9 @@ struct RandomWalkNegativeSamplerHelper {
 };
 
 absl::StatusOr<nb::ndarray<int64_t, nb::numpy, nb::shape<-1, -1>>>
-Sampler::RandomWalkNegativeSampling(
-    const nb::ndarray<int64_t, nb::numpy, nb::shape<-1>>& seed_node_idxs,
-    int target_edgeset_idx, int num_walks, int num_negatives_per_seed) {
+Sampler::RandomWalkNegativeSampling(const NodeIdxs& seed_node_idxs,
+                                    int target_edgeset_idx, int num_walks,
+                                    int num_negatives_per_seed) {
   if (target_edgeset_idx < 0 || target_edgeset_idx >= edgesets_.size()) {
     return absl::InvalidArgumentError("Invalid target_edgeset_idx");
   }
@@ -1275,6 +1725,13 @@ NB_MODULE(_in_memory_sampler_ext, m) {
       .def("Sample", ValueOrThrowWrapper(&Sampler::Sample),
            nb::arg("seed_node_idx"), nb::arg("seed_timestamps") = nb::none(),
            nb::arg("masked_edge_idxs") = nb::none())
+      .def("SampleMerged", ValueOrThrowWrapper(&Sampler::SampleMerged),
+           nb::arg("seed_node_idx"), nb::arg("seed_timestamps") = nb::none(),
+           nb::arg("masked_edge_idxs") = nb::none(), nb::arg("config"))
+      .def("CreateMergeConfig",
+           ValueOrThrowWrapper(&Sampler::CreateMergeConfig),
+           nb::arg("padding_num_nodes"), nb::arg("padding_num_edges"),
+           nb::arg("features"), nb::arg("return_node_idxs"))
       .def("SubGraph", ValueOrThrowWrapper(&Sampler::SubGraph))
       .def("MultiSubGraphs", ValueOrThrowWrapper(&Sampler::MultiSubGraphs))
       .def("RandomWalkNegativeSampling",
@@ -1284,6 +1741,12 @@ NB_MODULE(_in_memory_sampler_ext, m) {
       .def("EdgesetNameToEdgesetIdx",
            ValueOrThrowWrapper(&Sampler::EdgesetNameToEdgesetIdx))
       .def("__str__", &Sampler::__str__);
+
+  nb::class_<MergeConfig>(m, "MergeConfig");
+
+  nb::class_<SampledBatch>(m, "SampledBatch")
+      .def("Merge", ValueOrThrowWrapper(&SampledBatch::Merge), nb::arg("begin"),
+           nb::arg("end"), nb::arg("config"));
 
   nb::class_<AdjacencyIndex>(m, "AdjacencyIndex")
       .def("__str__", &AdjacencyIndex::to_string);

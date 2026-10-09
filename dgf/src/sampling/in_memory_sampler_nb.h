@@ -23,7 +23,11 @@ namespace nb = nanobind;
 // Numpy array definitions for dense adjacency lists and node idxs.
 typedef nb::ndarray<int64_t, nb::numpy, nb::shape<2, -1>> Adjacency;
 typedef nb::ndarray<int64_t, nb::numpy, nb::shape<-1>> NodeIdxs;
+typedef nb::ndarray<int64_t, nb::numpy, nb::shape<-1>> EdgeIdxs;
 typedef nb::ndarray<int64_t, nb::numpy, nb::shape<-1>> TimestampsArray;
+// Read-only C-contiguous array of any dtype (e.g. feature values), accessed as
+// raw bytes.
+typedef nb::ndarray<nb::ro, nb::numpy, nb::c_contig> RawArray;
 
 // Create an adjacency numpy array (of shape [2, num_edges]) from a container of
 // node idx pairs (or something equivalent). The type T should be integer

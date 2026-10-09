@@ -400,6 +400,7 @@ class NodePredictionModel(common.Model):
         plan=sampling_plan,
         schema=schema,
         batch_size=batch_size,
+        padding=self._data.padding,
     )
 
     np_seed_node_idxs = np.asarray(seed_node_idxs)
@@ -421,11 +422,6 @@ class NodePredictionModel(common.Model):
               drop_remainder=False,
           ),
       )
-
-    graph_merger = merge_lib.GraphMerger(
-        schema=schema,
-        padding=self._data.padding,
-    )
 
     target_nodeset = self._data.task.target_nodeset
     timestamp_feature = None
@@ -449,18 +445,14 @@ class NodePredictionModel(common.Model):
         seed_timestamps = np.asarray(timestamps[batch_seed_node_idxs]).reshape(
             -1
         )
-        graph_samples = sampler.sample(
-            batch_seed_node_idxs, seed_timestamps=seed_timestamps
-        )
-      else:
-        graph_samples = sampler.sample(batch_seed_node_idxs)
 
       for (
           merged_graph,
           merge_offsets,
           sub_slice,
-      ) in graph_merger.merge_sub_batches(
-          graph_samples,
+      ) in sampler.sample_merged_sub_batches(
+          batch_seed_node_idxs,
+          seed_timestamps=seed_timestamps,
           skip_overflow_padding_error=False,
           split_overflow_padding_error=True,
       ):

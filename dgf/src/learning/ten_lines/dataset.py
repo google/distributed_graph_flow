@@ -327,17 +327,10 @@ class SampleGeneratorFromAnything:
     assert isinstance(self.graph, in_memory_graph.InMemoryGraph)
     assert self.num_seed_nodes is not None
 
-    merge_schema = (
-        self._get_merge_schema()
-        if self.sampler_returns_node_idxs_only
-        else self.output_schema()
-    )
-
     def batch_generator():
       assert self.in_memory_sampler is not None
-      graph_merger = merge_lib.GraphMerger(
-          schema=merge_schema, padding=self.padding
-      )
+      # Note: The padding can change after the creation of the generator.
+      sampler = self.in_memory_sampler.with_padding(self.padding)
       for node_idxs in util.batch_indices_generator(
           self.seed_node_idxs
           if self.seed_node_idxs is not None
@@ -347,18 +340,16 @@ class SampleGeneratorFromAnything:
           shuffle=self.shuffle,
       ):
         seed_timestamps = None
-        if self._seed_timestamps_all is not None:
+        if self.temporal and self._seed_timestamps_all is not None:
           seed_timestamps = self._seed_timestamps_all[node_idxs]
 
-        if self.temporal:
-          graph_samples = self.in_memory_sampler.sample(
-              node_idxs, seed_timestamps=seed_timestamps
-          )
-        else:
-          graph_samples = self.in_memory_sampler.sample(node_idxs)
-
-        for merged_graph, merge_offsets, _ in graph_merger.merge_sub_batches(
-            graph_samples,
+        for (
+            merged_graph,
+            merge_offsets,
+            _,
+        ) in sampler.sample_merged_sub_batches(
+            node_idxs,
+            seed_timestamps=seed_timestamps,
             skip_overflow_padding_error=self.skip_overflow_padding_error,
             split_overflow_padding_error=self.split_overflow_padding_error,
             on_skip_samples=self._record_skipped_samples,

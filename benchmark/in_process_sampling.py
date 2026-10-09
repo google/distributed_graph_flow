@@ -15,12 +15,15 @@
 """Benchmarking of IO operations on in memory graphs."""
 
 from collections.abc import Callable
+import dataclasses
 import enum
 import os
 import random
 from typing import Any
 import dgf
 from dgf.benchmark import utils as benchmark_utils
+from dgf.src.analyse import padding as padding_analysis_lib
+from dgf.src.transform import merge as merge_lib
 from dgf.src.util import log
 import numpy as np
 
@@ -37,6 +40,21 @@ class OutputFormat(enum.Enum):
   NUMPY = "NUMPY_IN_MEMORY"
   JAX = "JAX_IN_MEMORY"
   JAX_SD = "JAX_SD"
+
+
+class MergeMode(enum.Enum):
+  """How the graph samples of a batch are merged.
+
+  Attributes:
+    NONE: The samples are not merged.
+    GRAPH_MERGER: `Sampler.sample` + `GraphMerger` with padding.
+    SAMPLE_MERGED: `Sampler.sample_merged` with padding (c++ merging and
+      concurrent feature gathering).
+  """
+
+  NONE = "NONE"
+  GRAPH_MERGER = "GRAPH_MERGER"
+  SAMPLE_MERGED = "SAMPLE_MERGED"
 
 
 class GenGraphSamples(benchmark_utils.Benchmark):
@@ -61,6 +79,8 @@ class GenGraphSamples(benchmark_utils.Benchmark):
       edgeset_to_mask: str | None = None,
       with_replacement: bool = False,
       multi_visit: bool = True,
+      merge_mode: MergeMode = MergeMode.NONE,
+      batch_size: int = 12,
   ):
     self.seed_nodeset = seed_nodeset
     self.extract_features = extract_features
@@ -70,7 +90,8 @@ class GenGraphSamples(benchmark_utils.Benchmark):
     self.num_hops = num_hops
     self.with_replacement = with_replacement
     self.hop_width = 5
-    self.batch_size = 12
+    self.batch_size = batch_size
+    self.merge_mode = merge_mode
     self.edgeset_to_mask = edgeset_to_mask
     self.set_unit_multiplicator(self.batch_size)
     self.multi_visit = multi_visit
@@ -138,10 +159,49 @@ class GenGraphSamples(benchmark_utils.Benchmark):
       assert False
     self.output_fn = output_fn
 
+    if self.merge_mode != MergeMode.NONE:
+      # Output schema of the sampler.
+      node_sets = {}
+      for name, node_set in self.schema.node_sets.items():
+        features = dict(node_set.features) if self.extract_features else {}
+        if not self.extract_features:
+          features["#idx"] = dgf.data.FeatureSchema(
+              format=dgf.data.FeatureFormat.INTEGER_64
+          )
+        node_sets[name] = dataclasses.replace(node_set, features=features)
+      self.merge_schema = dataclasses.replace(self.schema, node_sets=node_sets)
+
+      def gen_merged_samples():
+        for _ in range(10):
+          yield self.sampler.sample_merged(
+              np.random.randint(
+                  0, self.num_nodes, size=self.batch_size, dtype=np.int64
+              )
+          )[0]
+
+      padding = padding_analysis_lib.padding_from_graph_generator(
+          self.merge_schema, gen_merged_samples(), relative_margin=0.3
+      )
+      self.graph_merger = merge_lib.GraphMerger(
+          self.merge_schema, padding=padding
+      )
+      self.padded_sampler = self.sampler.with_padding(padding)
+
   def run_unit(self):
     seed_node_idxs = np.random.randint(
         0, self.num_nodes, size=self.batch_size, dtype=np.int64
     )
+    if self.merge_mode != MergeMode.NONE:
+      if self.merge_mode == MergeMode.GRAPH_MERGER:
+        _, offsets = self.graph_merger(self.sampler.sample(seed_node_idxs))
+      elif self.merge_mode == MergeMode.SAMPLE_MERGED:
+        _, offsets = self.padded_sampler.sample_merged(seed_node_idxs)
+      else:
+        raise ValueError(f"Unsupported merge mode: {self.merge_mode}")
+      for node_set_offsets in offsets.values():
+        self.sum_sampled_nodes += int(node_set_offsets[-1])
+      self.num_samples += 1
+      return
     if self.edgeset_to_mask is not None:
       # Pass dummy masked edge indices (e.g. all 0).
       masked_edge_idxs = np.zeros(self.batch_size, dtype=np.int64)
@@ -168,6 +228,7 @@ class GenGraphSamples(benchmark_utils.Benchmark):
         f" mask={self.edgeset_to_mask}"
         f" nodes/spl.={int(self.sum_sampled_nodes / self.num_samples)}"
         f" multi_visit={self.multi_visit}"
+        f" merge={self.merge_mode.value}"
     )
 
 
@@ -322,6 +383,24 @@ def in_process_sampling(
                 extract_features=extract_features,
                 output_format=OutputFormat.NUMPY,
                 edgeset_to_mask=edgeset_to_mask,
+            ),
+            repetitions=1,
+            warmup_repetitions=1,
+        )
+
+    # Merging + padding of batches of samples.
+    for extract_features in [True, False]:
+      for merge_mode in [MergeMode.GRAPH_MERGER, MergeMode.SAMPLE_MERGED]:
+        benchmarker.run(
+            GenGraphSamples(
+                num_hops=num_hops,
+                graph=graph,
+                schema=schema,
+                seed_nodeset=seed_nodeset,
+                extract_features=extract_features,
+                with_replacement=False,
+                merge_mode=merge_mode,
+                batch_size=128,
             ),
             repetitions=1,
             warmup_repetitions=1,

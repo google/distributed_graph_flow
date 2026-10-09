@@ -257,6 +257,72 @@ struct SamplingPlan {
   }
 };
 
+// Padding of a merged graph.
+struct MergePadding {
+  // Padded number of nodes for each nodeset. Nullopt means no padding.
+  std::vector<std::optional<std::size_t>> num_nodes;
+  // Padded number of edges for each edgeset. Nullopt means no padding.
+  std::vector<std::optional<std::size_t>> num_edges;
+};
+
+// Position of the samples in a merged graph.
+struct MergeLayout {
+  // `node_offsets[i][j]` is the index of the first node of the j-th sample in
+  // the i-th nodeset. The last value is the number of non-padding nodes.
+  std::vector<std::vector<std::size_t>> node_offsets;
+  // Same as `node_offsets`, for the edges.
+  std::vector<std::vector<std::size_t>> edge_offsets;
+  // Number of nodes / edges of each nodeset / edgeset, including the padding.
+  std::vector<std::size_t> num_nodes;
+  std::vector<std::size_t> num_edges;
+};
+
+// A nodeset or edgeset that does not fit in the padding.
+struct PaddingOverflow {
+  bool is_nodeset;
+  int set_idx;
+  // Required number of nodes (including the sentinel node) or edges.
+  std::size_t required;
+  std::size_t padded;
+};
+
+// Computes the layout of merged samples. `sample_num_nodes[i][j]` is the
+// number of nodes of the j-th sample in the i-th nodeset. Same for
+// `sample_num_edges`.
+MergeLayout ComputeMergeLayout(
+    const std::vector<std::vector<std::size_t>>& sample_num_nodes,
+    const std::vector<std::vector<std::size_t>>& sample_num_edges,
+    const MergePadding& padding);
+
+// Returns the first nodeset / edgeset of `layout` that does not fit in
+// `padding`, if any. A padded nodeset requires a sentinel node.
+std::optional<PaddingOverflow> FindPaddingOverflow(const MergeLayout& layout,
+                                                   const MergePadding& padding);
+
+// Copies the rows `src[idxs[i]]` into `dst[i]` for i in [begin, end). If
+// `idxs` is null, sets the rows of `dst` to zero instead.
+struct GatherRowsTask {
+  const char* src;
+  std::size_t src_num_rows;
+  char* dst;
+  const InputIdx* idxs;
+  std::size_t begin;
+  std::size_t end;
+  std::size_t row_bytes;
+};
+
+// Runs a gathering task. Returns false if an index is out of bounds.
+bool GatherRows(const GatherRowsTask& task);
+
+// Splits the gathering of `num_idxs` rows into `dst`, followed by the zeroing
+// of the remaining `num_dst_rows - num_idxs` rows, into tasks of at most
+// `rows_per_task` rows.
+void AppendGatherRowsTasks(const char* src, std::size_t src_num_rows,
+                           const InputIdx* idxs, std::size_t num_idxs,
+                           char* dst, std::size_t num_dst_rows,
+                           std::size_t row_bytes, std::size_t rows_per_task,
+                           std::vector<GatherRowsTask>* tasks);
+
 }  // namespace dgf::sampling::in_memory_sampler
 
 #endif  // DGF_SRC_SAMPLING_IN_MEMORY_SAMPLER_H_
