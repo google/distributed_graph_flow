@@ -15,6 +15,7 @@
 # pylint: disable=unused-import
 from dgf.src.learning.jax.layers import classification
 from dgf.src.learning.jax.layers import regression
+from dgf.src.learning.jax.layers import graphmae
 from dgf.src.learning.jax.layers import hetero_gnn
 from dgf.src.learning.jax.layers import hetero_graph_attention_network
 from dgf.src.learning.jax.layers import homo_gnn_sparse_deferred
