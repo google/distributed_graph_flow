@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <iterator>
+#include <optional>
 #include <queue>
 #include <random>
 #include <string>
@@ -359,6 +362,114 @@ absl::Status AdjacencyIndex::SampleFirstWithTimestamp(
     result->insert(result->end(), first, last);
   }
   return absl::OkStatus();
+}
+
+MergeLayout ComputeMergeLayout(
+    const std::vector<std::vector<std::size_t>>& sample_num_nodes,
+    const std::vector<std::vector<std::size_t>>& sample_num_edges,
+    const MergePadding& padding) {
+  const auto compute_offsets =
+      [](const std::vector<std::vector<std::size_t>>& counts,
+         const std::vector<std::optional<std::size_t>>& padded,
+         std::vector<std::vector<std::size_t>>* offsets,
+         std::vector<std::size_t>* totals) {
+        offsets->resize(counts.size());
+        totals->resize(counts.size());
+        for (std::size_t set_idx = 0; set_idx < counts.size(); set_idx++) {
+          auto& set_offsets = (*offsets)[set_idx];
+          set_offsets.assign(counts[set_idx].size() + 1, 0);
+          for (std::size_t i = 0; i < counts[set_idx].size(); i++) {
+            set_offsets[i + 1] = set_offsets[i] + counts[set_idx][i];
+          }
+          (*totals)[set_idx] = padded[set_idx].value_or(set_offsets.back());
+        }
+      };
+  MergeLayout layout;
+  compute_offsets(sample_num_nodes, padding.num_nodes, &layout.node_offsets,
+                  &layout.num_nodes);
+  compute_offsets(sample_num_edges, padding.num_edges, &layout.edge_offsets,
+                  &layout.num_edges);
+  return layout;
+}
+
+std::optional<PaddingOverflow> FindPaddingOverflow(
+    const MergeLayout& layout, const MergePadding& padding) {
+  for (std::size_t i = 0; i < layout.node_offsets.size(); i++) {
+    const std::size_t required = layout.node_offsets[i].back() + 1;
+    if (padding.num_nodes[i].has_value() && *padding.num_nodes[i] < required) {
+      return PaddingOverflow{true, static_cast<int>(i), required,
+                             *padding.num_nodes[i]};
+    }
+  }
+  for (std::size_t i = 0; i < layout.edge_offsets.size(); i++) {
+    const std::size_t required = layout.edge_offsets[i].back();
+    if (padding.num_edges[i].has_value() && *padding.num_edges[i] < required) {
+      return PaddingOverflow{false, static_cast<int>(i), required,
+                             *padding.num_edges[i]};
+    }
+  }
+  return std::nullopt;
+}
+
+namespace {
+
+template <typename T>
+bool GatherTypedRows(const GatherRowsTask& task) {
+  const T* src = reinterpret_cast<const T*>(task.src);
+  T* dst = reinterpret_cast<T*>(task.dst);
+  for (std::size_t i = task.begin; i < task.end; i++) {
+    const InputIdx j = task.idxs[i];
+    if (j >= task.src_num_rows) return false;
+    dst[i] = src[j];
+  }
+  return true;
+}
+
+}  // namespace
+
+bool GatherRows(const GatherRowsTask& task) {
+  if (task.idxs == nullptr) {
+    std::memset(task.dst + task.begin * task.row_bytes, 0,
+                (task.end - task.begin) * task.row_bytes);
+    return true;
+  }
+  switch (task.row_bytes) {
+    case 8:
+      return GatherTypedRows<int64_t>(task);
+    case 4:
+      return GatherTypedRows<int32_t>(task);
+    case 2:
+      return GatherTypedRows<int16_t>(task);
+    case 1:
+      return GatherTypedRows<int8_t>(task);
+    default:
+      for (std::size_t i = task.begin; i < task.end; i++) {
+        const InputIdx j = task.idxs[i];
+        if (j >= task.src_num_rows) return false;
+        std::memcpy(task.dst + i * task.row_bytes,
+                    task.src + j * task.row_bytes, task.row_bytes);
+      }
+      return true;
+  }
+}
+
+void AppendGatherRowsTasks(const char* src, const std::size_t src_num_rows,
+                           const InputIdx* idxs, const std::size_t num_idxs,
+                           char* dst, const std::size_t num_dst_rows,
+                           const std::size_t row_bytes,
+                           const std::size_t rows_per_task,
+                           std::vector<GatherRowsTask>* tasks) {
+  DCHECK_GT(rows_per_task, 0);
+  for (std::size_t begin = 0; begin < num_idxs; begin += rows_per_task) {
+    tasks->push_back({src, src_num_rows, dst, idxs, begin,
+                      std::min(num_idxs, begin + rows_per_task), row_bytes});
+  }
+  for (std::size_t begin = num_idxs; begin < num_dst_rows;
+       begin += rows_per_task) {
+    tasks->push_back({src, src_num_rows, dst, /*idxs=*/nullptr, begin,
+                      std::min(num_dst_rows, begin + rows_per_task),
+                      row_bytes});
+  }
 }
 
 }  // namespace dgf::sampling::in_memory_sampler

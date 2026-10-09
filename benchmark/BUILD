@@ -43,6 +43,8 @@ py_library(
     deps = [
         ":utils",
         "//dgf",
+        "//dgf/src/analyse:padding",
+        "//dgf/src/transform:merge",
         "//dgf/src/util:log",
         # numpy dep,
     ],
