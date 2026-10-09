@@ -17,11 +17,13 @@ r"""Binary to run message passing neural network (MPNN) benchmarks.
 Usage example:
 
 blaze run -c opt //third_party/py/dgf/benchmark:mpnn_main -- \
-  --scenarios=small_tree,small_loops,large_sorted \
+  --scenarios=small_tree,small_loops,many_edges_many_nodes \
+  --layer_types=GRAPHSAGE --layer_types=GCN \
   --list_dims=64,128 \
   --list_num_layers=1,3
 
-Run without `--scenarios` to benchmark all `mpnn.DEFAULT_SCENARIOS`.
+Run without `--scenarios` / `--layer_types` to benchmark all
+`mpnn.DEFAULT_SCENARIOS` / `mpnn.LayerType`.
 """
 
 from absl import app
@@ -33,6 +35,12 @@ _SCENARIOS = flags.DEFINE_list(
     [s.name for s in mpnn.DEFAULT_SCENARIOS],
     "Comma-separated list of scenario names to benchmark. Available:"
     f" {', '.join(s.name for s in mpnn.DEFAULT_SCENARIOS)}.",
+)
+_LAYER_TYPES = flags.DEFINE_multi_enum_class(
+    "layer_types",
+    list(mpnn.LayerType),
+    mpnn.LayerType,
+    "Layer types to benchmark (repeat the flag to select several).",
 )
 _LIST_DIMS = flags.DEFINE_list(
     "list_dims",
@@ -65,6 +73,7 @@ def main(argv):
 
   mpnn.mpnn(
       scenarios=[scenarios_by_name[name] for name in _SCENARIOS.value],
+      layer_types=_LAYER_TYPES.value,
       list_dims=[int(x) for x in _LIST_DIMS.value],
       list_num_layers=[int(x) for x in _LIST_NUM_LAYERS.value],
       max_runtime_seconds=_MAX_RUNTIME_SECONDS.value,

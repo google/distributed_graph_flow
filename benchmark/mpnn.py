@@ -41,6 +41,8 @@ class LayerType(enum.Enum):
 
   HETERO_GNN = "HeterogeneousGraphConvolution"
   HETERO_GAT = "HeterogeneousGraphAttentionNetwork"
+  GRAPHSAGE = "GraphSAGE"
+  GCN = "GCN"
 
 
 class Mode(enum.Enum):
@@ -404,6 +406,14 @@ def _make_model(
     layer_cfg = dgf.jax.layers.HeterogeneousGraphAttentionNetworkConfig(
         dims=dims, num_heads=num_heads
     )
+  elif layer_type == LayerType.GRAPHSAGE:
+    layer_cfg = dgf.jax.layers.HeterogeneousGraphConvolutionConfig.graphsage(
+        dims=dims
+    )
+  elif layer_type == LayerType.GCN:
+    layer_cfg = dgf.jax.layers.HeterogeneousGraphConvolutionConfig.gcn(
+        dims=dims
+    )
   else:
     raise ValueError(f"Unsupported layer_type: {layer_type}")
   return _StackedMPNN(
@@ -500,6 +510,7 @@ class RunMPNN(benchmark_utils.Benchmark):
 def mpnn(
     *,
     scenarios: Sequence[Scenario] = DEFAULT_SCENARIOS,
+    layer_types: Sequence[LayerType] = tuple(LayerType),
     list_dims: Sequence[int] = (128,),
     list_num_layers: Sequence[int] = (1, 3),
     num_heads: int = 4,
@@ -530,7 +541,7 @@ def mpnn(
       log.info("Relations: %s", describe_relations(jax_graph, schema))
 
       for num_layers in list_num_layers:
-        for layer_type in [LayerType.HETERO_GNN, LayerType.HETERO_GAT]:
+        for layer_type in layer_types:
           model = _make_model(schema, layer_type, num_layers, dims, num_heads)
           variables = model.init(
               jax.random.PRNGKey(0), jax_graph, training=False
