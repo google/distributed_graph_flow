@@ -113,6 +113,13 @@ class TenLines(parameterized.TestCase):
           common.Architecture.GRAPH_CONVOLUTIONAL_NETWORK,
       ),
       ("gcn_alias", "gcn", common.Architecture.GRAPH_CONVOLUTIONAL_NETWORK),
+      ("gat", "GAT", common.Architecture.GRAPH_ATTENTION_NETWORK),
+      (
+          "gat_long",
+          "graph_attention_network",
+          common.Architecture.GRAPH_ATTENTION_NETWORK,
+      ),
+      ("gatv2", "gatv2", common.Architecture.GRAPH_ATTENTION_NETWORK_V2),
   )
   def test_parse_architecture_success(self, input_val, expected):
     self.assertEqual(common.parse_architecture(input_val), expected)
@@ -121,12 +128,17 @@ class TenLines(parameterized.TestCase):
       (common.Architecture.HETEROGENEOUS_MESSAGE_PASSING, "Aggregation(mean)"),
       (
           common.Architecture.HETEROGENEOUS_GRAPH_ATTENTION_NETWORK,
-          "HeterogeneousGraphAttentionNetwork",
+          "DotProductAttention(heads=4, dims=8)",
       ),
       (common.Architecture.GRAPH_SAGE, "Aggregation(mean)"),
       (
           common.Architecture.GRAPH_CONVOLUTIONAL_NETWORK,
           "Aggregation(symmetric)",
+      ),
+      (common.Architecture.GRAPH_ATTENTION_NETWORK, "GatAttention(heads=8"),
+      (
+          common.Architecture.GRAPH_ATTENTION_NETWORK_V2,
+          "Gatv2Attention(heads=8",
       ),
   )
   def test_build_gnn_config(

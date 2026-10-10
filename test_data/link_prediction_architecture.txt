@@ -10,6 +10,7 @@ Graph Convolution Block x2:
         Activation(silu)
         Dense(8)
       Aggregation(sum)
+      RelationAggregation(sum)
       Update(concat(X, messages)):
         Dense(8)
         Activation(silu)

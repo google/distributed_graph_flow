@@ -22,6 +22,7 @@ py_library(
     srcs = ["layers.py"],
     deps = [
         "//dgf/src/learning/jax/layers:classification",
+        "//dgf/src/learning/jax/layers:graph_attention",
         "//dgf/src/learning/jax/layers:hetero_gnn",
         "//dgf/src/learning/jax/layers:hetero_graph_attention_network",
         "//dgf/src/learning/jax/layers:homo_gnn_sparse_deferred",

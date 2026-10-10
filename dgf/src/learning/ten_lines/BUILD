@@ -26,7 +26,6 @@ py_library(
         "//dgf/src/learning:early_stopping_monitor",
         "//dgf/src/learning/jax:common",
         "//dgf/src/learning/jax/layers:hetero_gnn",
-        "//dgf/src/learning/jax/layers:hetero_graph_attention_network",
         "//dgf/src/learning/jax/layers:preprocess",
         "//dgf/src/learning/jax/layers:timeseries_cnn",
         "//dgf/src/learning/jax/layers:timeseries_transformer",

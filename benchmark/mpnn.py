@@ -31,7 +31,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-# Thresholds used by `hetero_gnn.should_sort_edges` and `sort_edges_by_dst`.
+# Thresholds used by `message_passing_ops.should_sort_edges` and
+# `sort_edges_by_dst`.
 _SORT_MIN_EDGES = 50000
 _NARROW_INDEX_MAX_NODES = 65536
 
@@ -43,6 +44,8 @@ class LayerType(enum.Enum):
   HETERO_GAT = "HeterogeneousGraphAttentionNetwork"
   GRAPHSAGE = "GraphSAGE"
   GCN = "GCN"
+  GAT = "GAT"
+  GATV2 = "GATv2"
 
 
 class Mode(enum.Enum):
@@ -403,7 +406,7 @@ def _make_model(
   if layer_type == LayerType.HETERO_GNN:
     layer_cfg = dgf.jax.layers.HeterogeneousGraphConvolutionConfig(dims=dims)
   elif layer_type == LayerType.HETERO_GAT:
-    layer_cfg = dgf.jax.layers.HeterogeneousGraphAttentionNetworkConfig(
+    layer_cfg = dgf.jax.layers.HeterogeneousGraphConvolutionConfig.dot_product_attention(
         dims=dims, num_heads=num_heads
     )
   elif layer_type == LayerType.GRAPHSAGE:
@@ -413,6 +416,14 @@ def _make_model(
   elif layer_type == LayerType.GCN:
     layer_cfg = dgf.jax.layers.HeterogeneousGraphConvolutionConfig.gcn(
         dims=dims
+    )
+  elif layer_type == LayerType.GAT:
+    layer_cfg = dgf.jax.layers.HeterogeneousGraphConvolutionConfig.gat(
+        dims=dims, num_heads=num_heads
+    )
+  elif layer_type == LayerType.GATV2:
+    layer_cfg = dgf.jax.layers.HeterogeneousGraphConvolutionConfig.gatv2(
+        dims=dims, num_heads=num_heads
     )
   else:
     raise ValueError(f"Unsupported layer_type: {layer_type}")

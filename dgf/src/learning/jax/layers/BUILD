@@ -17,6 +17,7 @@ py_library(
     srcs = ["all.py"],
     deps = [
         ":classification",
+        ":graph_attention",
         ":hetero_gnn",
         ":hetero_graph_attention_network",
         ":homo_gnn_sparse_deferred",
@@ -135,9 +136,35 @@ py_library(
 )
 
 py_library(
+    name = "message_passing_ops",
+    srcs = ["message_passing_ops.py"],
+    deps = [
+        "//dgf/src/learning/jax:common",
+        # jax dep,
+        # jaxtyping dep,
+    ],
+)
+
+py_library(
+    name = "graph_attention",
+    srcs = ["graph_attention.py"],
+    deps = [
+        ":message_passing_ops",
+        ":registry",
+        # dataclasses_json dep,
+        "//dgf/src/learning/jax:common",
+        # flax:core dep,
+        # jax dep,
+        # jaxtyping dep,
+    ],
+)
+
+py_library(
     name = "hetero_gnn",
     srcs = ["hetero_gnn.py"],
     deps = [
+        ":graph_attention",
+        ":message_passing_ops",
         ":registry",
         ":standard",
         # dataclasses_json dep,
@@ -154,15 +181,14 @@ py_library(
     name = "hetero_graph_attention_network",
     srcs = ["hetero_graph_attention_network.py"],
     deps = [
+        ":graph_attention",
         ":hetero_gnn",
         ":registry",
         ":standard",
         # dataclasses_json dep,
-        "//dgf/src/data:jax_in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/learning/jax:common",
-        # flax:core dep,
-        # jax dep,
+        "//dgf/src/util:log",
     ],
 )
 
@@ -277,8 +303,50 @@ py_test(
 )
 
 py_test(
+    name = "message_passing_ops_test",
+    srcs = ["message_passing_ops_test.py"],
+    deps = [
+        ":message_passing_ops",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        # flax:core dep,
+        # jax dep,
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "graph_attention_test",
+    srcs = ["graph_attention_test.py"],
+    deps = [
+        ":graph_attention",
+        ":message_passing_ops",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        # jax dep,
+        # numpy dep,
+    ],
+)
+
+py_test(
     name = "hetero_gnn_test",
     srcs = ["hetero_gnn_test.py"],
+    deps = [
+        ":graph_attention",
+        ":hetero_gnn",
+        ":standard",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/data:jax_in_memory_graph",
+        "//dgf/src/data:schema",
+        # jax dep,
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "hetero_gnn_reference_test",
+    srcs = ["hetero_gnn_reference_test.py"],
     deps = [
         ":hetero_gnn",
         ":standard",
@@ -295,14 +363,13 @@ py_test(
     name = "hetero_graph_attention_network_test",
     srcs = ["hetero_graph_attention_network_test.py"],
     deps = [
+        ":graph_attention",
+        ":hetero_gnn",
         ":hetero_graph_attention_network",
-        ":standard",
         # absl/testing:absltest dep,
-        # absl/testing:parameterized dep,
         "//dgf/src/data:jax_in_memory_graph",
         "//dgf/src/data:schema",
         # jax dep,
-        # numpy dep,
     ],
 )
 

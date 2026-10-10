@@ -4,18 +4,21 @@ Activation(silu)
 Norm(layer_norm)
 Graph Convolution Block x2:
     X = ...
-    HeterogeneousGraphAttentionNetwork (heads=4):
-      Message/Value:
+    MPNN:
+      Message(concat(source, target)):
         Dense(8)
         Activation(silu)
         Dense(8)
-      Update:
+      Aggregation(attention):
+        DotProductAttention(heads=4, dims=8)
+      RelationAggregation(sum)
+      Update(concat(X, messages)):
         Dense(8)
         Activation(silu)
         Dropout(0.1)
         Dense(8)
     Residual(X)
-    # Post Attention FFN
+    # Post MPNN
     X = ...
     Norm(rms_norm)
     Dense(32)

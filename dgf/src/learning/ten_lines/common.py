@@ -28,7 +28,6 @@ from dgf.src.io import tf as io_tf_lib
 from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import common as jax_common
 from dgf.src.learning.jax.layers import hetero_gnn
-from dgf.src.learning.jax.layers import hetero_graph_attention_network
 from dgf.src.learning.jax.layers import preprocess
 from dgf.src.learning.jax.layers import timeseries_cnn
 from dgf.src.learning.jax.layers import timeseries_transformer
@@ -68,6 +67,8 @@ class Architecture(enum.Enum):
   )
   GRAPH_SAGE = "GRAPH_SAGE"
   GRAPH_CONVOLUTIONAL_NETWORK = "GRAPH_CONVOLUTIONAL_NETWORK"
+  GRAPH_ATTENTION_NETWORK = "GRAPH_ATTENTION_NETWORK"
+  GRAPH_ATTENTION_NETWORK_V2 = "GRAPH_ATTENTION_NETWORK_V2"
 
 
 DEFAULT_ARCHITECTURE = Architecture.HETEROGENEOUS_MESSAGE_PASSING
@@ -91,6 +92,10 @@ def parse_architecture(architecture: Architecture | str) -> Architecture:
     return Architecture.GRAPH_SAGE
   elif arch_lower in ("gcn", "graph_convolutional_network"):
     return Architecture.GRAPH_CONVOLUTIONAL_NETWORK
+  elif arch_lower in ("gat", "graph_attention_network"):
+    return Architecture.GRAPH_ATTENTION_NETWORK
+  elif arch_lower in ("gatv2", "graph_attention_network_v2"):
+    return Architecture.GRAPH_ATTENTION_NETWORK_V2
   else:
     raise ValueError(f"Unknown architecture: {architecture}")
 
@@ -555,10 +560,9 @@ def build_gnn_config(hparams: HParam) -> jax_common.GenericLayer:
   elif (
       hparams.architecture == Architecture.HETEROGENEOUS_GRAPH_ATTENTION_NETWORK
   ):
-    return hetero_graph_attention_network.HeterogeneousGraphAttentionNetworkConfig(  # pyrefly: ignore[bad-return]
+    return hetero_gnn.HeterogeneousGraphConvolutionConfig.dot_product_attention(  # pyrefly: ignore[bad-return]
         dims=hparams.node_embedding_dim,
         dropout_rate=hparams.dropout,
-        message_aggregation=hparams.message_aggregation.value,
     )
 
   elif hparams.architecture == Architecture.GRAPH_SAGE:
@@ -569,6 +573,18 @@ def build_gnn_config(hparams: HParam) -> jax_common.GenericLayer:
 
   elif hparams.architecture == Architecture.GRAPH_CONVOLUTIONAL_NETWORK:
     return hetero_gnn.HeterogeneousGraphConvolutionConfig.gcn(  # pyrefly: ignore[bad-return]
+        dims=hparams.node_embedding_dim,
+        dropout_rate=hparams.dropout,
+    )
+
+  elif hparams.architecture == Architecture.GRAPH_ATTENTION_NETWORK:
+    return hetero_gnn.HeterogeneousGraphConvolutionConfig.gat(  # pyrefly: ignore[bad-return]
+        dims=hparams.node_embedding_dim,
+        dropout_rate=hparams.dropout,
+    )
+
+  elif hparams.architecture == Architecture.GRAPH_ATTENTION_NETWORK_V2:
+    return hetero_gnn.HeterogeneousGraphConvolutionConfig.gatv2(  # pyrefly: ignore[bad-return]
         dims=hparams.node_embedding_dim,
         dropout_rate=hparams.dropout,
     )

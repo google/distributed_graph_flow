@@ -26,7 +26,10 @@ class RegistryTest(absltest.TestCase):
         layer_registry.registered_keys(),
         [
             "layers.ClassificationHeadConfig",
+            "layers.DotProductAttentionConfig",
             "layers.EmbedGraphConfig",
+            "layers.GatAttentionConfig",
+            "layers.Gatv2AttentionConfig",
             "layers.GenericBlockConfig",
             "layers.HeterogeneousGraphAttentionNetworkConfig",
             "layers.HeterogeneousGraphConvolutionConfig",

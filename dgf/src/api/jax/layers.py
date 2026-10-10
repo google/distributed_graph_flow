@@ -33,7 +33,16 @@ from dgf.src.learning.jax.layers.classification import ClassificationHeadConfig
 
 from dgf.src.learning.jax.layers.hetero_gnn import HeterogeneousGraphConvolution
 from dgf.src.learning.jax.layers.hetero_gnn import HeterogeneousGraphConvolutionConfig
+from dgf.src.learning.jax.layers.hetero_gnn import MessageAggregation
+from dgf.src.learning.jax.layers.hetero_gnn import RelationAggregation
+from dgf.src.learning.jax.layers.hetero_gnn import Combine
 
+from dgf.src.learning.jax.layers.graph_attention import GraphAttentionConfig
+from dgf.src.learning.jax.layers.graph_attention import DotProductAttentionConfig
+from dgf.src.learning.jax.layers.graph_attention import GatAttentionConfig
+from dgf.src.learning.jax.layers.graph_attention import Gatv2AttentionConfig
+
+# Deprecated. Use `HeterogeneousGraphConvolutionConfig.dot_product_attention()`.
 from dgf.src.learning.jax.layers.hetero_graph_attention_network import HeterogeneousGraphAttentionNetwork
 from dgf.src.learning.jax.layers.hetero_graph_attention_network import HeterogeneousGraphAttentionNetworkConfig
 
