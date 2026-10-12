@@ -1,0 +1,114 @@
+name: Nightly
+
+# Builds, tests, and publishes the "dgf-nightly" package to PyPI from the main
+# branch (see script/build_pip_package.sh for the package name and version).
+#
+# Manual runs: Actions > Nightly > "Run workflow". The wheels are only built
+# (and kept as workflow artifacts) unless "publish" is checked.
+on:
+  schedule:
+    # Daily at 03:00 UTC. Copybara pushes the google3 submits to main during
+    # the day; the scheduled run is skipped if main did not change.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish the wheels to PyPI (otherwise, only build them).
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  # Skips the scheduled run if the last successful scheduled run already built
+  # this commit. A failed nightly is retried the next night. Manual runs always
+  # build.
+  check:
+    name: Check for new commits
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - name: Compare with the last successful nightly
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          LAST_SHA=$(gh run list --workflow nightly.yml --event schedule \
+            --status success --limit 1 --json headSha --jq '.[0].headSha // ""')
+          echo "Last successful nightly: ${LAST_SHA:-none}; HEAD: ${GITHUB_SHA}"
+          if [ "${GITHUB_EVENT_NAME}" = "schedule" ] && [ "${LAST_SHA}" = "${GITHUB_SHA}" ]; then
+            echo "No new commit since the last nightly: skipping."
+            echo "build=false" >> "${GITHUB_OUTPUT}"
+          else
+            echo "build=true" >> "${GITHUB_OUTPUT}"
+          fi
+
+  build:
+    name: build-nightly (${{ matrix.python-version }})
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      # All the Python versions are built even if one fails (to see all the
+      # failures), but nothing is published unless all of them succeed.
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      # Actions must be pinned to a commit hash (Google GitHub org policy).
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      # Build, test, and Bazel cache handling (shared with ci.yml).
+      - name: Build and test the nightly package
+        uses: ./.github/actions/build-and-test
+        with:
+          python-version: ${{ matrix.python-version }}
+          nightly: "true"
+
+      # Only the auditwheel-repaired (manylinux) wheels are published.
+      - name: Upload wheel
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist-${{ matrix.python-version }}
+          path: dist/*manylinux*.whl
+          if-no-files-found: error
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    if: github.event_name == 'schedule' || inputs.publish
+    runs-on: ubuntu-latest
+    # The PyPI trusted publisher of "dgf-nightly" is bound to this workflow
+    # file and to this GitHub environment.
+    environment: pypi
+    permissions:
+      # PyPI Trusted Publishing (OIDC): no API token is stored on GitHub.
+      id-token: write
+
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+
+      - name: List wheels
+        run: ls -l dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          # A re-run on the same day finds the version already published.
+          skip-existing: true
+          print-hash: true
