@@ -134,23 +134,17 @@ class Encoder(nn.Module):
 
     # Message passing between nodes
     conv_config = self.config.graph_conv
-
-    class GNNBlock(nn.Module):
-
-      @nn.compact
-      def __call__(self, graph, _):
-        message_passer = conv_config.make(embedded_schema)
-        graph = message_passer(graph, training=training)
-        return graph, None
-
-    scanned_gnn = nn.scan(
-        GNNBlock,
-        variable_axes={"params": 0},
-        split_rngs={"params": True, "dropout": True},
-        length=self.config.num_layers,
+    plans = hetero_gnn.plans_for_target_nodeset(
+        embedded_schema,
+        target_nodeset=self.target_nodeset,
+        num_layers=self.config.num_layers,
+        plan=conv_config.plan,
     )
-
-    graph, _ = scanned_gnn()(graph, None)
+    for plan in plans:
+      message_passer = dataclasses.replace(conv_config, plan=plan).make(
+          embedded_schema
+      )
+      graph = message_passer(graph, training=training)
 
     # Extract embedding of seed nodes
     embedding = graph.node_sets[self.target_nodeset].features["embedding"][

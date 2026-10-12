@@ -244,6 +244,92 @@ class HeteroGNNTest(parameterized.TestCase):
   # Plan and configuration
   # ======================
 
+  def test_default_plan(self):
+    self.assertEqual(
+        hetero_gnn.default_plan(SCHEMA),
+        [("e1", False), ("e1", True), ("e2", False), ("e2", True)],
+    )
+
+  def test_plans_for_target_nodeset(self):
+    self.assertEqual(
+        hetero_gnn.plans_for_target_nodeset(SCHEMA, "n2", num_layers=0),
+        [],
+    )
+    self.assertEqual(
+        hetero_gnn.plans_for_target_nodeset(SCHEMA, "n2", num_layers=2),
+        [
+            [("e1", False), ("e1", True), ("e2", False), ("e2", True)],
+            [("e1", False), ("e2", False), ("e2", True)],
+        ],
+    )
+    self.assertEqual(
+        hetero_gnn.plans_for_target_nodeset(SCHEMA, "n1", num_layers=2),
+        [
+            [("e1", False), ("e1", True), ("e2", False), ("e2", True)],
+            [("e1", True)],
+        ],
+    )
+    # Custom base plan: only forward edges.
+    chain_schema = schema_lib.GraphSchema(
+        node_sets={},
+        edge_sets={
+            "ab": schema_lib.EdgeSchema(source="a", target="b"),
+            "bc": schema_lib.EdgeSchema(source="b", target="c"),
+            "cd": schema_lib.EdgeSchema(source="c", target="d"),
+        },
+    )
+    forward_only = [("ab", False), ("bc", False), ("cd", False)]
+    self.assertEqual(
+        hetero_gnn.plans_for_target_nodeset(
+            chain_schema, "d", num_layers=2, plan=forward_only
+        ),
+        [
+            [("bc", False), ("cd", False)],
+            [("cd", False)],
+        ],
+    )
+
+  def test_plans_for_target_nodeset_matches_full_plan_output(self):
+    graph = make_graph(num_edges=10)
+    full_layers = [Config(dims=DIMS).make(SCHEMA) for _ in range(2)]
+    pruned_plans = hetero_gnn.plans_for_target_nodeset(
+        SCHEMA, "n1", num_layers=2
+    )
+    pruned_layers = [
+        Config(dims=DIMS, plan=plan).make(SCHEMA) for plan in pruned_plans
+    ]
+
+    keys = jax.random.split(jax.random.PRNGKey(0), 2)
+    full_vars = [
+        layer.init(k, graph, training=False)
+        for k, layer in zip(keys, full_layers)
+    ]
+    pruned_vars = [
+        {
+            "params": {
+                k: v
+                for k, v in full_v["params"].items()
+                if k in layer.init(keys[0], graph, training=False)["params"]
+            }
+        }
+        for full_v, layer in zip(full_vars, pruned_layers)
+    ]
+
+    out_full = graph
+    for layer, v in zip(full_layers, full_vars):
+      out_full = layer.apply(v, out_full, training=False)
+
+    out_pruned = graph
+    for layer, v in zip(pruned_layers, pruned_vars):
+      out_pruned = layer.apply(v, out_pruned, training=False)
+
+    np.testing.assert_allclose(
+        out_pruned.node_sets["n1"].features["embedding"],
+        out_full.node_sets["n1"].features["embedding"],
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
   def test_sort_plan(self):
     plan = [("e1", False), ("e2", False), ("e2", True)]
     self.assertEqual(

@@ -627,7 +627,7 @@ def train_node_model(
 
       has_batch_stats = "batch_stats" in params
       batch_stats = params.get("batch_stats", {})
-      core_params = {"params": params["params"]}
+      core_params = {"params": params["params"]} if "params" in params else {}
 
       (loss, aux_data), grads = jax.value_and_grad(loss_fn, has_aux=True)(
           core_params, batch_stats, batch, labels, rng_key, True

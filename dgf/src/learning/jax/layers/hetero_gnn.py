@@ -76,6 +76,60 @@ class Combine(enum.Enum):
   SUM = "sum"
 
 
+def default_plan(schema: schema_lib.GraphSchema) -> Plan:
+  """Returns the default message passing plan: all edges in both directions."""
+  plan: Plan = []
+  for edge_name in schema.edge_sets:
+    plan.append((edge_name, False))
+    plan.append((edge_name, True))
+  return plan
+
+
+def plans_for_target_nodeset(
+    schema: schema_lib.GraphSchema,
+    target_nodeset: str,
+    num_layers: int,
+    plan: Plan | None = None,
+) -> list[Plan]:
+  """Returns the message passing plan of each layer to reach `target_nodeset`.
+
+  At each layer, only messages whose destination nodeset is needed to compute
+  the embedding of `target_nodeset` after `num_layers` layers are kept.
+
+  Args:
+    schema: The graph schema.
+    target_nodeset: The nodeset whose final embedding is needed.
+    num_layers: Number of message passing layers.
+    plan: Base message passing plan available at each layer. If None, defaults
+      to `default_plan(schema)` (all edges in both directions).
+
+  Returns:
+    A list of `num_layers` plans, one per layer from first to last.
+  """
+  if num_layers <= 0:
+    return []
+  if plan is None:
+    plan = default_plan(schema)
+
+  needed_nodesets = {target_nodeset}
+  plans_reversed: list[Plan] = []
+  for _ in range(num_layers):
+    layer_plan: Plan = []
+    next_needed = set(needed_nodesets)
+    for edgeset_name, reverse in plan:
+      edge_schema = schema.edge_sets[edgeset_name]
+      src = edge_schema.target if reverse else edge_schema.source
+      dst = edge_schema.source if reverse else edge_schema.target
+      if dst in needed_nodesets:
+        layer_plan.append((edgeset_name, reverse))
+        next_needed.add(src)
+    plans_reversed.append(layer_plan)
+    needed_nodesets = next_needed
+
+  plans_reversed.reverse()
+  return plans_reversed
+
+
 def sort_plan(plan: Plan, schema: schema_lib.GraphSchema) -> SortedPlan:
   """Sorts a message passing plan by destination nodeset.
 
@@ -649,10 +703,7 @@ class HeterogeneousGraphConvolution(nn.Module):
 
   def __post_init__(self):
     if self.config.plan is None:
-      self.config.plan = []
-      for edge_name in self.schema.edge_sets:
-        self.config.plan.append((edge_name, False))
-        self.config.plan.append((edge_name, True))
+      self.config.plan = default_plan(self.schema)
     self.sorted_plan = sort_plan(self.config.plan, self.schema)
     super().__post_init__()
 
