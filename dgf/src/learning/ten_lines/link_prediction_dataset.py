@@ -80,7 +80,18 @@ class LiveData:
   ) = None
 
   sampling_schema: schema_lib.GraphSchema | None = None
-  merge_schema: schema_lib.GraphSchema | None = None
+
+  # Copies of the samplers configured with the paddings: (positive source,
+  # positive target, negative target). Created on first use, once the sampler
+  # output options are final.
+  padded_samplers: (
+      tuple[
+          in_memory_sampler_lib.Sampler,
+          in_memory_sampler_lib.Sampler,
+          in_memory_sampler_lib.Sampler,
+      ]
+      | None
+  ) = None
 
 
 @dataclasses.dataclass(kw_only=True)
@@ -321,7 +332,6 @@ class GNNLinkDatasetPreparator:
         if self.seed_edge_idxs is not None
         else self.graph.edge_sets[self.target_edgeset].num_edges(),
         sampling_schema=sampling_schema,
-        merge_schema=self._get_merge_schema(sampling_schema),
     )
 
     if self.cache_normalized_features:
@@ -384,29 +394,6 @@ class GNNLinkDatasetPreparator:
         if self.mask_seed_edge and not self.temporal_sampling
         else None
     )
-
-  def _get_merge_schema(
-      self, base_schema: schema_lib.GraphSchema
-  ) -> schema_lib.GraphSchema:
-    if not self.cache_normalized_features:
-      return base_schema
-    node_sets = {}
-    for name, _ in base_schema.node_sets.items():
-      node_sets[name] = schema_lib.NodeSchema(
-          features={
-              "#idx": schema_lib.FeatureSchema(
-                  format=schema_lib.FeatureFormat.INTEGER_64
-              )
-          }
-      )
-
-    edge_sets = {}
-    for name, edge_schema in base_schema.edge_sets.items():
-      edge_sets[name] = schema_lib.EdgeSchema(
-          source=edge_schema.source, target=edge_schema.target
-      )
-
-    return schema_lib.GraphSchema(node_sets=node_sets, edge_sets=edge_sets)
 
   def prepare(self):
     """Pre-compute and prepare what is necessary for the generation.
@@ -792,7 +779,6 @@ class GNNLinkDatasetPreparator:
         if self.seed_edge_idxs is not None
         else self.graph.edge_sets[self.target_edgeset].num_edges(),
         sampling_schema=sampling_schema,
-        merge_schema=self._get_merge_schema(sampling_schema),
     )
 
     if self.cache_normalized_features:
@@ -832,7 +818,6 @@ class GNNLinkDatasetPreparator:
       self,
       live: LiveData,
       batch_seed: NodeIdsBatch,
-      merge_schema: schema_lib.GraphSchema,
       padding: bool = True,
   ) -> GNNLinkDatasetPreparatorSample:
     """Samples subgraphs and merges them into batched graphs.
@@ -840,7 +825,6 @@ class GNNLinkDatasetPreparator:
     Args:
       live: The live data computed during preparation.
       batch_seed: The seed nodes and edge indices for sampling.
-      merge_schema: The schema to use for merging graphs.
       padding: Whether to pad the merged graphs.
 
     Returns:
@@ -849,34 +833,36 @@ class GNNLinkDatasetPreparator:
           target.
         - A tuple of merge offsets dictionaries for each merged graph.
     """
+    if padding:
+      if live.padded_samplers is None:
+        live.padded_samplers = (
+            live.source_sampler.with_padding(live.positive_source_padding),
+            live.target_sampler.with_padding(live.positive_target_padding),
+            live.target_sampler.with_padding(live.negative_target_padding),
+        )
+      pos_src_sampler, pos_trg_sampler, neg_trg_sampler = live.padded_samplers
+    else:
+      pos_src_sampler = live.source_sampler
+      pos_trg_sampler = neg_trg_sampler = live.target_sampler
+
     masked_edge_idxs = (
         batch_seed.edge_idxs
         if self.mask_seed_edge and batch_seed.seed_timestamps is None
         else None
     )
     # Positive source
-    pos_src_samples = live.source_sampler.sample(
+    pos_src_merged, pos_src_offsets = pos_src_sampler.sample_merged(
         batch_seed.pos_src_node_idxs,
         masked_edge_idxs=masked_edge_idxs,
         seed_timestamps=batch_seed.seed_timestamps,
     )
-    pos_src_merged, pos_src_offsets = merge_lib.GraphMerger(
-        schema=merge_schema,
-        padding=live.positive_source_padding if padding else None,
-        sentinel_offset=True,
-    )(pos_src_samples)
 
     # Positive target
-    pos_trg_samples = live.target_sampler.sample(
+    pos_trg_merged, pos_trg_offsets = pos_trg_sampler.sample_merged(
         batch_seed.pos_trg_node_idxs,
         masked_edge_idxs=masked_edge_idxs,
         seed_timestamps=batch_seed.seed_timestamps,
     )
-    pos_trg_merged, pos_trg_offsets = merge_lib.GraphMerger(
-        schema=merge_schema,
-        padding=live.positive_target_padding if padding else None,
-        sentinel_offset=True,
-    )(pos_trg_samples)
 
     # Negative target
     neg_seed_timestamps = (
@@ -889,16 +875,11 @@ class GNNLinkDatasetPreparator:
         if self.mask_seed_edge and batch_seed.seed_timestamps is None
         else None
     )
-    neg_trg_samples = live.target_sampler.sample(
+    neg_trg_merged, neg_trg_offsets = neg_trg_sampler.sample_merged(
         batch_seed.neg_trg_node_idxs.flatten(),
         masked_edge_idxs=neg_masked_edge_idxs,
         seed_timestamps=neg_seed_timestamps,
     )
-    neg_trg_merged, neg_trg_offsets = merge_lib.GraphMerger(
-        schema=merge_schema,
-        padding=live.negative_target_padding if padding else None,
-        sentinel_offset=True,
-    )(neg_trg_samples)
 
     return GNNLinkDatasetPreparatorSample(
         positive_source_graph=pos_src_merged,
@@ -1008,7 +989,7 @@ class GNNLinkDatasetPreparator:
       batch_seed: NodeIdsBatch,
       padding: bool = True,
   ) -> GNNLinkDatasetPreparatorSample:
-    raw = self._sample_and_merge(live, batch_seed, live.merge_schema, padding)  # pyrefly: ignore[bad-argument-type]
+    raw = self._sample_and_merge(live, batch_seed, padding)
 
     if self.cache_normalized_features:
       if (
@@ -1090,7 +1071,7 @@ class GNNLinkDatasetPreparator:
       batch_seed: NodeIdsBatch,
       padding: bool = True,
   ) -> GNNLinkDatasetPreparatorJaxSample:
-    raw = self._sample_and_merge(live, batch_seed, live.merge_schema, padding)  # pyrefly: ignore[bad-argument-type]
+    raw = self._sample_and_merge(live, batch_seed, padding)
 
     if self.cache_normalized_features:
       norm_src = (

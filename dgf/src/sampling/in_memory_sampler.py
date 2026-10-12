@@ -14,15 +14,28 @@
 
 """In memory sampler."""
 
+from collections.abc import Callable
+import copy
+import dataclasses
+import math
 import os
 from typing import overload
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
+from dgf.src.data import padding as padding_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.sampling import _in_memory_sampler_ext
 from dgf.src.sampling import config as config_lib
 from dgf.src.sampling import temporal as sampling_temporal_lib
+from dgf.src.transform import merge as merge_lib
 from dgf.src.util import temporal as temporal_util
 import numpy as np
+
+# Name of the feature containing the node indices in the sampled graphs.
+_IDX_KEY = "#idx"
+
+# Numpy dtype kinds gathered in c++ by `Sampler.sample_merged`: boolean,
+# signed/unsigned integers, floats, and fixed-size bytes / unicode strings.
+_CC_GATHER_DTYPE_KINDS = "biufSU"
 
 
 class Sampler:
@@ -38,6 +51,7 @@ class Sampler:
       slice_timeseries_by_seed: bool,
       max_timeseries_len: int,
       has_temporal_edgesets: bool,
+      padding: padding_lib.Padding | None = None,
   ):
     self._cc_sampler = cc_sampler
     self._full_graph = full_graph
@@ -54,6 +68,10 @@ class Sampler:
     if self._max_timeseries_len <= 0:
       raise ValueError("max_timeseries_len must be positive")
 
+    merge_lib.validate_padding(self._schema, padding)
+    self._padding = padding
+    self._reset_merging()
+
   def set_return_options(self, return_features: bool, return_node_idxs: bool):
     """Sets whether to return features and node indices in sampled graphs.
 
@@ -64,6 +82,31 @@ class Sampler:
     """
     self._return_features = return_features
     self._return_node_idxs = return_node_idxs
+    self._reset_merging()
+
+  @property
+  def padding(self) -> padding_lib.Padding | None:
+    """The padding of the graphs returned by `sample_merged`."""
+    return self._padding
+
+  def with_padding(self, padding: padding_lib.Padding | None) -> "Sampler":
+    """Returns a copy of the sampler with a different `sample_merged` padding.
+
+    The copy shares the underlying C++ sampler (including the sampling index and
+    random number generator) with this sampler, so the two samplers are not
+    thread-safe and must not be called concurrently.
+
+    Args:
+      padding: Padding of the graphs returned by `sample_merged`.
+
+    Returns:
+      A new sampler.
+    """
+    merge_lib.validate_padding(self._schema, padding)
+    sampler = copy.copy(self)
+    sampler._padding = padding  # pylint: disable=protected-access
+    sampler._reset_merging()  # pylint: disable=protected-access
+    return sampler
 
   @overload
   def sample(
@@ -117,7 +160,295 @@ class Sampler:
       representing the sampled subgraph.
     """
 
-    # Check and convert the user input into what the c++ sampler expects.
+    return_single_graph = isinstance(seed_node_idxs, int)
+    seed_node_idxs, seed_timestamps, masked_edge_idxs = (
+        self._convert_sample_inputs(
+            seed_node_idxs, seed_timestamps, masked_edge_idxs
+        )
+    )
+
+    # Sample a graph structure.
+    graphs = self._cc_sampler.Sample(
+        seed_node_idxs,
+        seed_timestamps if self._has_temporal_edgesets else None,
+        masked_edge_idxs,
+    )
+
+    self._add_finalize_graphs(graphs, seed_timestamps=seed_timestamps)
+
+    if return_single_graph:
+      return graphs[0]
+    else:
+      return graphs
+
+  def sample_merged(
+      self,
+      seed_node_idxs: int | list[int] | np.ndarray,
+      seed_timestamps: int | list[int] | np.ndarray | None = None,
+      masked_edge_idxs: int | list[int] | np.ndarray | None = None,
+  ) -> tuple[in_memory_graph_lib.InMemoryGraph, dict[str, np.ndarray]]:
+    """Samples subgraphs and merges them into a single (padded) graph.
+
+    Functionally equivalent to (but much faster than) merging the graphs
+    returned by `sample` with `dgf.transform.GraphMerger(schema, padding)`.
+
+    Usage example:
+
+    ```python
+    sampler = dgf.sampling.create_sampler(graph, config, schema, batch_size=64,
+                                          padding=padding)
+    merged_graph, offsets = sampler.sample_merged(seed_node_idxs)
+    # The seed nodes of the samples in the merged graph.
+    merged_seed_node_idxs = offsets[config.seed_nodeset][:-1]
+    ```
+
+    The returned graph contains the node sets and edge sets of the sampler
+    schema. If the sampler is configured with `return_features=True`, the node
+    features of the schema are returned. If the sampler is configured with
+    `return_node_idxs=True`, the node indices are returned in the "#idx"
+    feature.
+
+    Args:
+      seed_node_idxs: The index or indexes of the nodes to start sampling from.
+      seed_timestamps: Optional timestamps for time-aware sampling. See
+        `sample`.
+      masked_edge_idxs: Optional edge indices to mask during sampling. See
+        `sample`.
+
+    Returns:
+      The merged graph, and the node offsets of each sample for each node set
+      (with an extra sentinel value). See `GraphMerger` for details.
+    """
+    ((merged, offsets, _),) = self.sample_merged_sub_batches(
+        seed_node_idxs, seed_timestamps, masked_edge_idxs
+    )
+    return merged, offsets
+
+  def sample_merged_sub_batches(
+      self,
+      seed_node_idxs: int | list[int] | np.ndarray,
+      seed_timestamps: int | list[int] | np.ndarray | None = None,
+      masked_edge_idxs: int | list[int] | np.ndarray | None = None,
+      *,
+      skip_overflow_padding_error: bool = False,
+      split_overflow_padding_error: bool = False,
+      on_skip_samples: Callable[[int], None] | None = None,
+  ) -> list[
+      tuple[in_memory_graph_lib.InMemoryGraph, dict[str, np.ndarray], slice]
+  ]:
+    """Same as `sample_merged`, but splits / skips samples exceeding the padding.
+
+    Equivalent to `GraphMerger.merge_sub_batches` applied on the output of
+    `sample`.
+
+    Args:
+      seed_node_idxs: See `sample_merged`.
+      seed_timestamps: See `sample_merged`.
+      masked_edge_idxs: See `sample_merged`.
+      skip_overflow_padding_error: See `GraphMerger.merge_sub_batches`.
+      split_overflow_padding_error: See `GraphMerger.merge_sub_batches`.
+      on_skip_samples: See `GraphMerger.merge_sub_batches`.
+
+    Returns:
+      A list of `(merged_graph, offsets, sub_slice)`.
+    """
+    seed_node_idxs, seed_timestamps, masked_edge_idxs = (
+        self._convert_sample_inputs(
+            seed_node_idxs, seed_timestamps, masked_edge_idxs
+        )
+    )
+    if not self._merging_configured:
+      self._configure_merging()
+
+    if self._python_merger is not None:
+      return list(
+          self._python_merger.merge_sub_batches(
+              self.sample(seed_node_idxs, seed_timestamps, masked_edge_idxs),
+              skip_overflow_padding_error=skip_overflow_padding_error,
+              split_overflow_padding_error=split_overflow_padding_error,
+              on_skip_samples=on_skip_samples,
+          )
+      )
+
+    res, batch, overflow = self._cc_sampler.SampleMerged(
+        seed_node_idxs,
+        seed_timestamps if self._has_temporal_edgesets else None,
+        masked_edge_idxs,
+        self._merge_config,
+    )
+    if overflow is None:
+      merged, offsets = self._finalize_merged(*res)
+      return [(merged, offsets, slice(0, len(seed_node_idxs)))]
+
+    results = []
+    self._merge_sub_batches(
+        batch,
+        begin=0,
+        end=len(seed_node_idxs),
+        overflow=overflow,
+        skip_overflow_padding_error=skip_overflow_padding_error,
+        split_overflow_padding_error=split_overflow_padding_error,
+        on_skip_samples=on_skip_samples,
+        results=results,
+    )
+    return results
+
+  def _merge_sub_batches(
+      self,
+      batch: _in_memory_sampler_ext.SampledBatch,
+      begin: int,
+      end: int,
+      overflow: tuple[bool, str, int, int] | None,
+      skip_overflow_padding_error: bool,
+      split_overflow_padding_error: bool,
+      on_skip_samples: Callable[[int], None] | None,
+      results: list[
+          tuple[
+              in_memory_graph_lib.InMemoryGraph, dict[str, np.ndarray], slice
+          ]
+      ],
+  ):
+    """Merges the samples [begin, end) of `batch` into `results`."""
+    if overflow is None:
+      res, overflow = batch.Merge(begin, end, self._merge_config)
+      if overflow is None:
+        merged, offsets = self._finalize_merged(*res)
+        results.append((merged, offsets, slice(begin, end)))
+        return
+
+    if split_overflow_padding_error and end - begin > 1:
+      mid = begin + (end - begin) // 2
+      for sub_begin, sub_end in ((begin, mid), (mid, end)):
+        self._merge_sub_batches(
+            batch,
+            begin=sub_begin,
+            end=sub_end,
+            overflow=None,
+            skip_overflow_padding_error=skip_overflow_padding_error,
+            split_overflow_padding_error=split_overflow_padding_error,
+            on_skip_samples=on_skip_samples,
+            results=results,
+        )
+      return
+    if not skip_overflow_padding_error:
+      is_node_set, set_name, required, padded = overflow
+      if is_node_set:
+        # Note: `required` includes the sentinel node.
+        message = merge_lib.insufficient_node_padding_message(
+            set_name, required - 1, padded
+        )
+      else:
+        message = merge_lib.insufficient_edge_padding_message(
+            set_name, required, padded
+        )
+      raise merge_lib.InsufficientPaddingError(message)
+    if on_skip_samples is not None:
+      on_skip_samples(end - begin)
+
+  def _finalize_merged(
+      self,
+      merged: in_memory_graph_lib.InMemoryGraph,
+      offsets: dict[str, np.ndarray],
+  ) -> tuple[in_memory_graph_lib.InMemoryGraph, dict[str, np.ndarray]]:
+    """Finalizes a merged graph exported by C++."""
+    # Features not gathered in c++ (e.g. object arrays).
+    for node_set_name, feature_name, src in self._python_gathered_features:
+      node_set = merged.node_sets[node_set_name]
+      assert node_set.num_nodes is not None
+      num_real_nodes = int(offsets[node_set_name][-1])
+      dst = np.empty((node_set.num_nodes,) + src.shape[1:], dtype=src.dtype)
+      merge_lib.gather_rows_numpy(
+          src, node_set.features[_IDX_KEY][:num_real_nodes], dst
+      )
+      node_set.features[feature_name] = dst
+    for node_set_name in self._node_idxs_to_remove:
+      del merged.node_sets[node_set_name].features[_IDX_KEY]
+    return merged, offsets
+
+  def _reset_merging(self):
+    """Invalidates the configuration of `sample_merged`."""
+    self._merging_configured = False
+    self._python_merger: merge_lib.GraphMerger | None = None
+    self._merge_config = None
+    self._python_gathered_features: list[tuple[str, str, np.ndarray]] = []
+    self._node_idxs_to_remove: list[str] = []
+
+  def _configure_merging(self):
+    """Pre-computes the configuration of `sample_merged`."""
+    self._reset_merging()
+    self._merging_configured = True
+
+    if self._return_features and self._has_timeseries_features():
+      # TODO(gbm): Support timeseries features (slicing by seed timestamp,
+      # clipping to `max_timeseries_len`, and timeseries padding) in the c++
+      # merging, and remove `_python_merger`.
+      self._python_merger = merge_lib.GraphMerger(
+          schema=self._output_schema(), padding=self._padding
+      )
+      return
+
+    padding_num_nodes = {}
+    for node_set_name in self._schema.node_sets:
+      num_nodes = merge_lib.padded_num_nodes(self._padding, node_set_name)
+      if num_nodes is not None:
+        padding_num_nodes[node_set_name] = num_nodes
+
+    padding_num_edges = {}
+    for edge_set_name, edge_set_schema in self._schema.edge_sets.items():
+      num_edges = merge_lib.padded_num_edges(self._padding, edge_set_name)
+      if num_edges is None:
+        continue
+      if (
+          edge_set_schema.source not in padding_num_nodes
+          or edge_set_schema.target not in padding_num_nodes
+      ):
+        raise ValueError(
+            merge_lib.missing_sentinel_message(edge_set_name, edge_set_schema)
+        )
+      padding_num_edges[edge_set_name] = num_edges
+
+    features = {}
+    for node_set_name, node_set_schema in self._schema.node_sets.items():
+      feature_specs = []
+      if self._return_features:
+        full_features = self._full_graph.node_sets[node_set_name].features
+        for feature_name in node_set_schema.features:
+          if feature_name == _IDX_KEY:
+            continue
+          if feature_name not in full_features:
+            raise ValueError(
+                f"Feature '{feature_name}' of node set '{node_set_name}' is"
+                " defined in the schema but not in the graph."
+            )
+          src = full_features[feature_name]
+          cc_src = _cc_gather_source(src)
+          if cc_src is None:
+            self._python_gathered_features.append(
+                (node_set_name, feature_name, src)
+            )
+          feature_specs.append(
+              (feature_name, cc_src, src.dtype, (-1,) + src.shape[1:])
+          )
+      features[node_set_name] = feature_specs
+      if not self._return_node_idxs and any(
+          name == node_set_name for name, _, _ in self._python_gathered_features
+      ):
+        self._node_idxs_to_remove.append(node_set_name)
+
+    self._merge_config = self._cc_sampler.CreateMergeConfig(
+        padding_num_nodes,
+        padding_num_edges,
+        features,
+        self._return_node_idxs,
+    )
+
+  def _convert_sample_inputs(
+      self,
+      seed_node_idxs: int | list[int] | np.ndarray,
+      seed_timestamps: int | list[int] | np.ndarray | None,
+      masked_edge_idxs: int | list[int] | np.ndarray | None,
+  ) -> tuple[np.ndarray, np.ndarray | None, np.ndarray | None]:
+    """Checks and converts the user input into what the c++ sampler expects."""
     assert (
         not (
             self._return_features
@@ -131,9 +462,7 @@ class Sampler:
         " `is_timeseries=True` features."
     )
 
-    return_single_graph = False
     if isinstance(seed_node_idxs, int):
-      return_single_graph = True
       seed_node_idxs = np.array([seed_node_idxs], dtype=np.int64)
     elif isinstance(seed_node_idxs, list):
       seed_node_idxs = np.array(seed_node_idxs, dtype=np.int64)
@@ -172,20 +501,25 @@ class Sampler:
         raise ValueError(
             "masked_edge_idxs must have the same length as seed_node_idxs"
         )
+    return seed_node_idxs, seed_timestamps, masked_edge_idxs
 
-    # Sample a graph structure.
-    graphs = self._cc_sampler.Sample(
-        seed_node_idxs,
-        seed_timestamps if self._has_temporal_edgesets else None,
-        masked_edge_idxs,
-    )
-
-    self._add_finalize_graphs(graphs, seed_timestamps=seed_timestamps)
-
-    if return_single_graph:
-      return graphs[0]
-    else:
-      return graphs
+  def _output_schema(self) -> schema_lib.GraphSchema:
+    """Schema of the sampled graphs given the `return_*` options."""
+    node_sets = {}
+    for node_set_name, node_set_schema in self._schema.node_sets.items():
+      features = {}
+      if self._return_features:
+        features.update({
+            k: v for k, v in node_set_schema.features.items() if k != _IDX_KEY
+        })
+      if self._return_node_idxs:
+        features[_IDX_KEY] = schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.INTEGER_64
+        )
+      node_sets[node_set_name] = dataclasses.replace(
+          node_set_schema, features=features
+      )
+    return dataclasses.replace(self._schema, node_sets=node_sets)
 
   def subgraph(
       self, seed_node_idxs: list[int]
@@ -324,6 +658,27 @@ class Sampler:
         )
 
 
+def _cc_gather_source(src: np.ndarray) -> np.ndarray | None:
+  """Returns the array to gather in c++ instead of `src`, or None.
+
+  Fixed-size bytes / unicode arrays are viewed as uint8 arrays since DLPack does
+  not support them. Other unsupported arrays (e.g. object arrays) return None.
+  """
+  if (
+      not isinstance(src, np.ndarray)
+      or src.ndim < 1
+      or not src.flags.c_contiguous
+      or src.dtype.kind not in _CC_GATHER_DTYPE_KINDS
+  ):
+    return None
+  row_bytes = src.itemsize * math.prod(src.shape[1:])
+  if row_bytes == 0:
+    return None
+  if src.dtype.kind in "SU":
+    return src.view(np.uint8).reshape(src.shape[0], row_bytes)
+  return src
+
+
 def add_features_to_samples(
     full_graph: in_memory_graph_lib.InMemoryGraph,
     samples: list[in_memory_graph_lib.InMemoryGraph],
@@ -373,6 +728,7 @@ def create_sampler(
     seed: int | None = None,
     edgeset_to_mask: str | None = None,
     slice_timeseries_by_seed: bool | None = None,
+    padding: padding_lib.Padding | None = None,
 ) -> Sampler:
   """Creates an in-memory sampler.
 
@@ -404,6 +760,7 @@ def create_sampler(
     slice_timeseries_by_seed: Whether to causally slice `is_timeseries=True`
       sequence features by the seed node timestamp. Defaults to
       `plan.temporal_sampling`.
+    padding: Padding of the graphs returned by `Sampler.sample_merged`.
 
   TODO(gbm): Should we remove the compilation variations (e.g., change in random
     number generator, change in hashmaps).
@@ -475,4 +832,5 @@ def create_sampler(
       slice_timeseries_by_seed=slice_timeseries_by_seed,
       max_timeseries_len=plan.max_timeseries_len,
       has_temporal_edgesets=bool(edgeset_timestamp_features),
+      padding=padding,
   )

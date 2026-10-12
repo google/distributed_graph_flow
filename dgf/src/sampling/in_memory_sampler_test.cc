@@ -1,8 +1,12 @@
 #include "dgf/src/sampling/in_memory_sampler.h"
 
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <memory>
+#include <optional>
 #include <random>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -300,5 +304,123 @@ TEST(InMemorySamplerTest, HasEdge) {
   EXPECT_TRUE(index.HasEdge(2, 21));
   EXPECT_FALSE(index.HasEdge(2, 10));
 }
+
+TEST(MergeTest, ComputeMergeLayout) {
+  // 2 nodesets, 1 edgeset, 3 samples. The first nodeset is padded.
+  const MergeLayout layout = ComputeMergeLayout(
+      /*sample_num_nodes=*/{{1, 2, 3}, {0, 4, 1}},
+      /*sample_num_edges=*/{{2, 0, 5}},
+      MergePadding{/*num_nodes=*/{10, std::nullopt},
+                   /*num_edges=*/{std::nullopt}});
+  EXPECT_THAT(layout.node_offsets,
+              ElementsAre(ElementsAre(0, 1, 3, 6), ElementsAre(0, 0, 4, 5)));
+  EXPECT_THAT(layout.edge_offsets, ElementsAre(ElementsAre(0, 2, 2, 7)));
+  EXPECT_THAT(layout.num_nodes, ElementsAre(10, 5));
+  EXPECT_THAT(layout.num_edges, ElementsAre(7));
+}
+
+TEST(MergeTest, ComputeMergeLayout_NoSamples) {
+  const MergeLayout layout = ComputeMergeLayout(
+      {{}}, {{}},
+      MergePadding{/*num_nodes=*/{4}, /*num_edges=*/{std::nullopt}});
+  EXPECT_THAT(layout.node_offsets, ElementsAre(ElementsAre(0)));
+  EXPECT_THAT(layout.num_nodes, ElementsAre(4));
+  EXPECT_THAT(layout.num_edges, ElementsAre(0));
+}
+
+TEST(MergeTest, FindPaddingOverflow) {
+  const auto overflow = [](std::optional<std::size_t> padded_nodes,
+                           std::optional<std::size_t> padded_edges) {
+    const MergePadding padding{{padded_nodes}, {padded_edges}};
+    return FindPaddingOverflow(ComputeMergeLayout({{2, 3}}, {{4}}, padding),
+                               padding);
+  };
+  // 5 nodes + 1 sentinel node, and 4 edges.
+  EXPECT_FALSE(overflow(6, 4).has_value());
+  EXPECT_FALSE(overflow(std::nullopt, std::nullopt).has_value());
+
+  const auto node_overflow = overflow(5, 4);
+  ASSERT_TRUE(node_overflow.has_value());
+  EXPECT_TRUE(node_overflow->is_nodeset);
+  EXPECT_EQ(node_overflow->set_idx, 0);
+  EXPECT_EQ(node_overflow->required, 6);
+  EXPECT_EQ(node_overflow->padded, 5);
+
+  const auto edge_overflow = overflow(6, 3);
+  ASSERT_TRUE(edge_overflow.has_value());
+  EXPECT_FALSE(edge_overflow->is_nodeset);
+  EXPECT_EQ(edge_overflow->required, 4);
+  EXPECT_EQ(edge_overflow->padded, 3);
+}
+
+// Gathers the rows `idxs` of `src` (with `row_size` values per row) into a
+// `num_dst_rows` rows output initialized with -1.
+template <typename T>
+std::vector<T> TestGather(const std::vector<T>& src, std::size_t row_size,
+                          const std::vector<InputIdx>& idxs,
+                          std::size_t num_dst_rows, bool* ok) {
+  std::vector<T> dst(num_dst_rows * row_size, -1);
+  std::vector<GatherRowsTask> tasks;
+  AppendGatherRowsTasks(reinterpret_cast<const char*>(src.data()),
+                        src.size() / row_size, idxs.data(), idxs.size(),
+                        reinterpret_cast<char*>(dst.data()), num_dst_rows,
+                        row_size * sizeof(T), /*rows_per_task=*/2, &tasks);
+  *ok = true;
+  for (const auto& task : tasks) {
+    *ok &= GatherRows(task);
+  }
+  return dst;
+}
+
+TEST(MergeTest, GatherRows) {
+  bool ok;
+  // Typed copies (1, 2, 4, and 8 bytes rows).
+  EXPECT_THAT(TestGather<int8_t>({10, 11, 12}, 1, {2, 0, 2}, 4, &ok),
+              ElementsAre(12, 10, 12, 0));
+  EXPECT_TRUE(ok);
+  EXPECT_THAT(TestGather<int16_t>({10, 11, 12}, 1, {1}, 1, &ok),
+              ElementsAre(11));
+  EXPECT_TRUE(ok);
+  EXPECT_THAT(TestGather<float>({1.f, 2.f}, 1, {1, 1, 0}, 3, &ok),
+              ElementsAre(2.f, 2.f, 1.f));
+  EXPECT_TRUE(ok);
+  EXPECT_THAT(TestGather<double>({1., 2.}, 1, {}, 2, &ok), ElementsAre(0., 0.));
+  EXPECT_TRUE(ok);
+  // Generic copies (rows of 3 x 4 bytes).
+  EXPECT_THAT(TestGather<int32_t>({1, 2, 3, 4, 5, 6}, 3, {1, 0}, 3, &ok),
+              ElementsAre(4, 5, 6, 1, 2, 3, 0, 0, 0));
+  EXPECT_TRUE(ok);
+}
+
+TEST(MergeTest, GatherRows_OutOfBounds) {
+  bool ok;
+  TestGather<int64_t>({1, 2}, 1, {0, 2}, 2, &ok);
+  EXPECT_FALSE(ok);
+  TestGather<int64_t>({1, 2}, 1, {std::numeric_limits<InputIdx>::max()}, 1,
+                      &ok);
+  EXPECT_FALSE(ok);
+  TestGather<int32_t>({1, 2, 3, 4, 5, 6}, 3, {2}, 1, &ok);
+  EXPECT_FALSE(ok);
+}
+
+TEST(MergeTest, AppendGatherRowsTasks) {
+  std::vector<GatherRowsTask> tasks;
+  const char src[1] = {};
+  const InputIdx idxs[5] = {};
+  char dst[1] = {};
+  AppendGatherRowsTasks(src, /*src_num_rows=*/1, idxs, /*num_idxs=*/5, dst,
+                        /*num_dst_rows=*/8, /*row_bytes=*/4,
+                        /*rows_per_task=*/2, &tasks);
+  ASSERT_THAT(tasks, SizeIs(5));
+  const auto range = [](const GatherRowsTask& task) {
+    return std::make_tuple(task.begin, task.end, task.idxs != nullptr);
+  };
+  EXPECT_EQ(range(tasks[0]), std::make_tuple(0, 2, true));
+  EXPECT_EQ(range(tasks[1]), std::make_tuple(2, 4, true));
+  EXPECT_EQ(range(tasks[2]), std::make_tuple(4, 5, true));
+  EXPECT_EQ(range(tasks[3]), std::make_tuple(5, 7, false));
+  EXPECT_EQ(range(tasks[4]), std::make_tuple(7, 8, false));
+}
+
 }  // namespace
 }  // namespace dgf::sampling::in_memory_sampler

@@ -16,11 +16,13 @@ import dataclasses
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
+from dgf.src.data import padding as padding_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.sampling import _in_memory_sampler_ext
 from dgf.src.sampling import config as config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.sampling import temporal as sampling_temporal_lib
+from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import temporal as temporal_lib
 from dgf.src.util import gen_test_graph
 from dgf.src.util import test_util
@@ -1439,6 +1441,38 @@ Node(nodeset_idx=0, children=[
     # Propagate timestamps to edges so temporal sampling works.
     return temporal_lib.propagate_timestamp_to_edges(graph, schema)
 
+  def test_sample_merged_with_timeseries_matches_graph_merger(self):
+    graph, schema = self._create_causal_timeseries_test_graph()
+    plan = config_lib.SimpleSamplingConfig(
+        seed_nodeset="alerts",
+        num_hops=1,
+        hop_width=10,
+        reverse=True,
+        temporal_sampling=True,
+        max_timeseries_len=3,
+    )
+
+    def create_sampler():
+      return in_memory_sampler_lib.create_sampler(
+          graph,
+          plan,
+          schema,
+          batch_size=2,
+          return_features=True,
+          slice_timeseries_by_seed=True,
+          seed=1234,
+      )
+
+    seed_node_idxs = np.array([0, 1], dtype=np.int64)
+    seed_timestamps = np.array([30, 60], dtype=np.int64)
+    expected = merge_lib.GraphMerger(schema)(
+        create_sampler().sample(seed_node_idxs, seed_timestamps=seed_timestamps)
+    )
+    actual = create_sampler().sample_merged(
+        seed_node_idxs, seed_timestamps=seed_timestamps
+    )
+    _assert_merged_equal(self, actual, expected)
+
   def test_causal_timeseries_filtering_in_sample(self):
     graph, schema = self._create_causal_timeseries_test_graph()
     plan = config_lib.SimpleSamplingConfig(
@@ -1710,6 +1744,487 @@ Node(nodeset_idx=0, children=[
     np.testing.assert_array_equal(
         sample.node_sets["hardware"].features["signal"][0], [2.0, 3.0]
     )
+
+
+def _padding(
+    num_nodes: dict[str, int], num_edges: dict[str, int]
+) -> padding_lib.Padding:
+  return padding_lib.Padding(
+      node_sets={
+          k: padding_lib.NodeSetPadding(num_nodes=v)
+          for k, v in num_nodes.items()
+      },
+      edge_sets={
+          k: padding_lib.EdgeSetPadding(num_edges=v)
+          for k, v in num_edges.items()
+      },
+  )
+
+
+def _sampler_output_schema(
+    schema: schema_lib.GraphSchema,
+    return_features: bool,
+    return_node_idxs: bool,
+) -> schema_lib.GraphSchema:
+  """Schema of the graphs returned by `sample_merged`."""
+  node_sets = {}
+  for name, node_set in schema.node_sets.items():
+    features = dict(node_set.features) if return_features else {}
+    if return_node_idxs:
+      features["#idx"] = schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.INTEGER_64
+      )
+    node_sets[name] = dataclasses.replace(node_set, features=features)
+  return dataclasses.replace(schema, node_sets=node_sets)
+
+
+def _generate_large_graph(
+    num_nodes: int, num_edges: int
+) -> tuple[InMemoryGraph, schema_lib.GraphSchema]:
+  """Random graph with features of various dtypes."""
+  rng = np.random.default_rng(0)
+  graph = InMemoryGraph(
+      node_sets={
+          "a": InMemoryNodeSet(
+              num_nodes=num_nodes,
+              features={
+                  "f32": rng.random((num_nodes, 8), dtype=np.float32),
+                  "i32": rng.integers(0, 100, num_nodes, dtype=np.int32),
+                  "i64": rng.integers(0, 100, (num_nodes, 1), dtype=np.int64),
+                  "f16": rng.random(num_nodes).astype(np.float16),
+                  "bool": rng.random(num_nodes) > 0.5,
+                  "bytes": np.array(
+                      [f"b{i % 997}".encode() for i in range(num_nodes)]
+                  ),
+                  "str": np.array([f"s{i % 13}" for i in range(num_nodes)]),
+                  "ragged": np.array(
+                      [np.arange(i % 3) for i in range(num_nodes)],
+                      dtype=np.object_,
+                  ),
+              },
+          ),
+      },
+      edge_sets={
+          "aa": InMemoryEdgeSet(
+              adjacency=rng.integers(0, num_nodes, (2, num_edges)),
+          ),
+      },
+  )
+  schema = schema_lib.GraphSchema(
+      node_sets={
+          "a": schema_lib.NodeSchema(
+              features={
+                  "f32": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.FLOAT_32, shape=(8,)
+                  ),
+                  "i32": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.INTEGER_32
+                  ),
+                  "i64": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.INTEGER_64, shape=(1,)
+                  ),
+                  "f16": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.FLOAT_32
+                  ),
+                  "bool": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.INTEGER_32
+                  ),
+                  "bytes": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.BYTES
+                  ),
+                  "str": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.BYTES
+                  ),
+                  "ragged": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.INTEGER_64,
+                      shape=(None,),
+                  ),
+              }
+          )
+      },
+      edge_sets={"aa": schema_lib.EdgeSchema(source="a", target="a")},
+  )
+  return graph, schema
+
+
+def _assert_same_dtypes_and_keys(test: absltest.TestCase, a, b):
+  """Checks that the arrays have the same dtypes and dicts the same keys."""
+  if isinstance(a, np.ndarray):
+    test.assertEqual(a.dtype, b.dtype)
+  elif dataclasses.is_dataclass(a):
+    for field in dataclasses.fields(a):
+      _assert_same_dtypes_and_keys(
+          test, getattr(a, field.name), getattr(b, field.name)
+      )
+  elif isinstance(a, dict):
+    test.assertEqual(list(a), list(b))
+    for key in a:
+      _assert_same_dtypes_and_keys(test, a[key], b[key])
+  elif isinstance(a, (list, tuple)):
+    test.assertEqual(len(a), len(b))
+    for x, y in zip(a, b):
+      _assert_same_dtypes_and_keys(test, x, y)
+
+
+def _assert_merged_equal(test: absltest.TestCase, actual, expected):
+  """Checks that two merged graphs (+ offsets) are equal."""
+  test_util.assert_are_equal(test, actual, expected)
+  _assert_same_dtypes_and_keys(test, actual, expected)
+
+
+class SampleMergedTest(parameterized.TestCase):
+  """Tests that `sample_merged` is equivalent to `sample` + `GraphMerger`."""
+
+  def _create_sampler(
+      self,
+      graph: InMemoryGraph,
+      schema: schema_lib.GraphSchema,
+      seed_nodeset: str,
+      num_hops: int = 2,
+      hop_width: int = 2,
+      with_replacement: bool = False,
+      temporal_sampling: bool = False,
+      **kwargs,
+  ) -> in_memory_sampler_lib.Sampler:
+    plan = config_lib.simple_sampling_config_to_sampling_plan(
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset=seed_nodeset,
+            num_hops=num_hops,
+            hop_width=hop_width,
+            with_replacement=with_replacement,
+            temporal_sampling=temporal_sampling,
+        ),
+        schema,
+    )
+    return in_memory_sampler_lib.create_sampler(
+        graph, plan, schema, seed=1234, batch_size=4, **kwargs
+    )
+
+  def _assert_matches_graph_merger(
+      self,
+      create_sampler,
+      seed_node_idxs: np.ndarray,
+      schema: schema_lib.GraphSchema,
+      padding: padding_lib.Padding | None,
+      return_features: bool,
+      return_node_idxs: bool,
+      **sample_kwargs,
+  ):
+    """Compares `sample_merged` with `sample` + `GraphMerger`.
+
+    Both are computed with identically seeded samplers.
+
+    Args:
+      create_sampler: Creates a sampler. Should be deterministic.
+      seed_node_idxs: The seed nodes.
+      schema: Schema of the sampler.
+      padding: Optional padding.
+      return_features: Sampler option.
+      return_node_idxs: Sampler option.
+      **sample_kwargs: Extra arguments to the sampling methods.
+    """
+    reference_sampler = create_sampler(
+        return_features=return_features, return_node_idxs=return_node_idxs
+    )
+    expected = merge_lib.GraphMerger(
+        _sampler_output_schema(schema, return_features, return_node_idxs),
+        padding=padding,
+    )(reference_sampler.sample(seed_node_idxs, **sample_kwargs))
+
+    sampler = create_sampler(
+        return_features=return_features,
+        return_node_idxs=return_node_idxs,
+        padding=padding,
+    )
+    actual = sampler.sample_merged(seed_node_idxs, **sample_kwargs)
+    _assert_merged_equal(self, actual, expected)
+
+  @parameterized.product(
+      use_padding=[False, True],
+      output=[(True, False), (False, True), (True, True)],
+      with_replacement=[False, True],
+  )
+  def test_matches_graph_merger(
+      self,
+      use_padding: bool,
+      output: tuple[bool, bool],
+      with_replacement: bool,
+  ):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    padding = (
+        _padding({"n1": 100, "n2": 100}, {"e1": 100, "e2": 100})
+        if use_padding
+        else None
+    )
+    return_features, return_node_idxs = output
+    self._assert_matches_graph_merger(
+        lambda **kwargs: self._create_sampler(
+            graph,
+            schema,
+            seed_nodeset="n1",
+            with_replacement=with_replacement,
+            **kwargs,
+        ),
+        np.array([0, 1, 1, 0], dtype=np.int64),
+        schema,
+        padding,
+        return_features=return_features,
+        return_node_idxs=return_node_idxs,
+    )
+
+  def test_subset_schema_and_partial_padding(self):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    # Only keep some of the features, and only pad "n1" / "e1".
+    subset_schema = dataclasses.replace(
+        schema,
+        node_sets={
+            "n1": dataclasses.replace(
+                schema.node_sets["n1"],
+                features={"f2": schema.node_sets["n1"].features["f2"]},
+            ),
+            "n2": dataclasses.replace(schema.node_sets["n2"], features={}),
+        },
+    )
+    self._assert_matches_graph_merger(
+        lambda **kwargs: self._create_sampler(
+            graph, subset_schema, seed_nodeset="n1", **kwargs
+        ),
+        np.array([1, 0], dtype=np.int64),
+        subset_schema,
+        _padding({"n1": 50}, {"e1": 60}),
+        return_features=True,
+        return_node_idxs=False,
+    )
+
+  @parameterized.product(num_threads=[0, 1, 4], return_node_idxs=[False, True])
+  def test_large_graph_all_dtypes(
+      self, num_threads: int, return_node_idxs: bool
+  ):
+    graph, schema = _generate_large_graph(num_nodes=3000, num_edges=20000)
+    num_seeds = 32
+    num_hops = 3
+    hop_width = 5
+    # Upper bound of the number of nodes per sample (the edges are sampled in
+    # both directions).
+    max_nodes = sum((2 * hop_width) ** i for i in range(num_hops + 1))
+    padding = _padding(
+        {"a": num_seeds * max_nodes + 1}, {"aa": num_seeds * max_nodes}
+    )
+    seed_node_idxs = np.random.default_rng(1).integers(
+        0, 3000, num_seeds, dtype=np.int64
+    )
+    for use_padding in [False, True]:
+      self._assert_matches_graph_merger(
+          lambda **kwargs: self._create_sampler(
+              graph,
+              schema,
+              seed_nodeset="a",
+              num_hops=num_hops,
+              hop_width=hop_width,
+              num_threads=num_threads,
+              **kwargs,
+          ),
+          seed_node_idxs,
+          schema,
+          padding if use_padding else None,
+          return_features=True,
+          return_node_idxs=return_node_idxs,
+      )
+
+  def test_temporal_sampling(self):
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
+        include_e2=True
+    )
+    self._assert_matches_graph_merger(
+        lambda **kwargs: self._create_sampler(
+            graph,
+            schema,
+            seed_nodeset="n1",
+            temporal_sampling=True,
+            **kwargs,
+        ),
+        np.array([0, 1, 2, 3], dtype=np.int64),
+        schema,
+        _padding({"n1": 100}, {"e1": 100, "e2": 100}),
+        return_features=True,
+        return_node_idxs=False,
+        seed_timestamps=np.array([20, 30, 40, 50], dtype=np.int64),
+    )
+
+  def test_edge_masking(self):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    self._assert_matches_graph_merger(
+        lambda **kwargs: self._create_sampler(
+            graph, schema, seed_nodeset="n1", edgeset_to_mask="e2", **kwargs
+        ),
+        np.array([0, 1], dtype=np.int64),
+        schema,
+        None,
+        return_features=True,
+        return_node_idxs=False,
+        masked_edge_idxs=np.array([1, -1], dtype=np.int64),
+    )
+
+  def test_insufficient_padding_raises(self):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    sampler = self._create_sampler(
+        graph,
+        schema,
+        seed_nodeset="n1",
+        padding=_padding({"n1": 2, "n2": 100}, {"e1": 100, "e2": 100}),
+    )
+    with self.assertRaisesRegex(
+        merge_lib.InsufficientPaddingError,
+        "Padding for node set 'n1' is insufficient",
+    ):
+      sampler.sample_merged([0, 1])
+
+  def test_padding_missing_sentinel_raises(self):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    sampler = self._create_sampler(
+        graph,
+        schema,
+        seed_nodeset="n1",
+        padding=_padding({"n1": 100}, {"e2": 100}),
+    )
+    with self.assertRaisesRegex(ValueError, "requires sentinel nodes"):
+      sampler.sample_merged([0, 1])
+
+  def test_unknown_padding_set_raises(self):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    sampler = self._create_sampler(graph, schema, seed_nodeset="n1")
+    with self.assertRaisesRegex(ValueError, "unknown node sets"):
+      sampler.with_padding(_padding({"unknown": 10}, {}))
+
+  @parameterized.parameters(
+      (False, True),
+      (True, False),
+      (True, True),
+  )
+  def test_overflow_matches_merge_sub_batches(
+      self, skip_overflow_padding_error: bool, split_overflow_padding_error: bool
+  ):
+    graph, schema = _generate_large_graph(num_nodes=200, num_edges=2000)
+    seed_node_idxs = np.arange(16, dtype=np.int64)
+    # A padding sufficient for each sample (at most 1 + 6 + 36 nodes and 42
+    # edges), but not for the entire batch.
+    padding = _padding({"a": 60}, {"aa": 100})
+
+    def create_sampler():
+      return self._create_sampler(
+          graph, schema, seed_nodeset="a", num_hops=2, hop_width=3
+      )
+
+    expected_num_skipped = []
+    expected = list(
+        merge_lib.GraphMerger(schema, padding=padding).merge_sub_batches(
+            create_sampler().sample(seed_node_idxs),
+            skip_overflow_padding_error=skip_overflow_padding_error,
+            split_overflow_padding_error=split_overflow_padding_error,
+            on_skip_samples=expected_num_skipped.append,
+        )
+    )
+    actual_num_skipped = []
+    actual = (
+        create_sampler()
+        .with_padding(padding)
+        .sample_merged_sub_batches(
+            seed_node_idxs,
+            skip_overflow_padding_error=skip_overflow_padding_error,
+            split_overflow_padding_error=split_overflow_padding_error,
+            on_skip_samples=actual_num_skipped.append,
+        )
+    )
+    if split_overflow_padding_error:
+      self.assertGreater(len(actual), 1)
+    else:
+      self.assertEqual(actual_num_skipped, [len(seed_node_idxs)])
+    self.assertEqual(actual_num_skipped, expected_num_skipped)
+    _assert_merged_equal(self, actual, expected)
+
+  def test_with_padding(self):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    padding = _padding({"n1": 100, "n2": 100}, {"e1": 100, "e2": 100})
+    seed_node_idxs = np.array([0, 1], dtype=np.int64)
+    sampler = self._create_sampler(graph, schema, seed_nodeset="n1")
+
+    padded_sampler = sampler.with_padding(padding)
+    self.assertIs(padded_sampler.padding, padding)
+    _assert_merged_equal(
+        self,
+        padded_sampler.sample_merged(seed_node_idxs),
+        self._create_sampler(
+            graph, schema, seed_nodeset="n1", padding=padding
+        ).sample_merged(seed_node_idxs),
+    )
+
+    # The original sampler is not padded.
+    self.assertIsNone(sampler.padding)
+    merged, offsets = sampler.sample_merged(seed_node_idxs)
+    self.assertEqual(merged.node_sets["n1"].num_nodes, offsets["n1"][-1])
+
+  def test_set_return_options_after_sample_merged(self):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    sampler = self._create_sampler(graph, schema, seed_nodeset="n1")
+    merged, _ = sampler.sample_merged([0])
+    self.assertEqual(set(merged.node_sets["n1"].features), {"f1", "f2"})
+
+    sampler.set_return_options(return_features=False, return_node_idxs=True)
+    merged, _ = sampler.sample_merged([0])
+    self.assertEqual(set(merged.node_sets["n1"].features), {"#idx"})
+
+  def test_feature_with_missing_values_raises(self):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    # "n1" has 2 nodes, but "f2" only has one value.
+    graph.node_sets["n1"].features["f2"] = np.array([[0.0, 1.0]], np.float32)
+    sampler = self._create_sampler(graph, schema, seed_nodeset="n1")
+    with self.assertRaisesRegex(ValueError, "out of the bounds"):
+      sampler.sample_merged([0, 1])
+
+
+class CcGatherSourceTest(parameterized.TestCase):
+
+  @parameterized.parameters(
+      (np.array([1, 2], np.int32),),
+      (np.array([[1.0, 2.0]], np.float16),),
+      (np.array([True, False]),),
+      (np.array([1, 2], np.uint64),),
+  )
+  def test_numerical(self, src: np.ndarray):
+    self.assertIs(in_memory_sampler_lib._cc_gather_source(src), src)  # pylint: disable=protected-access
+
+  @parameterized.parameters(
+      (np.array([b"a", b"bcd"]), (2, 3)),
+      (np.array([[b"a"], [b"bc"]]), (2, 2)),
+      (np.array(["a", "bc"]), (2, 8)),
+  )
+  def test_bytes_and_strings(self, src: np.ndarray, expected_shape):
+    result = in_memory_sampler_lib._cc_gather_source(src)  # pylint: disable=protected-access
+    assert result is not None
+    self.assertEqual(result.dtype, np.uint8)
+    self.assertEqual(result.shape, expected_shape)
+    self.assertTrue(np.shares_memory(result, src))
+    np.testing.assert_array_equal(result.view(src.dtype).reshape(src.shape), src)
+
+  @parameterized.named_parameters(
+      ("object", np.array([np.array([1]), np.array([1, 2])], np.object_)),
+      ("non_contiguous", np.arange(12).reshape(3, 4)[:, ::2]),
+      ("scalar", np.array(1)),
+      ("empty_rows", np.zeros((3, 0), np.float32)),
+      ("complex", np.array([1j])),
+      ("list", [1, 2]),
+  )
+  def test_unsupported(self, src):
+    self.assertIsNone(in_memory_sampler_lib._cc_gather_source(src))  # pylint: disable=protected-access
 
 
 class InMemorySamplerDiamon(parameterized.TestCase):
