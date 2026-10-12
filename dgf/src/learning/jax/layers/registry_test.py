@@ -31,6 +31,7 @@ class RegistryTest(absltest.TestCase):
             "layers.GatAttentionConfig",
             "layers.Gatv2AttentionConfig",
             "layers.GenericBlockConfig",
+            "layers.GraphMAEConfig",
             "layers.HeterogeneousGraphAttentionNetworkConfig",
             "layers.HeterogeneousGraphConvolutionConfig",
             "layers.RegressionHeadConfig",

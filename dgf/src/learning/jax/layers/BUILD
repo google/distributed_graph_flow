@@ -18,6 +18,7 @@ py_library(
     deps = [
         ":classification",
         ":graph_attention",
+        ":graphmae",
         ":hetero_gnn",
         ":hetero_graph_attention_network",
         ":homo_gnn_sparse_deferred",
@@ -156,6 +157,23 @@ py_library(
         # flax:core dep,
         # jax dep,
         # jaxtyping dep,
+    ],
+)
+
+py_library(
+    name = "graphmae",
+    srcs = ["graphmae.py"],
+    deps = [
+        ":graph_masking",
+        ":hetero_gnn",
+        ":registry",
+        ":standard",
+        # dataclasses_json dep,
+        "//dgf/src/data:jax_in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/learning/jax:common",
+        # flax:core dep,
+        # jax dep,
     ],
 )
 
@@ -325,6 +343,28 @@ py_test(
         # absl/testing:parameterized dep,
         # jax dep,
         # numpy dep,
+    ],
+)
+
+py_test(
+    name = "graphmae_test",
+    srcs = ["graphmae_test.py"],
+    deps = [
+        ":graphmae",
+        ":hetero_gnn",
+        ":preprocess",
+        ":registry",
+        ":standard",
+        # absl/testing:absltest dep,
+        # dataclasses_json dep,
+        "//dgf/src/data:jax_in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/util:gen_test_graph",
+        "//dgf/src/util:test_util",
+        # flax:core dep,
+        # jax dep,
+        # numpy dep,
+        # optax dep,
     ],
 )
 
