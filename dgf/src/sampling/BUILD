@@ -66,6 +66,7 @@ cc_library(
         "@abseil-cpp//absl/strings",
         "@abseil-cpp//absl/types:span",
         "//dgf/src/util",
+        "//dgf/src/util:random",
     ],
 )
 

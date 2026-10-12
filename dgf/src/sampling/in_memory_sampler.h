@@ -26,6 +26,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/types/span.h"
+#include "dgf/src/util/random.h"
 
 namespace dgf::sampling::in_memory_sampler {
 
@@ -41,21 +42,17 @@ typedef std::int64_t Timestamp;
 
 // Random number generator used by the samplers.
 //
-// `absl::InsecureBitGen` (PCG64) is significantly faster than
-// `std::mt19937_64`. Note that, unlike the std generators, absl generators mix
-// the user seed with a per-build salt: seeded sampling is reproducible within
-// a given binary, but not necessarily across different builds.
+// A given seed always leads to the same samples, whatever the platform, the
+// build mode (debug or optimized) or the process. For this reason, the absl
+// generators (which mix a per-process or per-build salt into the seed) are not
+// used here. See `dgf::DeterministicRng`.
 //
-// Note: absl generators cannot be re-seeded in place. Use `MakeRng` to create a
+// Note: The generator cannot be re-seeded in place. Use `MakeRng` to create a
 // new (seeded) generator instead.
-using Rng = absl::InsecureBitGen;
+using Rng = ::dgf::DeterministicRng;
 
 // Creates a random number generator seeded with `seed`.
-inline Rng MakeRng(uint64_t seed) {
-  std::seed_seq seq{static_cast<uint32_t>(seed),
-                    static_cast<uint32_t>(seed >> 32)};
-  return Rng(seq);
-}
+inline Rng MakeRng(uint64_t seed) { return Rng(seed); }
 
 // Index for fast retrieval of target nodes from source nodes in a directed
 // graph. Represents outgoing edges where the `i`-th source node's targets are

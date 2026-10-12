@@ -127,6 +127,15 @@ nanobind_library(
 )
 
 cc_library(
+    name = "random",
+    hdrs = ["random.h"],
+    deps = [
+        "@abseil-cpp//absl/random",
+        "@abseil-cpp//absl/random:distributions",
+    ],
+)
+
+cc_library(
     name = "util",
     srcs = ["util.cc"],
     hdrs = ["util.h"],
@@ -323,6 +332,16 @@ cc_test(
     deps = [
         ":util",
         "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "random_test",
+    srcs = ["random_test.cc"],
+    deps = [
+        ":random",
+        "@googletest//:gtest_main",
+        "@abseil-cpp//absl/random:distributions",
     ],
 )
 
