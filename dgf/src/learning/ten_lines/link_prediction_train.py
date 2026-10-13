@@ -683,7 +683,7 @@ def train_link_model(
       )
 
       if batch_stats:
-        pos_logits, neg_logits, new_model_state = output  # pyrefly: ignore[bad-unpacking]
+        (pos_logits, neg_logits), new_model_state = output
       else:
         pos_logits, neg_logits = output
         new_model_state = {}
@@ -731,7 +731,9 @@ def train_link_model(
 
       params = {**core_params}  # pyrefly: ignore[invalid-argument]
       if has_batch_stats:
-        params["batch_stats"] = batch_stats
+        # The batch statistics (e.g., the BatchNorm running averages) are not
+        # trained by the optimizer, but updated by the training forward pass.
+        params["batch_stats"] = aux_data["model_state"]["batch_stats"]
       return params, opt_state, {"loss": loss, **aux_data["metrics"]}
 
     def infinite_train_iterator() -> Iterator[Batch]:

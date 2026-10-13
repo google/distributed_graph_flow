@@ -91,7 +91,7 @@ class CoreModel(nn.Module):
     for nodeset_name, nodeset_value in graph.node_sets.items():
       nodeset_value.features["embedding"] = self.config.pre_mlp.make(
           name=f"pre_mlp_{nodeset_name}"
-      )(nodeset_value.features["embedding"])
+      )(nodeset_value.features["embedding"], training=training)
 
     # Message passing between nodes
     conv_config = self.config.graph_conv
@@ -112,7 +112,9 @@ class CoreModel(nn.Module):
         "embedding"
     ][seed_node_idxs]
 
-    node_embedding = self.config.post_mlp.make(name="post_mlp")(node_embedding)
+    node_embedding = self.config.post_mlp.make(name="post_mlp")(
+        node_embedding, training=training
+    )
 
     # Classification or regression head (no learning parameters).
     logits = self.config.head.make()(node_embedding, training=training)

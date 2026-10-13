@@ -130,7 +130,7 @@ class Encoder(nn.Module):
     for nodeset_name, nodeset_value in graph.node_sets.items():
       nodeset_value.features["embedding"] = self.config.pre_mlp.make(
           name=f"pre_conv_{nodeset_name}"
-      )(nodeset_value.features["embedding"])
+      )(nodeset_value.features["embedding"], training=training)
 
     # Message passing between nodes
     conv_config = self.config.graph_conv

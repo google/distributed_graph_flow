@@ -1183,6 +1183,45 @@ class NodePredictionArchitecturesToy(parameterized.TestCase):
     self.assertGreater(evaluation.accuracy, 0.6)  # pyrefly: ignore[no-matching-overload]
 
 
+class NodePredictionBatchNormTest(absltest.TestCase):
+
+  def test_batch_norm_statistics_are_updated_during_training(self):
+    graph, schema = gen_test_graph.gen_toy_classification_dataset()
+    node_embedding_dim = RAPID_TRAINING_KWARGS["node_embedding_dim"]
+
+    def preprocess_core_model_config(c):
+      return dataclasses.replace(
+          c,
+          pre_mlp=standard.ingest_feature(
+              node_embedding_dim, norm="batch_norm"
+          ),
+      )
+
+    model = node_prediction_lib.train_node_model(
+        graph=graph,
+        schema=schema,
+        target_nodeset="N1",
+        target_column="label",
+        experimental_preprocess_core_model_config=preprocess_core_model_config,
+        verbose=0,
+        **RAPID_TRAINING_KWARGS,
+    )
+
+    # The BatchNorm running means are initialized to zero. They are only updated
+    # if the training forward pass runs in training mode, and if the training
+    # step keeps the resulting batch statistics.
+    running_means = [
+        leaf
+        for path, leaf in jax.tree_util.tree_leaves_with_path(
+            model.data().model_params["batch_stats"]
+        )
+        if jax.tree_util.keystr(path).endswith("['mean']")
+    ]
+    self.assertLen(running_means, len(schema.node_sets))
+    for running_mean in running_means:
+      self.assertTrue(np.any(running_mean != 0.0))
+
+
 class NodePredictionNegativeLabelTest(absltest.TestCase):
   """Integer classification labels must be non-negative.
 

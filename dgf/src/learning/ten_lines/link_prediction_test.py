@@ -1123,6 +1123,46 @@ class LinkPredictionPredictibleModelTest(absltest.TestCase):
     # Note: The random negative sampling make the evaluation non deterministic.
 
 
+class LinkPredictionBatchNormTest(absltest.TestCase):
+
+  def test_batch_norm_statistics_are_updated_during_training(self):
+    graph, schema = gen_toy_graph()
+    node_embedding_dim = RAPID_TRAINING_KWARGS["node_embedding_dim"]
+
+    def preprocess_core_model_config(c):
+      return dataclasses.replace(
+          c,
+          encoder_config=dataclasses.replace(
+              c.encoder_config,
+              pre_mlp=standard.ingest_feature(
+                  node_embedding_dim, norm="batch_norm"
+              ),
+          ),
+      )
+
+    model = link_prediction_train.train_link_model(
+        graph=graph,
+        schema=schema,
+        target_edgeset="A_to_B",
+        experimental_preprocess_core_model_config=preprocess_core_model_config,
+        verbose=0,
+        **RAPID_TRAINING_KWARGS,
+    )
+
+    # The BatchNorm running means are initialized to zero. They are only updated
+    # if the training forward pass runs in training mode, and if the training
+    # step keeps the resulting batch statistics.
+    running_means = [
+        leaf
+        for path, leaf in jax.tree_util.tree_leaves_with_path(
+            model.data().model_params["batch_stats"]
+        )
+        if jax.tree_util.keystr(path).endswith("['mean']")
+    ]
+    self.assertNotEmpty(running_means)
+    self.assertTrue(any(np.any(mean != 0.0) for mean in running_means))
+
+
 class LinkPredictionRealLookingTemporal(parameterized.TestCase):
 
   @classmethod

@@ -638,7 +638,9 @@ def train_node_model(
 
       params = {**core_params}  # pyrefly: ignore[invalid-argument]
       if has_batch_stats:
-        params["batch_stats"] = batch_stats
+        # The batch statistics (e.g., the BatchNorm running averages) are not
+        # trained by the optimizer, but updated by the training forward pass.
+        params["batch_stats"] = aux_data["model_state"]["batch_stats"]
       return params, opt_state, {"loss": loss, **aux_data["metrics"]}
 
     # Use for speed.
