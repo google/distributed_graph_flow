@@ -172,7 +172,7 @@ def html_tabs(items: list[tuple[str, str]]) -> str:
     color: #5f6368;
     font-weight: 600;
   }}
-  {html_util.get_table_style(component_id)}
+{html_util.get_table_style(component_id)}
   @keyframes fadeIn {{
     from {{ opacity: 0; }}
     to {{ opacity: 1; }}
@@ -187,7 +187,7 @@ def html_tabs(items: list[tuple[str, str]]) -> str:
     html.append(
         f'<button class="tab-btn{active_class}"'
         f' onclick="openTab_{component_id.replace("-", "_")}(event,'
-        f" 'tab_{i}')\">{title}</button>"
+        f" '{component_id}-tab-{i}')\">{title}</button>"
     )
 
   html.append("</div>")
@@ -195,7 +195,8 @@ def html_tabs(items: list[tuple[str, str]]) -> str:
   for i, (_, content) in enumerate(items):
     active_class = " active" if i == 0 else ""
     html.append(
-        f'<div id="tab_{i}" class="tab-content{active_class}">{content}</div>'
+        f'<div id="{component_id}-tab-{i}"'
+        f' class="tab-content{active_class}">{content}</div>'
     )
 
   script = f"""

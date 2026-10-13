@@ -37,6 +37,7 @@ from dgf.src.io import jax as jax_lib
 from dgf.src.io import tf as io_tf_lib
 from dgf.src.learning.jax.layers import classification as classification_lib
 from dgf.src.learning.jax.layers import regression as regression_lib
+from dgf.src.learning.ten_lines import analyze as analyze_lib
 from dgf.src.learning.ten_lines import common
 from dgf.src.learning.ten_lines import evaluation
 from dgf.src.learning.ten_lines import node_prediction_core_model
@@ -647,6 +648,42 @@ class NodePredictionModel(common.Model):
             graph, seed_node_idxs, verbose=verbose, input_features_only=False
         )
     )
+
+  def analyze(
+      self,
+      graph: in_memory_graph.InMemoryGraph,
+      *,
+      max_duration: float | None = 60.0,
+  ) -> analyze_lib.ModelAnalysis:
+    """Analyzes the model to help with its interpretation.
+
+    The analysis computes the importance of each component of the graph, i.e.
+    how much the model relies on it for its predictions:
+
+    - Importance of the node features and edge features.
+    - Importance of the edgesets (i.e., the graph topology).
+    - Importance of the nodesets.
+    - Gradient saliency of the numerical features.
+
+    Usage example:
+
+      ```python
+      model = dgf.learning.train_node_model(train_graph, ...)
+      analysis = model.analyze(test_graph)
+      analysis  # Interactive report in a notebook.
+      print(analysis)  # Text report.
+      ```
+
+    Args:
+      graph: Graph with the ground truth labels to evaluate the model on.
+      max_duration: Maximum duration of the analysis in seconds. Increase to
+        improve the precision of the importances. If None, no time limit.
+
+    Returns:
+      The analysis of the model.
+    """
+    options = analyze_lib.AnalyzeOptions(max_duration=max_duration)
+    return analyze_lib.analyze_node_model(self, graph, options=options)
 
   def evaluate_generator(
       self,

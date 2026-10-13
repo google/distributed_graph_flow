@@ -26,8 +26,7 @@ def get_table_style(component_id: str | None = None) -> str:
     A CSS styles block as a string.
   """
   prefix = f"#{component_id} " if component_id else ""
-  return f"""
-  {prefix}.dgf-table {{
+  return f"""  {prefix}.dgf-table {{
     border-collapse: collapse;
     width: 100%;
     margin-bottom: 20px;

@@ -42,6 +42,7 @@ py_library(
 py_library(
     name = "node_prediction",
     srcs = [
+        "analyze.py",
         "node_prediction_core_model.py",
         "node_prediction_model.py",
         "node_prediction_train.py",
@@ -76,7 +77,9 @@ py_library(
         "//dgf/src/sampling:in_memory_sampler",
         "//dgf/src/transform:merge",
         "//dgf/src/transform:normalize",
+        "//dgf/src/transform:perturb",
         "//dgf/src/util:filesystem",
+        "//dgf/src/util:html_util",
         "//dgf/src/util:log",
         "//dgf/src/util:temporal",
         "//dgf/src/util:util_py",
@@ -87,6 +90,7 @@ py_library(
         # jaxtyping dep,
         # numpy dep,
         # optax dep,
+        # pandas dep,
         # tqdm dep,
     ],
 )
@@ -454,6 +458,23 @@ py_test(
         "//dgf/src/transform:normalize",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/validate:in_memory_graph",
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "analyze_test",
+    timeout = "moderate",
+    srcs = ["analyze_test.py"],
+    data = ["//test_data"],
+    deps = [
+        ":node_prediction",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/transform:perturb",
+        "//dgf/src/util:gen_test_graph",
+        "//dgf/src/util:test_util",
+        # jax dep,
         # numpy dep,
     ],
 )

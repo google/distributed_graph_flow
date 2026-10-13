@@ -1,0 +1,277 @@
+<div id="dgf-analysis-ID">
+
+<style>
+  #dgf-analysis-ID .dgf-table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-bottom: 20px;
+    font-size: inherit;
+    font-family: 'Roboto', sans-serif;
+  }
+  #dgf-analysis-ID .dgf-table td {
+    padding: 4px 8px;
+    text-align: left;
+  }
+  #dgf-analysis-ID .dgf-table td:first-child {
+    white-space: nowrap;
+  }
+  #dgf-analysis-ID .dgf-table td:last-child {
+    width: 100%;
+  }
+  #dgf-analysis-ID .dgf-table tr:nth-child(odd) {
+    background-color: #f8f9fa;
+  }
+
+  #dgf-analysis-ID .dgf-table th {
+    padding: 6px 8px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+    color: #5f6368;
+    border-bottom: 1px solid #e0e0e0;
+  }
+  #dgf-analysis-ID .dgf-sortable th { cursor: pointer; user-select: none; }
+  #dgf-analysis-ID .dgf-sortable th:hover { color: #1a73e8; }
+  #dgf-analysis-ID .dgf-sort-ind {
+    display: inline-block; width: 12px; margin-left: 4px; font-size: 10px;
+  }
+  #dgf-analysis-ID .dgf-table td b { display: inline; }
+  #dgf-analysis-ID .dgf-filter-bar {
+    display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0;
+  }
+  #dgf-analysis-ID .dgf-filter-btn {
+    border: 1px solid #dadce0; background-color: #ffffff; color: #3c4043;
+    border-radius: 16px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+  }
+  #dgf-analysis-ID .dgf-filter-btn:hover { background-color: #f1f3f4; }
+  #dgf-analysis-ID .dgf-filter-btn.active {
+    background-color: #1a73e8; color: #ffffff; border-color: #1a73e8;
+  }
+  #dgf-analysis-ID .dgf-badge {
+    display: inline-block; padding: 2px 8px; border-radius: 10px;
+    font-family: 'Roboto Mono', monospace; font-size: 11px;
+  }
+  #dgf-analysis-ID .dgf-badge-NODE_FEATURE,
+  #dgf-analysis-ID .dgf-badge-EDGE_FEATURE {
+    background-color: #e8f0fe; color: #1967d2;
+  }
+  #dgf-analysis-ID .dgf-badge-EDGESET {
+    background-color: #e6f4ea; color: #137333;
+  }
+  #dgf-analysis-ID .dgf-badge-NODESET {
+    background-color: #fef7e0; color: #b06000;
+  }
+  #dgf-analysis-ID .dgf-bar-cell {
+    display: flex; align-items: center; gap: 8px; white-space: nowrap;
+  }
+  #dgf-analysis-ID .dgf-bar-val {
+    display: inline-block; min-width: 62px; text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  #dgf-analysis-ID .dgf-na { color: #80868b; }
+  #dgf-analysis-ID .dgf-bar-bg {
+    background-color: #e8eaed; border-radius: 3px; width: 80px; height: 10px;
+    overflow: hidden; flex-shrink: 0;
+  }
+  #dgf-analysis-ID .dgf-bar-fill { height: 100%; background-color: #1a73e8; }
+</style>
+
+<div id="tabs-ID">
+
+<style>
+  #tabs-ID {
+    font-family: 'Roboto', sans-serif;
+    font-size: 13px;
+    color: #202124;
+    margin: 20px 0;
+    line-height: 1.5;
+  }
+  #tabs-ID .tab-header {
+    display: flex;
+    border-bottom: 1px solid #e0e0e0;
+    margin-bottom: 15px;
+    font-family: 'Roboto', sans-serif;
+  }
+  #tabs-ID .tab-btn {
+    padding: 10px 20px;
+    cursor: pointer;
+    border: none;
+    background: none;
+    font-family: 'Roboto', sans-serif;
+    font-size: 13px;
+    font-weight: normal;
+    color: #5f6368;
+    transition: color 0.2s, border-bottom 0.2s;
+    margin-bottom: -1px;
+  }
+  #tabs-ID .tab-btn:hover {
+    color: #1a73e8;
+  }
+  #tabs-ID .tab-btn.active {
+    color: #1a73e8;
+    border-bottom: 2px solid #1a73e8;
+  }
+  #tabs-ID .tab-content {
+    display: none;
+    padding: 10px 0;
+    animation: fadeIn 0.3s;
+  }
+  #tabs-ID .tab-content.active {
+    display: block;
+  }
+  #tabs-ID pre, #tabs-ID code {
+    font-family: 'Roboto Mono', monospace;
+    font-size: 13px;
+  }
+  #tabs-ID pre {
+    margin: 0 0 20px 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  #tabs-ID b {
+    font-weight: 600;
+    display: block;
+    margin-bottom: 4px;
+    font-family: 'Roboto', sans-serif;
+  }
+  #tabs-ID ul {
+    list-style-type: none;
+    padding-left: 0;
+    margin: 0;
+  }
+  #tabs-ID li {
+    margin: 0;
+    padding: 0;
+  }
+  #tabs-ID .lbl-key {
+    color: #5f6368;
+    font-weight: 600;
+  }
+  #tabs-ID .dgf-table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-bottom: 20px;
+    font-size: inherit;
+    font-family: 'Roboto', sans-serif;
+  }
+  #tabs-ID .dgf-table td {
+    padding: 4px 8px;
+    text-align: left;
+  }
+  #tabs-ID .dgf-table td:first-child {
+    white-space: nowrap;
+  }
+  #tabs-ID .dgf-table td:last-child {
+    width: 100%;
+  }
+  #tabs-ID .dgf-table tr:nth-child(odd) {
+    background-color: #f8f9fa;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+</style>
+
+<div class="tab-header">
+<button class="tab-btn active" onclick="openTab_tabs-ID(event, 'tabs-ID-tab-0')">Component importance</button>
+<button class="tab-btn" onclick="openTab_tabs-ID(event, 'tabs-ID-tab-1')">Glossary</button>
+</div>
+<div id="tabs-ID-tab-0" class="tab-content active"><b>Details</b>
+<table class="dgf-table"><tbody>
+<tr><td>Target</td><td>N1.label (NODE_CLASSIFICATION)</td></tr>
+<tr><td>Baseline accuracy</td><td>0.9000</td></tr>
+<tr><td>Baseline loss</td><td>1.0000</td></tr>
+<tr><td>Number of seed nodes</td><td>100</td></tr>
+<tr><td>Perturbation</td><td>Feature shuffle, edgeset maslov_sneppen</td></tr>
+<tr><td>Duration</td><td>12.50s</td></tr>
+</tbody></table><b>Importance</b>
+<div class="dgf-filter-bar">
+<button type="button" class="dgf-filter-btn active" onclick="dgfFilter_dgf_analysis-ID('ALL', this)">All (4)</button>
+<button type="button" class="dgf-filter-btn" onclick="dgfFilter_dgf_analysis-ID('NODE_FEATURE', this)">Node features (2)</button>
+<button type="button" class="dgf-filter-btn" onclick="dgfFilter_dgf_analysis-ID('EDGESET', this)">Edgesets (1)</button>
+<button type="button" class="dgf-filter-btn" onclick="dgfFilter_dgf_analysis-ID('NODESET', this)">Nodesets (1)</button>
+</div>
+<table id="dgf-analysis-ID-table" class="dgf-table dgf-sortable"><thead><tr>
+<th data-sort-dir="" onclick="dgfSort_dgf_analysis-ID(0, 'str')">Name<span class="dgf-sort-ind"></span></th>
+<th data-sort-dir="" onclick="dgfSort_dgf_analysis-ID(1, 'str')">Type<span class="dgf-sort-ind"></span></th>
+<th data-sort-dir="desc" onclick="dgfSort_dgf_analysis-ID(2, 'num')">Δ Loss<span class="dgf-sort-ind">▼</span></th>
+<th data-sort-dir="" onclick="dgfSort_dgf_analysis-ID(3, 'num')">Δ Accuracy<span class="dgf-sort-ind"></span></th>
+<th data-sort-dir="" onclick="dgfSort_dgf_analysis-ID(4, 'num')">Gradient saliency<span class="dgf-sort-ind"></span></th>
+</tr></thead><tbody>
+<tr data-category="NODE_FEATURE"><td data-sort-value="n1.f1"><b>N1.f1</b></td><td data-sort-value="NODE_FEATURE"><span class="dgf-badge dgf-badge-NODE_FEATURE">node_feature</span></td><td data-sort-value="0.5"><div class="dgf-bar-cell"><span class="dgf-bar-val">+0.5000</span><div class="dgf-bar-bg"><div class="dgf-bar-fill" style="width: 100.0%;"></div></div></div></td><td data-sort-value="0.25"><div class="dgf-bar-cell"><span class="dgf-bar-val">+0.2500</span><div class="dgf-bar-bg"><div class="dgf-bar-fill" style="width: 100.0%;"></div></div></div></td><td data-sort-value="0.1"><div class="dgf-bar-cell"><span class="dgf-bar-val">0.1000</span><div class="dgf-bar-bg"><div class="dgf-bar-fill" style="width: 100.0%;"></div></div></div></td></tr>
+<tr data-category="NODESET"><td data-sort-value="n2"><b>N2</b></td><td data-sort-value="NODESET"><span class="dgf-badge dgf-badge-NODESET">nodeset</span></td><td data-sort-value="0.3"><div class="dgf-bar-cell"><span class="dgf-bar-val">+0.3000</span><div class="dgf-bar-bg"><div class="dgf-bar-fill" style="width: 60.0%;"></div></div></div></td><td data-sort-value="0.15"><div class="dgf-bar-cell"><span class="dgf-bar-val">+0.1500</span><div class="dgf-bar-bg"><div class="dgf-bar-fill" style="width: 60.0%;"></div></div></div></td><td data-sort-value="-Infinity"><span class="dgf-na">—</span></td></tr>
+<tr data-category="EDGESET"><td data-sort-value="n1_to_n2"><b>N1_to_N2</b></td><td data-sort-value="EDGESET"><span class="dgf-badge dgf-badge-EDGESET">edgeset</span></td><td data-sort-value="0.2"><div class="dgf-bar-cell"><span class="dgf-bar-val">+0.2000</span><div class="dgf-bar-bg"><div class="dgf-bar-fill" style="width: 40.0%;"></div></div></div></td><td data-sort-value="0.1"><div class="dgf-bar-cell"><span class="dgf-bar-val">+0.1000</span><div class="dgf-bar-bg"><div class="dgf-bar-fill" style="width: 40.0%;"></div></div></div></td><td data-sort-value="-Infinity"><span class="dgf-na">—</span></td></tr>
+<tr data-category="NODE_FEATURE"><td data-sort-value="n1.f2"><b>N1.f2</b></td><td data-sort-value="NODE_FEATURE"><span class="dgf-badge dgf-badge-NODE_FEATURE">node_feature</span></td><td data-sort-value="0"><div class="dgf-bar-cell"><span class="dgf-bar-val">+0.0000</span><div class="dgf-bar-bg"><div class="dgf-bar-fill" style="width: 0.0%;"></div></div></div></td><td data-sort-value="0"><div class="dgf-bar-cell"><span class="dgf-bar-val">+0.0000</span><div class="dgf-bar-bg"><div class="dgf-bar-fill" style="width: 0.0%;"></div></div></div></td><td data-sort-value="-Infinity"><span class="dgf-na">—</span></td></tr>
+</tbody></table>
+
+<script>
+(function() {
+  var table = document.getElementById("dgf-analysis-ID-table");
+  if (!table) return;
+  window.dgfFilter_dgf_analysis-ID = function(category, button) {
+    var buttons = button.parentNode.getElementsByClassName("dgf-filter-btn");
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].classList.remove("active");
+    }
+    button.classList.add("active");
+    var rows = table.tBodies[0].rows;
+    for (var i = 0; i < rows.length; i++) {
+      var visible = category === "ALL" ||
+          rows[i].getAttribute("data-category") === category;
+      rows[i].style.display = visible ? "" : "none";
+    }
+  };
+  window.dgfSort_dgf_analysis-ID = function(colIdx, sortType) {
+    var headers = table.tHead.rows[0].cells;
+    var dir = headers[colIdx].getAttribute("data-sort-dir") === "desc" ?
+        "asc" : "desc";
+    for (var i = 0; i < headers.length; i++) {
+      headers[i].setAttribute("data-sort-dir", i === colIdx ? dir : "");
+      headers[i].querySelector(".dgf-sort-ind").textContent =
+          i === colIdx ? (dir === "asc" ? "▲" : "▼") : "";
+    }
+    var tbody = table.tBodies[0];
+    var rows = Array.prototype.slice.call(tbody.rows);
+    rows.sort(function(a, b) {
+      var va = a.cells[colIdx].getAttribute("data-sort-value");
+      var vb = b.cells[colIdx].getAttribute("data-sort-value");
+      var cmp = sortType === "num" ? parseFloat(va) - parseFloat(vb) :
+          va.localeCompare(vb);
+      return dir === "asc" ? cmp : -cmp;
+    });
+    rows.forEach(function(r) { tbody.appendChild(r); });
+  };
+})();
+</script>
+</div>
+<div id="tabs-ID-tab-1" class="tab-content"><table class="dgf-table"><tbody>
+<tr><td><b>Component</b></td><td>A node feature, an edge feature, an edgeset or a nodeset of the graph.</td></tr>
+<tr><td><b>Component importance</b></td><td>How much the model relies on a component to make its predictions. It is measured by perturbing the component and recording the degradation of the model quality. Components are ranked by Δ Loss.</td></tr>
+<tr><td><b>Perturbation</b></td><td>Destruction of the information carried by a component, while leaving the rest of the graph untouched. Feature values are shuffled across nodes or edges. Edgesets are rewired (by default, with degree-preserving Maslov-Sneppen swaps, so that every node keeps its number of neighbors). Nodesets have all their features shuffled and all their incident edgesets rewired.</td></tr>
+<tr><td><b>Baseline</b></td><td>Quality of the model on the unperturbed graph, on the same seed nodes.</td></tr>
+<tr><td><b>Δ Loss</b></td><td>Increase of the loss when the component is perturbed. Larger is more important. A value close to zero means the model can do without the component (possibly because other components carry the same information).</td></tr>
+<tr><td><b>Δ Accuracy</b></td><td>Drop of the accuracy when the component is perturbed. Larger is more important.</td></tr>
+<tr><td><b>Gradient saliency</b></td><td>Average magnitude of the gradient of the loss with respect to the values of a feature, on the unperturbed graph. It measures how sensitive the model is to small changes of the feature. Only available for numerical features. A high saliency with a small Δ Loss indicates a feature used by the model but redundant with other features.</td></tr>
+</tbody></table></div>
+
+<script>
+function openTab_tabs-ID(evt, tabId) {
+  var i, tabcontent, tablinks;
+  var container = document.getElementById("tabs-ID");
+  tabcontent = container.getElementsByClassName("tab-content");
+  for (i = 0; i < tabcontent.length; i++) {
+    tabcontent[i].style.display = "none";
+  }
+  tablinks = container.getElementsByClassName("tab-btn");
+  for (i = 0; i < tablinks.length; i++) {
+    tablinks[i].className = tablinks[i].className.replace(" active", "");
+  }
+  document.getElementById(tabId).style.display = "block";
+  evt.currentTarget.className += " active";
+}
+</script>
+
+</div>
+</div>
