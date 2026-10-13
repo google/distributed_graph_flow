@@ -486,7 +486,9 @@ class HeteroGNNTest(parameterized.TestCase):
     )
     np.testing.assert_allclose(loss_a, loss_b, rtol=1e-5)
     self.assert_graphs_close(out_a, out_b)
-    self.assert_graphs_close(grads_a, grads_b)
+    # Permuting the edges changes the float32 summation order of the
+    # aggregations: the gradients are only equal up to rounding errors.
+    self.assert_graphs_close(grads_a, grads_b, tolerance=1e-4)
 
   @parameterized.product(
       config=list(CONFIGS) + ["graphsage", "gcn"],
