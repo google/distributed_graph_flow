@@ -14,8 +14,9 @@
 
 r"""Binary to run message passing neural network (MPNN) benchmarks.
 
-Usage example:
+Usage examples:
 
+Run directly (locally on CPU/GPU):
 blaze run -c opt //third_party/py/dgf/benchmark:mpnn_main -- \
   --scenarios=small_tree,small_loops,many_edges_many_nodes \
   --layer_types=GRAPHSAGE --layer_types=GCN \
