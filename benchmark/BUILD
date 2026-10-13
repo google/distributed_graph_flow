@@ -106,7 +106,6 @@ py_binary(
     srcs = ["mpnn_main.py"],
     deps = [
         ":mpnn",
-        "//learning/brain/research/jax:gpu_support",  # buildcleaner: keep
         # absl:app dep,
         # absl/flags dep,
     ],
