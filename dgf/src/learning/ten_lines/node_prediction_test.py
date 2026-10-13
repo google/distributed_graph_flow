@@ -1819,6 +1819,7 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
         cache_normalized_features=True,
         evaluate_final_model=True,
         verbose=0,
+        padding_margin=_NO_SKIP_PADDING_MARGIN,
     )
     self.assertIsNotNone(model.data().final_evaluation)
 
