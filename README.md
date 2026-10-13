@@ -42,6 +42,13 @@ pip install dgf -U
 
 Graph Flow is available for Python 3.11–3.13 on Linux x86-64.
 
+For the latest features, install the nightly build instead
+([`dgf-nightly`](https://pypi.org/project/dgf-nightly/), built daily from `main`):
+
+```shell
+pip install dgf-nightly -U
+```
+
 ## 🔥 Why Graph Flow?
 
 -   **Simple API:** Train, evaluate, and save a GNN model in about 10 lines of

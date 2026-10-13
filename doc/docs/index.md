@@ -69,6 +69,12 @@ Linux x86-64):
 pip install dgf -U
 ```
 
+!!! tip "Nightly build"
+
+    For the latest features, `pip install dgf-nightly -U` instead
+    ([`dgf-nightly`](https://pypi.org/project/dgf-nightly/) is built daily
+    from `main`).
+
 Then, train a complete node classification GNN model on the
 [OGB arXiv](https://ogb.stanford.edu/docs/nodeprop/#ogbn-arxiv) citation graph
 in 10 lines of Python (click on **Output** to expand the results):
