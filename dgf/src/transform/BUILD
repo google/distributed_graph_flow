@@ -147,6 +147,17 @@ py_library(
     ],
 )
 
+py_library(
+    name = "perturb",
+    srcs = ["perturb.py"],
+    deps = [
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/util:temporal",
+        # numpy dep,
+    ],
+)
+
 # Tests
 # =====
 
@@ -301,6 +312,21 @@ py_test(
         "//dgf/src/util:log",
         "//dgf/src/util:test_util",
         "//dgf/src/validate:in_memory_graph",
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "perturb_test",
+    srcs = ["perturb_test.py"],
+    deps = [
+        ":perturb",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/util:gen_test_graph",
+        "//dgf/src/util:test_util",
         # numpy dep,
     ],
 )
