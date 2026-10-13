@@ -53,6 +53,7 @@ py_library(
         ":evaluation",
         ":node_prediction_dataset",
         ":report",
+        ":training",
         # dataclasses_json dep,
         "//dgf/src/analyse:print_schema",
         "//dgf/src/data:in_memory_graph",
@@ -165,6 +166,7 @@ py_library(
         ":link_prediction_core_model",
         ":link_prediction_dataset",
         ":link_prediction_model",
+        ":training",
         "//dgf/src/analyse:print_schema",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:jax_in_memory_graph",
@@ -185,8 +187,21 @@ py_library(
         "//dgf/src/util:temporal",
         "//dgf/src/util:util_py",
         # jax dep,
-        # jaxtyping dep,
         # numpy dep,
+        # optax dep,
+    ],
+)
+
+py_library(
+    name = "training",
+    srcs = ["training.py"],
+    deps = [
+        ":common",
+        "//dgf/src/learning/jax:flax_train",
+        "//dgf/src/util:log",
+        "//dgf/src/util:util_py",
+        # flax:core dep,
+        # jax dep,
         # optax dep,
         # tqdm dep,
     ],
@@ -476,5 +491,20 @@ py_test(
         "//dgf/src/util:test_util",
         # jax dep,
         # numpy dep,
+    ],
+)
+
+py_test(
+    name = "training_test",
+    srcs = ["training_test.py"],
+    deps = [
+        ":common",
+        ":training",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        # flax:core dep,
+        # jax dep,
+        # numpy dep,
+        # optax dep,
     ],
 )

@@ -40,6 +40,7 @@ from dgf.src.learning.ten_lines import dataset
 from dgf.src.learning.ten_lines import node_prediction_core_model
 from dgf.src.learning.ten_lines import node_prediction_dataset
 from dgf.src.learning.ten_lines import node_prediction_model
+from dgf.src.learning.ten_lines import training
 from dgf.src.plot import network as network_lib
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.transform import merge as merge_lib
@@ -51,10 +52,8 @@ from dgf.src.util import util
 
 import jax
 import jax.numpy as jnp
-import jaxtyping
 import numpy as np
 import optax
-import tqdm
 
 Batch = node_prediction_core_model.Batch
 HParam = node_prediction_model.HParam
@@ -513,29 +512,7 @@ def train_node_model(
     else:
       raise ValueError(f"Unsupported task type: {task.task_type}")
 
-    warmup_steps = min(200, 1 + num_train_steps // 5)  # pyrefly: ignore[unsupported-operation]
-    learning_rate_plan = optax.join_schedules(
-        schedules=[
-            optax.linear_schedule(
-                init_value=0.0,
-                end_value=hparams.learning_rate,
-                transition_steps=warmup_steps,
-            ),
-            optax.cosine_decay_schedule(
-                init_value=hparams.learning_rate,
-                decay_steps=int((num_train_steps or 100_000) - warmup_steps),
-            ),
-        ],
-        boundaries=[warmup_steps],
-    )
-
-    opt = optax.chain(
-        optax.clip_by_global_norm(1.0),
-        optax.adamw(
-            learning_rate=learning_rate_plan,
-            weight_decay=hparams.opt_weight_decay,
-        ),
-    )
+    opt = training.build_optimizer(hparams, num_train_steps)
 
     def process_batch(
         graph: jax_in_memory_graph.JaxInMemoryGraph,
@@ -574,32 +551,13 @@ def train_node_model(
           ),
       )
 
-    def loss_fn(
-        core_params: jaxtyping.PyTree,
-        batch_stats: jaxtyping.PyTree,
-        batch: Batch,
-        labels: jax.Array,
-        rng_key: jax.Array | None,
-        training: bool,
-    ) -> tuple[jax.Array, jaxtyping.PyTree]:
-      if rng_key is not None:
-        rngs = {"dropout": rng_key}
-      else:
-        rngs = None
-
-      effective_params = {**core_params}
-      if batch_stats:
-        effective_params["batch_stats"] = batch_stats
-
-      output = core_model.apply(
-          effective_params,
-          batch,
-          training=training,
-          rngs=rngs,
-          mutable=["batch_stats"] if training and batch_stats else False,
-      )
-
-      logits, new_model_state = output if batch_stats else (output, {})
+    def compute_loss(
+        logits: jax.Array, batch: Batch
+    ) -> tuple[jax.Array, dict[str, jax.Array]]:
+      graph, seed_node_idxs = batch
+      labels = graph.node_sets[task.target_nodeset].features[
+          task.normalized_target_column  # pyrefly: ignore[bad-index]
+      ][seed_node_idxs]
 
       if task.task_type == node_prediction_model.TaskType.NODE_CLASSIFICATION:
         loss = optax.softmax_cross_entropy_with_integer_labels(logits, labels)  # pyrefly: ignore[bad-argument-type]
@@ -611,40 +569,9 @@ def train_node_model(
         metrics = {"rmse": jnp.sqrt(loss.mean())}
       else:
         raise ValueError(f"Unknown task type: {task.task_type}")
+      return jnp.mean(loss), metrics
 
-      aux_data = {
-          "metrics": metrics,
-          "model_state": new_model_state,
-      }
-      return jnp.mean(loss), aux_data
-
-    def train_step(params, opt_state, batch: Batch, rng_key):
-      graph, seed_node_idxs = batch
-
-      labels = graph.node_sets[task.target_nodeset].features[
-          task.normalized_target_column  # pyrefly: ignore[bad-index]
-      ][seed_node_idxs]
-
-      has_batch_stats = "batch_stats" in params
-      batch_stats = params.get("batch_stats", {})
-      core_params = {"params": params["params"]} if "params" in params else {}
-
-      (loss, aux_data), grads = jax.value_and_grad(loss_fn, has_aux=True)(
-          core_params, batch_stats, batch, labels, rng_key, True
-      )
-
-      updates, opt_state = opt.update(grads, opt_state, core_params)
-      core_params = optax.apply_updates(core_params, updates)
-
-      params = {**core_params}  # pyrefly: ignore[invalid-argument]
-      if has_batch_stats:
-        # The batch statistics (e.g., the BatchNorm running averages) are not
-        # trained by the optimizer, but updated by the training forward pass.
-        params["batch_stats"] = aux_data["model_state"]["batch_stats"]
-      return params, opt_state, {"loss": loss, **aux_data["metrics"]}
-
-    # Use for speed.
-    jitted_train_step = jax.jit(train_step)
+    train_step = training.build_train_step(core_model, opt, compute_loss)
 
     num_steps = 0
 
@@ -689,77 +616,19 @@ def train_node_model(
           yield process_batch(sample, merge_offset)
 
       if cache_valid_dataset:
-        num_examples_to_cache = valid_dataset.num_nodes_in_seed_nodeset()
-        num_batches_to_cache = (
-            util.num_batches(
-                num_examples_to_cache,
-                batch_size=valid_dataset.batch_size,
-                drop_remainder=valid_dataset.drop_remainder,
-            )
-            if num_examples_to_cache is not None
-            else None
+        valid_dataset_iterator_fn = training.cache_valid_dataset(
+            valid_dataset_iterator_fn,
+            num_examples=valid_dataset.num_nodes_in_seed_nodeset(),
+            batch_size=valid_dataset.batch_size,
+            drop_remainder=valid_dataset.drop_remainder,
+            num_valid_steps=num_valid_steps,
+            verbose=verbose,
         )
-        if num_valid_steps is not None:
-          if num_batches_to_cache is None:
-            num_batches_to_cache = num_valid_steps
-          else:
-            num_batches_to_cache = min(num_batches_to_cache, num_valid_steps)
-        raw_valid_dataset_iterator_fn = valid_dataset_iterator_fn
-        cached_valid_dataset_list = None
-        valid_dataset_caching_failed = False
-
-        def cached_valid_dataset_iterator_fn():
-          nonlocal cached_valid_dataset_list, valid_dataset_caching_failed
-          if valid_dataset_caching_failed:
-            yield from raw_valid_dataset_iterator_fn()
-            return
-          if cached_valid_dataset_list is None:
-            valid_dataset_list = []
-            try:
-              with util.print_timer("Caching validation dataset", verbose >= 1):
-                valid_iter = raw_valid_dataset_iterator_fn()
-                if verbose >= 2:
-                  valid_iter = tqdm.tqdm(
-                      valid_iter,
-                      total=num_batches_to_cache,
-                      desc="Caching validation dataset",
-                  )
-                for batch in valid_iter:
-                  valid_dataset_list.append(batch)
-            except (jax.errors.JaxRuntimeError, RuntimeError, ValueError) as e:
-              valid_dataset_list.clear()
-              if "RESOURCE_EXHAUSTED" not in str(e):
-                raise
-              log.warning(
-                  "Out of device memory while caching validation dataset (%s);"
-                  " falling back to uncached validation dataset.",
-                  e,
-              )
-              valid_dataset_caching_failed = True
-              yield from raw_valid_dataset_iterator_fn()
-              return
-            if verbose >= 1:
-              log.info(
-                  "Number of cache validation batches: %d",
-                  len(valid_dataset_list),
-              )
-            cached_valid_dataset_list = valid_dataset_list
-          yield from cached_valid_dataset_list
-
-        valid_dataset_iterator_fn = cached_valid_dataset_iterator_fn
-
-      def valid_step(params, opt_state, batch: Batch):
-        graph, seed_node_idxs = batch
-        labels = graph.node_sets[task.target_nodeset].features[
-            task.normalized_target_column  # pyrefly: ignore[bad-index]
-        ][seed_node_idxs]
-        loss, aux = loss_fn(params, {}, batch, labels, None, False)
-        return {"loss": loss, **aux["metrics"]}
-
-      jitted_valid_step = jax.jit(valid_step)
 
       train_kwargs["valid_dataset_iterator_fn"] = valid_dataset_iterator_fn
-      train_kwargs["valid_step"] = jitted_valid_step
+      train_kwargs["valid_step"] = training.build_valid_step(
+          core_model, compute_loss
+      )
 
     with util.print_timer("Training model", verbose >= 1):
       with jax.profiler.TraceAnnotation("train model"):
@@ -769,7 +638,7 @@ def train_node_model(
         train_results = flax_train.train(
             model=core_model,
             opt=opt,
-            train_step=jitted_train_step,
+            train_step=train_step,
             dataset_iterator=infinite_train_dataset_iterator(),
             num_train_steps=num_train_steps,  # pyrefly: ignore[bad-argument-type]
             rng_key=jax.random.PRNGKey(hparams.random_seed),

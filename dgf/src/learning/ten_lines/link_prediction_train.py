@@ -35,6 +35,7 @@ from dgf.src.learning.ten_lines import evaluation
 from dgf.src.learning.ten_lines import link_prediction_core_model
 from dgf.src.learning.ten_lines import link_prediction_dataset
 from dgf.src.learning.ten_lines import link_prediction_model
+from dgf.src.learning.ten_lines import training
 from dgf.src.plot import network as network_lib
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.transform import merge as merge_lib
@@ -45,10 +46,8 @@ from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 import jax
 import jax.numpy as jnp
-import jaxtyping
 import numpy as np
 import optax
-import tqdm
 
 Batch = link_prediction_core_model.Batch
 EdgeBatch = tuple[
@@ -593,29 +592,7 @@ def train_link_model(
           ),
       )
 
-    # Optimizer
-    warmup_steps = min(200, 1 + num_train_steps // 5)  # pyrefly: ignore[unsupported-operation]
-    learning_rate_plan = optax.join_schedules(
-        schedules=[
-            optax.linear_schedule(
-                init_value=0.0,
-                end_value=hparams.learning_rate,
-                transition_steps=warmup_steps,
-            ),
-            optax.cosine_decay_schedule(
-                init_value=hparams.learning_rate,
-                decay_steps=int((num_train_steps or 100_000) - warmup_steps),
-            ),
-        ],
-        boundaries=[warmup_steps],
-    )
-    opt = optax.chain(
-        optax.clip_by_global_norm(1.0),
-        optax.adamw(
-            learning_rate=learning_rate_plan,
-            weight_decay=hparams.opt_weight_decay,
-        ),
-    )
+    opt = training.build_optimizer(hparams, num_train_steps)
 
     train_live = train_dataset.get_live()
     core_model_config = create_core_model_config(
@@ -657,36 +634,11 @@ def train_link_model(
           ],
       )
 
-    def loss_fn(
-        params: jaxtyping.PyTree,
-        batch_stats: jaxtyping.PyTree,
-        batch: Batch,
-        rng_key: jax.Array | None,
-        training: bool,
-    ):
-
-      if rng_key is not None:
-        rngs = {"dropout": rng_key}
-      else:
-        rngs = None
-
-      effective_params = {**params}
-      if batch_stats:
-        effective_params["batch_stats"] = batch_stats
-
-      output = core_model.apply(
-          effective_params,
-          batch,
-          training=training,
-          rngs=rngs,
-          mutable=["batch_stats"] if training and batch_stats else False,
-      )
-
-      if batch_stats:
-        (pos_logits, neg_logits), new_model_state = output
-      else:
-        pos_logits, neg_logits = output
-        new_model_state = {}
+    def compute_loss(
+        output: tuple[jax.Array, jax.Array], batch: Batch
+    ) -> tuple[jax.Array, dict[str, jax.Array | np.ndarray]]:
+      del batch  # Unused.
+      pos_logits, neg_logits = output
 
       # Ranking metrics
       neg_logits_reshaped = neg_logits.reshape(pos_logits.shape[0], -1)  # pyrefly: ignore[missing-attribute]
@@ -711,30 +663,9 @@ def train_link_model(
 
       # Ranking metrics
       ranking_metrics = evaluation.compute_ranking_metrics(pos_logits, neg_logits)  # pyrefly: ignore[bad-argument-type]
-      aux_data = {
-          "metrics": ranking_metrics,
-          "model_state": new_model_state,
-      }
-      return loss, aux_data
+      return loss, ranking_metrics
 
-    @jax.jit
-    def train_step(params, opt_state, batch: Batch, rng_key):
-      has_batch_stats = "batch_stats" in params
-      batch_stats = params.get("batch_stats", {})
-      core_params = {"params": params["params"]} if "params" in params else {}
-
-      (loss, aux_data), grads = jax.value_and_grad(loss_fn, has_aux=True)(
-          core_params, batch_stats, batch, rng_key, training=True
-      )
-      updates, opt_state = opt.update(grads, opt_state, core_params)
-      core_params = optax.apply_updates(core_params, updates)
-
-      params = {**core_params}  # pyrefly: ignore[invalid-argument]
-      if has_batch_stats:
-        # The batch statistics (e.g., the BatchNorm running averages) are not
-        # trained by the optimizer, but updated by the training forward pass.
-        params["batch_stats"] = aux_data["model_state"]["batch_stats"]
-      return params, opt_state, {"loss": loss, **aux_data["metrics"]}
+    train_step = training.build_train_step(core_model, opt, compute_loss)
 
     def infinite_train_iterator() -> Iterator[Batch]:
       num_diagnostic_plots = 0
@@ -765,57 +696,19 @@ def train_link_model(
           yield jax_sample_to_batch(batch)
 
       if cache_valid_dataset:
-        num_examples_to_cache = valid_dataset.num_edge_in_seed_edgeset()
-        num_batches_to_cache = (
-            util.num_batches(
-                num_examples_to_cache,
-                batch_size=valid_dataset.batch_size,
-                drop_remainder=valid_dataset.drop_remainder,
-            )
-            if num_examples_to_cache is not None
-            else None
+        valid_dataset_iterator_fn = training.cache_valid_dataset(
+            valid_dataset_iterator_fn,
+            num_examples=valid_dataset.num_edge_in_seed_edgeset(),
+            batch_size=valid_dataset.batch_size,
+            drop_remainder=valid_dataset.drop_remainder,
+            num_valid_steps=num_valid_steps,
+            verbose=verbose,
         )
-        if num_valid_steps is not None:
-          if num_batches_to_cache is None:
-            num_batches_to_cache = num_valid_steps
-          else:
-            num_batches_to_cache = min(num_batches_to_cache, num_valid_steps)
-        raw_valid_dataset_iterator_fn = valid_dataset_iterator_fn
-        cached_valid_dataset_list: list[Batch] | None = None
-
-        def cached_valid_dataset_iterator_fn() -> Iterator[Batch]:
-          nonlocal cached_valid_dataset_list
-          if cached_valid_dataset_list is None:
-            with util.print_timer("Caching validation dataset", verbose >= 1):
-              if verbose >= 2:
-                cached_valid_dataset_list = list(
-                    tqdm.tqdm(
-                        raw_valid_dataset_iterator_fn(),
-                        total=num_batches_to_cache,
-                        desc="Caching validation dataset",
-                    )
-                )
-              else:
-                cached_valid_dataset_list = list(
-                    raw_valid_dataset_iterator_fn()
-                )
-            if verbose >= 1:
-              log.info(
-                  "Number of cache validation batches: %d",
-                  len(cached_valid_dataset_list),
-              )
-          yield from cached_valid_dataset_list
-
-        valid_dataset_iterator_fn = cached_valid_dataset_iterator_fn
-
-      @jax.jit
-      def valid_step(params, opt_state, batch):
-        del opt_state
-        loss, aux = loss_fn(params, {}, batch, None, training=False)
-        return {"loss": loss, **aux["metrics"]}
 
       train_kwargs["valid_dataset_iterator_fn"] = valid_dataset_iterator_fn
-      train_kwargs["valid_step"] = valid_step
+      train_kwargs["valid_step"] = training.build_valid_step(
+          core_model, compute_loss
+      )
 
     with util.print_timer("Training model", verbose >= 1):
       checkpoint_dir = (
