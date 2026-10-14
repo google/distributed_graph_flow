@@ -26,6 +26,7 @@ from dgf.src.transform import timeseries_padding
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import numpy as np
+import numpy.typing as npt
 
 
 class InsufficientPaddingError(ValueError):
@@ -99,6 +100,30 @@ def missing_sentinel_message(
   )
 
 
+def padding_edge_endpoints(
+    num_padding_edges: int,
+    num_nodes: int,
+    num_real_nodes: int,
+    dtype: npt.DTypeLike,
+) -> np.ndarray:
+  """Assigns one side of each padding edge to the padding nodes, round-robin.
+
+  Args:
+    num_padding_edges: Number of padding edges.
+    num_nodes: Number of nodes, including the padding.
+    num_real_nodes: Number of non-padding nodes.
+    dtype: Dtype of the result.
+
+  Returns:
+    The node indices, shape [num_padding_edges].
+  """
+  num_padding_nodes = num_nodes - num_real_nodes
+  assert num_padding_nodes >= 1
+  return (
+      num_nodes - 1 - np.arange(num_padding_edges) % num_padding_nodes
+  ).astype(dtype)
+
+
 def gather_rows_numpy(src: np.ndarray, idxs: np.ndarray, dst: np.ndarray):
   """Sets dst[:len(idxs)] = src[idxs] and pads the remaining rows of dst.
 
@@ -125,10 +150,10 @@ class GraphMerger:
   are offset to prevent collisions in the merged graph.
 
   Padding nodes and edges are added according to the `padding` configuration.
-  Padding edges are defined to connect to the last node index of their
-  respective destination node set. Therefore, ensure that each node set's
-  padding size is at least one greater than the maximum number of nodes expected
-  before padding.
+  Padding edges connect, in round-robin, the padding nodes (a.k.a. sentinel
+  nodes) of their source and target node sets. Therefore, ensure that each node
+  set's padding size is at least one greater than the maximum number of nodes
+  expected before padding.
 
   If `padding` is None, the edges/nodes are not padded.
 
@@ -249,7 +274,8 @@ class GraphMerger:
       edge_set_offsets[edge_set_name] = np.insert(offsets, 0, 0)
 
     # Merge the nodesets + some more nodeset related compute.
-    node_set_sentinel_idx: dict[str, int] = {}
+    # (num_nodes, num_real_nodes) of the padded node sets.
+    node_set_sentinel_info: dict[str, tuple[int, int]] = {}
     merged_node_sets: dict[str, in_memory_graph.InMemoryNodeSet] = {}
     for node_set_name, node_set_schema in schema.node_sets.items():
       merged_features = {}
@@ -266,8 +292,10 @@ class GraphMerger:
         num_nodes = target_num_nodes
         # Note: node_offsets[-1] is the number of real nodes
         num_sentinel_nodes = num_nodes - num_real_nodes
-        # The sentinel node is the last one.
-        node_set_sentinel_idx[node_set_name] = num_nodes - 1
+        node_set_sentinel_info[node_set_name] = (
+            int(num_nodes),
+            int(num_real_nodes),
+        )
         if num_sentinel_nodes < 1:
           raise InsufficientPaddingError(
               insufficient_node_padding_message(
@@ -342,19 +370,21 @@ class GraphMerger:
 
         # Add padding edges pointing to sentinel nodes.
         if (
-            edge_set_schema.source not in node_set_sentinel_idx
-            or edge_set_schema.target not in node_set_sentinel_idx
+            edge_set_schema.source not in node_set_sentinel_info
+            or edge_set_schema.target not in node_set_sentinel_info
         ):
           raise ValueError(
               missing_sentinel_message(edge_set_name, edge_set_schema)
           )
-        padding_node_src = node_set_sentinel_idx[edge_set_schema.source]
-        padding_node_trg = node_set_sentinel_idx[edge_set_schema.target]
         adj_dtype = graphs[0].edge_sets[edge_set_name].adjacency.dtype
-        padding_edge = np.array(
-            [[padding_node_src], [padding_node_trg]], dtype=adj_dtype
-        )
-        padding_block = np.tile(padding_edge, (1, num_padding))
+        padding_block = np.stack([
+            padding_edge_endpoints(
+                num_padding,
+                *node_set_sentinel_info[node_set],
+                adj_dtype,
+            )
+            for node_set in (edge_set_schema.source, edge_set_schema.target)
+        ])
         merged_adjacency.append(padding_block)
 
       for feature_name, _ in edge_set_schema.features.items():
@@ -495,6 +525,18 @@ def create_padding_item(value, num_padding_items):
       return tf.zeros(padding_shape, dtype=value.dtype)
 
 
+def _padding_edge_endpoints_tensorflow(
+    num_padding_edges: tf.Tensor,
+    num_nodes: int,
+    num_real_nodes: tf.Tensor,
+    dtype: tf.DType,
+) -> tf.Tensor:
+  """Computes `padding_edge_endpoints` with TensorFlow."""
+  num_padding_nodes = tf.maximum(num_nodes - num_real_nodes, 1)
+  endpoints = num_nodes - 1 - tf.range(num_padding_edges) % num_padding_nodes
+  return tf.cast(endpoints, dtype)
+
+
 def pad_graph_tensorflow(
     graph: tf_in_memory_graph.TFInMemoryGraph,
     schema: schema_lib.GraphSchema,
@@ -523,6 +565,7 @@ def pad_graph_tensorflow(
   assert padding.edge_sets
 
   merged_node_sets: dict[str, tf_in_memory_graph.TFInMemoryNodeSet] = {}
+  num_real_nodes_per_node_set: dict[str, tf.Tensor] = {}
   for node_set_name, node_set_schema in schema.node_sets.items():
     merged_features = {}
     node_set_padding = padding.node_sets[node_set_name]
@@ -533,6 +576,7 @@ def pad_graph_tensorflow(
       )
     num_nodes = node_set_padding.num_nodes
     num_real_nodes = tf.cast(graph.node_sets[node_set_name].num_nodes, tf.int32)
+    num_real_nodes_per_node_set[node_set_name] = num_real_nodes
 
     num_sentinel_nodes = num_nodes - num_real_nodes
 
@@ -585,13 +629,18 @@ def pad_graph_tensorflow(
           f" both source '{edge_set_schema.source}' and target"
           f" '{edge_set_schema.target}'."
       )
-    padding_node_src = src_padding.num_nodes - 1
-    padding_node_trg = trg_padding.num_nodes - 1
-
-    padding_edge = tf.constant(
-        [[padding_node_src], [padding_node_trg]], dtype=adjacency.dtype
-    )
-    padding_block = tf.tile(padding_edge, [1, num_padding])
+    padding_block = tf.stack([
+        _padding_edge_endpoints_tensorflow(
+            num_padding,
+            num_nodes,
+            num_real_nodes_per_node_set[node_set],
+            adjacency.dtype,
+        )
+        for node_set, num_nodes in (
+            (edge_set_schema.source, src_padding.num_nodes),
+            (edge_set_schema.target, trg_padding.num_nodes),
+        )
+    ])
 
     merged_adjacency = tf.concat([adjacency, padding_block], axis=1)
     merged_adjacency = tf.ensure_shape(merged_adjacency, [2, num_edges])

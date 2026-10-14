@@ -1998,6 +1998,56 @@ class SampleMergedTest(parameterized.TestCase):
         return_node_idxs=False,
     )
 
+  @parameterized.parameters(1, 4)
+  def test_padding_edges_round_robin(self, num_padding_nodes: int):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    seed_node_idxs = np.array([0, 1], dtype=np.int64)
+    # Number of nodes of the unpadded merged samples.
+    _, offsets = self._create_sampler(
+        graph, schema, seed_nodeset="n1"
+    ).sample_merged(seed_node_idxs)
+    padding = _padding(
+        {
+            name: int(offsets[name][-1]) + num_padding_nodes
+            for name in schema.node_sets
+        },
+        {"e1": 20, "e2": 21},
+    )
+    self._assert_matches_graph_merger(
+        lambda **kwargs: self._create_sampler(
+            graph, schema, seed_nodeset="n1", **kwargs
+        ),
+        seed_node_idxs,
+        schema,
+        padding,
+        return_features=True,
+        return_node_idxs=False,
+    )
+
+    # Check the padding edges.
+    merged, offsets = self._create_sampler(
+        graph, schema, seed_nodeset="n1", padding=padding
+    ).sample_merged(seed_node_idxs)
+    for edge_set_name, edge_set_schema in schema.edge_sets.items():
+      adjacency = merged.edge_sets[edge_set_name].adjacency
+      num_real_edges = int(
+          np.sum(
+              (adjacency[0] < offsets[edge_set_schema.source][-1])
+              & (adjacency[1] < offsets[edge_set_schema.target][-1])
+          )
+      )
+      num_padding_edges = adjacency.shape[1] - num_real_edges
+      for side, node_set_name in enumerate(
+          [edge_set_schema.source, edge_set_schema.target]
+      ):
+        num_nodes = padding.node_sets[node_set_name].num_nodes
+        assert num_nodes is not None
+        np.testing.assert_array_equal(
+            adjacency[side, num_real_edges:],
+            num_nodes - 1 - np.arange(num_padding_edges) % num_padding_nodes,
+        )
+
   @parameterized.product(num_threads=[0, 1, 4], return_node_idxs=[False, True])
   def test_large_graph_all_dtypes(
       self, num_threads: int, return_node_idxs: bool

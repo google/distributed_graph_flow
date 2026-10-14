@@ -40,7 +40,7 @@ def padding_from_graph_generator(
     schema: schema_lib.GraphSchema,
     graphs: Iterator[in_memory_graph_lib.InMemoryGraph],
     relative_margin: float = 0.1,
-    absolute_margin: int = 1,
+    absolute_margin: int = 64,
     max_timeseries_len: int | None = None,
 ) -> padding_lib.Padding:
   """Creates a padding configuration from a set of in-memory graphs.
@@ -61,16 +61,22 @@ def padding_from_graph_generator(
   ```
 
   The padding size is:
-    ceil((<maximum observed value> + absolute_margin) * (1 + relative_margin))
+    ceil(<maximum observed value> * (1 + relative_margin)) + absolute_margin
 
-  Note: Having absolute_margin=1 (or more) is necessary if you need a sentinel
-  node (e.g., when doing padded merging).
+  The margins serve two purposes:
+  - JAX requires fixed size arrays. Graphs larger than the padding (e.g.,
+    samples not observed by this function) cannot be merged.
+  - The padding edges are spread over the padding nodes (a.k.a. sentinel
+    nodes). Merging requires at least one padding node, and many padding
+    nodes make message passing faster on GPU (all the padding edges pointing
+    to a single node serializes the scatter-adds).
 
   Args:
     schema: The graph schema.
     graphs: An iterator over in-memory heterogeneous graphs.
     relative_margin: A relative margin.
-    absolute_margin: An absolute margin.
+    absolute_margin: An absolute margin. Guarantees at least this number of
+      padding nodes.
     max_timeseries_len: Optional maximum sequence length for timeseries
       features.
 
@@ -103,7 +109,7 @@ def padding_from_graph_generator(
 
   padded_node_sets = {}
   for node_set_name, max_n in max_nodes.items():
-    padded_n = math.ceil((max_n + absolute_margin) * (1.0 + relative_margin))
+    padded_n = math.ceil(max_n * (1.0 + relative_margin)) + absolute_margin
     node_set_schema = schema.node_sets[node_set_name]
     padded_node_sets[node_set_name] = padding_lib.NodeSetPadding(
         num_nodes=padded_n,
@@ -115,7 +121,7 @@ def padding_from_graph_generator(
   # Create the padding with a margin.
   padded_edge_sets = {}
   for edge_set_name, max_e in max_edges.items():
-    padded_e = math.ceil((max_e + absolute_margin) * (1.0 + relative_margin))
+    padded_e = math.ceil(max_e * (1.0 + relative_margin)) + absolute_margin
     edge_set_schema = schema.edge_sets[edge_set_name]
     padded_edge_sets[edge_set_name] = padding_lib.EdgeSetPadding(
         num_edges=padded_e,

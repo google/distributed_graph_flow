@@ -30,6 +30,28 @@ import tensorflow as tf
 
 class BatchTest(absltest.TestCase):
 
+  def test_padding_edge_endpoints(self):
+    # 3 padding nodes (7, 8, 9).
+    np.testing.assert_array_equal(
+        merge_lib.padding_edge_endpoints(
+            num_padding_edges=7,
+            num_nodes=10,
+            num_real_nodes=7,
+            dtype=np.int64,
+        ),
+        [9, 8, 7, 9, 8, 7, 9],
+    )
+    # A single padding node.
+    np.testing.assert_array_equal(
+        merge_lib.padding_edge_endpoints(
+            num_padding_edges=3,
+            num_nodes=10,
+            num_real_nodes=9,
+            dtype=np.int64,
+        ),
+        [9, 9, 9],
+    )
+
   def test_batch_with_padding(self):
     graphs = [
         gen_test_graph.generate_in_memory_graph(False, False),
@@ -89,9 +111,11 @@ class BatchTest(absltest.TestCase):
                 features={},
             ),
             "e2": in_memory_graph_lib.InMemoryEdgeSet(
+                # The padding edges are assigned in round-robin to the
+                # padding nodes, starting from the last one.
                 adjacency=np.array([
-                    [0, 0, 2, 2, 5, 5],
-                    [0, 1, 2, 3, 6, 6],
+                    [0, 0, 2, 2, 5, 4],
+                    [0, 1, 2, 3, 6, 5],
                 ]),
                 features={},
             ),
@@ -289,8 +313,8 @@ class BatchTest(absltest.TestCase):
             "e1": tf_in_memory_graph.TFInMemoryEdgeSet(
                 adjacency=tf.constant(
                     [
-                        [0, 0, 5, 5, 5],
-                        [0, 1, 5, 5, 5],
+                        [0, 0, 5, 4, 3],
+                        [0, 1, 5, 4, 3],
                     ],
                     dtype=tf.int64,
                 ),
@@ -299,8 +323,8 @@ class BatchTest(absltest.TestCase):
             "e2": tf_in_memory_graph.TFInMemoryEdgeSet(
                 adjacency=tf.constant(
                     [
-                        [0, 0, 5, 5, 5, 5],
-                        [0, 1, 6, 6, 6, 6],
+                        [0, 0, 5, 4, 3, 2],
+                        [0, 1, 6, 5, 4, 3],
                     ],
                     dtype=tf.int64,
                 ),

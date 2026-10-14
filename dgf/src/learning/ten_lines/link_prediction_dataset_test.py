@@ -125,14 +125,15 @@ class GNNLinkDatasetPreparatorTest(parameterized.TestCase):
     logging.info("%s", pos_trg_padding)
     logging.info("%s", neg_trg_padding)
 
+    # Padding: ceil(<max observed> * 1.1) + 64.
     # Assertions for positive_source_padding
-    self.assertEqual(pos_src_padding.node_sets["n1"].num_nodes, 4)
-    self.assertEqual(pos_src_padding.node_sets["n2"].num_nodes, 6)
-    self.assertEqual(pos_src_padding.edge_sets["e2"].num_edges, 6)
+    self.assertEqual(pos_src_padding.node_sets["n1"].num_nodes, 3 + 64)
+    self.assertEqual(pos_src_padding.node_sets["n2"].num_nodes, 5 + 64)
+    self.assertEqual(pos_src_padding.edge_sets["e2"].num_edges, 5 + 64)
 
     # Assertions for positive_target_padding
-    self.assertEqual(pos_trg_padding.node_sets["n2"].num_nodes, 4)
-    self.assertEqual(pos_trg_padding.edge_sets["e2"].num_edges, 6)
+    self.assertEqual(pos_trg_padding.node_sets["n2"].num_nodes, 3 + 64)
+    self.assertEqual(pos_trg_padding.edge_sets["e2"].num_edges, 5 + 64)
 
     # Assertions for negative_target_padding
     # Note: Negative edge padding is very stocastic

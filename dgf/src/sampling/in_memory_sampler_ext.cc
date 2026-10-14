@@ -810,18 +810,15 @@ absl::StatusOr<std::optional<RawMergedBatch>> Sampler::MergeBuildersNoGil(
   for (std::size_t es = 0; es < num_edgesets; es++) {
     if (!config.padding.num_edges[es].has_value()) continue;
     const auto& edgeset = schema_->edgesets[es];
-    // The padding edges connect the sentinel (i.e. last) nodes.
-    const auto src_sentinel = static_cast<int64_t>(
-        *config.padding.num_nodes[edgeset.source_nodeset] - 1);
-    const auto trg_sentinel = static_cast<int64_t>(
-        *config.padding.num_nodes[edgeset.target_nodeset] - 1);
     int64_t* dst_src = raw.edge_bufs[es].get();
     int64_t* dst_trg = dst_src + raw.layout.num_edges[es];
     const std::size_t num_real = raw.layout.edge_offsets[es].back();
-    std::fill(dst_src + num_real, dst_src + raw.layout.num_edges[es],
-              src_sentinel);
-    std::fill(dst_trg + num_real, dst_trg + raw.layout.num_edges[es],
-              trg_sentinel);
+    FillPaddingEdgeEndpoints(raw.layout, edgeset.source_nodeset,
+                             dst_src + num_real,
+                             dst_src + raw.layout.num_edges[es]);
+    FillPaddingEdgeEndpoints(raw.layout, edgeset.target_nodeset,
+                             dst_trg + num_real,
+                             dst_trg + raw.layout.num_edges[es]);
   }
 
   // Gather the features (requires the node idxs).

@@ -426,6 +426,21 @@ std::optional<PaddingOverflow> FindPaddingOverflow(
   return std::nullopt;
 }
 
+void FillPaddingEdgeEndpoints(const MergeLayout& layout,
+                              const std::size_t nodeset_idx, int64_t* begin,
+                              int64_t* const end) {
+  const std::size_t num_nodes = layout.num_nodes[nodeset_idx];
+  const std::size_t num_real_nodes = layout.node_offsets[nodeset_idx].back();
+  DCHECK_GT(num_nodes, num_real_nodes);
+  const std::size_t num_sentinels = num_nodes - num_real_nodes;
+  const auto last_node = static_cast<int64_t>(num_nodes - 1);
+  std::size_t slot = 0;
+  for (; begin != end; ++begin) {
+    *begin = last_node - static_cast<int64_t>(slot);
+    if (++slot == num_sentinels) slot = 0;
+  }
+}
+
 bool GatherRows(const GatherRowsTask& task) {
   if (task.idxs == nullptr) {
     std::memset(task.dst + task.begin * task.row_bytes, 0,

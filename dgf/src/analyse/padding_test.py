@@ -36,12 +36,31 @@ class PaddingTest(absltest.TestCase):
     padding = padding_lib.padding_from_graph_generator(schema, iter(graphs))
     expected_padding = padding_data_lib.Padding(
         node_sets={
-            "n1": padding_data_lib.NodeSetPadding(num_nodes=4),
-            "n2": padding_data_lib.NodeSetPadding(num_nodes=4),
+            "n1": padding_data_lib.NodeSetPadding(num_nodes=3 + 64),
+            "n2": padding_data_lib.NodeSetPadding(num_nodes=3 + 64),
         },
         edge_sets={
-            "e1": padding_data_lib.EdgeSetPadding(num_edges=4),
-            "e2": padding_data_lib.EdgeSetPadding(num_edges=4),
+            "e1": padding_data_lib.EdgeSetPadding(num_edges=3 + 64),
+            "e2": padding_data_lib.EdgeSetPadding(num_edges=3 + 64),
+        },
+    )
+    test_util.assert_are_equal(self, padding, expected_padding)
+
+  def test_margins(self):
+    schema = gen_test_graph.generate_schema()
+    graphs = [gen_test_graph.generate_in_memory_graph()]
+    padding = padding_lib.padding_from_graph_generator(
+        schema, iter(graphs), relative_margin=0.5, absolute_margin=2
+    )
+    # Each node set / edge set has 2 nodes / edges: ceil(2 * 1.5) + 2 = 5.
+    expected_padding = padding_data_lib.Padding(
+        node_sets={
+            "n1": padding_data_lib.NodeSetPadding(num_nodes=5),
+            "n2": padding_data_lib.NodeSetPadding(num_nodes=5),
+        },
+        edge_sets={
+            "e1": padding_data_lib.EdgeSetPadding(num_edges=5),
+            "e2": padding_data_lib.EdgeSetPadding(num_edges=5),
         },
     )
     test_util.assert_are_equal(self, padding, expected_padding)
@@ -123,7 +142,7 @@ class PaddingTest(absltest.TestCase):
     expected_padding = padding_data_lib.Padding(
         node_sets={
             "n": padding_data_lib.NodeSetPadding(
-                num_nodes=4,
+                num_nodes=3 + 64,
                 features={
                     "static_ts": padding_data_lib.FeaturePadding(
                         max_timeseries_len=4
@@ -139,7 +158,7 @@ class PaddingTest(absltest.TestCase):
         },
         edge_sets={
             "e": padding_data_lib.EdgeSetPadding(
-                num_edges=3,
+                num_edges=2 + 64,
                 features={
                     "edge_ts": padding_data_lib.FeaturePadding(
                         max_timeseries_len=4

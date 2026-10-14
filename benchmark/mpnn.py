@@ -69,8 +69,7 @@ class Scenario:
     num_hops: Number of sampling hops.
     hop_width: Default number of neighbors sampled per plan edge.
     edgeset_hop_widths: Per-edgeset override of `hop_width`.
-    padding_relative_margin: Relative padding margin (padding edges all point to
-      the sentinel node).
+    padding_relative_margin: Relative padding margin.
     description: Regime exercised by this scenario.
   """
 
@@ -146,7 +145,7 @@ DEFAULT_SCENARIOS: tuple[Scenario, ...] = (
         treeness=0.3,
         batch_size=32,
         padding_relative_margin=1.0,
-        description="'small_loops' with 100% padding (high degree sentinel).",
+        description="'small_loops' with 100% padding.",
     ),
 )
 

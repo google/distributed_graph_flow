@@ -296,6 +296,12 @@ MergeLayout ComputeMergeLayout(
 std::optional<PaddingOverflow> FindPaddingOverflow(const MergeLayout& layout,
                                                    const MergePadding& padding);
 
+// Sets the padding edge endpoints [begin, end) of nodeset `nodeset_idx`,
+// round-robin over its padding nodes.
+void FillPaddingEdgeEndpoints(const MergeLayout& layout,
+                              std::size_t nodeset_idx, int64_t* begin,
+                              int64_t* end);
+
 // Copies the rows `src[idxs[i]]` into `dst[i]` for i in [begin, end). If
 // `idxs` is null, sets the rows of `dst` to zero instead.
 struct GatherRowsTask {
