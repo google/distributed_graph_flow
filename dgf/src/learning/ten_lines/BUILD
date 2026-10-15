@@ -363,6 +363,7 @@ py_test(
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         "//dgf/src/data:schema",
+        "//dgf/src/learning:early_stopping_monitor",
         "//dgf/src/learning/jax/layers:hetero_gnn",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:log",

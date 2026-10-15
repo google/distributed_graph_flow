@@ -117,6 +117,37 @@ class FlaxTrainTest(parameterized.TestCase):
     self.assertEqual(
         set(result.valid_logs[-1].metrics.keys()), set(["accuracy", "loss"])
     )
+    self.assertEqual(
+        result.stop_reason, flax_train.StopReason.MAX_NUM_TRAIN_STEPS
+    )
+
+  def _train_with_constant_loss(self, **kwargs) -> flax_train.TrainResult:
+    def train_step(params, opt_state, batch, rng_key):
+      return params, opt_state, {"loss": jnp.array(1.0)}
+
+    return flax_train.train(
+        model=SimpleModel(hidden_dim=8),
+        opt=optax.adam(1e-3),
+        train_step=train_step,
+        dummy_data_fn=lambda x: x["data"],
+        rng_key=jax.random.PRNGKey(42),
+        **kwargs,
+    )
+
+  def test_stop_reason_dataset_exhausted(self):
+    result = self._train_with_constant_loss(
+        dataset_iterator=dataset_iterator(num_steps=5),
+        num_train_steps=100,
+    )
+    self.assertEqual(result.stop_reason, flax_train.StopReason.DATASET_EXHAUSTED)
+
+  def test_stop_reason_max_training_time(self):
+    result = self._train_with_constant_loss(
+        dataset_iterator=dataset_iterator(num_steps=None),
+        num_train_steps=100,
+        max_training_time_seconds=-1,
+    )
+    self.assertEqual(result.stop_reason, flax_train.StopReason.MAX_TRAINING_TIME)
 
   def test_early_stopping(self):
     def train_step(params, opt_state, batch, rng_key):
@@ -148,6 +179,7 @@ class FlaxTrainTest(parameterized.TestCase):
 
     # Should validate at 10, then 20 and break out.
     self.assertEqual([l.step for l in result.valid_logs], [10, 20])
+    self.assertEqual(result.stop_reason, flax_train.StopReason.EARLY_STOPPING)
 
   def test_nan_in_training_metrics(self):
     def train_step(params, opt_state, batch, rng_key):

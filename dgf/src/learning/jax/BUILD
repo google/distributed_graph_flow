@@ -59,7 +59,6 @@ py_library(
         ":common",
         # clu/metric_writers dep,
         "//dgf/src/learning:early_stopping_monitor",
-        "//dgf/src/learning/ten_lines:common",
         "//dgf/src/util:log",
         "//dgf/src/util:util_py",
         # flax:core dep,

@@ -17,6 +17,7 @@
 import abc
 from collections.abc import Callable
 import dataclasses
+import enum
 from typing import Any, Protocol
 
 from absl import logging
@@ -45,6 +46,28 @@ DEFAULT_LOSS_PRECISION: jnp.dtype = jnp.float32  # pyrefly: ignore[bad-assignmen
 # TODO(bmayer): Might be a good default value that could work for large or small
 # datasets?
 DEFAULT_DROPOUT_RATE: float = 0.3
+
+
+@dataclasses.dataclass
+class LogItem:
+  """A single log item.
+
+  Attributes:
+    step: The current training step.
+    metrics: A dictionary of metrics for the current step.
+  """
+
+  step: int
+  metrics: dict[str, float]
+
+
+class StopReason(enum.Enum):
+  """Why the training loop stopped."""
+
+  MAX_NUM_TRAIN_STEPS = "max_num_train_steps"
+  MAX_TRAINING_TIME = "max_training_time"
+  EARLY_STOPPING = "early_stopping"
+  DATASET_EXHAUSTED = "dataset_exhausted"
 
 
 class BuildableModule(Protocol):

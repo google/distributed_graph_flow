@@ -20,6 +20,7 @@ import os
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.data import schema as schema_lib
+from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax.layers import hetero_gnn
 from dgf.src.learning.ten_lines import common
 from dgf.src.util import gen_test_graph
@@ -461,6 +462,142 @@ class TenLines(parameterized.TestCase):
     )
     f_none = signature["source_edges_e1_f_none"]
     self.assertEqual(f_none["shape"], "(None,)")
+
+
+def _training_logs(
+    valid_losses: list[float], stop_reason: common.StopReason | None
+) -> common.TrainingLogs:
+  return common.TrainingLogs(
+      train=[],
+      valid=[
+          common.LogItem(step=(i + 1) * 100, metrics={"loss": loss})
+          for i, loss in enumerate(valid_losses)
+      ],
+      num_train_step=len(valid_losses) * 100,
+      stop_reason=stop_reason,
+  )
+
+
+class ConvergenceTest(parameterized.TestCase):
+
+  @parameterized.named_parameters(
+      (
+          "still_improving",
+          [3.0, 2.0, 1.0],
+          common.StopReason.MAX_NUM_TRAIN_STEPS,
+          True,
+      ),
+      (
+          "still_improving_time_limit",
+          [3.0, 2.0, 1.0],
+          common.StopReason.MAX_TRAINING_TIME,
+          True,
+      ),
+      (
+          "plateau",
+          [3.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+          common.StopReason.MAX_NUM_TRAIN_STEPS,
+          False,
+      ),
+      (
+          "overfitting",
+          [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+          common.StopReason.MAX_NUM_TRAIN_STEPS,
+          False,
+      ),
+      ("early_stopping", [3.0, 2.0, 1.0], common.StopReason.EARLY_STOPPING, False),
+      (
+          "dataset_exhausted",
+          [3.0, 2.0, 1.0],
+          common.StopReason.DATASET_EXHAUSTED,
+          False,
+      ),
+      ("no_validation", [], common.StopReason.MAX_NUM_TRAIN_STEPS, False),
+      ("unknown_stop_reason", [3.0, 2.0, 1.0], None, False),
+  )
+  def test_is_not_converged(self, valid_losses, stop_reason, expected):
+    self.assertEqual(
+        common.is_not_converged(
+            _training_logs(valid_losses, stop_reason), early_stopping=None
+        ),
+        expected,
+    )
+
+  def test_is_not_converged_uses_early_stopping_config(self):
+    logs = _training_logs(
+        [3.0, 1.0, 0.95, 0.9], common.StopReason.MAX_NUM_TRAIN_STEPS
+    )
+    # Improvements of 0.05 are not significant: The best loss is reached at the
+    # second validation, two validations ago.
+    self.assertFalse(
+        common.is_not_converged(
+            logs,
+            early_stopping_monitor.EarlyStoppingMonitorConfig(
+                patience=2, min_improvement=0.2
+            ),
+        )
+    )
+    self.assertTrue(
+        common.is_not_converged(
+            logs,
+            early_stopping_monitor.EarlyStoppingMonitorConfig(
+                patience=3, min_improvement=0.2
+            ),
+        )
+    )
+
+  def test_warn_if_not_converged_max_num_steps(self):
+    with log.capture_logs() as logs:
+      common.warn_if_not_converged(
+          _training_logs([3.0, 2.0], common.StopReason.MAX_NUM_TRAIN_STEPS),
+          common.HParam(num_train_steps=200),
+      )
+    self.assertLen(logs, 1)
+    self.assertEqual(logs[0].severity, log.Severity.WARNING)
+    self.assertIn("not converged", logs[0].text)
+    self.assertIn("`num_train_steps`=200", logs[0].text)
+    self.assertIn("increasing `num_train_steps`", logs[0].text)
+
+  def test_warn_if_not_converged_max_training_time(self):
+    with log.capture_logs() as logs:
+      common.warn_if_not_converged(
+          _training_logs([3.0, 2.0], common.StopReason.MAX_TRAINING_TIME),
+          common.HParam(max_training_time_seconds=60),
+      )
+    self.assertLen(logs, 1)
+    self.assertIn("`max_training_time_seconds`=60", logs[0].text)
+    self.assertIn("increasing `max_training_time_seconds`", logs[0].text)
+
+  def test_warn_if_not_converged_converged(self):
+    with log.capture_logs() as logs:
+      common.warn_if_not_converged(
+          _training_logs([3.0, 2.0], common.StopReason.EARLY_STOPPING),
+          common.HParam(),
+      )
+    self.assertEmpty(logs)
+
+  def test_metadata_json_with_stop_reason(self):
+    metadata = common.Metadata(
+        name="test",
+        trainig_logs=_training_logs(
+            [1.0], common.StopReason.MAX_NUM_TRAIN_STEPS
+        ),
+    )
+    restored = common.Metadata.from_json(metadata.to_json())  # pyrefly: ignore[missing-attribute]
+    self.assertEqual(
+        restored.trainig_logs.stop_reason,
+        common.StopReason.MAX_NUM_TRAIN_STEPS,
+    )
+
+  def test_metadata_json_without_stop_reason(self):
+    # Models saved before the introduction of `stop_reason`.
+    restored = common.Metadata.from_json(  # pyrefly: ignore[missing-attribute]
+        json.dumps({
+            "name": "test",
+            "trainig_logs": {"train": [], "valid": [], "num_train_step": 10},
+        })
+    )
+    self.assertIsNone(restored.trainig_logs.stop_reason)
 
 
 if __name__ == "__main__":

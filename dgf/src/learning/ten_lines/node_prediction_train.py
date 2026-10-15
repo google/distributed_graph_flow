@@ -712,7 +712,9 @@ def train_node_model(
         train=train_results.train_logs,
         valid=train_results.valid_logs,
         num_train_step=train_results.num_train_step,
+        stop_reason=train_results.stop_reason,
     )
+    common.warn_if_not_converged(model.metadata.trainig_logs, hparams)
 
     if evaluate_final_model and valid_dataset is not None:
       if verbose >= 1:

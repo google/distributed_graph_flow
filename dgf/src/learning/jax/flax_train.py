@@ -48,7 +48,6 @@ else:
 
 from dgf.src.learning import early_stopping_monitor  # pylint: disable=g-import-not-at-top
 from dgf.src.learning.jax import common
-from dgf.src.learning.ten_lines import common as ten_lines_common
 from dgf.src.util import log
 from dgf.src.util import util
 import flax.linen as nn
@@ -167,7 +166,8 @@ def _append_to_display_dict(
     output[f"{prefix}{k}"] = f"{v:.4f}"
 
 
-LogItem = ten_lines_common.LogItem
+LogItem = common.LogItem
+StopReason = common.StopReason
 
 
 @dataclasses.dataclass
@@ -180,6 +180,7 @@ class TrainResult:
     train_logs: A list of LogItem objects containing the training metrics.
     valid_logs: A list of LogItem objects containing the validation metrics.
     num_train_step: Number of training steps.
+    stop_reason: Why the training stopped.
   """
 
   model_params: optax.Params
@@ -187,6 +188,7 @@ class TrainResult:
   train_logs: list[LogItem]
   valid_logs: list[LogItem]
   num_train_step: int
+  stop_reason: StopReason
 
 
 @dataclasses.dataclass(frozen=True)
@@ -395,6 +397,7 @@ def train(
       - `opt_state`: The final optimizer state.
       - `train_logs`: A list of `LogItem` for training metrics.
       - `valid_logs`: A list of `LogItem` for validation metrics.
+      - `stop_reason`: Why the training stopped.
   """
 
   if dummy_data is not None and dummy_data_fn is not None:
@@ -622,6 +625,7 @@ def train(
   )
   effective_num_train_steps = 0
   last_checkpoint_time = time.monotonic()
+  stop_reason = StopReason.MAX_NUM_TRAIN_STEPS
   for step in pbar:
     with jax.profiler.StepTraceAnnotation("train", step_num=step):
       t_step_start = time.perf_counter()
@@ -632,6 +636,7 @@ def train(
               "Max training time of %s seconds exceeded. Stopping training.",
               max_training_time_seconds,
           )
+          stop_reason = StopReason.MAX_TRAINING_TIME
           break
 
       rng_key, step_key = jax.random.split(state.rng_key, 2)
@@ -639,6 +644,7 @@ def train(
         batch = next(dataset_iterator, None)
       if batch is None:
         log.info("Dataset iterator depleted (returned None). Stopping training")
+        stop_reason = StopReason.DATASET_EXHAUSTED
         break
 
       with jax.profiler.TraceAnnotation("train step"):
@@ -695,6 +701,7 @@ def train(
           )
           if es_monitor.should_stop():
             log.info("Early stopping triggered at step %s.", step)
+            stop_reason = StopReason.EARLY_STOPPING
             break
 
       # Checkpointing
@@ -782,4 +789,5 @@ def train(
       train_logs=train_logs,
       valid_logs=valid_logs,
       num_train_step=effective_num_train_steps,
+      stop_reason=stop_reason,
   )

@@ -59,6 +59,10 @@ FILENAME_PARAMS = "params"
 # training.
 SKIPPED_SAMPLES_CHECK_STEP = 2000
 
+# Number of validation evaluations used to decide whether the validation loss
+# is still improving, when early stopping is disabled. See `is_not_converged`.
+_DEFAULT_CONVERGENCE_PATIENCE = 5
+
 
 class Architecture(enum.Enum):
   HETEROGENEOUS_MESSAGE_PASSING = "HETEROGENEOUS_MESSAGE_PASSING"
@@ -223,17 +227,8 @@ def resolve_tf_function_input_format(
   return TFFunctionInputFormat.TF_GRAPH
 
 
-@dataclasses.dataclass
-class LogItem:
-  """A single log item.
-
-  Attributes:
-    step: The current training step.
-    metrics: A dictionary of metrics for the current step.
-  """
-
-  step: int
-  metrics: dict[str, float]
+LogItem = jax_common.LogItem
+StopReason = jax_common.StopReason
 
 
 @dataclasses.dataclass
@@ -246,11 +241,93 @@ class TrainingLogs:
     num_train_step: The number of training steps of the final model. Note that
       the training logs might contain more steps if early stopping was used and
       the model was reverted to a previous version.
+    stop_reason: Why the training stopped.
   """
 
   train: list[LogItem]
   valid: list[LogItem]
   num_train_step: int
+  stop_reason: StopReason | None = None
+
+
+def is_not_converged(
+    training_logs: TrainingLogs,
+    early_stopping: early_stopping_monitor.EarlyStoppingMonitorConfig | None,
+) -> bool:
+  """Checks if the training stopped while the model was still improving.
+
+  The model is considered not converged if the training stopped because of the
+  maximum number of steps or the maximum training time, while the best
+  validation loss was obtained in one of the last `patience` validations.
+
+  Args:
+    training_logs: The training logs.
+    early_stopping: The early stopping configuration used during training.
+
+  Returns:
+    True if the model has likely not converged. False if the model has
+    converged, or if convergence cannot be determined (e.g., no validation).
+  """
+  if training_logs.stop_reason not in (
+      StopReason.MAX_NUM_TRAIN_STEPS,
+      StopReason.MAX_TRAINING_TIME,
+  ):
+    return False
+  valid_losses = [
+      item.metrics["loss"]
+      for item in training_logs.valid
+      if "loss" in item.metrics
+  ]
+  if not valid_losses:
+    return False
+  if early_stopping is not None:
+    patience = early_stopping.patience
+    min_improvement = early_stopping.min_improvement
+  else:
+    patience = _DEFAULT_CONVERGENCE_PATIENCE
+    min_improvement = 0.0
+  # Index of the first validation reaching the best loss (up to
+  # `min_improvement`).
+  best_loss = min(valid_losses)
+  best_idx = next(
+      i
+      for i, loss in enumerate(valid_losses)
+      if loss - best_loss <= min_improvement
+  )
+  return len(valid_losses) - 1 - best_idx < patience
+
+
+def warn_if_not_converged(
+    training_logs: TrainingLogs,
+    hparams: "HParam",
+) -> None:
+  """Prints a warning if the model has likely not converged.
+
+  Args:
+    training_logs: The training logs.
+    hparams: The hyper-parameters used for training.
+  """
+  if not is_not_converged(training_logs, hparams.early_stopping):
+    return
+  if training_logs.stop_reason == StopReason.MAX_TRAINING_TIME:
+    limit = (
+        "maximum training time (`max_training_time_seconds`="
+        f"{hparams.max_training_time_seconds})"
+    )
+    recommendation = "increasing `max_training_time_seconds`"
+  else:
+    limit = (
+        "maximum number of training steps (`num_train_steps`="
+        f"{hparams.num_train_steps})"
+    )
+    recommendation = "increasing `num_train_steps`"
+  log.warning(
+      "The model has likely not converged: Training stopped at the %s while"
+      " the validation loss was still improving. The model quality can likely"
+      " be improved by %s or `learning_rate`.",
+      limit,
+      recommendation,
+  )
 
 
 class Model(abc.ABC):
