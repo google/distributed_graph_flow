@@ -323,6 +323,7 @@ def train_link_model(
     *,
     max_training_time_seconds: int | None = None,
     work_dir: str | None = None,
+    checkpoint_every_n_minutes: float | None = 10.0,
     verbose: int = 2,
     validation_ratio: float = 0.1,
     train_seed_edges: list[int] | None = None,
@@ -385,6 +386,11 @@ def train_link_model(
     max_training_time_seconds: Maximum training time in seconds. If not
       provided, does not limit training time.
     work_dir: Working directory to store checkpoints.
+    checkpoint_every_n_minutes: Interval, in minutes, between periodic
+      checkpoints when `work_dir` is set. Periodic checkpoints are written
+      asynchronously and skipped if the previous one is still being written.
+      If None, only the final checkpoint is written at the end of training.
+      Ignored if `work_dir` is not set.
     verbose: Verbosity level. From 0 (no logs) to 2 (lots of logs).
     validation_ratio: Ratio of edges to use for validation. Only used if the
       "valid_graph" and "valid_seed_edges" arguments are not provided.
@@ -722,6 +728,7 @@ def train_link_model(
           num_train_steps=num_train_steps,  # pyrefly: ignore[bad-argument-type]
           rng_key=jax.random.PRNGKey(hparams.random_seed),
           working_path=checkpoint_dir,
+          checkpoint_every_n_minutes=checkpoint_every_n_minutes,
           disable_progress_bar=verbose == 0,
           display_model_structure=verbose >= 3,
           train_log_every_n_steps=100,

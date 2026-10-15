@@ -840,6 +840,30 @@ class NodePredictionRealLooking(parameterized.TestCase):
     self.assertEqual(model.data().training_stats.num_train_seed_nodes, 200)
     self.assertEqual(model.data().training_stats.num_valid_seed_nodes, 10)
 
+  def test_checkpoint_every_n_minutes(self):
+    work_dir = self.create_tempdir().full_path
+    with mock.patch.object(
+        node_prediction_lib.flax_train,
+        "train",
+        wraps=node_prediction_lib.flax_train.train,
+    ) as mock_train:
+      node_prediction_lib.train_node_model(
+          graph=self.graph,
+          schema=self.schema,
+          target_nodeset="client",
+          target_column="categorical_label",
+          work_dir=work_dir,
+          checkpoint_every_n_minutes=3.5,
+          **RAPID_TRAINING_KWARGS,
+      )
+    self.assertEqual(
+        mock_train.call_args.kwargs["checkpoint_every_n_minutes"], 3.5
+    )
+    # The final checkpoint is always written.
+    self.assertNotEmpty(
+        os.listdir(os.path.join(work_dir, "checkpoint", "checkpoints"))
+    )
+
   def test_valid_graph(self):
     model = node_prediction_lib.train_node_model(
         graph=self.graph,

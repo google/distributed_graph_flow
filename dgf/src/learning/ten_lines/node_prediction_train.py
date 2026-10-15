@@ -156,6 +156,7 @@ def train_node_model(
     target_nodeset: str | None = None,
     max_training_time_seconds: int | None = None,
     work_dir: str | None = None,
+    checkpoint_every_n_minutes: float | None = 10.0,
     verbose: int = 2,
     validation_ratio: float = 0.1,
     train_seed_nodes: common.SeedNodeIdxs | None = None,
@@ -207,6 +208,11 @@ def train_node_model(
       seconds. If None, training runs until convergence or default limits.
     work_dir: Optional. Directory to store model checkpoints. If not provided,
       the training is not checkpointed.
+    checkpoint_every_n_minutes: Interval, in minutes, between periodic
+      checkpoints when `work_dir` is set. Periodic checkpoints are written
+      asynchronously and skipped if the previous one is still being written.
+      If None, only the final checkpoint is written at the end of training.
+      Ignored if `work_dir` is not set.
     verbose: The verbosity level. Higher values provide more output.
     validation_ratio: Ratio of the training dataset used to create the
       validation dataset in case no validation dataset is manually provided
@@ -643,6 +649,7 @@ def train_node_model(
             num_train_steps=num_train_steps,  # pyrefly: ignore[bad-argument-type]
             rng_key=jax.random.PRNGKey(hparams.random_seed),
             working_path=checkpoint_dir,
+            checkpoint_every_n_minutes=checkpoint_every_n_minutes,
             disable_progress_bar=verbose == 0,
             display_model_structure=verbose >= 3,
             train_log_every_n_steps=100,

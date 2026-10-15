@@ -220,7 +220,7 @@ def _save_checkpoint(
   }
   if state.es_state is not None:
     save_item["es_state"] = state.es_state
-  checkpoint_manager.save(state.step, save_item)
+  checkpoint_manager.save(state.step, args=ocp.args.PyTreeSave(save_item))
 
 
 def _restore_checkpoint(
@@ -293,7 +293,8 @@ def train(
     metric_writer: metric_writers.MetricWriter | None = None,
     checkpoint_manager: ocp.CheckpointManager | None = None,
     train_log_every_n_steps: int = 100,
-    checkpoint_every_n_steps: int | None = 1000,
+    checkpoint_every_n_steps: int | None = None,
+    checkpoint_every_n_minutes: float | None = 10.0,
     disable_progress_bar: bool = False,
     display_model_structure: bool = False,
     valid_every_n_steps: int = 1000,
@@ -353,7 +354,12 @@ def train(
     train_log_every_n_steps: The frequency (in steps) at which training metrics
       are accumulated, logged, and displayed.
     checkpoint_every_n_steps: The frequency (in steps) at which model
-      checkpoints are saved. If `None`, checkpointing is disabled.
+      checkpoints are saved. If `None`, step-based periodic checkpointing is
+      disabled.
+    checkpoint_every_n_minutes: The frequency (in minutes) at which model
+      checkpoints are saved. If `None`, time-based periodic checkpointing is
+      disabled. Note that the final checkpoint at the end of training is always
+      saved when `checkpoint_manager` or `working_path` is provided.
     disable_progress_bar: If `True`, the tqdm progress bar will be suppressed.
     display_model_structure: If `True`, the model structure will be printed
       using `model.tabulate` before training starts.
@@ -492,10 +498,14 @@ def train(
   # Check for existing checkpoints (pre-emption tolerance).
   if checkpoint_manager is None:
     if working_path is not None:
-      options = ocp.CheckpointManagerOptions(max_to_keep=3, create=True)
+      # Checkpoints are written asynchronously: `save` only blocks for the
+      # device-to-host copy, and the (possibly slow, e.g. on CNS) write happens
+      # in a background thread.
+      options = ocp.CheckpointManagerOptions(
+          max_to_keep=3, create=True, enable_async_checkpointing=True
+      )
       checkpoint_manager = ocp.CheckpointManager(
           os.path.join(working_path, "checkpoints"),
-          ocp.PyTreeCheckpointer(),
           options=options,
       )
     else:
@@ -584,6 +594,10 @@ def train(
     log.info("Will validate model every %s step(s)", valid_every_n_steps)
   if checkpoint_every_n_steps is not None:
     log.info("Will checkpoint model every %s step(s)", checkpoint_every_n_steps)
+  if checkpoint_every_n_minutes is not None:
+    log.info(
+        "Will checkpoint model every %s minute(s)", checkpoint_every_n_minutes
+    )
 
   if aot_compile and hasattr(train_step, "lower"):
     sample_batch = first_batch if first_batch is not None else dummy_data
@@ -607,6 +621,7 @@ def train(
       desc="Training",
   )
   effective_num_train_steps = 0
+  last_checkpoint_time = time.monotonic()
   for step in pbar:
     with jax.profiler.StepTraceAnnotation("train", step_num=step):
       t_step_start = time.perf_counter()
@@ -683,15 +698,29 @@ def train(
             break
 
       # Checkpointing
-      if (
-          checkpoint_manager is not None
-          and checkpoint_every_n_steps is not None
-          and step % checkpoint_every_n_steps == 0
-      ):
-        _save_checkpoint(
-            checkpoint_manager=checkpoint_manager,
-            state=state,
+      if checkpoint_manager is not None:
+        should_checkpoint_steps = (
+            checkpoint_every_n_steps is not None
+            and step % checkpoint_every_n_steps == 0
         )
+        should_checkpoint_time = (
+            checkpoint_every_n_minutes is not None
+            and (time.monotonic() - last_checkpoint_time)
+            >= checkpoint_every_n_minutes * 60.0
+        )
+        if should_checkpoint_steps or should_checkpoint_time:
+          if checkpoint_manager.is_saving_in_progress():
+            # Skip this checkpoint instead of blocking the training until the
+            # previous (asynchronous) checkpoint is written.
+            log.info(
+                "Skip checkpoint at step %d: previous save in progress.", step
+            )
+          else:
+            _save_checkpoint(
+                checkpoint_manager=checkpoint_manager,
+                state=state,
+            )
+          last_checkpoint_time = time.monotonic()
       effective_num_train_steps += 1
   # Final logging
   if (es_monitor is None or not es_monitor.should_stop()) and state.step > 0:
@@ -726,11 +755,15 @@ def train(
   # Final checkpointing
   if checkpoint_manager is not None and state.step > 0:
     pbar.write("Saving final checkpoint...")
-    _save_checkpoint(
-        checkpoint_manager=checkpoint_manager,
-        state=state,
-    )
+    # Wait for the in-flight periodic checkpoint (if any) before saving the
+    # final one. The step might already be saved by the periodic checkpoint.
     checkpoint_manager.wait_until_finished()
+    if state.step not in checkpoint_manager.all_steps():
+      _save_checkpoint(
+          checkpoint_manager=checkpoint_manager,
+          state=state,
+      )
+      checkpoint_manager.wait_until_finished()
     pbar.write(
         f"Training complete. Final model saved at step {state.step}.",
     )

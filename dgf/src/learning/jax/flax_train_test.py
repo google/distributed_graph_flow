@@ -246,6 +246,95 @@ class FlaxTrainTest(parameterized.TestCase):
     self.assertIsNotNone(result_resumed.model_params)
     self.assertIsNotNone(result_resumed.opt_state)
 
+  def test_checkpoint_skipped_while_save_in_progress(self):
+    work_dir = self.create_tempdir()
+
+    def train_step(params, opt_state, batch, rng_key):
+      return params, opt_state, {"loss": jnp.array(0.5)}
+
+    checkpoint_manager = ocp.CheckpointManager(
+        os.path.join(work_dir.full_path, "checkpoints"),
+        options=ocp.CheckpointManagerOptions(
+            max_to_keep=10, create=True, enable_async_checkpointing=True
+        ),
+    )
+    # Simulates a slow (e.g. remote file system) save that is never finished
+    # when the next periodic checkpoint is due.
+    with mock.patch.object(
+        checkpoint_manager, "is_saving_in_progress", return_value=True
+    ):
+      flax_train.train(
+          model=SimpleModel(hidden_dim=8),
+          opt=optax.adam(1e-3),
+          train_step=train_step,
+          dataset_iterator=dataset_iterator(num_steps=None, batch_size=4),
+          dummy_data_fn=lambda x: x["data"],
+          num_train_steps=10,
+          checkpoint_every_n_steps=2,
+          checkpoint_manager=checkpoint_manager,
+          rng_key=jax.random.PRNGKey(42),
+      )
+
+    # The periodic checkpoints are skipped instead of blocking the training.
+    # Only the final checkpoint is saved.
+    self.assertEqual(checkpoint_manager.all_steps(), [10])
+
+  def test_checkpoint_every_n_minutes_and_final_checkpoint(self):
+    work_dir_default = self.create_tempdir()
+    work_dir_periodic = self.create_tempdir()
+
+    checkpoint_manager_default = ocp.CheckpointManager(
+        os.path.join(work_dir_default.full_path, "checkpoints"),
+        options=ocp.CheckpointManagerOptions(
+            max_to_keep=10, create=True, enable_async_checkpointing=True
+        ),
+    )
+
+    def train_step(params, opt_state, batch, rng_key):
+      del batch, rng_key
+      return params, opt_state, {"loss": jnp.array(0.5)}
+
+    # With default checkpoint_every_n_minutes=10.0, a fast 5-step run only
+    # writes the final checkpoint at step 5.
+    flax_train.train(
+        model=SimpleModel(hidden_dim=8),
+        opt=optax.adam(1e-3),
+        train_step=train_step,
+        dataset_iterator=dataset_iterator(num_steps=None, batch_size=4),
+        dummy_data_fn=lambda x: x["data"],
+        num_train_steps=5,
+        checkpoint_manager=checkpoint_manager_default,
+        rng_key=jax.random.PRNGKey(42),
+    )
+    self.assertEqual(checkpoint_manager_default.all_steps(), [5])
+
+    # With checkpoint_every_n_minutes=0.0, periodic checkpoints trigger on
+    # every step once any in-flight save finishes.
+    checkpoint_manager_periodic = ocp.CheckpointManager(
+        os.path.join(work_dir_periodic.full_path, "checkpoints"),
+        options=ocp.CheckpointManagerOptions(
+            max_to_keep=10, create=True, enable_async_checkpointing=True
+        ),
+    )
+
+    def train_step_wait(params, opt_state, batch, rng_key):
+      del batch, rng_key
+      checkpoint_manager_periodic.wait_until_finished()
+      return params, opt_state, {"loss": jnp.array(0.5)}
+
+    flax_train.train(
+        model=SimpleModel(hidden_dim=8),
+        opt=optax.adam(1e-3),
+        train_step=train_step_wait,
+        dataset_iterator=dataset_iterator(num_steps=None, batch_size=4),
+        dummy_data_fn=lambda x: x["data"],
+        num_train_steps=3,
+        checkpoint_every_n_minutes=0.0,
+        checkpoint_manager=checkpoint_manager_periodic,
+        rng_key=jax.random.PRNGKey(42),
+    )
+    self.assertEqual(checkpoint_manager_periodic.all_steps(), [1, 2, 3])
+
   def test_resume_from_old_checkpoint_format(self):
     """Verifies backward compatibility with old checkpoints (only params and opt_state)."""
     work_dir = self.create_tempdir()
