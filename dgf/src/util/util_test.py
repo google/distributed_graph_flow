@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from unittest import mock
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.util import util
@@ -199,6 +201,37 @@ class SplitTrainValidTest(parameterized.TestCase):
     self.assertLen(train_idxs, expected_train)
     all_idxs = np.concatenate([train_idxs, valid_idxs])
     self.assertCountEqual(all_idxs.tolist(), list(range(num_values)))
+
+  @parameterized.named_parameters(
+      (
+          "random",
+          lambda max_valid: util.split_train_valid(
+              10, 0.5, random_seed=42, max_num_valid_examples=max_valid
+          ),
+      ),
+      (
+          "temporal",
+          lambda max_valid: util.split_train_valid_temporal(
+              np.arange(10), 0.5, max_num_valid_examples=max_valid
+          ),
+      ),
+  )
+  @mock.patch("dgf.src.util.util.log.warning")
+  def test_truncation_warning_mentions_training_set(
+      self, split_fn, mock_warning
+  ):
+    train_idxs, valid_idxs = split_fn(2)
+    self.assertLen(valid_idxs, 2)
+    self.assertLen(train_idxs, 8)
+    mock_warning.assert_called_once()
+    message = mock_warning.call_args[0][0] % mock_warning.call_args[0][1:]
+    self.assertIn("truncated from 5 to 2 nodes", message)
+    self.assertIn("extra nodes are used for training instead", message)
+
+  @mock.patch("dgf.src.util.util.log.warning")
+  def test_no_truncation_warning(self, mock_warning):
+    util.split_train_valid(10, 0.2, random_seed=42, max_num_valid_examples=5)
+    mock_warning.assert_not_called()
 
   def test_randomness_and_consistency(self):
     num_values = 100

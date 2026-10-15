@@ -191,6 +191,31 @@ class RichDisplay:
     return self._html
 
 
+def _truncate_num_valid(
+    num_valid: int, max_num_valid_examples: int | None
+) -> int:
+  """Caps the number of validation examples to `max_num_valid_examples`.
+
+  Args:
+    num_valid: The requested number of validation examples.
+    max_num_valid_examples: Optional maximum number of validation examples.
+
+  Returns:
+    The number of validation examples.
+  """
+  if max_num_valid_examples is None or num_valid <= max_num_valid_examples:
+    return num_valid
+  log.warning(
+      "Validation set truncated from %d to %d nodes due to caching limits. The"
+      " extra nodes are used for training instead. To use more validation"
+      " nodes, either increase `num_valid_steps` or set"
+      " `cache_valid_dataset=False`.",
+      num_valid,
+      max_num_valid_examples,
+  )
+  return max_num_valid_examples
+
+
 def split_train_valid(
     num_values: int,
     validation_ratio: float,
@@ -234,16 +259,7 @@ def split_train_valid(
   if validation_ratio > 0 and num_values >= 2:
     num_valid = max(batch_size, num_valid)
 
-  if max_num_valid_examples is not None:
-    if num_valid > max_num_valid_examples:
-      log.warning(
-          "Validation set truncated from %d to %d nodes due to caching limits."
-          " To use more validation nodes, either increase `num_valid_steps` or"
-          " set `cache_valid_dataset=False`.",
-          num_valid,
-          max_num_valid_examples,
-      )
-      num_valid = max_num_valid_examples
+  num_valid = _truncate_num_valid(num_valid, max_num_valid_examples)
 
   valid_idxs = all_idxs[:num_valid]
   train_idxs = all_idxs[num_valid:]
@@ -293,16 +309,7 @@ def split_train_valid_temporal(
   if validation_ratio > 0 and num_values >= 2:
     num_valid = max(batch_size, num_valid)
 
-  if max_num_valid_examples is not None:
-    if num_valid > max_num_valid_examples:
-      log.warning(
-          "Validation set truncated from %d to %d nodes due to caching limits."
-          " To use more validation nodes, either increase `num_valid_steps` or"
-          " set `cache_valid_dataset=False`.",
-          num_valid,
-          max_num_valid_examples,
-      )
-      num_valid = max_num_valid_examples
+  num_valid = _truncate_num_valid(num_valid, max_num_valid_examples)
 
   train_cutoff = num_values - num_valid
   train_idxs = sorted_idxs[:train_cutoff]
