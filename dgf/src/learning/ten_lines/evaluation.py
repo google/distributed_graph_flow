@@ -36,12 +36,13 @@ class ClassificationEvaluationAccumulator:
   - `pos_histograms`: counts of positive examples in each score bin.
   - `neg_histograms`: counts of negative examples in each score bin.
 
-  Predictions (scores between 0.0 and 1.0) are mapped to bins:
-  `bin = min(int(score * num_bins), num_bins - 1)`
+  Predictions (scores between 0.0 and 1.0) are mapped to bins uniformly
+  distributed in the logit space in [-20, 20], which gives a high resolution
+  for the small scores of minor classes.
 
   When `extract_metrics` is called, it computes:
   - Confusion matrix counts (TP, FP, TN, FN) for each threshold. The thresholds
-    are defined by the bin boundaries: `threshold = bin_index / num_bins`.
+    are the lower bin boundaries.
   - ROC AUC: Computed using the trapezoidal rule on the ROC curve (FPR vs TPR).
     Since TPR and FPR evolve linearly between bins, the trapezoidal rule gives
     an exact calculation of the area under the binned curve.

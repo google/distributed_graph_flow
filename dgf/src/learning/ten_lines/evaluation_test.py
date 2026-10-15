@@ -141,6 +141,42 @@ class EvaluationTest(absltest.TestCase):
       # With binning it might fluctuate slightly, but should be very close.
       self.assertAlmostEqual(pc.pr_auc(), sk_pr_auc, places=2)
 
+  def test_classification_evaluation_accumulator_minor_class(self):
+    # A minor class with very small scores.
+    rng = np.random.default_rng(42)
+    num_pos = 200
+    num_neg = 20000
+    pos_logits = rng.normal(-9.0, 1.0, num_pos)
+    neg_logits = rng.normal(-12.0, 1.0, num_neg)
+    scores = 1.0 / (1.0 + np.exp(-np.concatenate([pos_logits, neg_logits])))
+    self.assertLess(scores.max(), 1e-2)
+    binary_targets = np.concatenate(
+        [np.ones(num_pos, np.int32), np.zeros(num_neg, np.int32)]
+    )
+    predictions = np.stack([1.0 - scores, scores], axis=1).astype(np.float32)
+
+    accumulator = evaluation_lib.ClassificationEvaluationAccumulator(2)
+    accumulator.add_predictions(predictions, binary_targets)
+    pc = accumulator.extract_metrics()[1]
+
+    sk_auc = sklearn_metrics.roc_auc_score(binary_targets, predictions[:, 1])
+    self.assertAlmostEqual(pc.auc(), sk_auc, places=3)
+    sk_ap = sklearn_metrics.average_precision_score(
+        binary_targets, predictions[:, 1]
+    )
+    self.assertAlmostEqual(pc.pr_auc(), sk_ap, places=2)
+    # The thresholds are decreasing and in [0, 1 + 1/num_bins].
+    self.assertTrue(np.all(np.diff(pc.thresholds) < 0))
+    self.assertEqual(pc.thresholds[-1], 0.0)
+
+  def test_classification_evaluation_accumulator_nan(self):
+    accumulator = evaluation_lib.ClassificationEvaluationAccumulator(2)
+    with self.assertRaisesRegex(ValueError, "NaN"):
+      accumulator.add_predictions(
+          np.array([[np.nan, 0.5]], dtype=np.float32),
+          np.array([0], dtype=np.int32),
+      )
+
   def test_evaluation_populate_from_accumulator(self):
     num_classes = 2
     accumulator = evaluation_lib.ClassificationEvaluationAccumulator(

@@ -22,6 +22,70 @@ from dgf.src.util import html_util
 import numpy as np
 import pandas as pd
 
+# Maximum number of points of each plotted class curve.
+_DEFAULT_MAX_PLOT_POINTS = 1000
+
+
+def _downsample_curve(
+    x: np.ndarray, y: np.ndarray, num_points: int
+) -> tuple[np.ndarray, np.ndarray]:
+  """Selects points uniformly along the length of a 2D curve (not its indices).
+
+  Args:
+    x: X coordinates of the curve.
+    y: Y coordinates of the curve.
+    num_points: Target number of points. Up to `2 * num_points + 1` points are
+      returned.
+
+  Returns:
+    The downsampled x and y coordinates, in the original order. The first and
+    last points are always included.
+  """
+  if len(x) <= num_points:
+    return x, y
+  segment_lengths = np.abs(np.diff(x)) + np.abs(np.diff(y))
+  cumulative_length = np.concatenate([[0.0], np.cumsum(segment_lengths)])
+  total_length = cumulative_length[-1]
+  if total_length == 0:
+    indices = np.array([0, len(x) - 1])
+  else:
+    targets = np.linspace(0.0, total_length, num_points)
+    indices = np.searchsorted(cumulative_length, targets, side="left")
+    indices = np.clip(indices, 0, len(x) - 1)
+    # Also keep the previous points to preserve sharp corners.
+    indices = np.concatenate([[0], indices, np.maximum(indices - 1, 0)])
+    indices = np.unique(indices)
+  return x[indices], y[indices]
+
+
+def _roc_convex_hull(
+    fpr: np.ndarray, tpr: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+  """Computes the upper convex hull of a ROC curve (ROCCH).
+
+  Any point on the hull is achievable by randomly interpolating between two
+  thresholds (Provost & Fawcett, 2001).
+
+  Args:
+    fpr: False positive rates.
+    tpr: True positive rates.
+
+  Returns:
+    The fpr and tpr of the hull vertices, sorted by increasing fpr.
+  """
+  points = np.unique(np.stack([fpr, tpr], axis=1), axis=0)
+  hull = []
+  for p in points:
+    while len(hull) >= 2:
+      o, a = hull[-2], hull[-1]
+      cross = (a[0] - o[0]) * (p[1] - o[1]) - (a[1] - o[1]) * (p[0] - o[0])
+      if cross < 0:
+        break
+      hull.pop()
+    hull.append(p)
+  hull = np.array(hull)
+  return hull[:, 0], hull[:, 1]
+
 
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass
@@ -191,18 +255,12 @@ class Evaluation:
             f"<p>*Showing plots for the first {max_plot_classes} classes out of"
             f" {len(self.per_classes)} total classes.</p>"
         )
-      num_classes_to_plot = min(len(self.per_classes), max_plot_classes)
-      points_per_class = max(10, max_plot_points // num_classes_to_plot)
       roc_data = []
       for c, pc in enumerate(self.per_classes[:max_plot_classes]):
-        fpr = pc.fpr
-        tpr = pc.tpr
-        if len(fpr) > points_per_class:
-          indices = np.linspace(0, len(fpr) - 1, points_per_class, dtype=int)
-          fpr = fpr[indices]
-          tpr = tpr[indices]
-        for f, t in zip(fpr, tpr):
-          roc_data.append({"Class": str(c), "FPR": f, "TPR": t})
+        fpr, tpr = _roc_convex_hull(pc.fpr, pc.tpr)
+        fpr, tpr = _downsample_curve(fpr, tpr, max_plot_points)
+        for i, (f, t) in enumerate(zip(fpr, tpr)):
+          roc_data.append({"Class": str(c), "FPR": f, "TPR": t, "Index": i})
       roc_df = pd.DataFrame(roc_data)
 
       roc_chart = (
@@ -212,22 +270,21 @@ class Evaluation:
               x=alt.X("FPR", title="False Positive Rate"),
               y=alt.Y("TPR", title="True Positive Rate"),
               color="Class",
+              # The default x order is ambiguous for vertical segments.
+              order="Index",
           )
-          .properties(title="ROC Curve", width=300, height=300)
+          .properties(title="ROC Curve (convex hull)", width=300, height=300)
       )
 
       pr_data = []
       for c, pc in enumerate(self.per_classes[:max_plot_classes]):
-        precision = pc.precision
-        recall = pc.recall
-        if len(precision) > points_per_class:
-          indices = np.linspace(
-              0, len(precision) - 1, points_per_class, dtype=int
+        recall, precision = _downsample_curve(
+            pc.recall, pc.precision, max_plot_points
+        )
+        for i, (r, p) in enumerate(zip(recall, precision)):
+          pr_data.append(
+              {"Class": str(c), "Recall": r, "Precision": p, "Index": i}
           )
-          precision = precision[indices]
-          recall = recall[indices]
-        for r, p in zip(recall, precision):
-          pr_data.append({"Class": str(c), "Recall": r, "Precision": p})
       pr_df = pd.DataFrame(pr_data)
 
       pr_chart = (
@@ -237,16 +294,19 @@ class Evaluation:
               x=alt.X("Recall", title="Recall"),
               y=alt.Y("Precision", title="Precision"),
               color="Class",
+              order="Index",
           )
           .properties(title="Precision-Recall Curve", width=300, height=300)
       )
 
       combined_chart = alt.hconcat(roc_chart, pr_chart)
-      html_parts.append(
-          combined_chart.to_html(
-              fullhtml=False, output_div=f"vis-{uuid.uuid4().hex}"
-          )
-      )
+      # The number of points is already bounded by max_plot_points.
+      with alt.data_transformers.disable_max_rows():  # pyrefly: ignore[bad-context-manager]
+        html_parts.append(
+            combined_chart.to_html(
+                fullhtml=False, output_div=f"vis-{uuid.uuid4().hex}"
+            )
+        )
 
     return "\n".join(html_parts)
 

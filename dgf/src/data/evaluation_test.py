@@ -131,6 +131,67 @@ class EvaluationTest(absltest.TestCase):
     self.assertIsNotNone(html_5)
     self.assertIn("vegaEmbed", html_5)
 
+  def test_downsample_curve_preserves_shape(self):
+    # (0, 0) -> (0, 0.9) -> (1, 1) with all but one point on the first segment.
+    x = np.concatenate([np.zeros(10000), [1.0]])
+    y = np.concatenate([np.linspace(0.0, 0.9, 10000), [1.0]])
+    ds_x, ds_y = evaluation._downsample_curve(x, y, 20)
+    self.assertLessEqual(len(ds_x), 41)
+    self.assertEqual((ds_x[0], ds_y[0]), (0.0, 0.0))
+    self.assertEqual((ds_x[-1], ds_y[-1]), (1.0, 1.0))
+    # The corner at (0, 0.9) is preserved.
+    self.assertEqual((ds_x[-2], ds_y[-2]), (0.0, 0.9))
+    # The points are in the original order.
+    self.assertTrue(np.all(np.diff(ds_y) > 0))
+
+  def test_evaluation_html_many_classes_and_points(self):
+    rng = np.random.default_rng(0)
+    per_classes = []
+    for _ in range(20):
+      tp = np.cumsum(rng.integers(0, 2, 10001))
+      fp = np.cumsum(rng.integers(0, 2, 10001))
+      per_classes.append(
+          evaluation.PerClass(
+              auc_value=0.5,
+              pr_auc_value=0.5,
+              tp=tp,
+              fp=fp,
+              tn=fp[-1] - fp,
+              fn=tp[-1] - tp,
+              thresholds=np.linspace(1, 0, 10001),
+          )
+      )
+    html = evaluation.Evaluation(per_classes=per_classes).html()
+    self.assertIn("vegaEmbed", html)
+
+  def test_roc_convex_hull(self):
+    # A staircase ROC curve.
+    fpr = np.array([0.0, 0.0, 0.5, 0.5, 1.0, 1.0])
+    tpr = np.array([0.0, 0.5, 0.5, 0.8, 0.8, 1.0])
+    hull_fpr, hull_tpr = evaluation._roc_convex_hull(fpr, tpr)
+    np.testing.assert_array_equal(hull_fpr, [0.0, 0.0, 0.5, 1.0])
+    np.testing.assert_array_equal(hull_tpr, [0.0, 0.5, 0.8, 1.0])
+
+  def test_roc_convex_hull_removes_collinear_and_concave(self):
+    fpr = np.array([0.0, 0.25, 0.5, 0.6, 1.0])
+    tpr = np.array([0.0, 0.25, 0.5, 0.4, 1.0])
+    hull_fpr, hull_tpr = evaluation._roc_convex_hull(fpr, tpr)
+    np.testing.assert_array_equal(hull_fpr, [0.0, 1.0])
+    np.testing.assert_array_equal(hull_tpr, [0.0, 1.0])
+
+  def test_downsample_curve_small(self):
+    x = np.array([0.0, 0.5, 1.0])
+    y = np.array([0.0, 0.7, 1.0])
+    ds_x, ds_y = evaluation._downsample_curve(x, y, 20)
+    np.testing.assert_array_equal(ds_x, x)
+    np.testing.assert_array_equal(ds_y, y)
+
+  def test_downsample_curve_constant(self):
+    x = np.zeros(100)
+    y = np.zeros(100)
+    ds_x, _ = evaluation._downsample_curve(x, y, 20)
+    self.assertLen(ds_x, 2)
+
   def test_evaluation_html_max_plot_classes(self):
     pc1 = evaluation.PerClass(
         auc_value=0.9,

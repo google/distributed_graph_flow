@@ -19,6 +19,9 @@ namespace nb = nanobind;
 
 namespace dgf {
 
+// Bins are uniform in logit space in [-kMaxAbsLogit, kMaxAbsLogit].
+constexpr double kMaxAbsLogit = 20.0;
+
 class ClassificationEvaluationAccumulator {
  public:
   ClassificationEvaluationAccumulator(int num_classes, int num_bins)
@@ -60,9 +63,12 @@ class ClassificationEvaluationAccumulator {
                                           std::to_string(true_class));
       }
       for (int c = 0; c < num_classes_; c++) {
-        float score = pred_view(i, c);
-        score = std::clamp(score, 0.0f, 1.0f);
-        int bin = std::min(static_cast<int>(score * num_bins_), num_bins_ - 1);
+        const float score = pred_view(i, c);
+        if (std::isnan(score)) {
+          return absl::InvalidArgumentError(
+              absl::StrCat("NaN prediction for example ", i, " and class ", c));
+        }
+        const int bin = ScoreToBin(score);
         if (true_class == c) {
           per_classes_[c].pos_histogram[bin]++;
         } else {
@@ -90,6 +96,27 @@ class ClassificationEvaluationAccumulator {
   int num_classes_;
   int num_bins_;
   std::vector<PerClassHistogram> per_classes_;
+
+  // Returns the bin of a score. Logit bins give resolution for tiny scores.
+  int ScoreToBin(const float score) const {
+    const double p = std::clamp(static_cast<double>(score), 0.0, 1.0);
+    // Note: log(0) = -inf and log1p(-1) = -inf.
+    const double logit =
+        std::clamp(std::log(p) - std::log1p(-p), -kMaxAbsLogit, kMaxAbsLogit);
+    const int bin = static_cast<int>((logit + kMaxAbsLogit) /
+                                     (2 * kMaxAbsLogit) * num_bins_);
+    return std::min(bin, num_bins_ - 1);
+  }
+
+  // Returns the score (i.e., probability) at the lower boundary of a bin.
+  double BinLowerThreshold(const int bin) const {
+    if (bin == 0) {
+      return 0.0;
+    }
+    const double logit =
+        -kMaxAbsLogit + 2 * kMaxAbsLogit * static_cast<double>(bin) / num_bins_;
+    return 1.0 / (1.0 + std::exp(-logit));
+  }
 
   nb::dict ExtractClassMetrics(int c) {
     const auto& pos_hist = per_classes_[c].pos_histogram;
@@ -146,7 +173,7 @@ class ClassificationEvaluationAccumulator {
       tpr.push_back(cur_tpr);
       fpr.push_back(cur_fpr);
       recall.push_back(cur_recall);
-      thresholds.push_back(static_cast<double>(b) / num_bins_);
+      thresholds.push_back(BinLowerThreshold(b));
       tp_list.push_back(tp);
       fp_list.push_back(fp);
       tn_list.push_back(total_neg - fp);
