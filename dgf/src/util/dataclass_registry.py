@@ -147,8 +147,22 @@ class Registry:
     encoded_item[TYPE_FIELD] = key
     return encoded_item
 
-  def _decode(self, encoded_item: dict[str, Any]) -> Any:
+  def _decode(self, encoded_item: Any) -> Any:
     """Decodes a JSON dictionary to an object of a registered class."""
+    if not isinstance(encoded_item, dict):
+      # Not everything reaching this decoder comes from JSON: when a key is
+      # absent, `dataclasses_json` substitutes the field's default (or
+      # `default_factory()`) and still runs it through the decoder. Accept such
+      # an already-decoded value, but only if its class is registered, so that
+      # anything else still fails here rather than silently passing through.
+      key = self._get_key(type(encoded_item))
+      if key not in self._registered_classes:
+        raise ValueError(
+            f"Cannot decode {encoded_item!r}: expected a JSON object with a"
+            f" {TYPE_FIELD!r} field, or an instance of a registered class."
+            f" Available: {list(self._registered_classes.keys())}"
+        )
+      return encoded_item
     item_type = encoded_item.get(TYPE_FIELD)
     if not item_type:
       raise ValueError(f"Missing {TYPE_FIELD} in data: {encoded_item}")
