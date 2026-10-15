@@ -33,6 +33,7 @@ from dgf.src.io import jax as jax_lib
 from dgf.src.learning.jax import common as jax_common_lib
 from dgf.src.learning.ten_lines import common
 from dgf.src.learning.ten_lines import dataset
+from dgf.src.learning.ten_lines import inference
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import temporal as sampling_temporal_lib
 from dgf.src.transform import normalize as normalize_lib
@@ -550,18 +551,14 @@ def _get_target_nodeset_and_timestamp_feature(
     schema: schema_lib.GraphSchema,
 ) -> tuple[str | None, str | None]:
   """Resolves target nodeset and timestamp feature if normalizer requires seed_timestamps."""
-  target_nodeset = None
-  timestamp_feature = None
-  if "seed_timestamps" in live.normalizer.accepted_kwargs:
-    target_nodeset = live.sampling_plan.root.nodeset
-    timestamp_feature = temporal_util.creation_time_feature_name(
-        schema.node_sets[target_nodeset].features
-    )
-    if timestamp_feature is None:
-      raise ValueError(
-          f"The target nodeset '{target_nodeset}' must have a creation time"
-          " feature when the normalizer requires seed_timestamps."
-      )
+  if "seed_timestamps" not in live.normalizer.accepted_kwargs:
+    return None, None
+  target_nodeset = live.sampling_plan.root.nodeset
+  timestamp_feature = inference.resolve_normalizer_timestamp_feature(
+      normalizer=live.normalizer,
+      schema=schema,
+      target_nodeset=target_nodeset,
+  )
   return target_nodeset, timestamp_feature
 
 
@@ -574,29 +571,16 @@ def _normalize_batch_sample(
     timestamp_feature: str | None = None,
 ) -> in_memory_graph_lib.InMemoryGraph:
   """Normalizes a merged batch sample, expanding root timestamps if supported."""
-  normalizer_kwargs = {}
-  if "seed_timestamps" in live.normalizer.accepted_kwargs:
-    if target_nodeset is None or timestamp_feature is None:
-      target_nodeset, timestamp_feature = (
-          _get_target_nodeset_and_timestamp_feature(live, schema)
-      )
-    assert target_nodeset is not None
-    assert timestamp_feature is not None
-    root_indices = merge_offsets[target_nodeset][:-1]
-    seed_timestamps = np.asarray(
-        sample.node_sets[target_nodeset].features[timestamp_feature][
-            root_indices
-        ]
-    ).reshape(-1)
-    normalizer_kwargs["seed_timestamps"] = (
-        temporal_util.expand_batch_seed_timestamps(
-            sample=sample,
-            merge_offsets=merge_offsets,
-            schema=schema,
-            seed_timestamps=seed_timestamps,
-        )
-    )
-  return live.normalizer.normalize_numpy(sample, **normalizer_kwargs)
+  if target_nodeset is None:
+    target_nodeset = live.sampling_plan.root.nodeset
+  return inference.normalize_merged_graph(
+      sample,
+      merge_offsets,
+      schema=schema,
+      normalizer=live.normalizer,
+      target_nodeset=target_nodeset,
+      timestamp_feature=timestamp_feature,
+  )
 
 
 def attach_features_from_numpy_graph(

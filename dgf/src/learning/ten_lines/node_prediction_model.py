@@ -40,14 +40,13 @@ from dgf.src.learning.jax.layers import regression as regression_lib
 from dgf.src.learning.ten_lines import analyze as analyze_lib
 from dgf.src.learning.ten_lines import common
 from dgf.src.learning.ten_lines import evaluation
+from dgf.src.learning.ten_lines import inference
 from dgf.src.learning.ten_lines import node_prediction_core_model
 from dgf.src.learning.ten_lines import report
 from dgf.src.sampling import config as sampling_config_lib
-from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
 from dgf.src.util import log
-from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import jax
@@ -57,7 +56,6 @@ if getattr(tf, "is_available", lambda: True)():
 import jax.numpy as jnp
 import jaxtyping
 import numpy as np
-import tqdm
 
 Batch = node_prediction_core_model.Batch
 CoreModel = node_prediction_core_model.CoreModel
@@ -69,7 +67,9 @@ class BatchPrediction:
   """Prediction yielded by "predict_batch" function.
 
   Attributes:
-    batch_seed_node_idxs: The indices of the seed nodes in the input graph.
+    batch_seed_node_idxs: The indices of the seed nodes in the input graph, or
+      `None` when predicting on pre-sampled subgraphs where input-graph indices
+      are unknown.
     normalized_merged_graph: The merged and normalized graph sample used for
       prediction.
     merged_seed_node_idxs: The indices of the seed nodes in the
@@ -78,7 +78,7 @@ class BatchPrediction:
       batch.
   """
 
-  batch_seed_node_idxs: np.ndarray
+  batch_seed_node_idxs: np.ndarray | None
   normalized_merged_graph: in_memory_graph.InMemoryGraph
   merged_seed_node_idxs: np.ndarray
   predictions: np.ndarray
@@ -387,146 +387,45 @@ class NodePredictionModel(common.Model):
     live = self._get_live()
 
     if input_features_only:
-      schema = schema_to_input_feature_schema(
+      sampler_schema = schema_to_input_feature_schema(
           self._data.schema, self._data.task
       )
     else:
-      schema = self._data.schema
+      sampler_schema = self._data.schema
 
     # TODO(gbm): Implement a better fall-back option.
     batch_size = max(1, self._data.hparams.batch_size // 2)
 
-    sampler = in_memory_sampler_lib.create_sampler(
-        graph=graph,
-        plan=sampling_plan,
-        schema=schema,
-        batch_size=batch_size,
+    for normalized_batch in inference.generate_normalized_batches(
+        graph,
+        seed_node_idxs,
+        schema=self._data.schema,
+        sampling_plan=sampling_plan,
         padding=self._data.padding,
-    )
-
-    np_seed_node_idxs = np.asarray(seed_node_idxs)
-    batch_seed_node_idxs_generator = util.batch_indices_generator(
-        np_seed_node_idxs,
+        normalizer=live.normalizer,
+        target_nodeset=self._data.task.target_nodeset,
         batch_size=batch_size,
-        drop_remainder=False,
-        shuffle=False,
-    )
+        temporal_sampling=self._data.temporal_sampling,
+        sampler_schema=sampler_schema,
+        verbose=verbose,
+    ):
+      yield self._predict_normalized_batch(live, normalized_batch)
 
-    if verbose >= 2:
-      # Create the progress bar.
-      batch_seed_node_idxs_generator = tqdm.tqdm(
-          batch_seed_node_idxs_generator,
-          desc="Inference",
-          total=util.num_batches(
-              np_seed_node_idxs,
-              batch_size=batch_size,
-              drop_remainder=False,
-          ),
-      )
-
-    target_nodeset = self._data.task.target_nodeset
-    timestamp_feature = None
-    if self._data.temporal_sampling:
-      timestamp_feature = temporal_util.creation_time_feature_name(
-          self._data.schema.node_sets[target_nodeset].features
-      )
-      if timestamp_feature is None:
-        raise ValueError(
-            f"The target nodeset '{target_nodeset}' must have a creation time"
-            " feature when temporal_sampling=True."
-        )
-
-    for batch_seed_node_idxs in batch_seed_node_idxs_generator:
-
-      # TODO(gbm): The sampler should consume np array directly.
-      seed_timestamps = None
-      if self._data.temporal_sampling:
-        assert timestamp_feature is not None
-        timestamps = graph.node_sets[target_nodeset].features[timestamp_feature]
-        seed_timestamps = np.asarray(timestamps[batch_seed_node_idxs]).reshape(
-            -1
-        )
-
-      for (
-          merged_graph,
-          merge_offsets,
-          sub_slice,
-      ) in sampler.sample_merged_sub_batches(
-          batch_seed_node_idxs,
-          seed_timestamps=seed_timestamps,
-          skip_overflow_padding_error=False,
-          split_overflow_padding_error=True,
-      ):
-        yield self._predict_merged_sub_batch(
-            live,
-            batch_seed_node_idxs[sub_slice],
-            merged_graph,
-            merge_offsets,
-        )
-
-  def _predict_merged_sub_batch(
+  def _predict_normalized_batch(
       self,
-      live,
-      sub_seed_idxs: np.ndarray,
-      merged_graph: in_memory_graph.InMemoryGraph,
-      merge_offsets: dict[str, np.ndarray],
+      live: ModelLiveResource,
+      normalized_batch: inference.NormalizedBatch,
   ) -> BatchPrediction:
-    """Predicts on an already merged (sub-)batch of graph samples.
-
-    Args:
-      live: The live model state.
-      sub_seed_idxs: The seed node indices of the samples in `merged_graph`.
-      merged_graph: The merged graph of the (sub-)batch.
-      merge_offsets: The merge offsets returned alongside `merged_graph`.
-
-    Returns:
-      The prediction for this (sub-)batch.
-    """
-    # sentinel_offset=True produces N+1 offsets; omit trailing sentinel offset.
-    seed_node_idxs = merge_offsets[self._data.task.target_nodeset][:-1]
-
-    normalizer_kwargs = {}
-    if "seed_timestamps" in live.normalizer.accepted_kwargs:
-      target_nodeset = self._data.task.target_nodeset
-      timestamp_feature = temporal_util.creation_time_feature_name(
-          self._data.schema.node_sets[target_nodeset].features
-      )
-      if timestamp_feature is None:
-        raise ValueError(
-            f"The target nodeset '{target_nodeset}' must have a creation time"
-            " feature when the normalizer requires seed_timestamps."
-        )
-      seed_timestamps = np.asarray(
-          merged_graph.node_sets[target_nodeset].features[timestamp_feature][
-              seed_node_idxs
-          ]
-      ).reshape(-1)
-      normalizer_kwargs["seed_timestamps"] = (
-          temporal_util.expand_batch_seed_timestamps(
-              sample=merged_graph,
-              merge_offsets=merge_offsets,
-              schema=self._data.schema,
-              seed_timestamps=seed_timestamps,
-          )
-      )
-    normalized_merged = live.normalizer.normalize_numpy(
-        merged_graph, **normalizer_kwargs
-    )
-    normalized_merged_jax = jax_lib.graph_to_jax_graph(normalized_merged)
-
-    jax_seed_node_idxs = jnp.asarray(seed_node_idxs)
-    probabilities = live.apply_core_model(
-        (normalized_merged_jax, jax_seed_node_idxs)
-    )
+    """Predicts on an already merged and normalized (sub-)batch."""
+    probabilities = live.apply_core_model(normalized_batch.jax_batch)
     predictions = np.asarray(probabilities)
     return BatchPrediction(
-        batch_seed_node_idxs=sub_seed_idxs,
-        normalized_merged_graph=normalized_merged,
-        merged_seed_node_idxs=seed_node_idxs,
+        batch_seed_node_idxs=normalized_batch.batch_seed_node_idxs,
+        normalized_merged_graph=normalized_batch.normalized_merged_graph,
+        merged_seed_node_idxs=normalized_batch.merged_seed_node_idxs,
         predictions=predictions,
     )
 
-  # TODO(gbm): Factor with predict_batch above.
   def predict_on_graph_sample_batch(
       self,
       graph_samples: list[in_memory_graph.InMemoryGraph],
@@ -547,43 +446,14 @@ class NodePredictionModel(common.Model):
         padding=self._data.padding,
     )(graph_samples)
 
-    # sentinel_offset=True produces N+1 offsets; omit trailing sentinel offset.
-    seed_node_idxs = merge_offsets[self._data.task.target_nodeset][:-1]
-
-    normalizer_kwargs = {}
-    if "seed_timestamps" in live.normalizer.accepted_kwargs:
-      target_nodeset = self._data.task.target_nodeset
-      timestamp_feature = temporal_util.creation_time_feature_name(
-          self._data.schema.node_sets[target_nodeset].features
-      )
-      if timestamp_feature is None:
-        raise ValueError(
-            f"The target nodeset '{target_nodeset}' must have a creation time"
-            " feature when the normalizer requires seed_timestamps."
-        )
-      seed_timestamps = np.asarray(
-          merged_graph.node_sets[target_nodeset].features[timestamp_feature][
-              seed_node_idxs
-          ]
-      ).reshape(-1)
-      normalizer_kwargs["seed_timestamps"] = (
-          temporal_util.expand_batch_seed_timestamps(
-              sample=merged_graph,
-              merge_offsets=merge_offsets,
-              schema=self._data.schema,
-              seed_timestamps=seed_timestamps,
-          )
-      )
-    normalized_merged = live.normalizer.normalize_numpy(
-        merged_graph, **normalizer_kwargs
+    normalized_batch = inference.merged_graph_to_normalized_batch(
+        merged_graph,
+        merge_offsets,
+        schema=self._data.schema,
+        normalizer=live.normalizer,
+        target_nodeset=self._data.task.target_nodeset,
     )
-    normalized_merged_jax = jax_lib.graph_to_jax_graph(normalized_merged)
-    jax_seed_node_idxs = jnp.asarray(seed_node_idxs)
-    probabilities = live.apply_core_model(
-        (normalized_merged_jax, jax_seed_node_idxs)
-    )
-    predictions = np.asarray(probabilities)
-    return predictions
+    return self._predict_normalized_batch(live, normalized_batch).predictions
 
   def evaluate(
       self,
@@ -721,46 +591,20 @@ class NodePredictionModel(common.Model):
 
     batch_size = max(1, self._data.hparams.batch_size // 2)
 
-    def batch_prediction_generator():
+    def batch_prediction_generator() -> Iterator[BatchPrediction]:
       live = self._get_live()
-      graph_merger = merge_lib.GraphMerger(
+      normalized_batches = inference.generate_normalized_batches_from_samples(
+          graph_samples,
           schema=self._data.schema,
           padding=self._data.padding,
+          normalizer=live.normalizer,
+          target_nodeset=self._data.task.target_nodeset,
+          batch_size=batch_size,
+          num_steps=num_eval_steps,
+          verbose=verbose,
       )
-      iterator = graph_samples
-      if verbose >= 2:
-        iterator = tqdm.tqdm(iterator, desc="Evaluation", total=num_eval_steps)
-
-      def predict_samples(
-          samples: list[in_memory_graph.InMemoryGraph],
-      ) -> Iterator[BatchPrediction]:
-        # The seed node is the first node of each sample, so the seed node
-        # indices in the input graph are unknown (and unused) here.
-        seed_idxs = np.zeros(len(samples), dtype=np.int32)
-        for (
-            merged_graph,
-            merge_offsets,
-            sub_slice,
-        ) in graph_merger.merge_sub_batches(
-            samples,
-            skip_overflow_padding_error=False,
-            split_overflow_padding_error=True,
-        ):
-          yield self._predict_merged_sub_batch(
-              live,
-              seed_idxs[sub_slice],
-              merged_graph,
-              merge_offsets,
-          )
-
-      batch = []
-      for sample in iterator:
-        batch.append(sample)
-        if len(batch) == batch_size:
-          yield from predict_samples(batch)
-          batch = []
-      if batch:
-        yield from predict_samples(batch)
+      for normalized_batch in normalized_batches:
+        yield self._predict_normalized_batch(live, normalized_batch)
 
     if verbose >= 1:
       log.info("Evaluating model on generator")

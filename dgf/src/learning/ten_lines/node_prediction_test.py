@@ -530,10 +530,15 @@ class NodePredictionRealLooking(parameterized.TestCase):
     self.assertLen(batches, len(seed_node_idxs))
     for batch in batches:
       self.assertIsInstance(batch, node_prediction_model.BatchPrediction)
+      assert batch.batch_seed_node_idxs is not None
       self.assertLen(batch.batch_seed_node_idxs, 1)
       self.assertLen(batch.predictions, 1)
     self.assertEqual(
-        [int(batch.batch_seed_node_idxs[0]) for batch in batches],
+        [
+            int(batch.batch_seed_node_idxs[0])
+            for batch in batches
+            if batch.batch_seed_node_idxs is not None
+        ],
         seed_node_idxs,
     )
 

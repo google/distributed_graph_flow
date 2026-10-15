@@ -40,6 +40,28 @@ py_library(
 )
 
 py_library(
+    name = "inference",
+    srcs = ["inference.py"],
+    deps = [
+        ":common",
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:jax_in_memory_graph",
+        "//dgf/src/data:padding",
+        "//dgf/src/data:schema",
+        "//dgf/src/io:jax",
+        "//dgf/src/sampling:config",
+        "//dgf/src/sampling:in_memory_sampler",
+        "//dgf/src/transform:merge",
+        "//dgf/src/transform:normalize",
+        "//dgf/src/util:temporal",
+        "//dgf/src/util:util_py",
+        # jax dep,
+        # numpy dep,
+        # tqdm dep,
+    ],
+)
+
+py_library(
     name = "node_prediction",
     srcs = [
         "analyze.py",
@@ -51,6 +73,7 @@ py_library(
         ":common",
         ":dataset",
         ":evaluation",
+        ":inference",
         ":node_prediction_dataset",
         ":report",
         ":training",
@@ -290,6 +313,7 @@ py_library(
     deps = [
         ":common",
         ":dataset",
+        ":inference",
         "//dgf/src/analyse:in_process_feature_statistics",
         "//dgf/src/analyse:padding",
         "//dgf/src/data:in_memory_graph",
@@ -313,6 +337,23 @@ py_library(
 
 # Test
 # =========
+
+py_test(
+    name = "inference_test",
+    srcs = ["inference_test.py"],
+    deps = [
+        ":inference",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:padding",
+        "//dgf/src/data:schema",
+        "//dgf/src/sampling:config",
+        "//dgf/src/sampling:in_memory_sampler",
+        "//dgf/src/transform:merge",
+        "//dgf/src/util:gen_test_graph",
+        # numpy dep,
+    ],
+)
 
 py_test(
     name = "common_test",
