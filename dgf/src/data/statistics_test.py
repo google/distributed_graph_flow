@@ -51,6 +51,14 @@ class StatisticsTest(absltest.TestCase):
                         dictionary={},
                         quantiles=[0.0, 1.0, 2.0, 3.0],
                     ),
+                    "f4": statistics_lib.FeatureStatistics(
+                        count=3,
+                        dictionary={
+                            "green": statistics_lib.DictionaryItem(
+                                index=0, count=3
+                            ),
+                        },
+                    ),
                 }
             ),
             "n2": statistics_lib.FeatureSetStatistics(
@@ -74,6 +82,7 @@ GraphFeatureStatistics:
     'n1':
       'f1': count=2, dictionary=(2)['red': 1, 'blue': 1]
       'f2': count=2, min=0.0000, max=3.0000, quantiles=(4)[0.0000, 1.0000, 2.0000, 3.0000]
+      'f4': count=3, dictionary=(1)['green': 3]
     'n2':
       'f3': count=2, min=4.0000, max=5.0000, quantiles=(4)[4.0000, 4.3333, 4.6666, 5.0000]
 """,

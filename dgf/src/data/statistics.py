@@ -59,8 +59,12 @@ class FeatureStatistics:
 
   def __str__(self) -> str:
     s = f"count={self.count}"
-    if self.minimum != math.inf and self.maximum != -math.inf:
-      s += f", min={self.minimum:.4f}, max={self.maximum:.4f}"
+    # The minimum and maximum are not set (nan or inf) for non-numerical
+    # features.
+    if math.isfinite(self.minimum):
+      s += f", min={self.minimum:.4f}"
+    if math.isfinite(self.maximum):
+      s += f", max={self.maximum:.4f}"
     if self.dictionary:
       dt = self.dictionary
       # Show the first 5 dictionary values.
