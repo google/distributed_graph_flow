@@ -148,6 +148,17 @@ py_library(
 )
 
 py_library(
+    name = "canonicalize",
+    srcs = ["canonicalize.py"],
+    deps = [
+        "//dgf/src/analyse:schema",
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        # numpy dep,
+    ],
+)
+
+py_library(
     name = "perturb",
     srcs = ["perturb.py"],
     deps = [
@@ -312,6 +323,21 @@ py_test(
         "//dgf/src/util:log",
         "//dgf/src/util:test_util",
         "//dgf/src/validate:in_memory_graph",
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "canonicalize_test",
+    srcs = ["canonicalize_test.py"],
+    deps = [
+        ":canonicalize",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/util:gen_test_graph",
+        "//dgf/src/util:test_util",
         # numpy dep,
     ],
 )

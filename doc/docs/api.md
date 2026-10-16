@@ -274,10 +274,12 @@ Functions for printing structures.
 
 Functions and classes to extract subsets of graphs for GNN training.
 
+*   [`dgf.sampling.BigQueryGraphSampler`](api/dgf-sampling.md#section-bigquerygraphsampler): Samples subgraphs directly from a BigQuery Graph using SQL queries.
 *   [`dgf.sampling.Sampler`](api/dgf-sampling.md#section-sampler): Sampler for generating subgraphs from an in-memory graph.
 *   [`dgf.sampling.SamplingPlan`](api/dgf-sampling.md#section-samplingplan): Defines a complex sampling config.
 *   [`dgf.sampling.SimpleSamplingConfig`](api/dgf-sampling.md#section-simplesamplingconfig): Configuration for simple neighborhood sampling.
 *   [`dgf.sampling.SpannerGraphSampler`](api/dgf-sampling.md#section-spannergraphsampler): Sampler that executes queries on Spanner directly to fetch subgraphs.
+*   [`dgf.sampling.create_bigquery_graph_sampler`](api/dgf-sampling.md#section-create-bigquery-graph-sampler): Creates a `BigQueryGraphSampler` instance to sample subgraphs from BigQuery.
 *   [`dgf.sampling.create_graph_spanner_sampler`](api/dgf-sampling.md#section-create-graph-spanner-sampler): Creates a SpannerGraphSampler instance.
 *   [`dgf.sampling.create_sampler`](api/dgf-sampling.md#section-create-sampler): Creates an in-memory sampler.
 *   [`dgf.sampling.extract_beam_nodes_ids`](api/dgf-sampling.md#section-extract-beam-nodes-ids): Extracts all the node ids of a given nodeset.
@@ -320,6 +322,7 @@ Transforms graph data into other graph structures or formats.
 *   [`dgf.transform.apply_feature`](api/dgf-transform.md#section-apply-feature): Applies feature processors to the node and edge sets of a graph.
 *   [`dgf.transform.auto_normalize`](api/dgf-transform.md#section-auto-normalize): Create a generally good GraphNormalizer from feature statistics.
 *   [`dgf.transform.batch_indices_generator`](api/dgf-transform.md#section-batch-indices-generator): Generates batches of indices.
+*   [`dgf.transform.canonicalize_graph`](api/dgf-transform.md#section-canonicalize-graph): Sorts nodes and edges of an in-memory graph into a canonical order.
 *   [`dgf.transform.combine_graph_snapshots`](api/dgf-transform.md#section-combine-graph-snapshots): Combines chronologically ordered graph snapshots into a Temporal Graph.
 *   [`dgf.transform.drop_edge_features`](api/dgf-transform.md#section-drop-edge-features): Drops all edge features from a graph and its schema.
 *   [`dgf.transform.drop_edge_features_from_schema`](api/dgf-transform.md#section-drop-edge-features-from-schema): Drops all edge features from a schema.

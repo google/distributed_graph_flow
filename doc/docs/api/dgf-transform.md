@@ -59,6 +59,9 @@ hide:
 ## dgf.transform.batch_indices_generator  # {: #section-batch-indices-generator}
 ::: dgf.transform.batch_indices_generator
 
+## dgf.transform.canonicalize_graph  # {: #section-canonicalize-graph}
+::: dgf.transform.canonicalize_graph
+
 ## dgf.transform.combine_graph_snapshots  # {: #section-combine-graph-snapshots}
 ::: dgf.transform.combine_graph_snapshots
 

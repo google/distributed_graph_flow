@@ -26,6 +26,7 @@ from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import graph_in_beam as gf_graph_in_beam_lib
 from dgf.src.io import graph_in_memory as gf_graph_in_memory
+from dgf.src.transform import canonicalize as canonicalize_lib
 from dgf.src.util import gen_test_graph
 from dgf.src.util import test_util
 import numpy as np
@@ -181,57 +182,13 @@ class ReadGFGGraphTest(parameterized.TestCase):
       test_util.assert_are_equal(self, output_schema, expected_schema)
       test_util.assert_are_equal(
           self,
-          _canonicalize_graph(output_in_memory_graph, expected_schema),
-          _canonicalize_graph(expected_in_memory_graph, expected_schema),
+          canonicalize_lib.canonicalize_graph(
+              output_in_memory_graph, expected_schema
+          ),
+          canonicalize_lib.canonicalize_graph(
+              expected_in_memory_graph, expected_schema
+          ),
       )
-
-
-def _canonicalize_graph(
-    graph: in_memory_graph_lib.InMemoryGraph,
-    schema: schema_lib.GraphSchema,
-) -> in_memory_graph_lib.InMemoryGraph:
-  new_node_sets = {}
-  node_perm = {}
-  for nodeset_name, nodeset in graph.node_sets.items():
-    if (
-        "#id" in nodeset.features
-        and nodeset.num_nodes
-        and nodeset.num_nodes > 1
-    ):
-      order = np.argsort(nodeset.features["#id"])
-      inv_order = np.empty_like(order)
-      inv_order[order] = np.arange(len(order))
-      node_perm[nodeset_name] = inv_order
-      new_features = {k: v[order] for k, v in nodeset.features.items()}
-      new_node_sets[nodeset_name] = in_memory_graph_lib.InMemoryNodeSet(
-          num_nodes=nodeset.num_nodes, features=new_features
-      )
-    else:
-      node_perm[nodeset_name] = np.arange(nodeset.num_nodes or 0)
-      new_node_sets[nodeset_name] = nodeset
-
-  new_edge_sets = {}
-  for edgeset_name, edgeset in graph.edge_sets.items():
-    edge_schema = schema.edge_sets[edgeset_name]
-    src_perm = node_perm[edge_schema.source]
-    dst_perm = node_perm[edge_schema.target]
-    new_src = src_perm[edgeset.adjacency[0]]
-    new_dst = dst_perm[edgeset.adjacency[1]]
-    if "#id" in edgeset.features:
-      edge_order = np.argsort(edgeset.features["#id"])
-    else:
-      edge_order = np.lexsort((new_dst, new_src))
-    new_adjacency = np.stack([new_src[edge_order], new_dst[edge_order]])
-    new_features = {k: v[edge_order] for k, v in edgeset.features.items()}
-    new_edge_sets[edgeset_name] = in_memory_graph_lib.InMemoryEdgeSet(
-        adjacency=new_adjacency, features=new_features
-    )
-
-  return in_memory_graph_lib.InMemoryGraph(
-      node_sets=new_node_sets,
-      edge_sets=new_edge_sets,
-      timestamp=graph.timestamp,
-  )
 
 
 def _check_graph(self, graph, edge_ids: bool, has_edges: bool = True):

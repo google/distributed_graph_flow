@@ -5,6 +5,9 @@ hide:
 
 # dgf.sampling
 
+## dgf.sampling.BigQueryGraphSampler  # {: #section-bigquerygraphsampler}
+::: dgf.sampling.BigQueryGraphSampler
+
 ## dgf.sampling.Sampler  # {: #section-sampler}
 ::: dgf.sampling.Sampler
 
@@ -16,6 +19,9 @@ hide:
 
 ## dgf.sampling.SpannerGraphSampler  # {: #section-spannergraphsampler}
 ::: dgf.sampling.SpannerGraphSampler
+
+## dgf.sampling.create_bigquery_graph_sampler  # {: #section-create-bigquery-graph-sampler}
+::: dgf.sampling.create_bigquery_graph_sampler
 
 ## dgf.sampling.create_graph_spanner_sampler  # {: #section-create-graph-spanner-sampler}
 ::: dgf.sampling.create_graph_spanner_sampler

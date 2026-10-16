@@ -18,14 +18,13 @@ r"""Integration test.
 import time
 from absl.testing import absltest
 from absl.testing import parameterized
-from dgf.src.analyse import schema as analyse_schema_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
-from dgf.src.data import schema as schema_lib
 from dgf.src.io import cache as cache_lib
 from dgf.src.io.gcp import spanner_graph as spanner_graph_io_lib
 from dgf.src.sampling import config as config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.sampling.gcp import spanner_graph_sampler as spanner_graph_sampler_lib
+from dgf.src.transform import canonicalize as canonicalize_lib
 from dgf.src.util import test_util
 from dgf.src.validate import in_memory_graph as in_memory_graph_validate_lib
 import numpy as np
@@ -35,65 +34,6 @@ InMemoryNodeSet = in_memory_graph_lib.InMemoryNodeSet
 InMemoryEdgeSet = in_memory_graph_lib.InMemoryEdgeSet
 
 DEBUG_SAMPLING = True  # If true, usses deterministic sampling.
-
-
-def normalize_graph(
-    graph: in_memory_graph_lib.InMemoryGraph, schema: schema_lib.GraphSchema
-) -> in_memory_graph_lib.InMemoryGraph:
-  node_mappings = {}
-  new_node_sets = {}
-
-  for nodeset_name, nodeset in graph.node_sets.items():
-    primary_key_feature = analyse_schema_lib.primary_feature(
-        nodeset_name, schema.node_sets[nodeset_name]
-    )
-    ids = nodeset.features[primary_key_feature]
-    sorted_idxs = np.argsort(ids)
-
-    old_to_new = np.zeros_like(sorted_idxs)
-    for new_idx, old_idx in enumerate(sorted_idxs):
-      old_to_new[old_idx] = new_idx
-    node_mappings[nodeset_name] = old_to_new
-
-    new_features = {}
-    for feat_name, feat_val in nodeset.features.items():
-      new_features[feat_name] = feat_val[sorted_idxs]
-
-    new_node_sets[nodeset_name] = in_memory_graph_lib.InMemoryNodeSet(
-        num_nodes=nodeset.num_nodes,
-        features=new_features,
-    )
-
-  new_edge_sets = {}
-  for edgeset_name, edgeset in graph.edge_sets.items():
-    edgeset_schema = schema.edge_sets[edgeset_name]
-    source_nodeset = edgeset_schema.source
-    target_nodeset = edgeset_schema.target
-
-    src_map = node_mappings[source_nodeset]
-    trg_map = node_mappings[target_nodeset]
-
-    adj = edgeset.adjacency
-    new_adj = np.zeros_like(adj)
-    new_adj[0] = src_map[adj[0]]
-    new_adj[1] = trg_map[adj[1]]
-
-    sorted_edge_idxs = np.lexsort((new_adj[1], new_adj[0]))
-    new_adj = new_adj[:, sorted_edge_idxs]
-
-    new_features = {}
-    for feat_name, feat_val in edgeset.features.items():
-      new_features[feat_name] = feat_val[sorted_edge_idxs]
-
-    new_edge_sets[edgeset_name] = in_memory_graph_lib.InMemoryEdgeSet(
-        adjacency=new_adj,
-        features=new_features,
-    )
-
-  return in_memory_graph_lib.InMemoryGraph(
-      node_sets=new_node_sets,
-      edge_sets=new_edge_sets,
-  )
 
 
 def print_graph_stats(
@@ -200,8 +140,12 @@ class E2EArxivTest(parameterized.TestCase):
 
     if DEBUG_SAMPLING:
       for i in range(len(seed_ids)):
-        norm_cte = normalize_graph(cte_samples[i], self.schema)
-        norm_in_mem = normalize_graph(in_mem_samples[i], self.schema)
+        norm_cte = canonicalize_lib.canonicalize_graph(
+            cte_samples[i], self.schema
+        )
+        norm_in_mem = canonicalize_lib.canonicalize_graph(
+            in_mem_samples[i], self.schema
+        )
 
         # Compare In-Memory vs CTE
         test_util.assert_are_equal(self, norm_in_mem, norm_cte)
@@ -299,8 +243,12 @@ class E2EMagTest(parameterized.TestCase):
 
       if DEBUG_SAMPLING:
         for i in range(len(seed_ids)):
-          norm_cte = normalize_graph(cte_samples[i], self.schema)
-          norm_in_mem = normalize_graph(in_mem_samples[i], self.schema)
+          norm_cte = canonicalize_lib.canonicalize_graph(
+              cte_samples[i], self.schema
+          )
+          norm_in_mem = canonicalize_lib.canonicalize_graph(
+              in_mem_samples[i], self.schema
+          )
 
           # Compare In-Memory vs CTE
           test_util.assert_are_equal(self, norm_in_mem, norm_cte)
