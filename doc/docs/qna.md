@@ -2,8 +2,43 @@
 
 ## What are Graph Neural Networks?
 
-Graph Neural Networks (GNNs) are a class of machine learning methods designed to
-perform inference on data described by graphs, or on relational data in general.
+Graph Neural Networks (GNNs) are deep learning models that consume and make
+predictions on graph and relational data (e.g., multiple tables of users,
+accounts, and transactions connected by keys).
+
+Unlike classic tabular models, GNNs consume relational data natively. There is
+no need for lossy and hard-to-maintain feature engineering, such as manually
+flattening tables with joins and aggregations.
+
+GNNs are widely used for abuse, spam, and fraud detection, as well as in many
+other domains. For example, they power weather forecasting (GraphCast) and
+protein structure prediction (AlphaFold 2).
+
+## Why use Graph Flow with coding agents? { #coding-agents }
+
+Graph Flow is built for both engineers and coding agents (e.g., Gemini CLI,
+Claude Code, Cursor).
+
+Without Graph Flow, a coding agent asked to "train a GNN on my data" typically
+generates thousands of lines of custom code (data loading, sampling, feature
+normalization, model architecture, training loop, export). This code:
+
+-   has to be reviewed and maintained by your team,
+-   is often inefficient (e.g., naive sampling, non-optimized training loops),
+-   can contain subtle bugs (e.g., future-data leakage, wrong normalization)
+    that silently degrade model quality.
+
+With Graph Flow, the agent writes ~10 lines of code calling a tested and
+benchmarked API instead:
+
+-   **Minimal code to maintain:** Your product owns a few lines of code, not a
+    custom ML stack.
+-   **Efficient:** Sampling, training, and serving are optimized and
+    benchmarked by the Graph Flow team.
+-   **Correct:** The code does what it is supposed to do. Graph Flow is unit
+    tested and continuously evaluated on quality benchmarks.
+-   **Free improvements:** New models, speedups, and fixes come with library
+    updates, without re-generating code.
 
 ## Is Graph Flow right for my problem?
 
