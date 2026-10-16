@@ -11,8 +11,8 @@ hide:
 ## dgf.io.create_spanner_tables_from_graph_schema  # {: #section-create-spanner-tables-from-graph-schema}
 ::: dgf.io.create_spanner_tables_from_graph_schema
 
-## dgf.io.export_bigquery_to_disk  # {: #section-export-bigquery-to-disk}
-::: dgf.io.export_bigquery_to_disk
+## dgf.io.export_bigquery_graph_to_disk  # {: #section-export-bigquery-graph-to-disk}
+::: dgf.io.export_bigquery_graph_to_disk
 
 ## dgf.io.fetch_graphland_graph  # {: #section-fetch-graphland-graph}
 ::: dgf.io.fetch_graphland_graph

@@ -48,7 +48,7 @@ from dgf.src.io.gcp.bigquery_graph import read_bigquery_graph_schema
 
 from dgf.src.io.gcp.bigquery_graph import read_bigquery_graph
 from dgf.src.io.gcp.bigquery_graph import read_bigquery_graph_schema
-from dgf.src.io.gcp.bigquery_graph import export_bigquery_to_disk
+from dgf.src.io.gcp.bigquery_graph import export_bigquery_graph_to_disk
 
 from dgf.src.io.spanner import create_spanner_tables_from_graph_schema
 

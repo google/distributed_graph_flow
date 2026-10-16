@@ -153,7 +153,7 @@ Functions to read and write graphs, schemas, and related data.
 
 *   [`dgf.io.cache`](api/dgf-io.md#section-cache): Returns and caches the variable(s) created by "create_fn".
 *   [`dgf.io.create_spanner_tables_from_graph_schema`](api/dgf-io.md#section-create-spanner-tables-from-graph-schema): Creates Spanner tables for a graph schema.
-*   [`dgf.io.export_bigquery_to_disk`](api/dgf-io.md#section-export-bigquery-to-disk): Reads a BigQuery Graph in-process and returns a GraphFlow in-memory graph.
+*   [`dgf.io.export_bigquery_graph_to_disk`](api/dgf-io.md#section-export-bigquery-graph-to-disk): Exports a BigQuery Graph to a GraphFlow graph directory on disk.
 *   [`dgf.io.fetch_graphland_graph`](api/dgf-io.md#section-fetch-graphland-graph): Downloads and loads a Graphland dataset into memory.
 *   [`dgf.io.fetch_jena_climate_graph`](api/dgf-io.md#section-fetch-jena-climate-graph): Downloads and loads the Jena Climate time series benchmark into memory.
 *   [`dgf.io.fetch_ogb_graph`](api/dgf-io.md#section-fetch-ogb-graph): Downloads and loads an OGB node property prediction dataset into memory.

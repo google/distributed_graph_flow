@@ -69,8 +69,8 @@ class BigqueryGraphManualTest(absltest.TestCase):
     )
     test_util.assert_are_equal(self, schema, expected_schema())
 
-  def test_export_bigquery_to_disk(self):
-    bigquery_graph.export_bigquery_to_disk(
+  def test_export_bigquery_graph_to_disk(self):
+    bigquery_graph.export_bigquery_graph_to_disk(
         path="gs://gbm-test/graph_export",
         project="biggraphs-poc",
         dataset="arxiv",

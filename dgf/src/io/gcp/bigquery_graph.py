@@ -288,7 +288,7 @@ def read_bigquery_graph(
     work_dir = os.path.join(
         work_dir, f"read_{project}_{dataset}_{graph}_{uuid.uuid4()}"
     )
-    export_bigquery_to_disk(
+    export_bigquery_graph_to_disk(
         path=work_dir,
         project=project,
         dataset=dataset,
@@ -311,7 +311,7 @@ def read_bigquery_graph(
   return in_memory_graph, in_memory_schema
 
 
-def export_bigquery_to_disk(
+def export_bigquery_graph_to_disk(
     path: str,
     project: str,
     dataset: str,
@@ -321,32 +321,31 @@ def export_bigquery_to_disk(
     combine_as_json: bool = False,
     max_workers: int = 10,
     verbose: int | bool = True,
-):
-  """Reads a BigQuery Graph in-process and returns a GraphFlow in-memory graph.
+) -> None:
+  """Exports a BigQuery Graph to a GraphFlow graph directory on disk.
 
   Usage:
-    ```
+    ```python
     import dgf
 
-    graph, schema = dgf.io.export_bigquery_to_disk(
-      path="gs://my_project/my_graph"
-      project="biggraphs-poc",
-      dataset="arxiv",
-      graph="arvix_graph",
+    dgf.io.export_bigquery_graph_to_disk(
+        path="gs://my_project/my_graph",
+        project="biggraphs-poc",
+        dataset="arxiv",
+        graph="arvix_graph",
     )
     ```
 
   Args:
-    path: The directory to export the BigQuery graph data to.
+    path: The GCS directory to export the BigQuery graph data to.
     project: The Google Cloud project ID.
     dataset: The BigQuery dataset ID.
     graph: The BigQuery graph ID.
+    schema: Optional GraphFlow schema. If None, inferred from the BigQuery Graph
+      metadata.
     combine_as_json: Whether to combine the features as JSON.
     max_workers: The maximum number of workers to use for parallel processing.
     verbose: Amount of verbose (0: no, 1 or true: a little, 2: a lot).
-
-  Returns:
-    A Tuple of the in memory graph and the schema.
   """
 
   if isinstance(verbose, bool):
