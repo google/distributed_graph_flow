@@ -121,6 +121,8 @@ class TenLines(parameterized.TestCase):
           common.Architecture.GRAPH_ATTENTION_NETWORK,
       ),
       ("gatv2", "gatv2", common.Architecture.GRAPH_ATTENTION_NETWORK_V2),
+      ("mtalbis", "mtalbis", common.Architecture.MT_ALBIS),
+      ("mtalbis_alias", "Albis", common.Architecture.MT_ALBIS),
   )
   def test_parse_architecture_success(self, input_val, expected):
     self.assertEqual(common.parse_architecture(input_val), expected)
@@ -141,6 +143,7 @@ class TenLines(parameterized.TestCase):
           common.Architecture.GRAPH_ATTENTION_NETWORK_V2,
           "Gatv2Attention(heads=8",
       ),
+      (common.Architecture.MT_ALBIS, "RelationAggregation(concat)"),
   )
   def test_build_gnn_config(
       self, architecture: common.Architecture, expected_in_architecture: str

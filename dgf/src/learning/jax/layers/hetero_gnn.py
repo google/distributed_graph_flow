@@ -51,6 +51,8 @@ class MessageAggregation(enum.Enum):
 
   SUM = "sum"
   MEAN = "mean"
+  # Concatenation of the MEAN and SUM aggregations (like TF-GNN's "mean|sum").
+  MEAN_SUM = "mean|sum"
   SYMMETRIC = "symmetric"
   ATTENTION = "attention"
 
@@ -214,7 +216,7 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
   """Configuration for HeterogeneousGraphConvolution.
 
   Classic architectures are available as templates, e.g. `graphsage()`,
-  `gcn()`, `gat()`, `gatv2()`, and `dot_product_attention()`.
+  `gcn()`, `gat()`, `gatv2()`, `dot_product_attention()`, and `mtalbis()`.
 
   Usage example:
 
@@ -238,6 +240,7 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
     aggregate_r(i) = sum_{j in N_r(i)} w_ij * message_ij
         w_ij = 1                                      SUM
              = 1 / in_deg(i)                          MEAN
+         = concat(MEAN, SUM)                      MEAN_SUM ("mean|sum")
              = 1 / sqrt((1+out_deg(j))(1+in_deg(i)))  SYMMETRIC (GCN)
              = softmax_j(logits_ij), per head         ATTENTION
                                          Args: `message_aggregation`,
@@ -427,6 +430,55 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
             dropout_rate=dropout_rate,
         ),
         post=standard.identity(),
+    )
+
+  @classmethod
+  def mtalbis(
+      cls,
+      dims: int = 128,
+      dropout_rate: float = 0.2,
+      message_aggregation: MessageAggregation = MessageAggregation.MEAN_SUM,
+      plan: Plan | None = None,
+  ) -> "HeterogeneousGraphConvolutionConfig":
+    """TF-GNN Model Template "Albis" (MtAlbis) template, without attention.
+
+    Replicates `tensorflow_gnn.models.mt_albis.MtAlbisGraphUpdate` with
+    `attention_type="none"`, `next_state_type="residual"`, and
+    `normalization_type="layer"`:
+
+    ```
+    m_ij = relu(W_r [h_j ; h_i] + b_r)                (per relation r)
+    a_r(i) = [mean_{j in N_r(i)} m_ij ; sum_{j in N_r(i)} m_ij]
+    h_i' = LayerNorm(Dropout(relu(W_u [h_i ; a_1(i) ; ... ; a_R(i)] + b))
+                     + h_i)
+    ```
+
+    Args:
+      dims: Dimension of the messages and of the output embeddings.
+      dropout_rate: Dropout rate of the new node states.
+      message_aggregation: Aggregation of the messages within a relation.
+      plan: Message passing plan.
+
+    Returns:
+      The layer configuration.
+    """
+    return cls(
+        plan=plan,
+        dims=dims,
+        dropout_rate=dropout_rate,
+        message_aggregation=message_aggregation,
+        relation_aggregation=RelationAggregation.CONCAT,
+        message_consumes_target=True,
+        combine=Combine.CONCAT,
+        residual=True,
+        message=standard.GenericBlockConfig("LA", dims=dims, activation="relu"),
+        update=standard.GenericBlockConfig(
+            "LAD" if dropout_rate > 0.0 else "LA",
+            dims=dims,
+            activation="relu",
+            dropout_rate=dropout_rate,
+        ),
+        post=standard.GenericBlockConfig("N", dims=dims, norm="layer_norm"),
     )
 
   @classmethod
@@ -834,6 +886,13 @@ class HeterogeneousGraphConvolution(nn.Module):
     elif aggregation == MessageAggregation.MEAN:
       return self.aggregate_with_fixed_weights(
           relation, None, mean_weights(relation), training
+      )
+    elif aggregation == MessageAggregation.MEAN_SUM:
+      sum_aggregate = self.aggregate_with_fixed_weights(
+          relation, None, None, training
+      )
+      return jnp.concatenate(
+          [sum_aggregate * mean_weights(relation), sum_aggregate], axis=-1
       )
     elif aggregation == MessageAggregation.SYMMETRIC:
       src_weights, dst_weights = symmetric_weights(relation)

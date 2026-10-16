@@ -73,6 +73,7 @@ class Architecture(enum.Enum):
   GRAPH_CONVOLUTIONAL_NETWORK = "GRAPH_CONVOLUTIONAL_NETWORK"
   GRAPH_ATTENTION_NETWORK = "GRAPH_ATTENTION_NETWORK"
   GRAPH_ATTENTION_NETWORK_V2 = "GRAPH_ATTENTION_NETWORK_V2"
+  MT_ALBIS = "MT_ALBIS"
 
 
 DEFAULT_ARCHITECTURE = Architecture.HETEROGENEOUS_MESSAGE_PASSING
@@ -100,6 +101,8 @@ def parse_architecture(architecture: Architecture | str) -> Architecture:
     return Architecture.GRAPH_ATTENTION_NETWORK
   elif arch_lower in ("gatv2", "graph_attention_network_v2"):
     return Architecture.GRAPH_ATTENTION_NETWORK_V2
+  elif arch_lower in ("mtalbis", "mt_albis", "albis"):
+    return Architecture.MT_ALBIS
   else:
     raise ValueError(f"Unknown architecture: {architecture}")
 
@@ -662,6 +665,12 @@ def build_gnn_config(hparams: HParam) -> jax_common.GenericLayer:
 
   elif hparams.architecture == Architecture.GRAPH_ATTENTION_NETWORK_V2:
     return hetero_gnn.HeterogeneousGraphConvolutionConfig.gatv2(  # pyrefly: ignore[bad-return]
+        dims=hparams.node_embedding_dim,
+        dropout_rate=hparams.dropout,
+    )
+
+  elif hparams.architecture == Architecture.MT_ALBIS:
+    return hetero_gnn.HeterogeneousGraphConvolutionConfig.mtalbis(  # pyrefly: ignore[bad-return]
         dims=hparams.node_embedding_dim,
         dropout_rate=hparams.dropout,
     )

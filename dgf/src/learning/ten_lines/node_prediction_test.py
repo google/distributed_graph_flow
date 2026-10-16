@@ -1182,7 +1182,7 @@ class NodePredictionClassificationToy(absltest.TestCase):
 
 class NodePredictionArchitecturesToy(parameterized.TestCase):
 
-  @parameterized.parameters("graphsage", "gcn")
+  @parameterized.parameters("graphsage", "gcn", "mtalbis")
   def test_train_and_evaluate(self, architecture: str):
     graph_kwargs = {"num_n1_nodes": 1000, "num_n2_nodes": 500, "accuracy": 0.8}
     graph_train, schema = gen_test_graph.gen_toy_classification_dataset(

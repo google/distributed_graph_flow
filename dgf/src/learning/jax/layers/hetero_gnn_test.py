@@ -62,6 +62,9 @@ CONFIGS: dict[
     "mean": lambda **kw: Config(
         dims=DIMS, message_aggregation=MessageAggregation.MEAN, **kw
     ),
+    "mean_sum": lambda **kw: Config(
+        dims=DIMS, message_aggregation=MessageAggregation.MEAN_SUM, **kw
+    ),
     "symmetric": lambda **kw: Config(
         dims=DIMS,
         message_aggregation=MessageAggregation.SYMMETRIC,
@@ -99,6 +102,7 @@ TEMPLATES: dict[
     "gat": Config.gat,
     "gatv2": Config.gatv2,
     "dot_product_attention": Config.dot_product_attention,
+    "mtalbis": Config.mtalbis,
 }
 
 
@@ -420,6 +424,17 @@ class HeteroGNNTest(parameterized.TestCase):
               "Residual(X)",
           ],
       ),
+      (
+          "mtalbis",
+          "mtalbis",
+          [
+              "Message(concat(source, target)):",
+              "Aggregation(mean|sum)",
+              "RelationAggregation(concat)",
+              "Residual(X)",
+              "Norm(layer_norm)",
+          ],
+      ),
   )
   def test_templates_architecture(self, template: str, expected: list[str]):
     architecture = TEMPLATES[template](dims=DIMS).architecture()
@@ -537,6 +552,44 @@ class HeteroGNNTest(parameterized.TestCase):
     self.assertEqual(
         output.node_sets["n2"].features["embedding"].shape,
         (NUM_N2_NODES, DIMS),
+    )
+
+  def test_mean_sum_aggregation_concatenates_mean_and_sum(self):
+    graph = make_graph(num_edges=30)
+
+    def make(aggregation: MessageAggregation):
+      # Without update, residual, and post blocks, the output of the layer is
+      # `concat(X, messages)`.
+      return Config(
+          dims=DIMS,
+          message_aggregation=aggregation,
+          plan=SINGLE_RELATION_PLAN,
+          residual=False,
+          update=standard.identity(),
+          post=standard.identity(),
+      ).make(SCHEMA)
+
+    def messages(aggregation: MessageAggregation, variables):
+      output = make(aggregation).apply(variables, graph, training=False)
+      return output.node_sets["n2"].features["embedding"][:, DIMS:]
+
+    # The message weights are shared by the three aggregations.
+    variables = make(MessageAggregation.MEAN_SUM).init(
+        jax.random.PRNGKey(0), graph, training=False
+    )
+    mean_sum_messages = messages(MessageAggregation.MEAN_SUM, variables)
+    self.assertEqual(mean_sum_messages.shape, (NUM_N2_NODES, 2 * DIMS))
+    np.testing.assert_allclose(
+        mean_sum_messages,
+        np.concatenate(
+            [
+                messages(MessageAggregation.MEAN, variables),
+                messages(MessageAggregation.SUM, variables),
+            ],
+            axis=-1,
+        ),
+        rtol=1e-5,
+        atol=1e-5,
     )
 
   def test_attention_dropout(self):
