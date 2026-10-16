@@ -106,8 +106,24 @@ class LearningRateScheduleTest(absltest.TestCase):
     np.testing.assert_allclose(schedule(3), 0.1, rtol=1e-5)
     np.testing.assert_allclose(schedule(10), 0.0, atol=1e-7)
 
+  def test_custom_warmup(self):
+    schedule = training_lib.learning_rate_schedule(
+        0.1, num_train_steps=1000, warmup_steps=10
+    )
+    np.testing.assert_allclose(schedule(5), 0.05, rtol=1e-5)
+    np.testing.assert_allclose(schedule(10), 0.1, rtol=1e-5)
+    np.testing.assert_allclose(schedule(505), 0.05, rtol=1e-5)
 
-class BuildOptimizerTest(absltest.TestCase):
+  def test_no_warmup(self):
+    schedule = training_lib.learning_rate_schedule(
+        0.1, num_train_steps=1000, warmup_steps=0
+    )
+    np.testing.assert_allclose(schedule(0), 0.1, rtol=1e-5)
+    np.testing.assert_allclose(schedule(500), 0.05, rtol=1e-5)
+    np.testing.assert_allclose(schedule(1000), 0.0, atol=1e-7)
+
+
+class BuildOptimizerTest(parameterized.TestCase):
 
   def test_follows_learning_rate_warmup(self):
     hparams = common.HParam(learning_rate=0.1, opt_weight_decay=0.0)
@@ -125,6 +141,40 @@ class BuildOptimizerTest(absltest.TestCase):
     updates, _ = opt.update(grads, opt_state, params)
     assert isinstance(updates, jax.Array)
     self.assertTrue(np.all(updates < 0.0))
+
+  @parameterized.parameters((None, 0.1), (1e-12, 0.0))
+  def test_gradient_clipping(
+      self, gradient_clip_norm: float | None, expected_update_magnitude: float
+  ):
+    hparams = common.HParam(
+        learning_rate=0.1,
+        opt_weight_decay=0.0,
+        warmup_steps=0,
+        gradient_clip_norm=gradient_clip_norm,
+    )
+    opt = training_lib.build_optimizer(hparams, num_train_steps=1000)
+    params = jnp.ones((3,))
+    # Adam normalizes the gradients, except when they are smaller than its
+    # epsilon (1e-8), which is the case after clipping to a 1e-12 norm.
+    updates, _ = opt.update(jnp.ones((3,)), opt.init(params), params)
+    assert isinstance(updates, jax.Array)
+    np.testing.assert_allclose(
+        -updates, expected_update_magnitude, atol=1e-4, rtol=1e-4
+    )
+
+  def test_weight_decay(self):
+    hparams = common.HParam(
+        learning_rate=0.1,
+        opt_weight_decay=0.5,
+        warmup_steps=0,
+        gradient_clip_norm=None,
+    )
+    opt = training_lib.build_optimizer(hparams, num_train_steps=1000)
+    params = jnp.full((3,), 2.0)
+    updates, _ = opt.update(jnp.zeros((3,)), opt.init(params), params)
+    assert isinstance(updates, jax.Array)
+    # update = -lr * weight_decay * params.
+    np.testing.assert_allclose(updates, -0.1, rtol=1e-5)
 
 
 class BuildTrainStepTest(parameterized.TestCase):

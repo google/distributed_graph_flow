@@ -187,6 +187,9 @@ def train_node_model(
     batch_size: int = 32,
     node_embedding_dim: int = 128,
     learning_rate: float = 1e-3,
+    weight_decay: float = 1e-4,
+    warmup_steps: int | None = None,
+    gradient_clip_norm: float | None = 1.0,
     cache_valid_dataset: bool = True,
     time_aware: bool = False,
     message_aggregation: hetero_gnn.MessageAggregation | str = "sum",
@@ -260,6 +263,11 @@ def train_node_model(
     batch_size: The batch size to use for training.
     node_embedding_dim: The dimension of the node embeddings.
     learning_rate: The learning rate to use for training.
+    weight_decay: The decoupled weight decay of the AdamW optimizer.
+    warmup_steps: The number of linear learning rate warmup steps. If None, uses
+      `min(200, 1 + num_train_steps // 5)`. If 0, there is no warmup.
+    gradient_clip_norm: The maximum global norm of the gradients. If None, the
+      gradients are not clipped.
     cache_valid_dataset: Whether to cache the validation dataset in memory. This
       can speed up validation if sample generation and normalization are
       time-consuming, but it will increase memory usage.
@@ -401,6 +409,9 @@ def train_node_model(
         batch_size=batch_size,
         node_embedding_dim=node_embedding_dim,
         learning_rate=learning_rate,
+        opt_weight_decay=weight_decay,
+        warmup_steps=warmup_steps,
+        gradient_clip_norm=gradient_clip_norm,
         num_layers=num_layers,
         message_aggregation=hetero_gnn.MessageAggregation(message_aggregation),
         architecture=architecture,

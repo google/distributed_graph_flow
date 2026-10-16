@@ -53,22 +53,33 @@ ComputeLossFn = Callable[[Any, Any], tuple[jax.Array, dict[str, Any]]]
 
 
 def learning_rate_schedule(
-    learning_rate: float, num_train_steps: int | None
+    learning_rate: float,
+    num_train_steps: int | None,
+    warmup_steps: int | None = None,
 ) -> optax.Schedule:
   """Returns a linear warmup followed by a cosine decay of the learning rate.
 
   The learning rate increases linearly from 0 to `learning_rate` during the
-  first `min(200, 1 + num_train_steps // 5)` steps, and then decays to 0 at step
-  `num_train_steps` following a cosine.
+  first `warmup_steps` steps, and then decays to 0 at step `num_train_steps`
+  following a cosine.
 
   Args:
     learning_rate: The maximum learning rate, reached at the end of the warmup.
     num_train_steps: The total number of training steps.
+    warmup_steps: The number of warmup steps. If None, uses `min(200, 1 +
+      num_train_steps // 5)`. If 0, there is no warmup.
 
   Returns:
     The learning rate schedule.
   """
-  warmup_steps = min(200, 1 + num_train_steps // 5)  # pyrefly: ignore[unsupported-operation]
+  num_train_steps = num_train_steps or 100_000
+  if warmup_steps is None:
+    warmup_steps = min(200, 1 + num_train_steps // 5)
+  decay = optax.cosine_decay_schedule(
+      init_value=learning_rate, decay_steps=num_train_steps - warmup_steps
+  )
+  if warmup_steps == 0:
+    return decay
   return optax.join_schedules(
       schedules=[
           optax.linear_schedule(
@@ -76,10 +87,7 @@ def learning_rate_schedule(
               end_value=learning_rate,
               transition_steps=warmup_steps,
           ),
-          optax.cosine_decay_schedule(
-              init_value=learning_rate,
-              decay_steps=int((num_train_steps or 100_000) - warmup_steps),
-          ),
+          decay,
       ],
       boundaries=[warmup_steps],
   )
@@ -91,25 +99,26 @@ def build_optimizer(
   """Returns the optimizer of the ten-lines models.
 
   The optimizer is AdamW with the learning rate schedule of
-  `learning_rate_schedule`, applied on gradients clipped to a global norm of 1.
+  `learning_rate_schedule`, optionally applied on gradients clipped to a global
+  norm of `hparams.gradient_clip_norm`.
 
   Args:
-    hparams: The hyper-parameters of the model. Defines the learning rate and
-      the weight decay.
+    hparams: The hyper-parameters of the model. Defines the learning rate, the
+      weight decay, the warmup and the gradient clipping.
     num_train_steps: The total number of training steps.
 
   Returns:
     The optimizer.
   """
-  return optax.chain(
-      optax.clip_by_global_norm(1.0),
-      optax.adamw(
-          learning_rate=learning_rate_schedule(
-              hparams.learning_rate, num_train_steps
-          ),
-          weight_decay=hparams.opt_weight_decay,
+  adamw = optax.adamw(
+      learning_rate=learning_rate_schedule(
+          hparams.learning_rate, num_train_steps, hparams.warmup_steps
       ),
+      weight_decay=hparams.opt_weight_decay,
   )
+  if hparams.gradient_clip_norm is None:
+    return adamw
+  return optax.chain(optax.clip_by_global_norm(hparams.gradient_clip_norm), adamw)
 
 
 def build_train_step(

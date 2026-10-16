@@ -495,6 +495,10 @@ class HParam:
     learning_rate: The learning rate used for training.
     opt_weight_decay: The strength of the weight decay regularization of the
       optimizer. See https://optax.readthedocs.io/en/latest/api/optimizers.html.
+    warmup_steps: The number of linear learning rate warmup steps. If None, the
+      number of warmup steps is set automatically. If 0, there is no warmup.
+    gradient_clip_norm: The maximum global norm of the gradients. If None, the
+      gradients are not clipped.
     dropout: The dropout rate used for training.
     message_aggregation: How the messages received by a node are aggregated. See
       `hetero_gnn.MessageAggregation`. Only used by the
@@ -521,6 +525,8 @@ class HParam:
   node_embedding_dim: int = 64
   learning_rate: float = 0.0005
   opt_weight_decay: float = 0.0001
+  warmup_steps: int | None = None
+  gradient_clip_norm: float | None = 1.0
   dropout: float = 0.1
   message_aggregation: hetero_gnn.MessageAggregation = (
       hetero_gnn.MessageAggregation.SUM
