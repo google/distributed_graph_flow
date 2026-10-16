@@ -434,10 +434,10 @@ struct SampleBuilder {
                                       seed_timestamp, masked_edge_idx,
                                       /*depth=*/0));
 
-    // Deduplicate the edges.
+    // Deduplicate the edges. Without replacement, the same edge can be reached
+    // several times (e.g., from both of its nodes when `reverse=True`).
     // Note: We also sort edges in debug mode.
-    const bool dedup_edges =
-        !sampler.plan_.with_replacement && sampler.plan_.multi_visit;
+    const bool dedup_edges = !sampler.plan_.with_replacement;
     if (dedup_edges || sampler.debug_sampling_) {
       for (auto& sampled_edgeset : edgesets) {
         std::sort(sampled_edgeset.edges.begin(), sampled_edgeset.edges.end());

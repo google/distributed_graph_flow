@@ -285,9 +285,10 @@ class GenGraphSubsets(benchmark_utils.Benchmark):
     self.num_nodes = num_nodes
 
   def run_unit(self):
-    seed_node_idxs = [
-        random.randrange(0, self.num_nodes) for _ in range(self.batch_size)
-    ]
+    # Note: `subgraph` does not support repeated seed nodes.
+    seed_node_idxs = random.sample(
+        range(self.num_nodes), min(self.batch_size, self.num_nodes)
+    )
     subgraph = self.sampler.subgraph(seed_node_idxs)
     for ns in subgraph.node_sets.values():
       self.sum_sampled_nodes += ns.num_nodes  # pyrefly: ignore[unsupported-operation]

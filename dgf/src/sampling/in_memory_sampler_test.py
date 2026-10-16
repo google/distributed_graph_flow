@@ -764,6 +764,144 @@ Node(nodeset_idx=0, children=[
         expected_subgraph,
     )
 
+  def _assert_no_orphan_nodes(self, graph: in_memory_graph_lib.InMemoryGraph):
+    """Checks that each node of `graph` is connected to at least one edge."""
+    for node_set_name, node_set in graph.node_sets.items():
+      assert node_set.num_nodes is not None
+      connected = np.zeros(node_set.num_nodes, dtype=bool)
+      for edge_set_name, edge_set_schema in self.schema.edge_sets.items():
+        adjacency = graph.edge_sets[edge_set_name].adjacency
+        if edge_set_schema.source == node_set_name:
+          connected[adjacency[0]] = True
+        if edge_set_schema.target == node_set_name:
+          connected[adjacency[1]] = True
+      self.assertTrue(
+          np.all(connected), f"Orphan nodes in {node_set_name}: {connected}"
+      )
+
+  def _original_edges(
+      self, graph: in_memory_graph_lib.InMemoryGraph
+  ) -> set[tuple[str, int, int]]:
+    """Lists the edges of `graph` with the node indices of the input graph."""
+    edges = set()
+    for name, edge_set_schema in self.schema.edge_sets.items():
+      src_idxs = graph.node_sets[edge_set_schema.source].features["#idx"]
+      trg_idxs = graph.node_sets[edge_set_schema.target].features["#idx"]
+      for src, trg in graph.edge_sets[name].adjacency.T:
+        edges.add((name, int(src_idxs[src]), int(trg_idxs[trg])))
+    return edges
+
+  @parameterized.parameters(True, False)
+  def test_repeated_seeds(self, multi_visit: bool):
+    # Note: `debug_sampling` and a large `hop_width` make the samples
+    # deterministic: All the neighbors are selected.
+    sampler = in_memory_sampler_lib.create_sampler(
+        self.graph,
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1",
+            num_hops=3,
+            hop_width=100,
+            multi_visit=multi_visit,
+        ),
+        schema=self.schema,
+        return_features=False,
+        return_node_idxs=True,
+        batch_size=2,
+        debug_sampling=True,
+    )
+    seed_node_idxs = [0, 0, 1, 0]
+    expected = {s: sampler.sample(s) for s in set(seed_node_idxs)}
+    for s, graph in expected.items():
+      self.assertEqual(graph.node_sets["n1"].features["#idx"][0], s)
+      self._assert_no_orphan_nodes(graph)
+
+    # Each sample is equal to the sample of its seed alone.
+    samples = sampler.sample(np.array(seed_node_idxs, dtype=np.int64))
+    test_util.assert_are_equal(
+        self, samples, [expected[s] for s in seed_node_idxs]
+    )
+    test_util.assert_are_equal(
+        self,
+        sampler.multisubgraph(seed_node_idxs),
+        [expected[s] for s in seed_node_idxs],
+    )
+
+    # The merged samples are equal to the merging of the samples.
+    merged_schema = _sampler_output_schema(
+        self.schema, return_features=False, return_node_idxs=True
+    )
+    test_util.assert_are_equal(
+        self,
+        sampler.sample_merged(np.array(seed_node_idxs, dtype=np.int64)),
+        merge_lib.GraphMerger(merged_schema)(
+            [expected[s] for s in seed_node_idxs]
+        ),
+    )
+
+    # `subgraph` does not support repeated seeds.
+    with self.assertRaisesRegex(ValueError, "repeated seed nodes"):
+      sampler.subgraph(seed_node_idxs)
+
+    # The subgraph of the unique seeds starts with the seeds, and contains the
+    # union of the edges of the samples.
+    unique_seed_node_idxs = [0, 1]
+    subgraph = sampler.subgraph(unique_seed_node_idxs)
+    np.testing.assert_array_equal(
+        subgraph.node_sets["n1"].features["#idx"][:2], unique_seed_node_idxs
+    )
+    self.assertEqual(
+        self._original_edges(subgraph),
+        set().union(*[self._original_edges(g) for g in expected.values()]),
+    )
+    self._assert_no_orphan_nodes(subgraph)
+
+    # Without the check, the repeated seeds are kept, and only their last copy
+    # is connected.
+    subgraph = sampler.subgraph(seed_node_idxs, check_unique_seeds=False)
+    np.testing.assert_array_equal(
+        subgraph.node_sets["n1"].features["#idx"][: len(seed_node_idxs)],
+        seed_node_idxs,
+    )
+    self.assertEqual(
+        self._original_edges(subgraph),
+        set().union(*[self._original_edges(g) for g in expected.values()]),
+    )
+
+  def test_subgraph_seed_order(self):
+    # Note: `debug_sampling` and a large `hop_width` make the subgraphs
+    # deterministic: All the neighbors are selected.
+    sampler = in_memory_sampler_lib.create_sampler(
+        self.graph,
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1", num_hops=3, hop_width=100
+        ),
+        schema=self.schema,
+        return_features=False,
+        return_node_idxs=True,
+        batch_size=2,
+        debug_sampling=True,
+    )
+    subgraph_01 = sampler.subgraph([0, 1])
+    subgraph_10 = sampler.subgraph([1, 0])
+
+    # The seeds come first, in the given order.
+    np.testing.assert_array_equal(
+        subgraph_01.node_sets["n1"].features["#idx"][:2], [0, 1]
+    )
+    np.testing.assert_array_equal(
+        subgraph_10.node_sets["n1"].features["#idx"][:2], [1, 0]
+    )
+    # Same nodes and edges (with the node indices of the input graph).
+    for node_set_name in self.schema.node_sets:
+      self.assertCountEqual(
+          subgraph_01.node_sets[node_set_name].features["#idx"],
+          subgraph_10.node_sets[node_set_name].features["#idx"],
+      )
+    self.assertEqual(
+        self._original_edges(subgraph_01), self._original_edges(subgraph_10)
+    )
+    self.assertNotEmpty(self._original_edges(subgraph_01))
+
   def test_multi_subgraphs(self):
     sampling_config = config_lib.SimpleSamplingConfig(
         seed_nodeset="n1",
@@ -2340,6 +2478,151 @@ class InMemorySamplerDiamon(parameterized.TestCase):
       self.assertEqual(sample.node_sets["n1"].num_nodes, 7)
     else:
       self.assertEqual(sample.node_sets["n1"].num_nodes, 6)
+
+  def test_order_independent_with_large_hop_width(self):
+    # With a large `hop_width`, all the neighbors are selected without using the
+    # random generator (no `debug_sampling`). The results do not depend on the
+    # order of the seeds, on the sampler seed, or on the previous calls.
+    def create_sampler(seed: int):
+      plan = config_lib.simple_sampling_config_to_sampling_plan(
+          config_lib.SimpleSamplingConfig(
+              seed_nodeset="n1", num_hops=4, hop_width=100, reverse=True
+          ),
+          self.schema,
+      )
+      return in_memory_sampler_lib.create_sampler(
+          self.graph,
+          plan,
+          self.schema,
+          return_features=False,
+          return_node_idxs=True,
+          batch_size=5,
+          seed=seed,
+      )
+
+    def original_edges(graph: in_memory_graph_lib.InMemoryGraph):
+      idxs = graph.node_sets["n1"].features["#idx"]
+      return {
+          (int(idxs[src]), int(idxs[trg]))
+          for src, trg in graph.edge_sets["e11"].adjacency.T
+      }
+
+    sampler = create_sampler(seed=1)
+    other_sampler = create_sampler(seed=2)
+
+    # `multisubgraph`: Same graphs, in the order of the seeds.
+    subgraphs_16 = sampler.multisubgraph([1, 6])
+    subgraphs_61 = sampler.multisubgraph([6, 1])
+    test_util.assert_are_equal(self, subgraphs_61, subgraphs_16[::-1])
+    test_util.assert_are_equal(
+        self, other_sampler.multisubgraph([1, 6]), subgraphs_16
+    )
+
+    # `subgraph`: Same nodes and edges. Only the node order changes.
+    subgraph_16 = sampler.subgraph([1, 6])
+    subgraph_61 = sampler.subgraph([6, 1])
+    self.assertCountEqual(
+        subgraph_16.node_sets["n1"].features["#idx"],
+        subgraph_61.node_sets["n1"].features["#idx"],
+    )
+    self.assertEqual(original_edges(subgraph_16), original_edges(subgraph_61))
+    self.assertNotEmpty(original_edges(subgraph_16))
+    test_util.assert_are_equal(self, other_sampler.subgraph([1, 6]), subgraph_16)
+
+  def test_all_methods_equal_with_large_hop_width(self):
+    # Node 3 is reached twice at the same step (from nodes 1 and 2), so
+    # `multi_visit=True` expands it twice. With all the neighbors selected
+    # (`debug_sampling` and a large `hop_width`), the second expansion adds
+    # nothing, and all the methods return the same graph.
+    def create_sampler(multi_visit: bool):
+      plan = config_lib.simple_sampling_config_to_sampling_plan(
+          config_lib.SimpleSamplingConfig(
+              seed_nodeset="n1",
+              num_hops=4,
+              hop_width=100,
+              reverse=True,
+              multi_visit=multi_visit,
+          ),
+          self.schema,
+      )
+      return in_memory_sampler_lib.create_sampler(
+          self.graph,
+          plan,
+          self.schema,
+          return_features=False,
+          return_node_idxs=True,
+          batch_size=5,
+          debug_sampling=True,
+      )
+
+    sampler_multi_visit = create_sampler(multi_visit=True)
+    sampler = create_sampler(multi_visit=False)
+    for seed_node_idx in range(7):
+      expected = sampler_multi_visit.sample(seed_node_idx)
+      test_util.assert_are_equal(self, sampler.sample(seed_node_idx), expected)
+      test_util.assert_are_equal(
+          self, sampler.multisubgraph([seed_node_idx])[0], expected
+      )
+      test_util.assert_are_equal(
+          self, sampler.subgraph([seed_node_idx]), expected
+      )
+
+  @parameterized.parameters(True, False)
+  def test_no_duplicate_edges(self, multi_visit: bool):
+    # With `reverse=True`, each edge is reached from both of its nodes.
+    plan = config_lib.simple_sampling_config_to_sampling_plan(
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1",
+            num_hops=3,
+            hop_width=10,
+            reverse=True,
+            multi_visit=multi_visit,
+        ),
+        self.schema,
+    )
+    sampler = in_memory_sampler_lib.create_sampler(
+        self.graph,
+        plan,
+        self.schema,
+        return_features=False,
+        return_node_idxs=True,
+        batch_size=5,
+        seed=0,
+    )
+    for sample in sampler.sample(np.arange(7, dtype=np.int64)):
+      edges = [tuple(e) for e in sample.edge_sets["e11"].adjacency.T]
+      self.assertNotEmpty(edges)
+      self.assertEqual(edges, sorted(set(edges)))
+
+  @parameterized.parameters(1, 2, 4)
+  def test_multisubgraph_equals_sample_without_multi_visit(self, num_hops):
+    def create_sampler():
+      plan = config_lib.simple_sampling_config_to_sampling_plan(
+          config_lib.SimpleSamplingConfig(
+              seed_nodeset="n1",
+              num_hops=num_hops,
+              hop_width=2,
+              reverse=True,
+              multi_visit=False,
+          ),
+          self.schema,
+      )
+      return in_memory_sampler_lib.create_sampler(
+          self.graph,
+          plan,
+          self.schema,
+          return_features=False,
+          return_node_idxs=True,
+          batch_size=5,
+          seed=1234,
+      )
+
+    seed_node_idxs = [0, 1, 3, 3, 6]
+    test_util.assert_are_equal(
+        self,
+        create_sampler().multisubgraph(seed_node_idxs),
+        create_sampler().sample(np.array(seed_node_idxs, dtype=np.int64)),
+    )
 
 
 if __name__ == "__main__":

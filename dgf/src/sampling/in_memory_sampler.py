@@ -12,7 +12,45 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""In memory sampler."""
+"""In-memory in-process sampler.
+
+This file defines three graph sampling methods. All of them traverse the
+sampling plan from the seed nodes. At each expanded node, they pick up to
+`hop_width` random edges per edgeset and direction (all the edges if the node
+has fewer).
+
+- `sample`: Builds an independent graph sample for each seed node. A node can be
+  reached several times through different paths.
+  - `multi_visit=True` (default): A node reached again through the same sequence
+    of edgesets is expanded again, and its edges are re-sampled independently
+    (the new picks can be the same edges or different ones).
+  - `multi_visit=False`: A node is expanded only the first time it is reached
+    through a given sequence of edgesets. The next visits only add an edge to
+    it.
+  - `with_replacement=True`: Each visit creates a new node. The sample is a tree
+    (the computation tree of a GNN), and `multi_visit` is ignored.
+  The samples of different seed nodes are independent: They can contain the
+  same nodes and edges of the input graph.
+- `multisubgraph`: Same as `sample` with `with_replacement=False` and
+  `multi_visit=False`. Ignores the `with_replacement`, `multi_visit`, temporal
+  sampling and edge masking options.
+  TODO(gbm): Factor the code.
+- `subgraph`: Same as `multisubgraph`, but returns a single graph for all the
+  seed nodes instead of one graph per seed node.
+
+Common properties:
+
+- The seed nodes are the first nodes of the output graphs.
+- The nodes reached at the last hop are not expanded. So, an edge between two
+  such nodes is not returned, even though both nodes are (i.e., the output is
+  not the induced subgraph).
+- With `with_replacement=False` (default), a node or an edge of the input graph
+  appears at most once in each output graph.
+- `multisubgraph` and `subgraph` match `sample` with `multi_visit=False`. They
+  can differ from the default `sample` (`multi_visit=True`) when `num_hops >= 3`
+  and `hop_width` is smaller than the node degrees. With a large `hop_width`,
+  all of them return the same graph.
+"""
 
 from collections.abc import Callable
 import copy
@@ -303,9 +341,7 @@ class Sampler:
       split_overflow_padding_error: bool,
       on_skip_samples: Callable[[int], None] | None,
       results: list[
-          tuple[
-              in_memory_graph_lib.InMemoryGraph, dict[str, np.ndarray], slice
-          ]
+          tuple[in_memory_graph_lib.InMemoryGraph, dict[str, np.ndarray], slice]
       ],
   ):
     """Merges the samples [begin, end) of `batch` into `results`."""
@@ -509,9 +545,9 @@ class Sampler:
     for node_set_name, node_set_schema in self._schema.node_sets.items():
       features = {}
       if self._return_features:
-        features.update({
-            k: v for k, v in node_set_schema.features.items() if k != _IDX_KEY
-        })
+        features.update(
+            {k: v for k, v in node_set_schema.features.items() if k != _IDX_KEY}
+        )
       if self._return_node_idxs:
         features[_IDX_KEY] = schema_lib.FeatureSchema(
             format=schema_lib.FeatureFormat.INTEGER_64
@@ -522,7 +558,7 @@ class Sampler:
     return dataclasses.replace(self._schema, node_sets=node_sets)
 
   def subgraph(
-      self, seed_node_idxs: list[int]
+      self, seed_node_idxs: list[int], check_unique_seeds: bool = True
   ) -> in_memory_graph_lib.InMemoryGraph:
     """Extracts the subgraph around the provided seed nodes.
 
@@ -556,11 +592,20 @@ class Sampler:
 
     Args:
       seed_node_idxs: The indexes of the nodes to start sampling from.
+      check_unique_seeds: If true, raises an error if `seed_node_idxs` contains
+        the same node several times. If false, a repeated seed node appears
+        several times in the output, but only its last copy is connected.
 
     Returns:
       The resulting graph.
     """
 
+    if check_unique_seeds and len(set(seed_node_idxs)) != len(seed_node_idxs):
+      raise ValueError(
+          "`seed_node_idxs` contains repeated seed nodes, which is not"
+          " supported by `subgraph`. Remove the duplicates, or set"
+          " `check_unique_seeds=False`."
+      )
     graph = self._cc_sampler.SubGraph(seed_node_idxs)
     self._add_finalize_graphs([graph])
     return graph
