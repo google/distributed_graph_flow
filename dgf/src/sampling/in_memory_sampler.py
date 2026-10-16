@@ -34,7 +34,6 @@ has fewer).
 - `multisubgraph`: Same as `sample` with `with_replacement=False` and
   `multi_visit=False`. Ignores the `with_replacement`, `multi_visit`, temporal
   sampling and edge masking options.
-  TODO(gbm): Factor the code.
 - `subgraph`: Same as `multisubgraph`, but returns a single graph for all the
   seed nodes instead of one graph per seed node.
 
@@ -290,6 +289,46 @@ class Sampler:
     Returns:
       A list of `(merged_graph, offsets, sub_slice)`.
     """
+    return self._merged_sub_batches(
+        seed_node_idxs,
+        seed_timestamps,
+        masked_edge_idxs,
+        subgraph=False,
+        skip_overflow_padding_error=skip_overflow_padding_error,
+        split_overflow_padding_error=split_overflow_padding_error,
+        on_skip_samples=on_skip_samples,
+    )
+
+  def _merged_sub_batches(
+      self,
+      seed_node_idxs: int | list[int] | np.ndarray,
+      seed_timestamps: int | list[int] | np.ndarray | None,
+      masked_edge_idxs: int | list[int] | np.ndarray | None,
+      *,
+      subgraph: bool,
+      skip_overflow_padding_error: bool,
+      split_overflow_padding_error: bool,
+      on_skip_samples: Callable[[int], None] | None,
+  ) -> list[
+      tuple[in_memory_graph_lib.InMemoryGraph, dict[str, np.ndarray], slice]
+  ]:
+    """Implementation of `sample_merged_sub_batches` and `multisubgraph_merged`.
+
+    Args:
+      seed_node_idxs: See `sample_merged`.
+      seed_timestamps: See `sample_merged`. Should be None if `subgraph`.
+      masked_edge_idxs: See `sample_merged`. Should be None if `subgraph`.
+      subgraph: If true, merges the subgraphs of `multisubgraph`. Otherwise,
+        merges the samples of `sample`.
+      skip_overflow_padding_error: See `GraphMerger.merge_sub_batches`.
+      split_overflow_padding_error: See `GraphMerger.merge_sub_batches`.
+      on_skip_samples: See `GraphMerger.merge_sub_batches`.
+
+    Returns:
+      A list of `(merged_graph, offsets, sub_slice)`.
+    """
+    if subgraph:
+      assert seed_timestamps is None and masked_edge_idxs is None
     seed_node_idxs, seed_timestamps, masked_edge_idxs = (
         self._convert_sample_inputs(
             seed_node_idxs, seed_timestamps, masked_edge_idxs
@@ -299,21 +338,30 @@ class Sampler:
       self._configure_merging()
 
     if self._python_merger is not None:
+      if subgraph:
+        graphs = self.multisubgraph(seed_node_idxs)
+      else:
+        graphs = self.sample(seed_node_idxs, seed_timestamps, masked_edge_idxs)
       return list(
           self._python_merger.merge_sub_batches(
-              self.sample(seed_node_idxs, seed_timestamps, masked_edge_idxs),
+              graphs,
               skip_overflow_padding_error=skip_overflow_padding_error,
               split_overflow_padding_error=split_overflow_padding_error,
               on_skip_samples=on_skip_samples,
           )
       )
 
-    res, batch, overflow = self._cc_sampler.SampleMerged(
-        seed_node_idxs,
-        seed_timestamps if self._has_temporal_edgesets else None,
-        masked_edge_idxs,
-        self._merge_config,
-    )
+    if subgraph:
+      res, batch, overflow = self._cc_sampler.MultiSubGraphsMerged(
+          seed_node_idxs, self._merge_config
+      )
+    else:
+      res, batch, overflow = self._cc_sampler.SampleMerged(
+          seed_node_idxs,
+          seed_timestamps if self._has_temporal_edgesets else None,
+          masked_edge_idxs,
+          self._merge_config,
+      )
     if overflow is None:
       merged, offsets = self._finalize_merged(*res)
       return [(merged, offsets, slice(0, len(seed_node_idxs)))]
@@ -562,9 +610,10 @@ class Sampler:
   ) -> in_memory_graph_lib.InMemoryGraph:
     """Extracts the subgraph around the provided seed nodes.
 
-    This method returns a graph containing all the nodes and edges at a
-    distance less than or equal to the configured number of hops from the
-    provided `seed_node_idxs`.
+    This method returns a graph containing the nodes and edges reached from
+    the provided `seed_node_idxs` by following the sampling plan, with up to
+    `hop_width` neighbors per expanded node (see the module docstring). With a
+    large `hop_width`, this is all the nodes and edges within `num_hops` hops.
 
     The seed nodes are always the first nodes of their respective node set in
     the returned `InMemoryGraph`. For example, if `seed_node_idxs` contains 3
@@ -581,7 +630,7 @@ class Sampler:
     config = dgf.sampling.SimpleSamplingConfig(
         seed_nodeset="client",
         num_hops=4,
-        hop_width=1, # Not used with "subgraph".
+        hop_width=1000,
         reverse=True,
     )
     sampler = dgf.sampling.create_sampler(graph, config, schema)
@@ -611,21 +660,24 @@ class Sampler:
     return graph
 
   def multisubgraph(
-      self, seed_node_idxs: list[int]
+      self, seed_node_idxs: list[int] | np.ndarray
   ) -> list[in_memory_graph_lib.InMemoryGraph]:
     """Extracts the subgraphs around the provided seed nodes.
 
     This method returns the graphs containing all the nodes and edges at a
     distance less than or equal to the configured number of hops from the
-    provided `seed_node_idxs`. Each seed-node leads to the creation of a
-    different sub-graph independently.
+    provided `seed_node_idxs` (up to `hop_width` neighbors per node and edge
+    set). Each seed-node leads to the creation of a different sub-graph
+    independently.
 
     The seed nodes are always the first node of the extracted graph.
 
-    Functionally, `multisubgraph` returns the same results as `sample` with an
-    infinite width, but is massively more efficient. Both `multisubgraph` and
-    `sample` use a graph traversal algorithm. However, `multisubgraph` doesn't
-    re-visit nodes, which can make it more efficient.
+    Functionally, `multisubgraph` returns the same results as `sample` with
+    `with_replacement=False` and `multi_visit=False`. With a large enough
+    `hop_width`, the subgraphs contain all the neighbors.
+
+    To train a model, prefer `multisubgraph_merged` which merges (and pads) the
+    sub-graphs and gathers the features in c++.
 
     Usage example:
     ```python
@@ -633,13 +685,13 @@ class Sampler:
     config = dgf.sampling.SimpleSamplingConfig(
         seed_nodeset="client",
         num_hops=4,
-        hop_width=1, # Not used with "subgraph".
+        hop_width=1000,  # Large enough to cover all the neighbors.
         reverse=True,
     )
-    sampler = dgf.sampling.create_sampler(graph, config, schema)
+    sampler = dgf.sampling.create_sampler(graph, config, schema, batch_size=3)
 
-    subgraph = sampler.subgraph([0,1,2])
-    print(subgraph)
+    subgraphs = sampler.multisubgraph([0,1,2])
+    print(subgraphs)
     ```
 
     Args:
@@ -649,9 +701,48 @@ class Sampler:
       A list of graphs. One for each "seed_node_idxs" value.
     """
 
-    graphs = self._cc_sampler.MultiSubGraphs(seed_node_idxs)
+    graphs = self._cc_sampler.MultiSubGraphs(
+        np.asarray(seed_node_idxs, dtype=np.int64)
+    )
     self._add_finalize_graphs(graphs)
     return graphs
+
+  def multisubgraph_merged(
+      self, seed_node_idxs: list[int] | np.ndarray
+  ) -> tuple[in_memory_graph_lib.InMemoryGraph, dict[str, np.ndarray]]:
+    """Extracts subgraphs and merges them into a single (padded) graph.
+
+    Functionally equivalent to (but much faster than) merging the graphs
+    returned by `multisubgraph` with `dgf.transform.GraphMerger(schema,
+    padding)`. See `sample_merged` for details about the returned graph.
+
+    Usage example:
+
+    ```python
+    sampler = dgf.sampling.create_sampler(graph, config, schema, batch_size=64,
+                                          padding=padding)
+    merged_graph, offsets = sampler.multisubgraph_merged(seed_node_idxs)
+    # The seed nodes of the subgraphs in the merged graph.
+    merged_seed_node_idxs = offsets[config.seed_nodeset][:-1]
+    ```
+
+    Args:
+      seed_node_idxs: The indexes of the nodes to start sampling from.
+
+    Returns:
+      The merged graph, and the node offsets of each subgraph for each node set
+      (with an extra sentinel value). See `GraphMerger` for details.
+    """
+    ((merged, offsets, _),) = self._merged_sub_batches(
+        seed_node_idxs,
+        seed_timestamps=None,
+        masked_edge_idxs=None,
+        subgraph=True,
+        skip_overflow_padding_error=False,
+        split_overflow_padding_error=False,
+        on_skip_samples=None,
+    )
+    return merged, offsets
 
   def __str__(self) -> str:
     return str(self._cc_sampler)

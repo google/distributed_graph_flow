@@ -79,7 +79,8 @@ struct AdjacencyIndex {
   // `source_blocks[n]` equals `target_node_idxs.size()`.
   std::vector<InputIdx> source_blocks;
   // Contains target node indices. Segments `[source_blocks[i],
-  // source_blocks[i+1])` are sorted.
+  // source_blocks[i+1])` are sorted by target node index, or by timestamp and
+  // then target node index if `timestamps` is not empty.
   std::vector<InputIdx> target_node_idxs;
   // Parallel array containing edge timestamps, if the edgeset has timestamps.
   // Otherwise, is empty.
@@ -126,6 +127,11 @@ struct AdjacencyIndex {
   // Checks if a directed edge exists from `source_node` to `target_node`.
   bool HasEdge(InputIdx source_node, InputIdx target_node) const {
     auto targets = Targets(source_node);
+    if (!timestamps.empty()) {
+      // The targets are not sorted by node index.
+      return std::find(targets.begin(), targets.end(), target_node) !=
+             targets.end();
+    }
     return std::binary_search(targets.begin(), targets.end(), target_node);
   }
 
@@ -156,8 +162,8 @@ struct AdjacencyIndex {
                                    InputIdx masked_edge_idx = -1) const;
 
   // Samples the first `num_samples` target nodes connected to the given
-  // `source_node` (sorted by source node id). The sampled target node indices
-  // are appended to the `result` vector.
+  // `source_node` (in the order of `target_node_idxs`). The sampled target node
+  // indices are appended to the `result` vector.
   absl::Status SampleFirst(InputIdx source_node, std::size_t num_samples,
                            std::vector<InputIdx>* result,
                            InputIdx masked_edge_idx = -1) const;
@@ -252,6 +258,127 @@ struct SamplingPlan {
     return absl::StrCat("SamplingPlan(root=\n", root->to_string(0),
                         ",\n  with_replacement=", with_replacement, "\n)");
   }
+};
+
+// Traversal semantics of `SampleBuilder::Grow`.
+enum class GrowMode {
+  // Follows the `with_replacement` and `multi_visit` options of the sampling
+  // plan. Used by `Sampler::Sample`.
+  kPlan,
+  // Sub-graph extraction: Samples without replacement, expands each node at
+  // most once per plan step (i.e., `multi_visit=False`), and deduplicates the
+  // edges. Used by `Sampler::SubGraph` and `Sampler::MultiSubGraphs`.
+  kSubGraph,
+};
+
+// Graph indexes and sampling options used to grow samples. Base of the
+// nanobind `Sampler`.
+struct SamplerIndex {
+  struct EdgeSet {
+    std::string name;
+    int source_nodeset = -1;
+    int target_nodeset = -1;
+    bool need_forward = false;
+    bool need_backward = false;
+    std::optional<AdjacencyIndex> forward_index;
+    std::optional<AdjacencyIndex> backward_index;
+  };
+
+  struct NodeSet {
+    std::string name;
+    std::size_t num_nodes;
+  };
+
+  // Sampling plan i.e. order of the sampling operations.
+  SamplingPlan plan_;
+
+  // Per edge-set information indexed by edgeset index.
+  std::vector<EdgeSet> edgesets_;
+
+  // Per nodeset-set information indexed by nodeset index.
+  std::vector<NodeSet> nodesets_;
+
+  // If true, the sampler runs a deterministic sampling useful for debugging:
+  //   - When sampling k unique edges, the k edges comming from the k nodes with
+  //   the lowest ids are sampled (and sorted). For edge sets with timestamps,
+  //   the k earliest edges are sampled instead.
+  bool debug_sampling_ = false;
+
+  int edgeset_to_mask_idx_ = -1;
+
+  // Used to track the nodes already expanded at a given plan step (when
+  // `multi_visit=False`). `step_slots_[step_idx]` is the index of the step
+  // among the non-leaf steps of the same nodeset, or -1 if the step is a leaf
+  // (leaf steps have nothing to expand). `num_step_slots_[nodeset_idx]` is the
+  // number of non-leaf steps of the nodeset.
+  std::vector<int> step_slots_;
+  std::vector<int> num_step_slots_;
+
+  // Computes `step_slots_` and `num_step_slots_`.
+  void ComputeStepSlots();
+};
+
+// A struct to hold data during the creation of a sample.
+struct SampleBuilder {
+  struct EdgeSet {
+    // The pair of sampled edges (i.e., src/target node index).
+    std::vector<std::pair<SampleIdx, SampleIdx>> edges;
+  };
+
+  struct NodeSet {
+    // Mapping from node idx in the sample to node idx in the original graph.
+    std::vector<InputIdx> sampled_node_idx_to_node_idx;
+    // Inverse mapping of "sampled_node_idx_to_node_idx".
+    // Only used when sampling without replacement.
+    absl::flat_hash_map<InputIdx, SampleIdx> node_idx_to_sampled_node_idx;
+    // Bitmap of the (non-leaf) plan steps already expanded for each sampled
+    // node. Only used when sampling without replacement and without
+    // multi-visit. The bit `slot % 64` of `expanded_steps[sampled_node_idx *
+    // words_per_node + slot / 64]` is set iff the node was expanded at the step
+    // with slot `slot` (see `SamplerIndex::step_slots_`).
+    std::vector<uint64_t> expanded_steps;
+    int words_per_node = 0;
+  };
+
+  // Per edge-set information indexed by edgeset index.
+  std::vector<EdgeSet> edgesets;
+  // Per nodeset-set information indexed by nodeset index.
+  std::vector<NodeSet> nodesets;
+
+  // Cache to avoid heap allocations during recursive sampling.
+  // `recursion_cache[depth]` stores the temporary sampled node indices at that
+  // depth.
+  std::vector<std::vector<InputIdx>> recursion_cache;
+
+  // Traversal options of the current `Grow` call.
+  bool with_replacement = false;
+  bool multi_visit = true;
+
+  // Random number generator. Re-seeded (via `MakeRng`) before each sample.
+  Rng rng;
+
+  // Grows a sample from one or multiple seed nodes. With multiple seed nodes,
+  // the seed nodes are the first nodes of the sample (in order), and the
+  // traversals from the different seed nodes are merged into a single graph.
+  absl::Status Grow(const SamplerIndex& index,
+                    std::span<const InputIdx> seed_node_idxs,
+                    std::optional<Timestamp> seed_timestamp,
+                    InputIdx masked_edge_idx, GrowMode mode);
+
+  // Adds a node to the sample and returns its sampled node idx.
+  SampleIdx AddNode(NodeSet& nodeset, InputIdx node_idx);
+
+  // Marks a node as expanded for the given step slot. Returns false if the node
+  // was already expanded for this slot.
+  static bool MarkExpanded(NodeSet& nodeset, SampleIdx sampled_node_idx,
+                           int slot);
+
+  absl::Status RecursiveGrow(const SamplerIndex& index,
+                             const SamplingPlan::Node& plan_node,
+                             InputIdx source_node,
+                             SampleIdx source_sampled_node,
+                             std::optional<Timestamp> seed_timestamp,
+                             InputIdx masked_edge_idx, int depth);
 };
 
 // Padding of a merged graph.

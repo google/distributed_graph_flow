@@ -59,6 +59,7 @@ cc_library(
     hdrs = ["in_memory_sampler.h"],
     deps = [
         "@abseil-cpp//absl/container:flat_hash_map",
+        "@abseil-cpp//absl/container:flat_hash_set",
         "@abseil-cpp//absl/log",
         "@abseil-cpp//absl/log:check",
         "@abseil-cpp//absl/random",
@@ -146,9 +147,8 @@ nanobind_extension(
     deps = [
         ":in_memory_sampler_cc",
         ":in_memory_sampler_nb",
-        "@abseil-cpp//absl/container:btree",
+        "@abseil-cpp//absl/base:core_headers",
         "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/container:flat_hash_set",
         "@abseil-cpp//absl/log",
         "@abseil-cpp//absl/random",
         "@abseil-cpp//absl/random:distributions",
@@ -218,7 +218,10 @@ cc_test(
     deps = [
         ":in_memory_sampler_cc",
         "@googletest//:gtest_main",
+        "@abseil-cpp//absl/container:flat_hash_set",
         "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "//dgf/src/util",
         "//dgf/src/util:test_util_cc",
     ],
 )
