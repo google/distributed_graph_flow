@@ -190,6 +190,60 @@ class BuildTrainStepTest(parameterized.TestCase):
     np.testing.assert_allclose(losses[0], losses[1])
     self.assertNotAlmostEqual(float(losses[0]), float(losses[2]))
 
+  def test_splits_key_across_multiple_rng_streams(self):
+    class _MultiRngModel(nn.Module):
+
+      @nn.compact
+      def __call__(self, batch: _Batch, training: bool) -> jax.Array:
+        del training
+        features, _ = batch
+        preds = nn.Dense(1)(features)[:, 0]
+        dropout_noise = jax.random.normal(
+            self.make_rng("dropout"), preds.shape
+        )
+        masking_noise = jax.random.normal(
+            self.make_rng("masking"), preds.shape
+        )
+        return preds + 0.1 * dropout_noise + 0.1 * masking_noise
+
+    model = _MultiRngModel()
+    batch = _make_batch()
+    variables: Mapping[str, Any] = model.init(
+        {
+            "params": jax.random.PRNGKey(0),
+            "dropout": jax.random.PRNGKey(1),
+            "masking": jax.random.PRNGKey(2),
+        },
+        batch,
+        training=True,
+    )
+    opt = optax.sgd(0.05)
+    opt_state = _init_opt_state(opt, variables)
+    train_step = training_lib.build_train_step(
+        model, opt, _compute_loss, rng_streams=("dropout", "masking")
+    )
+
+    new_vars_0, _, metrics_0 = train_step(
+        variables, opt_state, batch, jax.random.PRNGKey(7)
+    )
+    new_vars_0_dict: Any = new_vars_0
+    _, _, metrics_0_repeat = train_step(
+        variables, opt_state, batch, jax.random.PRNGKey(7)
+    )
+    _, _, metrics_1 = train_step(
+        variables, opt_state, batch, jax.random.PRNGKey(8)
+    )
+    np.testing.assert_allclose(metrics_0["loss"], metrics_0_repeat["loss"])
+    self.assertNotAlmostEqual(
+        float(metrics_0["loss"]), float(metrics_1["loss"])
+    )
+    self.assertFalse(
+        np.allclose(
+            new_vars_0_dict["params"]["Dense_0"]["kernel"],
+            variables["params"]["Dense_0"]["kernel"],
+        )
+    )
+
 
 class BuildValidStepTest(absltest.TestCase):
 
@@ -217,6 +271,38 @@ class BuildValidStepTest(absltest.TestCase):
         expected_metrics["mean_prediction"],
         rtol=1e-6,
     )
+
+  def test_passes_fixed_rngs_in_valid_step(self):
+    class _MaskingEvalModel(nn.Module):
+
+      @nn.compact
+      def __call__(self, batch: _Batch, training: bool) -> jax.Array:
+        del training
+        features, _ = batch
+        preds = nn.Dense(1)(features)[:, 0]
+        mask_noise = jax.random.uniform(self.make_rng("masking"), preds.shape)
+        return preds + mask_noise
+
+    model = _MaskingEvalModel()
+    batch = _make_batch()
+    variables = model.init(
+        {"params": jax.random.PRNGKey(0), "masking": jax.random.PRNGKey(1)},
+        batch,
+        training=False,
+    )
+    fixed_rngs = {"masking": jax.random.PRNGKey(42)}
+    valid_step = training_lib.build_valid_step(
+        model, _compute_loss, rngs=fixed_rngs
+    )
+    metrics_a = valid_step(params=variables, opt_state={}, batch=batch)
+    metrics_b = valid_step(params=variables, opt_state={}, batch=batch)
+    expected_preds = model.apply(
+        variables, batch, training=False, rngs=fixed_rngs
+    )
+    assert isinstance(expected_preds, jax.Array)
+    expected_loss, _ = _compute_loss(expected_preds, batch)
+    np.testing.assert_allclose(metrics_a["loss"], expected_loss, rtol=1e-6)
+    np.testing.assert_allclose(metrics_a["loss"], metrics_b["loss"], rtol=1e-6)
 
 
 class _CountingIteratorFn:

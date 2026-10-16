@@ -33,7 +33,7 @@ follows:
   ```
 """
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from typing import Any, TypeVar
 
 from dgf.src.learning.jax import flax_train
@@ -116,15 +116,17 @@ def build_train_step(
     model: nn.Module,
     opt: optax.GradientTransformation,
     compute_loss: ComputeLossFn,
+    *,
+    rng_streams: Sequence[str] = ("dropout",),
 ) -> flax_train.TrainStep:
   """Returns a jitted training step for `flax_train.train`.
 
-  The training step runs the model in training mode with a "dropout" random
-  stream, and updates the trainable parameters (i.e., the "params" variable
-  collection) with `opt` to minimize the loss computed by `compute_loss`. The
-  batch statistics (i.e., the "batch_stats" variable collection, e.g., the
-  BatchNorm running averages) are not trained by the optimizer, but updated by
-  the forward pass.
+  The training step runs the model in training mode with the random streams in
+  `rng_streams`, and updates the trainable parameters (i.e., the "params"
+  variable collection) with `opt` to minimize the loss computed by
+  `compute_loss`. The batch statistics (i.e., the "batch_stats" variable
+  collection, e.g., the BatchNorm running averages) are not trained by the
+  optimizer, but updated by the forward pass.
 
   Args:
     model: The model to train, called as `model.apply(variables, batch,
@@ -132,14 +134,24 @@ def build_train_step(
     opt: The optimizer. Its state only covers the "params" variable collection.
     compute_loss: Computes the loss to minimize and the metrics of a batch, from
       the output of the model on the batch.
+    rng_streams: Names of the Flax RNG streams passed to `model.apply`. When a
+      single stream is given, `rng_key` is passed directly to that stream; when
+      multiple streams are given, `rng_key` is split across them.
 
   Returns:
     The training step. The returned metrics contain the "loss", and the metrics
     returned by `compute_loss`.
   """
+  rng_streams = tuple(rng_streams)
 
   def loss_fn(core_params, batch_stats, batch, rng_key):
-    rngs = {"dropout": rng_key}
+    if not rng_streams:
+      rngs = {}
+    elif len(rng_streams) == 1:
+      rngs = {rng_streams[0]: rng_key}
+    else:
+      keys = jax.random.split(rng_key, len(rng_streams))
+      rngs = dict(zip(rng_streams, keys))
     if batch_stats:
       output, mutated_variables = model.apply(
           {**core_params, "batch_stats": batch_stats},
@@ -170,7 +182,10 @@ def build_train_step(
 
 
 def build_valid_step(
-    model: nn.Module, compute_loss: ComputeLossFn
+    model: nn.Module,
+    compute_loss: ComputeLossFn,
+    *,
+    rngs: Mapping[str, jax.Array] | None = None,
 ) -> flax_train.ValidStep:
   """Returns a jitted validation step for `flax_train.train`.
 
@@ -182,6 +197,9 @@ def build_valid_step(
       training=False)`.
     compute_loss: Computes the loss and the metrics of a batch, from the output
       of the model on the batch.
+    rngs: Optional fixed RNG streams passed to `model.apply` during evaluation
+      (e.g., `{"masking": jax.random.PRNGKey(0)}` for deterministic evaluation
+      masking in GraphMAE).
 
   Returns:
     The validation step. The returned metrics contain the "loss", and the
@@ -190,7 +208,10 @@ def build_valid_step(
 
   def valid_step(params, opt_state, batch):
     del opt_state  # Unused.
-    output = model.apply(params, batch, training=False)
+    if rngs is None:
+      output = model.apply(params, batch, training=False)
+    else:
+      output = model.apply(params, batch, training=False, rngs=dict(rngs))
     loss, metrics = compute_loss(output, batch)
     return {"loss": loss, **metrics}
 
