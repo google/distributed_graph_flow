@@ -1181,6 +1181,81 @@ class NodePredictionClassificationToy(absltest.TestCase):
     self.assertIn("does not have a string dictionary", str(ctx.exception))
 
 
+class NodePredictionInferenceTest(absltest.TestCase):
+
+  @classmethod
+  def setUpClass(cls):
+    super().setUpClass()
+    cls.graph, cls.schema = gen_test_graph.gen_toy_classification_dataset(
+        num_n1_nodes=300, num_n2_nodes=100, random_seed=0
+    )
+    # The sampling width is larger than the degree of the nodes, so the
+    # sampling (and the predictions) are deterministic.
+    max_degree = max(
+        np.max(np.bincount(edgeset.adjacency[i]))
+        for edgeset in cls.graph.edge_sets.values()
+        for i in range(2)
+    )
+    cls.model = node_prediction_lib.train_node_model(
+        graph=cls.graph,
+        schema=cls.schema,
+        target_nodeset="N1",
+        target_column="label",
+        num_train_steps=20,
+        valid_every_n_steps=10,
+        batch_size=8,
+        num_sampling_hops=1,
+        sampling_width=int(max_degree) + 1,
+        node_embedding_dim=8,
+        verbose=0,
+    )
+
+  def _predict(self, cache_normalized_features: bool, num_seeds: int):
+    with mock.patch.object(
+        node_prediction_model.NodePredictionModel,
+        "_should_cache_normalized_features",
+        return_value=cache_normalized_features,
+    ):
+      return self.model.predict(
+          self.graph, seed_node_idxs=np.arange(num_seeds), verbose=0
+      )
+
+  def test_cached_normalized_features_give_the_same_predictions(self):
+    # 101 seeds is not a multiple of the batch size.
+    with_cache = self._predict(cache_normalized_features=True, num_seeds=101)
+    without_cache = self._predict(cache_normalized_features=False, num_seeds=101)
+    self.assertEqual(with_cache.shape, (101, 2))
+    np.testing.assert_allclose(with_cache, without_cache, atol=1e-5)
+
+  def test_should_cache_normalized_features(self):
+    num_n1_nodes = self.graph.node_sets["N1"].num_nodes
+    assert num_n1_nodes is not None
+    # pylint: disable=protected-access
+    self.assertFalse(
+        self.model._should_cache_normalized_features(self.graph, 1)
+    )
+    self.assertTrue(
+        self.model._should_cache_normalized_features(self.graph, num_n1_nodes)
+    )
+    # pylint: enable=protected-access
+
+  def test_evaluate_with_and_without_cache(self):
+    with mock.patch.object(
+        node_prediction_model.NodePredictionModel,
+        "_should_cache_normalized_features",
+        return_value=True,
+    ):
+      with_cache = self.model.evaluate(self.graph, verbose=0)
+    with mock.patch.object(
+        node_prediction_model.NodePredictionModel,
+        "_should_cache_normalized_features",
+        return_value=False,
+    ):
+      without_cache = self.model.evaluate(self.graph, verbose=0)
+    self.assertEqual(with_cache.num_examples, without_cache.num_examples)
+    self.assertAlmostEqual(with_cache.accuracy, without_cache.accuracy)  # pyrefly: ignore[no-matching-overload]
+
+
 class NodePredictionArchitecturesToy(parameterized.TestCase):
 
   @parameterized.parameters("graphsage", "gcn", "mtalbis")

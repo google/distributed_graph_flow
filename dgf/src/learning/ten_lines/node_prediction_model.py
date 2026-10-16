@@ -47,6 +47,7 @@ from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
 from dgf.src.util import log
+from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import jax
@@ -60,6 +61,9 @@ import numpy as np
 Batch = node_prediction_core_model.Batch
 CoreModel = node_prediction_core_model.CoreModel
 CoreModelConfig = node_prediction_core_model.CoreModelConfig
+
+# Number of batches sampled and normalized in advance during inference.
+_PREDICT_PREFETCH_SIZE = 2
 
 
 @dataclasses.dataclass
@@ -393,23 +397,67 @@ class NodePredictionModel(common.Model):
     else:
       sampler_schema = self._data.schema
 
-    # TODO(gbm): Implement a better fall-back option.
-    batch_size = max(1, self._data.hparams.batch_size // 2)
+    batch_size = self._data.hparams.batch_size
+    task = self._data.task
 
-    for normalized_batch in inference.generate_normalized_batches(
+    # If enough nodes are sampled, normalizing the features of the entire graph
+    # once is cheaper than normalizing the features of each sampled sub-graph.
+    # The normalized features are then directly gathered by the sampler.
+    is_normalized = self._should_cache_normalized_features(
+        graph, len(seed_node_idxs)
+    )
+    if is_normalized:
+      graph = live.normalizer.normalize_numpy(graph)
+      sampler_schema = live.normalizer.output_schema()
+      if input_features_only:
+        label_features = sampler_schema.node_sets[task.target_nodeset].features
+        for name in live.normalizer.get_normalized_feature_names(
+            task.target_nodeset, task.target_column
+        ):
+          del label_features[name]
+
+    normalized_batches = inference.generate_normalized_batches(
         graph,
         seed_node_idxs,
         schema=self._data.schema,
         sampling_plan=sampling_plan,
         padding=self._data.padding,
         normalizer=live.normalizer,
-        target_nodeset=self._data.task.target_nodeset,
+        target_nodeset=task.target_nodeset,
         batch_size=batch_size,
         temporal_sampling=self._data.temporal_sampling,
         sampler_schema=sampler_schema,
         verbose=verbose,
+        is_normalized=is_normalized,
+    )
+    # The next batches are sampled and normalized while the model is applied.
+    for normalized_batch in util.prefetch_iterator(
+        normalized_batches, prefetch_size=_PREDICT_PREFETCH_SIZE
     ):
       yield self._predict_normalized_batch(live, normalized_batch)
+
+  def _should_cache_normalized_features(
+      self, graph: in_memory_graph.InMemoryGraph, num_seed_nodes: int
+  ) -> bool:
+    """Tests if the features of the entire graph should be normalized at once."""
+    live = self._get_live()
+    schema = self._data.schema
+    if (
+        self._data.temporal_sampling
+        or "seed_timestamps" in live.normalizer.accepted_kwargs
+        or temporal_util.schema_has_timeseries_features(schema)
+        or any(not nodeset.num_nodes for nodeset in graph.node_sets.values())
+    ):
+      return False
+    num_graph_nodes = sum(n.num_nodes or 0 for n in graph.node_sets.values())
+    # The padding is an upper bound of the number of nodes in a batch.
+    num_padded_nodes = sum(
+        n.num_nodes or 0 for n in self._data.padding.node_sets.values()
+    )
+    num_sampled_nodes = (
+        num_seed_nodes * num_padded_nodes / self._data.hparams.batch_size
+    )
+    return num_sampled_nodes >= num_graph_nodes
 
   def _predict_normalized_batch(
       self,
@@ -954,3 +1002,4 @@ def schema_to_input_feature_schema(
   schema = copy.deepcopy(schema)
   del schema.node_sets[task.target_nodeset].features[task.target_column]
   return schema
+

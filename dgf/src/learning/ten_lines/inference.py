@@ -125,8 +125,6 @@ def merged_graph_to_normalized_batch(
     timestamp_feature: str | None = None,
 ) -> NormalizedBatch:
   """Normalizes an already-merged (sub-)batch and converts it to a `NormalizedBatch`."""
-  # sentinel_offset=True produces N+1 offsets; omit trailing sentinel offset.
-  merged_seed_node_idxs = merge_offsets[target_nodeset][:-1]
   normalized_merged = normalize_merged_graph(
       merged_graph,
       merge_offsets,
@@ -135,6 +133,24 @@ def merged_graph_to_normalized_batch(
       target_nodeset=target_nodeset,
       timestamp_feature=timestamp_feature,
   )
+  return _to_normalized_batch(
+      normalized_merged,
+      merge_offsets,
+      target_nodeset=target_nodeset,
+      batch_seed_node_idxs=batch_seed_node_idxs,
+  )
+
+
+def _to_normalized_batch(
+    normalized_merged: in_memory_graph.InMemoryGraph,
+    merge_offsets: dict[str, np.ndarray],
+    *,
+    target_nodeset: str,
+    batch_seed_node_idxs: np.ndarray | None,
+) -> NormalizedBatch:
+  """Converts a merged and normalized (sub-)batch to a `NormalizedBatch`."""
+  # sentinel_offset=True produces N+1 offsets; omit trailing sentinel offset.
+  merged_seed_node_idxs = merge_offsets[target_nodeset][:-1]
   normalized_merged_jax = jax_lib.graph_to_jax_graph(normalized_merged)
   jax_seed_node_idxs = jnp.asarray(merged_seed_node_idxs)
   return NormalizedBatch(
@@ -159,6 +175,7 @@ def generate_normalized_batches(
     sampler_schema: schema_lib.GraphSchema | None = None,
     verbose: int = 2,
     progress_bar_desc: str = "Inference",
+    is_normalized: bool = False,
 ) -> Iterator[NormalizedBatch]:
   """Samples, merges, and normalizes sub-batches from an `InMemoryGraph`.
 
@@ -180,6 +197,8 @@ def generate_normalized_batches(
       target label column during label-free inference). Defaults to `schema`.
     verbose: Verbosity level (`>= 2` shows a tqdm progress bar).
     progress_bar_desc: Description shown on the tqdm progress bar.
+    is_normalized: If true, the features of `graph` are already normalized
+      (and `sampler_schema` is the normalized schema).
 
   Yields:
     `NormalizedBatch` instances in seed-node order.
@@ -248,15 +267,23 @@ def generate_normalized_batches(
         skip_overflow_padding_error=False,
         split_overflow_padding_error=True,
     ):
-      yield merged_graph_to_normalized_batch(
-          merged_graph,
-          merge_offsets,
-          schema=schema,
-          normalizer=normalizer,
-          target_nodeset=target_nodeset,
-          batch_seed_node_idxs=batch_seed_node_idxs[sub_slice],
-          timestamp_feature=normalizer_timestamp_feature,
-      )
+      if is_normalized:
+        yield _to_normalized_batch(
+            merged_graph,
+            merge_offsets,
+            target_nodeset=target_nodeset,
+            batch_seed_node_idxs=batch_seed_node_idxs[sub_slice],
+        )
+      else:
+        yield merged_graph_to_normalized_batch(
+            merged_graph,
+            merge_offsets,
+            schema=schema,
+            normalizer=normalizer,
+            target_nodeset=target_nodeset,
+            batch_seed_node_idxs=batch_seed_node_idxs[sub_slice],
+            timestamp_feature=normalizer_timestamp_feature,
+        )
 
 
 def generate_normalized_batches_from_samples(
