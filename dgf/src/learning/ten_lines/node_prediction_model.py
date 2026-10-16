@@ -707,7 +707,9 @@ class NodePredictionModel(common.Model):
             self._data.model_params, batch, training=False
         )
         if self._data.task.task_type == TaskType.NODE_REGRESSION:
-          return regression_lib.RegressionHead.logits_to_predictions(logits)  # pyrefly: ignore[bad-argument-type]
+          head_config = self._data.core_model_config.head
+          assert isinstance(head_config, regression_lib.RegressionHeadConfig)
+          return head_config.logits_to_predictions(logits)  # pyrefly: ignore[bad-argument-type]
         else:
           return classification_lib.ClassificationHead.logits_to_probability(
               logits  # pyrefly: ignore[bad-argument-type]

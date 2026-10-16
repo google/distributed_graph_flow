@@ -32,27 +32,50 @@ class RegressionHeadConfig(common.ArchitectureProvider):
   logits of shape [batch, 1] (or [batch, num_outputs]). It does not apply any
   normalization, dropout, or activation function.
 
-  To convert the output logits to predictions, use the
-  `RegressionHead.logits_to_predictions` static method.
+  The logits are the standardized predictions: The loss should be computed
+  against `standardize_labels(labels)`, and `logits_to_predictions` converts the
+  logits to predictions.
 
   Usage example:
 
     ```python
-    head = RegressionHeadConfig().make()
+    head_config = RegressionHeadConfig(label_mean=10.0, label_std=2.0)
+    head = head_config.make()
 
     embedding = jnp.ones((2, 16))
     logits = head(embedding, training=True)
-    predictions = RegressionHead.logits_to_predictions(logits)
+    predictions = head_config.logits_to_predictions(logits)
     ```
+
+  Attributes:
+    num_outputs: Number of regression outputs.
+    label_mean: Mean of the labels.
+    label_std: Standard deviation of the labels.
   """
 
   num_outputs: int = 1
+  label_mean: float = 0.0
+  label_std: float = 1.0
 
   def make(self, name: str | None = None) -> "RegressionHead":
     return RegressionHead(config=self, name=name)
 
   def architecture(self) -> str:
-    return f"Dense({self.num_outputs}) # Regression head"
+    if self.label_mean == 0.0 and self.label_std == 1.0:
+      return f"Dense({self.num_outputs}) # Regression head"
+    return (
+        f"Dense({self.num_outputs}) * {self.label_std:g} +"
+        f" {self.label_mean:g} # Regression head"
+    )
+
+  def standardize_labels(self, labels: jnp.ndarray) -> jnp.ndarray:
+    """Standardizes labels to be compared with the logits."""
+    return (labels - self.label_mean) / self.label_std
+
+  def logits_to_predictions(self, logits: jnp.ndarray) -> jnp.ndarray:
+    """Converts logits to predictions in the scale of the labels."""
+    predictions = RegressionHead.logits_to_predictions(logits)
+    return predictions * self.label_std + self.label_mean
 
 
 class RegressionHead(nn.Module):
@@ -62,12 +85,15 @@ class RegressionHead(nn.Module):
 
   @nn.compact
   def __call__(self, x: jnp.ndarray, training: bool) -> jnp.ndarray:
-    logits = nn.Dense(self.config.num_outputs)(x)
+    # Zero kernel: The initial predictions are the label mean.
+    logits = nn.Dense(
+        self.config.num_outputs, kernel_init=nn.initializers.zeros
+    )(x)
     return logits
 
   @staticmethod
   def logits_to_predictions(logits: jnp.ndarray) -> jnp.ndarray:
-    """Converts logits to predictions (squeezes the last unit dim if size 1).
+    """Squeezes the last unit dim of the logits if of size 1 (no un-scaling).
 
     Args:
       logits: A jnp.Array of shape [batch, num_outputs].

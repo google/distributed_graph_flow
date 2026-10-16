@@ -396,6 +396,7 @@ py_test(
         "//dgf/src/generate:graphs",
         "//dgf/src/io:tf",
         "//dgf/src/io:tf_graph_sample",
+        "//dgf/src/learning/jax/layers:regression",
         "//dgf/src/learning/jax/layers:standard",
         "//dgf/src/sampling:config",
         "//dgf/src/sampling:in_memory_sampler",

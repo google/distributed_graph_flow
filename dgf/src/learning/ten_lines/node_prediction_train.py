@@ -27,6 +27,7 @@ from dgf.src.analyse import print_schema as print_schema_lib
 from dgf.src.data import in_memory_graph
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
+from dgf.src.data import statistics as statistics_lib
 from dgf.src.io import jax as jax_lib
 from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import flax_train
@@ -69,6 +70,7 @@ def create_core_model_config(
     task: NodePredictionTask,
     label_spec: schema_lib.FeatureSchema,
     max_timeseries_len: int,
+    label_stats: statistics_lib.FeatureStatistics | None = None,
 ) -> CoreModelConfig:
   """Creates the FLAX core model config from the hyper-parameters.
 
@@ -81,10 +83,29 @@ def create_core_model_config(
     task: The node prediction task.
     label_spec: The schema of the label feature.
     max_timeseries_len: Maximum sequence length from the sampling plan.
+    label_stats: For regression tasks, the statistics of the label used to
+      standardize it. If None, the label is not standardized.
 
   Returns:
     The core model config.
   """
+
+  if task.task_type == node_prediction_model.TaskType.NODE_CLASSIFICATION:
+    head = classification_lib.ClassificationHeadConfig(
+        num_classes=label_spec.num_categorical_values,  # pyrefly: ignore[bad-argument-type]
+    )
+  else:
+    label_mean, label_std = 0.0, 1.0
+    if label_stats is not None:
+      # Estimated from the quantiles of the label.
+      quantiles = np.asarray(label_stats.quantiles)
+      label_mean = float(np.mean(quantiles))
+      label_std = float(np.std(quantiles)) or 1.0
+    head = regression_lib.RegressionHeadConfig(
+        num_outputs=label_spec.static_size(),
+        label_mean=label_mean,
+        label_std=label_std,
+    )
 
   return CoreModelConfig(
       embbed_graph=preprocess.EmbedGraphConfig(
@@ -98,13 +119,7 @@ def create_core_model_config(
       pre_mlp=standard.ingest_feature(hparams.node_embedding_dim),
       graph_conv=common.build_gnn_config(hparams),  # pyrefly: ignore[bad-argument-type]
       post_mlp=standard.identity(),
-      head=classification_lib.ClassificationHeadConfig(
-          num_classes=label_spec.num_categorical_values,  # pyrefly: ignore[bad-argument-type]
-      )
-      if task.task_type == node_prediction_model.TaskType.NODE_CLASSIFICATION
-      else regression_lib.RegressionHeadConfig(
-          num_outputs=label_spec.static_size()
-      ),
+      head=head,
       target_nodeset=task.target_nodeset,
       num_layers=hparams.num_layers,
       dropout=hparams.dropout,
@@ -531,6 +546,9 @@ def train_node_model(
         task,
         label_spec,
         max_timeseries_len=train_dataset.sampling_plan.max_timeseries_len,
+        label_stats=dataset_preparator.feature_stats.node_sets[
+            task.target_nodeset
+        ].features[task.target_column],
     )
     if experimental_preprocess_core_model_config is not None:
       core_model_config = experimental_preprocess_core_model_config(
@@ -570,9 +588,16 @@ def train_node_model(
         accuracy = jnp.argmax(logits, axis=-1) == labels  # pyrefly: ignore[bad-argument-type]
         metrics = {"accuracy": accuracy.mean()}
       elif task.task_type == node_prediction_model.TaskType.NODE_REGRESSION:
-        predictions = regression_lib.RegressionHead.logits_to_predictions(logits)  # pyrefly: ignore[bad-argument-type]
-        loss = optax.squared_error(predictions, labels)
-        metrics = {"rmse": jnp.sqrt(loss.mean())}
+        head_config = core_model_config.head
+        assert isinstance(head_config, regression_lib.RegressionHeadConfig)
+        # The loss is computed on the standardized labels, and the metric on
+        # the (un-standardized) labels.
+        loss = optax.squared_error(
+            regression_lib.RegressionHead.logits_to_predictions(logits),  # pyrefly: ignore[bad-argument-type]
+            head_config.standardize_labels(labels),  # pyrefly: ignore[bad-argument-type]
+        )
+        predictions = head_config.logits_to_predictions(logits)  # pyrefly: ignore[bad-argument-type]
+        metrics = {"rmse": jnp.sqrt(jnp.mean(jnp.square(predictions - labels)))}
       else:
         raise ValueError(f"Unknown task type: {task.task_type}")
       return jnp.mean(loss), metrics

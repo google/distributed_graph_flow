@@ -306,6 +306,17 @@ py_test(
 )
 
 py_test(
+    name = "regression_test",
+    srcs = ["regression_test.py"],
+    deps = [
+        ":regression",
+        # absl/testing:absltest dep,
+        # jax dep,
+        # numpy dep,
+    ],
+)
+
+py_test(
     name = "graph_masking_test",
     srcs = ["graph_masking_test.py"],
     deps = [

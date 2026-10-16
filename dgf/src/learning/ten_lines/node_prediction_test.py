@@ -29,6 +29,7 @@ from dgf.src.data import schema as schema_lib
 from dgf.src.generate import graphs as synthetic_lib
 from dgf.src.io import tf as tf_io
 from dgf.src.io import tf_graph_sample as tf_graph_sample_lib
+from dgf.src.learning.jax.layers import regression as regression_lib
 from dgf.src.learning.jax.layers import standard
 from dgf.src.learning.ten_lines import common as common_lib
 from dgf.src.learning.ten_lines import node_prediction_model
@@ -1339,6 +1340,82 @@ class NodePredictionNegativeLabelTest(absltest.TestCase):
 
 class NodePredictionRegressionToy(parameterized.TestCase):
 
+  def test_label_standardization(self):
+    # The labels are shifted and scaled far from [0, 1].
+    shift, scale = 5000.0, 1000.0
+    graph_kwargs = {"num_n1_nodes": 1000, "num_n2_nodes": 500}
+
+    def gen_graph(random_seed: int):
+      graph, schema = gen_test_graph.gen_toy_regression_dataset(
+          **graph_kwargs, random_seed=random_seed
+      )
+      n1 = graph.node_sets["N1"]
+      scaled_n1 = dataclasses.replace(
+          n1,
+          features={
+              **n1.features,
+              "label": n1.features["label"] * scale + shift,
+          },
+      )
+      return (
+          dataclasses.replace(
+              graph, node_sets={**graph.node_sets, "N1": scaled_n1}
+          ),
+          schema,
+      )
+
+    graph_train, schema = gen_graph(random_seed=0)
+    graph_test, _ = gen_graph(random_seed=1)
+    train_seed_nodes = np.arange(800)
+    model = node_prediction_lib.train_node_model(
+        graph=graph_train,
+        schema=schema,
+        target_nodeset="N1",
+        target_column="label",
+        train_seed_nodes=train_seed_nodes,
+        valid_seed_nodes=np.arange(800, 1000),
+        num_train_steps=100,
+        valid_every_n_steps=25,
+        num_sampling_hops=1,
+        verbose=0,
+    )
+
+    # The labels are standardized with (an estimate of) their statistics.
+    head = model.data().core_model_config.head
+    assert isinstance(head, regression_lib.RegressionHeadConfig)
+    train_labels = graph_train.node_sets["N1"].features["label"][
+        train_seed_nodes
+    ]
+    self.assertAlmostEqual(
+        head.label_mean, np.mean(train_labels), delta=0.1 * scale
+    )
+    self.assertAlmostEqual(
+        head.label_std, np.std(train_labels), delta=0.2 * np.std(train_labels)
+    )
+
+    # The predictions are in the scale of the labels.
+    predictions = model.predict(graph_test, seed_node_idxs=np.arange(1000))
+    test_labels = graph_test.node_sets["N1"].features["label"]
+    self.assertAlmostEqual(
+        np.mean(predictions), np.mean(test_labels), delta=0.5 * scale
+    )
+    evaluation = model.evaluate(graph_test)
+    # Same bound as `test_evaluate`, in the scale of the labels.
+    self.assertLess(evaluation.rmse, 1.5 * scale)  # pyrefly: ignore[no-matching-overload]
+    self.assertGreater(evaluation.r2, 0.0)  # pyrefly: ignore[no-matching-overload]
+
+    # The statistics are saved with the model.
+    with tempfile.TemporaryDirectory() as tmpdir:
+      model.save(tmpdir)
+      restored_model = common_lib.load_model(tmpdir)
+      self.assertEqual(
+          restored_model.data().core_model_config.head, head  # pyrefly: ignore[missing-attribute]
+      )
+      # Note: The neighbor sampling is random.
+      restored_rmse = restored_model.evaluate(graph_test).rmse  # pyrefly: ignore[missing-attribute]
+      assert restored_rmse is not None and evaluation.rmse is not None
+      self.assertAlmostEqual(restored_rmse, evaluation.rmse, delta=0.1 * scale)
+
   @parameterized.parameters(("float32", 1), ("int64", 1), ("float32", 3))
   def test_evaluate(self, label_dtype, label_dim):
 
@@ -1461,6 +1538,10 @@ class NodePredictionPredictibleModelTest(absltest.TestCase):
       return dataclasses.replace(
           c,
           pre_mlp=standard.identity(),
+          # Without label standardization, so that the model is the identity.
+          head=regression_lib.RegressionHeadConfig(
+              num_outputs=c.head.num_outputs
+          ),
       )
 
     cls.model = node_prediction_lib.train_node_model(

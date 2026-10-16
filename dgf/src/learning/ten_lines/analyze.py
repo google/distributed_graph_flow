@@ -701,7 +701,9 @@ class _Evaluator:
   ) -> tuple[jax.Array, jax.Array]:
     """Returns the (predictions, per-example losses) from the model logits."""
     if self.is_regression:
-      preds = regression_lib.RegressionHead.logits_to_predictions(logits)
+      head_config = self.data.core_model_config.head
+      assert isinstance(head_config, regression_lib.RegressionHeadConfig)
+      preds = head_config.logits_to_predictions(logits)
       losses = optax.squared_error(preds, labels)
       if losses.ndim > 1:
         # Multi-dimensional regression target: average over the dimensions.
