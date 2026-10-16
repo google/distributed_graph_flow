@@ -1322,8 +1322,7 @@ Node(nodeset_idx=0, children=[
     )
 
     with self.assertRaisesRegex(
-        ValueError,
-        "Cannot use SampleRandomUniform when timestamps are available",
+        ValueError, "seed_timestamps must be provided with temporal sampling"
     ):
       _ = sampler.sample([0])
 
@@ -1493,6 +1492,198 @@ Node(nodeset_idx=0, children=[
     sampled = negatives[0]
     for n in sampled:
       self.assertIn(n, [0, 1, 2, 3, 4, 5])
+
+  def _create_line_sampler(
+      self, num_nodes: int, edge_timestamps: list[int] | None = None
+  ) -> in_memory_sampler_lib.Sampler:
+    """Creates a sampler on the homogeneous line graph 0->1->...->n-1."""
+    edge_features = {}
+    edge_features_schema = {}
+    if edge_timestamps is not None:
+      edge_features["t"] = np.array(edge_timestamps, dtype=np.int64)
+      edge_features_schema["t"] = schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.INTEGER_64,
+          semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+          is_creation_time=True,
+      )
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "n": in_memory_graph_lib.InMemoryNodeSet(
+                num_nodes=num_nodes, features={}
+            )
+        },
+        edge_sets={
+            "e": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array(
+                    [range(num_nodes - 1), range(1, num_nodes)], dtype=np.int64
+                ).reshape(2, -1),
+                features=edge_features,
+            )
+        },
+    )
+    schema = schema_lib.GraphSchema(
+        node_sets={"n": schema_lib.NodeSchema()},
+        edge_sets={
+            "e": schema_lib.EdgeSchema(
+                source="n", target="n", features=edge_features_schema
+            )
+        },
+    )
+    return in_memory_sampler_lib.create_sampler(
+        graph,
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n",
+            num_hops=2,
+            hop_width=10,
+            temporal_sampling=edge_timestamps is not None,
+            propagate_timestamp_to_edges=False,
+        ),
+        schema,
+        batch_size=1,
+        return_node_idxs=True,
+        seed=1,
+    )
+
+  def test_temporal_sampler_subgraphs_ignore_timestamps(self):
+    temporal = self._create_line_sampler(4, edge_timestamps=[3, 2, 1])
+    non_temporal = self._create_line_sampler(4)
+
+    def assert_same_graph(a, b):
+      np.testing.assert_array_equal(
+          a.node_sets["n"].features["#idx"], b.node_sets["n"].features["#idx"]
+      )
+      np.testing.assert_array_equal(
+          a.edge_sets["e"].adjacency, b.edge_sets["e"].adjacency
+      )
+
+    assert_same_graph(temporal.subgraph([0]), non_temporal.subgraph([0]))
+    for a, b in zip(
+        temporal.multisubgraph([0, 1]), non_temporal.multisubgraph([0, 1])
+    ):
+      assert_same_graph(a, b)
+    assert_same_graph(
+        temporal.multisubgraph_merged([1])[0],
+        non_temporal.multisubgraph_merged([1])[0],
+    )
+    # `sample` follows the seed timestamps.
+    self.assertEqual(
+        temporal.sample(0, seed_timestamps=10).edge_sets["e"].adjacency.shape,
+        (2, 2),
+    )
+    self.assertEqual(
+        temporal.sample(0, seed_timestamps=2).edge_sets["e"].adjacency.shape,
+        (2, 0),
+    )
+
+  def test_random_walk_negative_sampling_invalid_arguments(self):
+    sampler = self._create_line_sampler(3)
+    with self.assertRaisesRegex(ValueError, "out of bounds"):
+      sampler._cc_sampler.RandomWalkNegativeSampling(
+          seed_node_idxs=np.array([3], dtype=np.int64),
+          target_edgeset_idx=0,
+          num_walks=4,
+          num_negatives_per_seed=2,
+      )
+    with self.assertRaisesRegex(ValueError, "non-negative"):
+      sampler._cc_sampler.RandomWalkNegativeSampling(
+          seed_node_idxs=np.array([0], dtype=np.int64),
+          target_edgeset_idx=0,
+          num_walks=4,
+          num_negatives_per_seed=-1,
+      )
+    # A single node cannot be a negative of itself.
+    with self.assertRaisesRegex(ValueError, "Not enough target nodes"):
+      self._create_line_sampler(1)._cc_sampler.RandomWalkNegativeSampling(
+          seed_node_idxs=np.array([0], dtype=np.int64),
+          target_edgeset_idx=0,
+          num_walks=4,
+          num_negatives_per_seed=1,
+      )
+
+  def test_random_walk_negative_sampling_temporal_excludes_neighbors(self):
+    # The neighbors of 0 are {1, 2}, with timestamps in the reverse order of
+    # the node indices. The self-loop on 1 makes it the most visited node.
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "n": in_memory_graph_lib.InMemoryNodeSet(num_nodes=4, features={})
+        },
+        edge_sets={
+            "e": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array([[0, 0, 1, 2], [1, 2, 1, 3]]),
+                features={"t": np.array([2, 1, 0, 0], dtype=np.int64)},
+            )
+        },
+    )
+    schema = schema_lib.GraphSchema(
+        node_sets={"n": schema_lib.NodeSchema()},
+        edge_sets={
+            "e": schema_lib.EdgeSchema(
+                source="n",
+                target="n",
+                features={
+                    "t": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_creation_time=True,
+                    )
+                },
+            )
+        },
+    )
+    sampler = in_memory_sampler_lib.create_sampler(
+        graph,
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n",
+            num_hops=2,
+            hop_width=10,
+            temporal_sampling=True,
+            propagate_timestamp_to_edges=False,
+        ),
+        schema,
+        batch_size=1,
+        seed=1,
+    )
+    # The walks from 0 visit 1, 2 (neighbors) and 3 (the only negative).
+    negatives = sampler._cc_sampler.RandomWalkNegativeSampling(
+        seed_node_idxs=np.array([0], dtype=np.int64),
+        target_edgeset_idx=0,
+        num_walks=100,
+        num_negatives_per_seed=1,
+    )
+    np.testing.assert_array_equal(negatives, [[3]])
+
+  def test_plan_inconsistent_with_schema(self):
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "a": in_memory_graph_lib.InMemoryNodeSet(num_nodes=3, features={}),
+            "b": in_memory_graph_lib.InMemoryNodeSet(num_nodes=3, features={}),
+        },
+        edge_sets={
+            "e": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array([[0, 1], [2, 0]])
+            )
+        },
+    )
+    schema = schema_lib.GraphSchema(
+        node_sets={"a": schema_lib.NodeSchema(), "b": schema_lib.NodeSchema()},
+        edge_sets={"e": schema_lib.EdgeSchema(source="a", target="b")},
+    )
+    # Traverses "e" forward from "b", while "e" goes from "a" to "b".
+    plan = config_lib.SamplingPlan(
+        root=config_lib.PlanNode(
+            nodeset="b",
+            children=[
+                config_lib.PlanEdge(
+                    edgeset="e",
+                    reversed=False,
+                    hop_width=5,
+                    node=config_lib.PlanNode(nodeset="a"),
+                )
+            ],
+        )
+    )
+    with self.assertRaisesRegex(ValueError, "between the wrong node sets"):
+      in_memory_sampler_lib.create_sampler(graph, plan, schema, batch_size=1)
 
   def _create_causal_timeseries_test_graph(self):
     graph = in_memory_graph_lib.InMemoryGraph(
@@ -1777,6 +1968,73 @@ Node(nodeset_idx=0, children=[
     ):
       sampler_missing_timestamps.sample(seed_node_idxs=0, seed_timestamps=None)
 
+  def test_subgraph_repeated_seeds(self):
+    sampler = in_memory_sampler_lib.create_sampler(
+        self.graph,
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1", num_hops=3, hop_width=100
+        ),
+        schema=self.schema,
+        return_features=False,
+        return_node_idxs=True,
+        batch_size=2,
+    )
+    subgraph = sampler.subgraph([0, 1, 0], check_unique_seeds=False)
+    node_idxs = {
+        name: node_set.features["#idx"]
+        for name, node_set in subgraph.node_sets.items()
+    }
+    # The seeds are the first nodes, including the repeated one.
+    np.testing.assert_array_equal(node_idxs["n1"][:3], [0, 1, 0])
+    self.assertLen(set(node_idxs["n1"][3:]), len(node_idxs["n1"]) - 3)
+    # Each extracted edge is an edge of the original graph.
+    for name, edge_set_schema in self.schema.edge_sets.items():
+      original_edges = set(
+          tuple(e) for e in self.graph.edge_sets[name].adjacency.T
+      )
+      for src, trg in subgraph.edge_sets[name].adjacency.T:
+        self.assertIn(
+            (
+                node_idxs[edge_set_schema.source][src],
+                node_idxs[edge_set_schema.target][trg],
+            ),
+            original_edges,
+        )
+
+  def test_subgraph_invalid_seed(self):
+    sampler = in_memory_sampler_lib.create_sampler(
+        self.graph,
+        config_lib.SimpleSamplingConfig(seed_nodeset="n1", num_hops=1),
+        schema=self.schema,
+        batch_size=2,
+    )
+    num_nodes = self.graph.node_sets["n1"].num_nodes
+    assert num_nodes is not None
+    with self.assertRaisesRegex(ValueError, "out of bounds"):
+      sampler.subgraph([num_nodes])
+    with self.assertRaisesRegex(ValueError, "out of bounds"):
+      sampler.multisubgraph([0, num_nodes])
+
+  def test_subgraph_deep_plan_edges_are_unique(self):
+    # With a deep plan, the same nodes are expanded at several steps of the
+    # plan, and the same edges are traversed several times.
+    sampler = in_memory_sampler_lib.create_sampler(
+        self.graph,
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1", num_hops=4, hop_width=100
+        ),
+        schema=self.schema,
+        return_features=False,
+        return_node_idxs=True,
+        batch_size=2,
+    )
+    subgraph = sampler.subgraph([0])
+    (multisubgraph,) = sampler.multisubgraph([0])
+    test_util.assert_are_equal(self, subgraph, multisubgraph)
+    for edge_set in subgraph.edge_sets.values():
+      edges = [tuple(e) for e in edge_set.adjacency.T]
+      self.assertEqual(edges, sorted(set(edges)))
+
   def test_timeseries_subgraph_and_multisubgraph_clipping(self):
     graph, schema = self._create_causal_timeseries_test_graph()
     plan = config_lib.SimpleSamplingConfig(
@@ -2046,6 +2304,7 @@ class SampleMergedTest(parameterized.TestCase):
       padding: padding_lib.Padding | None,
       return_features: bool,
       return_node_idxs: bool,
+      subgraph: bool = False,
       **sample_kwargs,
   ):
     """Compares `sample_merged` with `sample` + `GraphMerger`.
@@ -2059,22 +2318,31 @@ class SampleMergedTest(parameterized.TestCase):
       padding: Optional padding.
       return_features: Sampler option.
       return_node_idxs: Sampler option.
+      subgraph: If true, compares `multisubgraph_merged` with `multisubgraph` +
+        `GraphMerger` instead.
       **sample_kwargs: Extra arguments to the sampling methods.
     """
     reference_sampler = create_sampler(
         return_features=return_features, return_node_idxs=return_node_idxs
     )
+    if subgraph:
+      graphs = reference_sampler.multisubgraph(seed_node_idxs)
+    else:
+      graphs = reference_sampler.sample(seed_node_idxs, **sample_kwargs)
     expected = merge_lib.GraphMerger(
         _sampler_output_schema(schema, return_features, return_node_idxs),
         padding=padding,
-    )(reference_sampler.sample(seed_node_idxs, **sample_kwargs))
+    )(graphs)
 
     sampler = create_sampler(
         return_features=return_features,
         return_node_idxs=return_node_idxs,
         padding=padding,
     )
-    actual = sampler.sample_merged(seed_node_idxs, **sample_kwargs)
+    if subgraph:
+      actual = sampler.multisubgraph_merged(seed_node_idxs)
+    else:
+      actual = sampler.sample_merged(seed_node_idxs, **sample_kwargs)
     _assert_merged_equal(self, actual, expected)
 
   @parameterized.product(
@@ -2109,6 +2377,35 @@ class SampleMergedTest(parameterized.TestCase):
         padding,
         return_features=return_features,
         return_node_idxs=return_node_idxs,
+    )
+
+  @parameterized.product(
+      use_padding=[False, True],
+      output=[(True, False), (False, True), (True, True)],
+  )
+  def test_multisubgraph_merged_matches_graph_merger(
+      self,
+      use_padding: bool,
+      output: tuple[bool, bool],
+  ):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    padding = (
+        _padding({"n1": 100, "n2": 100}, {"e1": 100, "e2": 100})
+        if use_padding
+        else None
+    )
+    return_features, return_node_idxs = output
+    self._assert_matches_graph_merger(
+        lambda **kwargs: self._create_sampler(
+            graph, schema, seed_nodeset="n1", num_hops=3, **kwargs
+        ),
+        np.array([0, 1, 1, 0], dtype=np.int64),
+        schema,
+        padding,
+        return_features=return_features,
+        return_node_idxs=return_node_idxs,
+        subgraph=True,
     )
 
   def test_subset_schema_and_partial_padding(self):
