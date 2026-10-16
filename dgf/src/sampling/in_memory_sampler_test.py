@@ -1777,6 +1777,39 @@ Node(nodeset_idx=0, children=[
     ):
       sampler_missing_timestamps.sample(seed_node_idxs=0, seed_timestamps=None)
 
+  def test_subgraph_repeated_seeds(self):
+    sampler = in_memory_sampler_lib.create_sampler(
+        self.graph,
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1", num_hops=3, hop_width=100
+        ),
+        schema=self.schema,
+        return_features=False,
+        return_node_idxs=True,
+        batch_size=2,
+    )
+    subgraph = sampler.subgraph([0, 1, 0], check_unique_seeds=False)
+    node_idxs = {
+        name: node_set.features["#idx"]
+        for name, node_set in subgraph.node_sets.items()
+    }
+    # The seeds are the first nodes, including the repeated one.
+    np.testing.assert_array_equal(node_idxs["n1"][:3], [0, 1, 0])
+    self.assertLen(set(node_idxs["n1"][3:]), len(node_idxs["n1"]) - 3)
+    # Each extracted edge is an edge of the original graph.
+    for name, edge_set_schema in self.schema.edge_sets.items():
+      original_edges = set(
+          tuple(e) for e in self.graph.edge_sets[name].adjacency.T
+      )
+      for src, trg in subgraph.edge_sets[name].adjacency.T:
+        self.assertIn(
+            (
+                node_idxs[edge_set_schema.source][src],
+                node_idxs[edge_set_schema.target][trg],
+            ),
+            original_edges,
+        )
+
   def test_subgraph_invalid_seed(self):
     sampler = in_memory_sampler_lib.create_sampler(
         self.graph,
@@ -2080,6 +2113,7 @@ class SampleMergedTest(parameterized.TestCase):
       padding: padding_lib.Padding | None,
       return_features: bool,
       return_node_idxs: bool,
+      subgraph: bool = False,
       **sample_kwargs,
   ):
     """Compares `sample_merged` with `sample` + `GraphMerger`.
@@ -2093,22 +2127,31 @@ class SampleMergedTest(parameterized.TestCase):
       padding: Optional padding.
       return_features: Sampler option.
       return_node_idxs: Sampler option.
+      subgraph: If true, compares `multisubgraph_merged` with `multisubgraph` +
+        `GraphMerger` instead.
       **sample_kwargs: Extra arguments to the sampling methods.
     """
     reference_sampler = create_sampler(
         return_features=return_features, return_node_idxs=return_node_idxs
     )
+    if subgraph:
+      graphs = reference_sampler.multisubgraph(seed_node_idxs)
+    else:
+      graphs = reference_sampler.sample(seed_node_idxs, **sample_kwargs)
     expected = merge_lib.GraphMerger(
         _sampler_output_schema(schema, return_features, return_node_idxs),
         padding=padding,
-    )(reference_sampler.sample(seed_node_idxs, **sample_kwargs))
+    )(graphs)
 
     sampler = create_sampler(
         return_features=return_features,
         return_node_idxs=return_node_idxs,
         padding=padding,
     )
-    actual = sampler.sample_merged(seed_node_idxs, **sample_kwargs)
+    if subgraph:
+      actual = sampler.multisubgraph_merged(seed_node_idxs)
+    else:
+      actual = sampler.sample_merged(seed_node_idxs, **sample_kwargs)
     _assert_merged_equal(self, actual, expected)
 
   @parameterized.product(
@@ -2143,6 +2186,35 @@ class SampleMergedTest(parameterized.TestCase):
         padding,
         return_features=return_features,
         return_node_idxs=return_node_idxs,
+    )
+
+  @parameterized.product(
+      use_padding=[False, True],
+      output=[(True, False), (False, True), (True, True)],
+  )
+  def test_multisubgraph_merged_matches_graph_merger(
+      self,
+      use_padding: bool,
+      output: tuple[bool, bool],
+  ):
+    graph = gen_test_graph.generate_in_memory_graph()
+    schema = gen_test_graph.generate_schema()
+    padding = (
+        _padding({"n1": 100, "n2": 100}, {"e1": 100, "e2": 100})
+        if use_padding
+        else None
+    )
+    return_features, return_node_idxs = output
+    self._assert_matches_graph_merger(
+        lambda **kwargs: self._create_sampler(
+            graph, schema, seed_nodeset="n1", num_hops=3, **kwargs
+        ),
+        np.array([0, 1, 1, 0], dtype=np.int64),
+        schema,
+        padding,
+        return_features=return_features,
+        return_node_idxs=return_node_idxs,
+        subgraph=True,
     )
 
   def test_subset_schema_and_partial_padding(self):

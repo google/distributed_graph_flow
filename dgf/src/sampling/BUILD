@@ -147,8 +147,9 @@ nanobind_extension(
     deps = [
         ":in_memory_sampler_cc",
         ":in_memory_sampler_nb",
+        "@abseil-cpp//absl/base:core_headers",
+        "@abseil-cpp//absl/cleanup",
         "@abseil-cpp//absl/container:flat_hash_map",
-        "@abseil-cpp//absl/container:flat_hash_set",
         "@abseil-cpp//absl/log",
         "@abseil-cpp//absl/random",
         "@abseil-cpp//absl/random:distributions",

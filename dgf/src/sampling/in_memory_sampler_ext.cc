@@ -17,7 +17,6 @@
 #include <cstdint>
 #include <functional>
 #include <latch>
-#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -27,8 +26,9 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/thread_annotations.h"
+#include "absl/cleanup/cleanup.h"
 #include "absl/container/flat_hash_map.h"
-#include "absl/container/flat_hash_set.h"
 #include "absl/log/log.h"
 #include "absl/random/distributions.h"
 #include "absl/status/status.h"
@@ -57,6 +57,17 @@ struct SampledBatch;
 struct MergeConfig;
 struct RawMergedBatch;
 
+// Traversal semantics of `SampleBuilder::Grow`.
+enum class GrowMode {
+  // Follows the `with_replacement` and `multi_visit` options of the sampling
+  // plan. Used by `Sampler::Sample`.
+  kPlan,
+  // Sub-graph extraction: Samples without replacement, expands each node at
+  // most once per plan step (i.e., `multi_visit=False`), and deduplicates the
+  // edges. Used by `Sampler::SubGraph` and `Sampler::MultiSubGraphs`.
+  kSubGraph,
+};
+
 // In-memory index used for graph sampling. This struct stores node and edge
 // indices, as well as edge pairs, but does not include feature values.
 struct Sampler {
@@ -73,12 +84,6 @@ struct Sampler {
   struct NodeSet {
     std::string name;
     std::size_t num_nodes;
-
-    // List of edgesets where this nodeset is a source.
-    std::vector<int> as_source_edgeset;
-
-    // List of edgestes where this nodeset is a target.
-    std::vector<int> as_target_edgeset;
   };
 
   // Sampling plan i.e. order of the sampling operations.
@@ -94,6 +99,9 @@ struct Sampler {
   ModuleIndex module_index_;
 
   // Random number generator.
+  // Not guarded by a mutex: Only used by the calling thread (the thread pool
+  // workers get their own generator). A sampler should not be called
+  // concurrently from several threads.
   // TODO(gbm): Create a pool for when using multi-threaded sampling.
   Rng rng_;
 
@@ -109,25 +117,25 @@ struct Sampler {
   int edgeset_to_mask_idx_ = -1;
 
   // Pool of available SampleBuilders to reuse them across seeds and calls.
-  std::vector<std::unique_ptr<SampleBuilder>> sample_builder_pool_;
   util::concurrency::Mutex sample_builder_pool_mutex_;
+  std::vector<std::unique_ptr<SampleBuilder>> sample_builder_pool_
+      ABSL_GUARDED_BY(sample_builder_pool_mutex_);
 
-  // Used by the sub-graph extraction to track the nodes already expanded at a
-  // given plan step. `subgraph_step_slots_[step_idx]` is the index of the step
+  // Used to track the nodes already expanded at a given plan step (when
+  // `multi_visit=False`). `step_slots_[step_idx]` is the index of the step
   // among the non-leaf steps of the same nodeset, or -1 if the step is a leaf
-  // (leaf steps are never expanded). `subgraph_num_step_slots_[nodeset_idx]`
-  // is the number of non-leaf steps of the nodeset.
-  std::vector<int> subgraph_step_slots_;
-  std::vector<int> subgraph_num_step_slots_;
+  // (leaf steps have nothing to expand). `num_step_slots_[nodeset_idx]` is the
+  // number of non-leaf steps of the nodeset.
+  std::vector<int> step_slots_;
+  std::vector<int> num_step_slots_;
 
-  // Computes `subgraph_step_slots_` and `subgraph_num_step_slots_`.
-  void ComputeSubGraphStepSlots() {
-    subgraph_step_slots_.assign(plan_.num_steps, -1);
-    subgraph_num_step_slots_.assign(nodesets_.size(), 0);
+  // Computes `step_slots_` and `num_step_slots_`.
+  void ComputeStepSlots() {
+    step_slots_.assign(plan_.num_steps, -1);
+    num_step_slots_.assign(nodesets_.size(), 0);
     for (const SamplingPlan::Node* node : plan_.step_to_nodes) {
       if (!node->children.empty()) {
-        subgraph_step_slots_[node->step_idx] =
-            subgraph_num_step_slots_[node->nodeset_idx]++;
+        step_slots_[node->step_idx] = num_step_slots_[node->nodeset_idx]++;
       }
     }
   }
@@ -188,13 +196,34 @@ struct Sampler {
       std::optional<TimestampsArray> seed_timestamps,
       std::optional<EdgeIdxs> masked_edge_idxs, const MergeConfig& config);
 
+  // Same as `SampleMerged`, but for the sub-graphs of `MultiSubGraphs`.
+  absl::StatusOr<nb::tuple> MultiSubGraphsMerged(const NodeIdxs& seed_node_idxs,
+                                                 const MergeConfig& config);
+
+  // Implementation of `SampleMerged` and `MultiSubGraphsMerged`.
+  absl::StatusOr<nb::tuple> SampleMergedImpl(
+      const NodeIdxs& seed_node_idxs,
+      const std::optional<TimestampsArray>& seed_timestamps,
+      const std::optional<EdgeIdxs>& masked_edge_idxs,
+      const MergeConfig& config, GrowMode mode);
+
+  // Implementation of `Sample` and `MultiSubGraphs`.
+  absl::StatusOr<nb::list> SampleImpl(
+      const NodeIdxs& seed_node_idxs,
+      const std::optional<TimestampsArray>& seed_timestamps,
+      const std::optional<EdgeIdxs>& masked_edge_idxs, GrowMode mode);
+
   // Grows one sample per seed node in the thread pool. Called without the GIL.
   // The returned builders should be returned to the pool with
   // `ReleaseBuilders`.
   absl::StatusOr<std::vector<std::unique_ptr<SampleBuilder>>> GrowSamplesNoGil(
       const NodeIdxs& seed_node_idxs,
       const std::optional<TimestampsArray>& seed_timestamps,
-      const std::optional<EdgeIdxs>& masked_edge_idxs);
+      const std::optional<EdgeIdxs>& masked_edge_idxs, GrowMode mode);
+
+  // Gets `num_builders` sample builders from the pool (or creates them).
+  std::vector<std::unique_ptr<SampleBuilder>> AcquireBuilders(
+      std::size_t num_builders);
 
   // Returns sample builders to the pool for re-use.
   void ReleaseBuilders(std::vector<std::unique_ptr<SampleBuilder>>* builders);
@@ -235,8 +264,7 @@ struct Sampler {
       const std::vector<InputIdx>& seed_node_idx);
 
   // Extracts a graph subset around each provided seed nodes.
-  absl::StatusOr<nb::list> MultiSubGraphs(
-      const std::vector<InputIdx>& seed_node_idx);
+  absl::StatusOr<nb::list> MultiSubGraphs(const NodeIdxs& seed_node_idxs);
 
   // Negative sampling using a random walk.
   //
@@ -276,6 +304,13 @@ struct SampleBuilder {
     // Inverse mapping of "sampled_node_idx_to_node_idx".
     // Only used when sampling without replacement.
     absl::flat_hash_map<InputIdx, SampleIdx> node_idx_to_sampled_node_idx;
+    // Bitmap of the (non-leaf) plan steps already expanded for each sampled
+    // node. Only used when sampling without replacement and without
+    // multi-visit. The bit `slot % 64` of `expanded_steps[sampled_node_idx *
+    // words_per_node + slot / 64]` is set iff the node was expanded at the step
+    // with slot `slot` (see `Sampler::step_slots_`).
+    std::vector<uint64_t> expanded_steps;
+    int words_per_node = 0;
   };
 
   // Per edge-set information indexed by edgeset index.
@@ -288,12 +323,37 @@ struct SampleBuilder {
   // depth.
   std::vector<std::vector<InputIdx>> recursion_cache;
 
-  // Keep track of visited nodes per plan step to avoid multi-visits on the same
-  // step.
-  std::vector<absl::flat_hash_set<InputIdx>> visited_node_idxs;
+  // Traversal options of the current `Grow` call.
+  bool with_replacement = false;
+  bool multi_visit = true;
 
   // Random number generator. Re-seeded (via `MakeRng`) before each sample.
   Rng rng;
+
+  // Adds a node to the sample and returns its sampled node idx.
+  SampleIdx AddNode(NodeSet& nodeset, InputIdx node_idx) {
+    const SampleIdx sampled_node_idx =
+        nodeset.sampled_node_idx_to_node_idx.size();
+    nodeset.sampled_node_idx_to_node_idx.push_back(node_idx);
+    nodeset.expanded_steps.resize(
+        nodeset.expanded_steps.size() + nodeset.words_per_node, 0);
+    return sampled_node_idx;
+  }
+
+  // Marks a node as expanded for the given step slot. Returns false if the node
+  // was already expanded for this slot.
+  static bool MarkExpanded(NodeSet& nodeset, SampleIdx sampled_node_idx,
+                           int slot) {
+    uint64_t& word = nodeset.expanded_steps[sampled_node_idx *
+                                                nodeset.words_per_node +
+                                            slot / 64];
+    const uint64_t mask = uint64_t{1} << (slot % 64);
+    if (word & mask) {
+      return false;
+    }
+    word |= mask;
+    return true;
+  }
 
   absl::Status RecursiveGrow(const Sampler& sampler,
                              const SamplingPlan::Node& plan_node,
@@ -343,8 +403,11 @@ struct SampleBuilder {
       }
 
       // Recursively sample the sub-nodes.
-      auto& sample_target_nodeset = nodesets[plan_edge.node->nodeset_idx];
+      const SamplingPlan::Node& target_plan_node = *plan_edge.node;
+      auto& sample_target_nodeset = nodesets[target_plan_node.nodeset_idx];
       auto& sample_edgeset = edgesets[plan_edge.edgeset_idx];
+      // -1 if the target step is a leaf i.e. there is nothing to expand.
+      const int step_slot = sampler.step_slots_[target_plan_node.step_idx];
 
       const auto add_edge = [&](SampleIdx src, SampleIdx trg) {
         if (!plan_edge.reversed) {
@@ -356,48 +419,42 @@ struct SampleBuilder {
 
       for (const auto target_node : cache_node_idxs) {
         // Record the target node and create/reuse a sampled node.
-
-        bool recuse = true;
+        bool recurse = step_slot >= 0;
 
         SampleIdx target_sampled_node;
-        if (!sampler.plan_.with_replacement) {
+        if (!with_replacement) {
           // Sampling without replacement.
+          // Note: The new sampled node idx is the number of sampled nodes (and
+          // not the size of the map) since a seed node can be repeated.
           auto [target_sampled_node_it, inserted] =
               sample_target_nodeset.node_idx_to_sampled_node_idx.try_emplace(
                   target_node,
-                  sample_target_nodeset.node_idx_to_sampled_node_idx.size());
+                  sample_target_nodeset.sampled_node_idx_to_node_idx.size());
           target_sampled_node = target_sampled_node_it->second;
           add_edge(source_sampled_node, target_sampled_node);
 
           if (inserted) {
-            sample_target_nodeset.sampled_node_idx_to_node_idx.push_back(
-                target_node);
-            DCHECK(sample_target_nodeset.sampled_node_idx_to_node_idx.size() ==
-                   sample_target_nodeset.node_idx_to_sampled_node_idx.size());
+            AddNode(sample_target_nodeset, target_node);
           }
 
-          if (!sampler.plan_.multi_visit) {
-            // Further expand the node iff it was not already visited in
-            // this plan edge. Note that the same node can be expanded multiple
-            // times through different plan edges.
-            auto [_it, inserted_local] =
-                visited_node_idxs[plan_edge.node->step_idx].insert(target_node);
-            recuse = inserted_local;
+          if (!multi_visit && recurse) {
+            // Further expand the node iff it was not already expanded at this
+            // plan step. Note that the same node can be expanded multiple
+            // times through different plan steps.
+            recurse = MarkExpanded(sample_target_nodeset, target_sampled_node,
+                                   step_slot);
           }
 
         } else {
           // Sampling with replacement.
-          target_sampled_node =
-              sample_target_nodeset.sampled_node_idx_to_node_idx.size();
-          sample_target_nodeset.sampled_node_idx_to_node_idx.push_back(
-              target_node);
+          target_sampled_node = AddNode(sample_target_nodeset, target_node);
           add_edge(source_sampled_node, target_sampled_node);
         }
 
         // Build the sub-sample.
-        if (recuse) {
+        if (recurse) {
           DGF_RETURN_IF_ERROR(RecursiveGrow(
-              sampler, *plan_edge.node, target_node, target_sampled_node,
+              sampler, target_plan_node, target_node, target_sampled_node,
               seed_timestamp, masked_edge_idx, depth + 1));
         }
       }
@@ -405,20 +462,20 @@ struct SampleBuilder {
     return absl::OkStatus();
   }
 
-  absl::Status Grow(const Sampler& sampler, InputIdx seed_node_idx,
+  // Grows a sample from one or multiple seed nodes. With multiple seed nodes,
+  // the seed nodes are the first nodes of the sample (in order), and the
+  // traversals from the different seed nodes are merged into a single graph.
+  absl::Status Grow(const Sampler& sampler,
+                    std::span<const InputIdx> seed_node_idxs,
                     std::optional<Timestamp> seed_timestamp,
-                    InputIdx masked_edge_idx) {
+                    InputIdx masked_edge_idx, GrowMode mode) {
+    const bool subgraph = mode == GrowMode::kSubGraph;
+    with_replacement = !subgraph && sampler.plan_.with_replacement;
+    multi_visit = !subgraph && sampler.plan_.multi_visit;
+
     // Pre-allocate recursion cache to avoid reallocations during recursion.
     if (recursion_cache.size() < sampler.plan_.num_steps) {
       recursion_cache.resize(sampler.plan_.num_steps);
-    }
-    if (!sampler.plan_.multi_visit) {
-      if (visited_node_idxs.size() < sampler.plan_.num_steps) {
-        visited_node_idxs.resize(sampler.plan_.num_steps);
-      }
-      for (auto& s : visited_node_idxs) {
-        s.clear();
-      }
     }
 
     // Reuse capacity of edgesets and nodesets.
@@ -432,30 +489,54 @@ struct SampleBuilder {
     if (nodesets.size() < sampler.nodesets_.size()) {
       nodesets.resize(sampler.nodesets_.size());
     }
-    for (auto& ns : nodesets) {
+    const bool track_expanded_steps = !with_replacement && !multi_visit;
+    for (std::size_t i = 0; i < nodesets.size(); i++) {
+      auto& ns = nodesets[i];
       ns.sampled_node_idx_to_node_idx.clear();
       ns.node_idx_to_sampled_node_idx.clear();
+      ns.expanded_steps.clear();
+      ns.words_per_node =
+          track_expanded_steps ? (sampler.num_step_slots_[i] + 63) / 64 : 0;
     }
 
-    // Record the seed node as the first sampled node.
-    SampleIdx sample_seed_node_idx = 0;
-    auto& seed_nodeset = nodesets[sampler.plan_.root->nodeset_idx];
-    seed_nodeset.sampled_node_idx_to_node_idx.push_back(seed_node_idx);
-    if (!sampler.plan_.with_replacement) {
-      seed_nodeset.node_idx_to_sampled_node_idx[seed_node_idx] =
-          sample_seed_node_idx;
+    // Record the seed nodes as the first sampled nodes.
+    const SamplingPlan::Node& root = *sampler.plan_.root;
+    auto& seed_nodeset = nodesets[root.nodeset_idx];
+    const std::size_t num_seed_nodeset_nodes =
+        sampler.nodesets_[root.nodeset_idx].num_nodes;
+    for (const InputIdx seed_node_idx : seed_node_idxs) {
+      if (seed_node_idx >= num_seed_nodeset_nodes) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("Seed node idx ", seed_node_idx,
+                         " is out of bounds. Should be lower than ",
+                         num_seed_nodeset_nodes, "."));
+      }
+      const SampleIdx sample_seed_node_idx =
+          AddNode(seed_nodeset, seed_node_idx);
+      if (!with_replacement) {
+        // Note: If a seed node is repeated, the last occurrence is used.
+        seed_nodeset.node_idx_to_sampled_node_idx[seed_node_idx] =
+            sample_seed_node_idx;
+      }
     }
 
     // Recursive transversal.
-    DGF_RETURN_IF_ERROR(RecursiveGrow(sampler, *sampler.plan_.root,
-                                      seed_node_idx, sample_seed_node_idx,
-                                      seed_timestamp, masked_edge_idx,
-                                      /*depth=*/0));
+    for (std::size_t i = 0; i < seed_node_idxs.size(); i++) {
+      const InputIdx seed_node_idx = seed_node_idxs[i];
+      const SampleIdx sample_seed_node_idx =
+          with_replacement
+              ? static_cast<SampleIdx>(i)
+              : seed_nodeset.node_idx_to_sampled_node_idx[seed_node_idx];
+      DGF_RETURN_IF_ERROR(RecursiveGrow(sampler, root, seed_node_idx,
+                                        sample_seed_node_idx, seed_timestamp,
+                                        masked_edge_idx,
+                                        /*depth=*/0));
+    }
 
     // Deduplicate the edges. Without replacement, the same edge can be reached
     // several times (e.g., from both of its nodes when `reverse=True`).
     // Note: We also sort edges in debug mode.
-    const bool dedup_edges = !sampler.plan_.with_replacement;
+    const bool dedup_edges = !with_replacement;
     if (dedup_edges || sampler.debug_sampling_) {
       for (auto& sampled_edgeset : edgesets) {
         std::sort(sampled_edgeset.edges.begin(), sampled_edgeset.edges.end());
@@ -567,34 +648,59 @@ absl::StatusOr<nb::list> Sampler::Sample(
     const NodeIdxs& seed_node_idxs,
     std::optional<TimestampsArray> seed_timestamps,
     std::optional<EdgeIdxs> masked_edge_idxs) {
+  return SampleImpl(seed_node_idxs, seed_timestamps, masked_edge_idxs,
+                    GrowMode::kPlan);
+}
+
+absl::StatusOr<nb::list> Sampler::MultiSubGraphs(
+    const NodeIdxs& seed_node_idxs) {
+  return SampleImpl(seed_node_idxs, std::nullopt, std::nullopt,
+                    GrowMode::kSubGraph);
+}
+
+absl::StatusOr<nb::list> Sampler::SampleImpl(
+    const NodeIdxs& seed_node_idxs,
+    const std::optional<TimestampsArray>& seed_timestamps,
+    const std::optional<EdgeIdxs>& masked_edge_idxs, const GrowMode mode) {
   std::vector<std::unique_ptr<SampleBuilder>> active_builders;
+  absl::Cleanup release_builders = [&] { ReleaseBuilders(&active_builders); };
   {
     nb::gil_scoped_release release;
-    DGF_ASSIGN_OR_RETURN(
-        active_builders,
-        GrowSamplesNoGil(seed_node_idxs, seed_timestamps, masked_edge_idxs));
+    DGF_ASSIGN_OR_RETURN(active_builders,
+                         GrowSamplesNoGil(seed_node_idxs, seed_timestamps,
+                                          masked_edge_idxs, mode));
   }
 
   // Convert samples into python objects.
   nb::list graphs;
   for (auto& sample_builder : active_builders) {
-    auto graph = sample_builder->ExportToInMemoryGraph(*this);
-    if (!graph.ok()) {
-      ReleaseBuilders(&active_builders);
-      return graph.status();
-    }
-    graphs.append(*graph);
+    DGF_ASSIGN_OR_RETURN(auto graph,
+                         sample_builder->ExportToInMemoryGraph(*this));
+    graphs.append(graph);
   }
-
-  // Release builders back to pool in bulk.
-  ReleaseBuilders(&active_builders);
   return graphs;
+}
+
+std::vector<std::unique_ptr<SampleBuilder>> Sampler::AcquireBuilders(
+    const std::size_t num_builders) {
+  std::vector<std::unique_ptr<SampleBuilder>> builders(num_builders);
+  util::concurrency::MutexLock lock(sample_builder_pool_mutex_);
+  for (auto& builder : builders) {
+    if (!sample_builder_pool_.empty()) {
+      builder = std::move(sample_builder_pool_.back());
+      sample_builder_pool_.pop_back();
+    } else {
+      builder = std::make_unique<SampleBuilder>();
+    }
+  }
+  return builders;
 }
 
 absl::StatusOr<std::vector<std::unique_ptr<SampleBuilder>>>
 Sampler::GrowSamplesNoGil(const NodeIdxs& seed_node_idxs,
                           const std::optional<TimestampsArray>& seed_timestamps,
-                          const std::optional<EdgeIdxs>& masked_edge_idxs) {
+                          const std::optional<EdgeIdxs>& masked_edge_idxs,
+                          const GrowMode mode) {
   auto seed_node_idxs_view = seed_node_idxs.view();
   std::size_t num_seeds = seed_node_idxs_view.shape(0);
 
@@ -620,20 +726,9 @@ Sampler::GrowSamplesNoGil(const NodeIdxs& seed_node_idxs,
     }
   }
 
-  std::vector<std::unique_ptr<SampleBuilder>> active_builders(num_seeds);
-
-  // Pre-allocate builders + grab the ones we need.
-  {
-    util::concurrency::MutexLock lock(sample_builder_pool_mutex_);
-    for (size_t seed_idx = 0; seed_idx < num_seeds; seed_idx++) {
-      if (!sample_builder_pool_.empty()) {
-        active_builders[seed_idx] = std::move(sample_builder_pool_.back());
-        sample_builder_pool_.pop_back();
-      } else {
-        active_builders[seed_idx] = std::make_unique<SampleBuilder>();
-      }
-    }
-  }
+  std::vector<std::unique_ptr<SampleBuilder>> active_builders =
+      AcquireBuilders(num_seeds);
+  absl::Cleanup release_builders = [&] { ReleaseBuilders(&active_builders); };
 
   // Generate seeds sequentially in the main thread to ensure determinism.
   std::vector<uint64_t> seeds(num_seeds);
@@ -660,12 +755,12 @@ Sampler::GrowSamplesNoGil(const NodeIdxs& seed_node_idxs,
     const uint64_t seed = seeds[seed_idx];
     SampleBuilder* sample_builder = active_builders[seed_idx].get();
     thread_pool.Schedule([this, sample_builder, seed, seed_node_idx,
-                          seed_timestamp, masked_edge_idx, &latch,
+                          seed_timestamp, masked_edge_idx, mode, &latch,
                           &global_status_mutex, &global_status]() {
       sample_builder->rng = MakeRng(seed);
 
-      const auto status = sample_builder->Grow(*this, seed_node_idx,
-                                               seed_timestamp, masked_edge_idx);
+      const auto status = sample_builder->Grow(
+          *this, {&seed_node_idx, 1}, seed_timestamp, masked_edge_idx, mode);
 
       // Record the failure before counting down: Once the latch reaches zero,
       // the calling thread can return and destroy `global_status`.
@@ -683,9 +778,9 @@ Sampler::GrowSamplesNoGil(const NodeIdxs& seed_node_idxs,
 
   // Return an error if any of the samplers failed.
   if (!global_status.ok()) {
-    ReleaseBuilders(&active_builders);
     return global_status;
   }
+  std::move(release_builders).Cancel();
   return active_builders;
 }
 
@@ -917,29 +1012,39 @@ absl::StatusOr<nb::tuple> Sampler::SampleMerged(
     const NodeIdxs& seed_node_idxs,
     std::optional<TimestampsArray> seed_timestamps,
     std::optional<EdgeIdxs> masked_edge_idxs, const MergeConfig& config) {
+  return SampleMergedImpl(seed_node_idxs, seed_timestamps, masked_edge_idxs,
+                          config, GrowMode::kPlan);
+}
+
+absl::StatusOr<nb::tuple> Sampler::MultiSubGraphsMerged(
+    const NodeIdxs& seed_node_idxs, const MergeConfig& config) {
+  return SampleMergedImpl(seed_node_idxs, std::nullopt, std::nullopt, config,
+                          GrowMode::kSubGraph);
+}
+
+absl::StatusOr<nb::tuple> Sampler::SampleMergedImpl(
+    const NodeIdxs& seed_node_idxs,
+    const std::optional<TimestampsArray>& seed_timestamps,
+    const std::optional<EdgeIdxs>& masked_edge_idxs, const MergeConfig& config,
+    const GrowMode mode) {
   std::vector<std::unique_ptr<SampleBuilder>> builders;
+  absl::Cleanup release_builders = [&] { ReleaseBuilders(&builders); };
   std::optional<RawMergedBatch> raw;
   PaddingOverflow overflow;
   {
     nb::gil_scoped_release release;
-    DGF_ASSIGN_OR_RETURN(
-        builders,
-        GrowSamplesNoGil(seed_node_idxs, seed_timestamps, masked_edge_idxs));
-    auto raw_or =
-        MergeBuildersNoGil(builders, 0, builders.size(), config, &overflow);
-    if (!raw_or.ok()) {
-      ReleaseBuilders(&builders);
-      return raw_or.status();
-    }
-    raw = *std::move(raw_or);
-    if (raw.has_value()) {
-      ReleaseBuilders(&builders);
-    }
+    DGF_ASSIGN_OR_RETURN(builders,
+                         GrowSamplesNoGil(seed_node_idxs, seed_timestamps,
+                                          masked_edge_idxs, mode));
+    DGF_ASSIGN_OR_RETURN(raw, MergeBuildersNoGil(builders, 0, builders.size(),
+                                                 config, &overflow));
   }
   if (raw.has_value()) {
     return nb::make_tuple(ExportMergedBatch(config, &*raw), nb::none(),
                           nb::none());
   }
+  // The builders are owned by the returned `SampledBatch`.
+  std::move(release_builders).Cancel();
   return nb::make_tuple(
       nb::none(), std::make_unique<SampledBatch>(this, std::move(builders)),
       ExportPaddingOverflow(overflow));
@@ -1021,251 +1126,6 @@ absl::StatusOr<std::unique_ptr<MergeConfig>> Sampler::CreateMergeConfig(
   }
   return config;
 }
-
-namespace {
-
-// Thread-local mapping from the input node idxs to the sampled node idxs, used
-// by the subgraph extraction.
-//
-// Instead of allocating a fresh array of size N_graph per extraction, each
-// worker thread reuses its own thread-local instance. Resets between
-// extractions are performed in O(1) by incrementing `generation`.
-//
-// The state of a node is packed in 8 bytes so that a single (random) memory
-// access is needed per visited edge.
-struct ThreadLocalVisited {
-  struct NodeState {
-    // The node was visited in the current extraction iff `generation` is equal
-    // to `ThreadLocalVisited::generation`.
-    uint32_t generation = 0;
-    // Index of the node in the extracted subgraph. Only valid if visited.
-    SampleIdx sample_idx = 0;
-  };
-  static_assert(sizeof(NodeState) == 8);
-
-  // Indexed by nodeset idx and input node idx.
-  std::vector<std::vector<NodeState>> nodesets;
-  uint32_t generation = 0;
-
-  void ResetOrResize(const Sampler& sampler) {
-    if (nodesets.size() < sampler.nodesets_.size()) {
-      nodesets.resize(sampler.nodesets_.size());
-    }
-    for (size_t i = 0; i < sampler.nodesets_.size(); ++i) {
-      if (nodesets[i].size() < sampler.nodesets_[i].num_nodes) {
-        nodesets[i].resize(sampler.nodesets_[i].num_nodes);
-      }
-    }
-    generation++;
-    if (generation == 0) {
-      for (auto& ns : nodesets) {
-        std::fill(ns.begin(), ns.end(), NodeState{});
-      }
-      generation = 1;
-    }
-  }
-};
-
-thread_local ThreadLocalVisited tl_visited;
-
-}  // namespace
-
-// Helper struct and methods to extract a subgraph by performing a depth-first
-// traversal of the sampling plan starting from a set of seed nodes.
-//
-// Usage example:
-//  SubGraphExtractor a;
-//  a.ExtractSubGraph(...);
-//  return a.SubGraphToPyhon()
-struct SubGraphExtractor {
-  struct WorkingNodeset {
-    // List of the input node idxs to return. This arrays also define the
-    // mapping from output to input node idxs.
-    std::vector<InputIdx> node_idxs;
-
-    // Bitmap of the (non-leaf) plan steps already expanded for each output
-    // node. The bit `slot % 64` of `expanded_steps[sample_idx * words_per_node
-    // + slot / 64]` is set iff node `sample_idx` was expanded at the step
-    // with slot `slot` (see `Sampler::subgraph_step_slots_`).
-    std::vector<uint64_t> expanded_steps;
-    int words_per_node = 0;
-  };
-  std::vector<WorkingNodeset> working_nodesets;
-
-  struct WorkingEdgeset {
-    // Source and target output node idxs. Sorted and deduplicated at the end
-    // of the extraction.
-    std::vector<std::pair<SampleIdx, SampleIdx>> edges;
-  };
-  std::vector<WorkingEdgeset> working_edgesets;
-
-  // `recursion_cache[depth]` stores the temporary sampled node indices at that
-  // depth (avoids heap allocations during the recursion).
-  std::vector<std::vector<InputIdx>> recursion_cache;
-
-  // Adds a new node to the subgraph and returns its output idx.
-  SampleIdx AddNode(int nodeset_idx, InputIdx node_idx) {
-    auto& nodeset = working_nodesets[nodeset_idx];
-    const SampleIdx sample_idx = nodeset.node_idxs.size();
-    nodeset.node_idxs.push_back(node_idx);
-    nodeset.expanded_steps.resize(
-        nodeset.expanded_steps.size() + nodeset.words_per_node, 0);
-    tl_visited.nodesets[nodeset_idx][node_idx] = {tl_visited.generation,
-                                                  sample_idx};
-    return sample_idx;
-  }
-
-  // Marks the node as expanded for the given step slot. Returns false if the
-  // node was already expanded for this slot.
-  bool MarkExpanded(WorkingNodeset& nodeset, SampleIdx sample_idx, int slot) {
-    uint64_t& word =
-        nodeset.expanded_steps[sample_idx * nodeset.words_per_node + slot / 64];
-    const uint64_t mask = uint64_t{1} << (slot % 64);
-    if (word & mask) {
-      return false;
-    }
-    word |= mask;
-    return true;
-  }
-
-  absl::Status RecursiveGrow(const Sampler& sampler,
-                             const SamplingPlan::Node& plan_node,
-                             InputIdx source_node,
-                             SampleIdx source_sampled_node, Rng* rng,
-                             int depth) {
-    DGF_STATUS_CHECK(depth < recursion_cache.size());
-    auto& cache_node_idxs = recursion_cache[depth];
-
-    for (const auto& plan_edge : plan_node.children) {
-      // Get the edge data to sample from.
-      const Sampler::EdgeSet& edgeset =
-          sampler.edgesets_[plan_edge.edgeset_idx];
-      const std::optional<AdjacencyIndex>& edges =
-          plan_edge.reversed ? edgeset.backward_index : edgeset.forward_index;
-      DGF_STATUS_CHECK(edges.has_value());
-
-      // Sample target nodes / edges.
-      if (sampler.debug_sampling_) {
-        DGF_RETURN_IF_ERROR(edges->SampleFirst(source_node, plan_edge.hop_width,
-                                               &cache_node_idxs));
-      } else {
-        DGF_RETURN_IF_ERROR(edges->SampleRandomUniform(
-            source_node, plan_edge.hop_width, &cache_node_idxs, rng));
-      }
-
-      // Recursively sample the sub-nodes.
-      const SamplingPlan::Node& target_plan_node = *plan_edge.node;
-      const int target_nodeset_idx = target_plan_node.nodeset_idx;
-      auto& sample_target_nodeset = working_nodesets[target_nodeset_idx];
-      auto& tl_nodeset = tl_visited.nodesets[target_nodeset_idx];
-      auto& sample_edges = working_edgesets[plan_edge.edgeset_idx].edges;
-      // -1 if the target step is a leaf i.e. there is nothing to expand.
-      const int step_slot =
-          sampler.subgraph_step_slots_[target_plan_node.step_idx];
-
-      for (const auto target_node : cache_node_idxs) {
-        const ThreadLocalVisited::NodeState state = tl_nodeset[target_node];
-        const SampleIdx target_sampled_node =
-            state.generation == tl_visited.generation
-                ? state.sample_idx
-                : AddNode(target_nodeset_idx, target_node);
-
-        // Edges are deduplicated at the end of the extraction.
-        if (!plan_edge.reversed) {
-          sample_edges.push_back({source_sampled_node, target_sampled_node});
-        } else {
-          sample_edges.push_back({target_sampled_node, source_sampled_node});
-        }
-
-        // Expand each node at most once per plan step.
-        if (step_slot >= 0 && MarkExpanded(sample_target_nodeset,
-                                           target_sampled_node, step_slot)) {
-          DGF_RETURN_IF_ERROR(RecursiveGrow(sampler, target_plan_node,
-                                            target_node, target_sampled_node,
-                                            rng, depth + 1));
-        }
-      }
-    }
-    return absl::OkStatus();
-  }
-
-  // Extracts the subgraph.
-  absl::Status ExtractSubGraph(const std::vector<InputIdx>& seed_node_idxs,
-                               const Sampler* sampler, Rng* rng) {
-    // Initialize the working memory.
-    working_nodesets.resize(sampler->nodesets_.size());
-    for (std::size_t i = 0; i < working_nodesets.size(); i++) {
-      working_nodesets[i].words_per_node =
-          (sampler->subgraph_num_step_slots_[i] + 63) / 64;
-    }
-    working_edgesets.resize(sampler->edgesets_.size());
-    if (recursion_cache.size() < sampler->plan_.num_steps) {
-      recursion_cache.resize(sampler->plan_.num_steps);
-    }
-
-    // Reset or resize thread-local structures in O(1)
-    tl_visited.ResetOrResize(*sampler);
-
-    // Record the seed nodes.
-    const SamplingPlan::Node& root = *sampler->plan_.root;
-    for (const auto seed_node_idx : seed_node_idxs) {
-      const std::size_t num_seed_nodes =
-          sampler->nodesets_[root.nodeset_idx].num_nodes;
-      if (seed_node_idx >= num_seed_nodes) {
-        return absl::InvalidArgumentError(
-            absl::StrCat("Seed node idx ", seed_node_idx,
-                         " is out of bounds. Should be lower than ",
-                         num_seed_nodes, "."));
-      }
-      AddNode(root.nodeset_idx, seed_node_idx);
-    }
-
-    // Grow the graph.
-    for (const auto seed_node_idx : seed_node_idxs) {
-      const SampleIdx sample_seed_node_idx =
-          tl_visited.nodesets[root.nodeset_idx][seed_node_idx].sample_idx;
-      DGF_RETURN_IF_ERROR(RecursiveGrow(*sampler, root, seed_node_idx,
-                                        sample_seed_node_idx, rng,
-                                        /*depth=*/0));
-    }
-
-    // Deduplicate the edges.
-    for (auto& working_edgeset : working_edgesets) {
-      auto& edges = working_edgeset.edges;
-      std::sort(edges.begin(), edges.end());
-      edges.erase(std::unique(edges.begin(), edges.end()), edges.end());
-    }
-    return absl::OkStatus();
-  }
-
-  // Convert the extracted sub-graph into a python graph.
-  absl::StatusOr<nb::object> SubGraphToPyhon(const Sampler* sampler) const {
-    nb::dict py_nodesets;
-    nb::dict py_edgesets;
-    for (std::size_t nodeset_idx = 0; nodeset_idx < working_nodesets.size();
-         nodeset_idx++) {
-      const auto& nodeset_name = sampler->nodesets_[nodeset_idx].name;
-      const auto& working_nodeset = working_nodesets[nodeset_idx];
-      const int num_nodes = working_nodeset.node_idxs.size();
-      nb::dict py_features;
-      py_features[sampler->module_index_.key_idx_feature] =
-          NodeIdxsToNumpyArray(working_nodeset.node_idxs);
-      py_nodesets[string_to_py_str(nodeset_name)] =
-          sampler->module_index_.nodeset_cls(num_nodes, py_features);
-    }
-
-    for (std::size_t edgeset_idx = 0; edgeset_idx < working_edgesets.size();
-         edgeset_idx++) {
-      const auto& edgeset = sampler->edgesets_[edgeset_idx];
-      const auto& working_edgeset = working_edgesets[edgeset_idx];
-
-      auto py_adjacency = EdgesToNumpyArray(working_edgeset.edges);
-      py_edgesets[string_to_py_str(edgeset.name)] =
-          sampler->module_index_.edgeset_cls(std::move(py_adjacency));
-    }
-    return sampler->module_index_.graph_cls(py_nodesets, py_edgesets);
-  }
-};
 
 struct RandomWalkNegativeSamplerHelper {
   const Sampler* sampler;
@@ -1455,64 +1315,20 @@ absl::StatusOr<int> Sampler::EdgesetNameToEdgesetIdx(std::string& name) {
 
 absl::StatusOr<nb::object> Sampler::SubGraph(
     const std::vector<InputIdx>& seed_node_idxs) {
-  SubGraphExtractor extractor;
+  std::vector<std::unique_ptr<SampleBuilder>> builders = AcquireBuilders(1);
+  absl::Cleanup release_builders = [&] { ReleaseBuilders(&builders); };
+  SampleBuilder& builder = *builders.front();
   {
     // Release the GIL.
     nb::gil_scoped_release release;
-    // Create a local RNG
-    Rng rng = MakeRng(rng_());
-    DGF_RETURN_IF_ERROR(extractor.ExtractSubGraph(seed_node_idxs, this, &rng));
+    builder.rng = MakeRng(rng_());
+    DGF_RETURN_IF_ERROR(builder.Grow(*this, seed_node_idxs, std::nullopt,
+                                     /*masked_edge_idx=*/-1,
+                                     GrowMode::kSubGraph));
   }
 
   // Convert to a python object.
-  return extractor.SubGraphToPyhon(this);
-}
-
-absl::StatusOr<nb::list> Sampler::MultiSubGraphs(
-    const std::vector<InputIdx>& seed_node_idxs) {
-  std::size_t num_seeds = seed_node_idxs.size();
-  std::vector<SubGraphExtractor> extractors(num_seeds);
-  // TODO(gbm): Don't re-create RNGs at each sampling.
-  std::vector<Rng> rngs;
-  rngs.reserve(num_seeds);
-
-  {
-    // Release GIL for parallel execution
-    nb::gil_scoped_release release;
-
-    for (size_t i = 0; i < num_seeds; ++i) {
-      rngs.push_back(MakeRng(rng_()));
-    }
-
-    absl::Status global_status;
-    std::mutex global_status_mutex;
-    std::latch latch(num_seeds);
-
-    for (size_t i = 0; i < num_seeds; i++) {
-      thread_pool.Schedule([&extractors, this, &seed_node_idxs, i, &rngs,
-                            &latch, &global_status_mutex, &global_status]() {
-        const auto status =
-            extractors[i].ExtractSubGraph({seed_node_idxs[i]}, this, &rngs[i]);
-        // Record the failure before counting down: Once the latch reaches zero,
-        // the calling thread can return and destroy `global_status`.
-        if (!status.ok()) {
-          util::concurrency::MutexLock l(global_status_mutex);
-          global_status.Update(status);
-        }
-
-        latch.count_down();
-      });
-    }
-    latch.wait();
-    DGF_RETURN_IF_ERROR(global_status);
-  }
-
-  nb::list graphs;
-  for (size_t i = 0; i < num_seeds; ++i) {
-    DGF_ASSIGN_OR_RETURN(auto graph, extractors[i].SubGraphToPyhon(this));
-    graphs.append(graph);
-  }
-  return graphs;
+  return builder.ExportToInMemoryGraph(*this);
 }
 
 // Builds an AdjacencyIndex from a numpy adjacency matrix.
@@ -1633,11 +1449,6 @@ absl::Status Sampler::IndexEdgeSets(const nb::object& py_graph,
         edgeset.source_nodeset = node.nodeset_idx;
         edgeset.target_nodeset = child.node->nodeset_idx;
 
-        nodesets_[edgeset.source_nodeset].as_source_edgeset.push_back(
-            child.edgeset_idx);
-        nodesets_[edgeset.target_nodeset].as_target_edgeset.push_back(
-            child.edgeset_idx);
-
         edgeset.need_forward = true;
       } else {
         DGF_STATUS_CHECK(edgeset.source_nodeset == -1 ||
@@ -1647,11 +1458,6 @@ absl::Status Sampler::IndexEdgeSets(const nb::object& py_graph,
 
         edgeset.source_nodeset = child.node->nodeset_idx;
         edgeset.target_nodeset = node.nodeset_idx;
-
-        nodesets_[edgeset.source_nodeset].as_source_edgeset.push_back(
-            child.edgeset_idx);
-        nodesets_[edgeset.target_nodeset].as_target_edgeset.push_back(
-            child.edgeset_idx);
 
         edgeset.need_backward = true;
       }
@@ -1735,7 +1541,7 @@ absl::StatusOr<std::unique_ptr<Sampler>> CreateSampler(
 
   DGF_RETURN_IF_ERROR(
       sampler->IndexEdgeSets(graph, edgeset_timestamp_features));
-  sampler->ComputeSubGraphStepSlots();
+  sampler->ComputeStepSlots();
   if (seed >= 0) {
     sampler->rng_ = MakeRng(seed);
   }
@@ -1757,7 +1563,11 @@ NB_MODULE(_in_memory_sampler_ext, m) {
            nb::arg("padding_num_nodes"), nb::arg("padding_num_edges"),
            nb::arg("features"), nb::arg("return_node_idxs"))
       .def("SubGraph", ValueOrThrowWrapper(&Sampler::SubGraph))
-      .def("MultiSubGraphs", ValueOrThrowWrapper(&Sampler::MultiSubGraphs))
+      .def("MultiSubGraphs", ValueOrThrowWrapper(&Sampler::MultiSubGraphs),
+           nb::arg("seed_node_idx"))
+      .def("MultiSubGraphsMerged",
+           ValueOrThrowWrapper(&Sampler::MultiSubGraphsMerged),
+           nb::arg("seed_node_idx"), nb::arg("config"))
       .def("RandomWalkNegativeSampling",
            ValueOrThrowWrapper(&Sampler::RandomWalkNegativeSampling),
            nb::arg("seed_node_idxs"), nb::arg("target_edgeset_idx"),
