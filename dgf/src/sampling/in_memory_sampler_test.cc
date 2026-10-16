@@ -1,5 +1,6 @@
 #include "dgf/src/sampling/in_memory_sampler.h"
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -12,6 +13,7 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/status/status.h"
 #include "dgf/src/util/test_util.h"
 
@@ -83,6 +85,49 @@ TEST(InMemorySamplerTest, SampleRandomUniform_NoNeighbors) {
   EXPECT_OK(index.SampleRandomUniform(/*source_node=*/1, /*num_samples=*/1,
                                       &result, &rng));
   EXPECT_THAT(result, IsEmpty());
+}
+
+// Creates an index where the single source node 0 is connected to the targets
+// [0, num_targets).
+AdjacencyIndex CreateHighDegreeIndex(std::size_t num_targets) {
+  AdjacencyIndex index;
+  index.source_blocks = {0, num_targets};
+  for (std::size_t i = 0; i < num_targets; i++) {
+    index.target_node_idxs.push_back(i);
+  }
+  return index;
+}
+
+// Covers the different sampling algorithms used depending on the ratio
+// between the number of samples and the number of neighbors.
+TEST(InMemorySamplerTest, SampleRandomUniform_HighDegree) {
+  constexpr std::size_t kNumTargets = 100;
+  const AdjacencyIndex index = CreateHighDegreeIndex(kNumTargets);
+  for (const std::size_t num_samples : {1, 5, 15, 16, 20, 49, 50, 70, 99}) {
+    SCOPED_TRACE(num_samples);
+    Rng rng = MakeRng(42);
+    std::vector<int> counts(kNumTargets, 0);
+    constexpr int kNumRuns = 2000;
+    std::vector<std::size_t> result;
+    for (int run = 0; run < kNumRuns; run++) {
+      EXPECT_OK(index.SampleRandomUniform(/*source_node=*/0, num_samples,
+                                          &result, &rng));
+      ASSERT_THAT(result, SizeIs(num_samples));
+      const absl::flat_hash_set<std::size_t> unique(result.begin(),
+                                                    result.end());
+      ASSERT_THAT(unique, SizeIs(num_samples));
+      for (const auto target : result) {
+        ASSERT_LT(target, kNumTargets);
+        counts[target]++;
+      }
+    }
+    // Each target is selected with probability num_samples / kNumTargets.
+    const double expected =
+        static_cast<double>(kNumRuns) * num_samples / kNumTargets;
+    for (const int count : counts) {
+      EXPECT_NEAR(count, expected, 5 * std::sqrt(expected) + 1);
+    }
+  }
 }
 
 TEST(InMemorySamplerTest, IndexStringValues) {

@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/random/distributions.h"
@@ -34,6 +35,57 @@ bool GatherTypedRows(const GatherRowsTask& task) {
     dst[i] = src[j];
   }
   return true;
+}
+
+// Appends `num_samples` distinct values sampled uniformly at random without
+// replacement from the `num_candidates` values starting at `first`. Requires
+// `num_samples < num_candidates`.
+//
+// The cost is O(num_samples) when `num_samples` is small compared to
+// `num_candidates` (e.g., sampling the neighbors of a high-degree node), and
+// O(num_candidates) otherwise.
+void SampleDistinct(std::vector<InputIdx>::const_iterator first,
+                    const std::size_t num_candidates,
+                    const std::size_t num_samples,
+                    std::vector<InputIdx>* result, Rng* rng) {
+  DCHECK_LT(num_samples, num_candidates);
+  if (num_samples * 2 >= num_candidates) {
+    // Selection sampling. O(num_candidates) = O(num_samples).
+    std::sample(first, first + num_candidates, std::back_inserter(*result),
+                num_samples, *rng);
+  } else if (num_samples < 16) {
+    // Rejection sampling with a linear scan for duplicates.
+    size_t selected_indices[16];
+    for (size_t i = 0; i < num_samples; i++) {
+      while (true) {
+        size_t idx = absl::Uniform<size_t>(*rng, 0, num_candidates);
+        bool duplicate = false;
+        for (size_t j = 0; j < i; ++j) {
+          if (selected_indices[j] == idx) {
+            duplicate = true;
+            break;
+          }
+        }
+        if (!duplicate) {
+          selected_indices[i] = idx;
+          result->push_back(*(first + idx));
+          break;
+        }
+      }
+    }
+  } else {
+    // Rejection sampling with a hash set for duplicates. Since less than half
+    // of the candidates are selected, each draw succeeds with probability
+    // > 1/2.
+    absl::flat_hash_set<size_t> selected_indices;
+    selected_indices.reserve(num_samples);
+    while (selected_indices.size() < num_samples) {
+      const size_t idx = absl::Uniform<size_t>(*rng, 0, num_candidates);
+      if (selected_indices.insert(idx).second) {
+        result->push_back(*(first + idx));
+      }
+    }
+  }
 }
 
 }  // namespace
@@ -147,31 +199,7 @@ absl::Status AdjacencyIndex::SampleRandomUniform(
       // Sample all available neighbors.
       result->insert(result->end(), first, last);
     } else {
-      // Sample num_samples unique neighbors.
-      if (num_samples < 16 && num_samples * 2 < num_neighbors) {
-        // Fast path for small sample sizes.
-        size_t selected_indices[16];
-        for (size_t i = 0; i < num_samples; i++) {
-          while (true) {
-            size_t idx = absl::Uniform<size_t>(*rng, 0, num_neighbors);
-            bool duplicate = false;
-            for (size_t j = 0; j < i; ++j) {
-              if (selected_indices[j] == idx) {
-                duplicate = true;
-                break;
-              }
-            }
-            if (!duplicate) {
-              selected_indices[i] = idx;
-              result->push_back(*(first + idx));
-              break;
-            }
-          }
-        }
-      } else {
-        std::sample(first, last, std::back_inserter(*result), num_samples,
-                    *rng);
-      }
+      SampleDistinct(first, num_neighbors, num_samples, result, rng);
     }
   }
   return absl::OkStatus();
@@ -343,7 +371,7 @@ absl::Status AdjacencyIndex::SampleRandomUniformWithTimestamp(
   if (num_samples >= num_neighbors) {
     result->insert(result->end(), first, last);
   } else {
-    std::sample(first, last, std::back_inserter(*result), num_samples, *rng);
+    SampleDistinct(first, num_neighbors, num_samples, result, rng);
   }
   return absl::OkStatus();
 }

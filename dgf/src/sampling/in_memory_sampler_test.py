@@ -1777,6 +1777,40 @@ Node(nodeset_idx=0, children=[
     ):
       sampler_missing_timestamps.sample(seed_node_idxs=0, seed_timestamps=None)
 
+  def test_subgraph_invalid_seed(self):
+    sampler = in_memory_sampler_lib.create_sampler(
+        self.graph,
+        config_lib.SimpleSamplingConfig(seed_nodeset="n1", num_hops=1),
+        schema=self.schema,
+        batch_size=2,
+    )
+    num_nodes = self.graph.node_sets["n1"].num_nodes
+    assert num_nodes is not None
+    with self.assertRaisesRegex(ValueError, "out of bounds"):
+      sampler.subgraph([num_nodes])
+    with self.assertRaisesRegex(ValueError, "out of bounds"):
+      sampler.multisubgraph([0, num_nodes])
+
+  def test_subgraph_deep_plan_edges_are_unique(self):
+    # With a deep plan, the same nodes are expanded at several steps of the
+    # plan, and the same edges are traversed several times.
+    sampler = in_memory_sampler_lib.create_sampler(
+        self.graph,
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1", num_hops=4, hop_width=100
+        ),
+        schema=self.schema,
+        return_features=False,
+        return_node_idxs=True,
+        batch_size=2,
+    )
+    subgraph = sampler.subgraph([0])
+    (multisubgraph,) = sampler.multisubgraph([0])
+    test_util.assert_are_equal(self, subgraph, multisubgraph)
+    for edge_set in subgraph.edge_sets.values():
+      edges = [tuple(e) for e in edge_set.adjacency.T]
+      self.assertEqual(edges, sorted(set(edges)))
+
   def test_timeseries_subgraph_and_multisubgraph_clipping(self):
     graph, schema = self._create_causal_timeseries_test_graph()
     plan = config_lib.SimpleSamplingConfig(
