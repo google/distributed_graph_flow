@@ -98,6 +98,8 @@ nav:
       - Link model: tutorial/link_prediction.ipynb
     - Input features:
       - Timeseries: tutorial/timeseries_node_prediction.ipynb
+    - Explainability / XAI:
+      - Model analysis: tutorial/model_analysis.ipynb
   - Advanced API:
     - In-memory graph: tutorial/in_memory_graph.ipynb
     - In-process Sampler: tutorial/sampler.ipynb
