@@ -101,6 +101,7 @@ py_library(
     srcs = ["transform.py"],
     deps = [
         "//dgf/src/learning/ten_lines:node_prediction_dataset",
+        "//dgf/src/transform:canonicalize",
         "//dgf/src/transform:combine_graph_snapshots",
         "//dgf/src/transform:extract",
         "//dgf/src/transform:homogenize",
@@ -151,6 +152,7 @@ py_library(
         "//dgf/src/sampling:config",
         "//dgf/src/sampling:in_memory_sampler",
         "//dgf/src/sampling:temporal",
+        "//dgf/src/sampling/gcp:bigquery_graph_sampler",
         "//dgf/src/sampling/gcp:spanner_graph_sampler",
         "//dgf/src/sampling/offline_distributed:offline_distributed_gcp",
     ],

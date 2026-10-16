@@ -90,6 +90,27 @@ py_binary(
     ],
 )
 
+py_library(
+    name = "bq_sampling",
+    srcs = ["bq_sampling.py"],
+    deps = [
+        ":utils",
+        "//dgf",
+        "//dgf/src/io/gcp:bigquery_graph",
+        "//dgf/src/io/gcp:bigquery_graph_metadata",
+    ],
+)
+
+py_binary(
+    name = "bq_sampling_main",
+    srcs = ["bq_sampling_main.py"],
+    deps = [
+        ":bq_sampling",
+        # absl:app dep,
+        # absl/flags dep,
+    ],
+)
+
 py_binary(
     name = "in_process_sampling_main",
     srcs = ["in_process_sampling_main.py"],
