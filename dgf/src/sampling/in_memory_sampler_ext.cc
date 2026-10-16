@@ -182,10 +182,16 @@ struct Sampler {
   Sampler() = default;
 
   // Creates a new sample.
+  //
+  // If `random_seeds` is set, the random generator of the sample of
+  // `seed_node_idxs[i]` is seeded with `random_seeds[i]`, and the generator of
+  // the sampler is not used. Otherwise, the seeds are drawn from the generator
+  // of the sampler.
   absl::StatusOr<nb::list> Sample(
       const NodeIdxs& seed_node_idxs,
       std::optional<TimestampsArray> seed_timestamps = std::nullopt,
-      std::optional<EdgeIdxs> masked_edge_idxs = std::nullopt);
+      std::optional<EdgeIdxs> masked_edge_idxs = std::nullopt,
+      std::optional<RandomSeeds> random_seeds = std::nullopt);
 
   // Samples and merges a batch of subgraphs. Returns
   // ((InMemoryGraph, offsets), None, None) if the batch fits in the padding, or
@@ -194,32 +200,37 @@ struct Sampler {
   absl::StatusOr<nb::tuple> SampleMerged(
       const NodeIdxs& seed_node_idxs,
       std::optional<TimestampsArray> seed_timestamps,
-      std::optional<EdgeIdxs> masked_edge_idxs, const MergeConfig& config);
+      std::optional<EdgeIdxs> masked_edge_idxs, const MergeConfig& config,
+      std::optional<RandomSeeds> random_seeds);
 
   // Same as `SampleMerged`, but for the sub-graphs of `MultiSubGraphs`.
-  absl::StatusOr<nb::tuple> MultiSubGraphsMerged(const NodeIdxs& seed_node_idxs,
-                                                 const MergeConfig& config);
+  absl::StatusOr<nb::tuple> MultiSubGraphsMerged(
+      const NodeIdxs& seed_node_idxs, const MergeConfig& config,
+      std::optional<RandomSeeds> random_seeds);
 
   // Implementation of `SampleMerged` and `MultiSubGraphsMerged`.
   absl::StatusOr<nb::tuple> SampleMergedImpl(
       const NodeIdxs& seed_node_idxs,
       const std::optional<TimestampsArray>& seed_timestamps,
       const std::optional<EdgeIdxs>& masked_edge_idxs,
-      const MergeConfig& config, GrowMode mode);
+      const std::optional<RandomSeeds>& random_seeds, const MergeConfig& config,
+      GrowMode mode);
 
   // Implementation of `Sample` and `MultiSubGraphs`.
   absl::StatusOr<nb::list> SampleImpl(
       const NodeIdxs& seed_node_idxs,
       const std::optional<TimestampsArray>& seed_timestamps,
-      const std::optional<EdgeIdxs>& masked_edge_idxs, GrowMode mode);
+      const std::optional<EdgeIdxs>& masked_edge_idxs,
+      const std::optional<RandomSeeds>& random_seeds, GrowMode mode);
 
   // Grows one sample per seed node in the thread pool. Called without the GIL.
   // The returned builders should be returned to the pool with
-  // `ReleaseBuilders`.
+  // `ReleaseBuilders`. See `Sample` for `random_seeds`.
   absl::StatusOr<std::vector<std::unique_ptr<SampleBuilder>>> GrowSamplesNoGil(
       const NodeIdxs& seed_node_idxs,
       const std::optional<TimestampsArray>& seed_timestamps,
-      const std::optional<EdgeIdxs>& masked_edge_idxs, GrowMode mode);
+      const std::optional<EdgeIdxs>& masked_edge_idxs,
+      const std::optional<RandomSeeds>& random_seeds, GrowMode mode);
 
   // Gets `num_builders` sample builders from the pool (or creates them).
   std::vector<std::unique_ptr<SampleBuilder>> AcquireBuilders(
@@ -259,12 +270,17 @@ struct Sampler {
       const nb::dict& padding_num_nodes, const nb::dict& padding_num_edges,
       const nb::dict& features, bool return_node_idxs);
 
-  // Extracts the graph subset around the provided seed nodes.
+  // Extracts the graph subset around the provided seed nodes. If set,
+  // `random_seed` seeds the random generator of the sample instead of the
+  // generator of the sampler.
   absl::StatusOr<nb::object> SubGraph(
-      const std::vector<InputIdx>& seed_node_idx);
+      const std::vector<InputIdx>& seed_node_idx,
+      std::optional<uint64_t> random_seed);
 
-  // Extracts a graph subset around each provided seed nodes.
-  absl::StatusOr<nb::list> MultiSubGraphs(const NodeIdxs& seed_node_idxs);
+  // Extracts a graph subset around each provided seed nodes. See `Sample` for
+  // `random_seeds`.
+  absl::StatusOr<nb::list> MultiSubGraphs(
+      const NodeIdxs& seed_node_idxs, std::optional<RandomSeeds> random_seeds);
 
   // Negative sampling using a random walk.
   //
@@ -647,28 +663,31 @@ struct SampledBatch {
 absl::StatusOr<nb::list> Sampler::Sample(
     const NodeIdxs& seed_node_idxs,
     std::optional<TimestampsArray> seed_timestamps,
-    std::optional<EdgeIdxs> masked_edge_idxs) {
+    std::optional<EdgeIdxs> masked_edge_idxs,
+    std::optional<RandomSeeds> random_seeds) {
   return SampleImpl(seed_node_idxs, seed_timestamps, masked_edge_idxs,
-                    GrowMode::kPlan);
+                    random_seeds, GrowMode::kPlan);
 }
 
 absl::StatusOr<nb::list> Sampler::MultiSubGraphs(
-    const NodeIdxs& seed_node_idxs) {
-  return SampleImpl(seed_node_idxs, std::nullopt, std::nullopt,
+    const NodeIdxs& seed_node_idxs, std::optional<RandomSeeds> random_seeds) {
+  return SampleImpl(seed_node_idxs, std::nullopt, std::nullopt, random_seeds,
                     GrowMode::kSubGraph);
 }
 
 absl::StatusOr<nb::list> Sampler::SampleImpl(
     const NodeIdxs& seed_node_idxs,
     const std::optional<TimestampsArray>& seed_timestamps,
-    const std::optional<EdgeIdxs>& masked_edge_idxs, const GrowMode mode) {
+    const std::optional<EdgeIdxs>& masked_edge_idxs,
+    const std::optional<RandomSeeds>& random_seeds, const GrowMode mode) {
   std::vector<std::unique_ptr<SampleBuilder>> active_builders;
   absl::Cleanup release_builders = [&] { ReleaseBuilders(&active_builders); };
   {
     nb::gil_scoped_release release;
-    DGF_ASSIGN_OR_RETURN(active_builders,
-                         GrowSamplesNoGil(seed_node_idxs, seed_timestamps,
-                                          masked_edge_idxs, mode));
+    DGF_ASSIGN_OR_RETURN(
+        active_builders,
+        GrowSamplesNoGil(seed_node_idxs, seed_timestamps, masked_edge_idxs,
+                         random_seeds, mode));
   }
 
   // Convert samples into python objects.
@@ -700,6 +719,7 @@ absl::StatusOr<std::vector<std::unique_ptr<SampleBuilder>>>
 Sampler::GrowSamplesNoGil(const NodeIdxs& seed_node_idxs,
                           const std::optional<TimestampsArray>& seed_timestamps,
                           const std::optional<EdgeIdxs>& masked_edge_idxs,
+                          const std::optional<RandomSeeds>& random_seeds,
                           const GrowMode mode) {
   auto seed_node_idxs_view = seed_node_idxs.view();
   std::size_t num_seeds = seed_node_idxs_view.shape(0);
@@ -726,14 +746,27 @@ Sampler::GrowSamplesNoGil(const NodeIdxs& seed_node_idxs,
     }
   }
 
+  if (random_seeds.has_value() && num_seeds != random_seeds->view().shape(0)) {
+    return absl::InvalidArgumentError(
+        "seed_node_idxs and random_seeds must have the same size");
+  }
+
   std::vector<std::unique_ptr<SampleBuilder>> active_builders =
       AcquireBuilders(num_seeds);
   absl::Cleanup release_builders = [&] { ReleaseBuilders(&active_builders); };
 
-  // Generate seeds sequentially in the main thread to ensure determinism.
+  // Generate seeds sequentially in the main thread to ensure determinism. The
+  // user provided seeds do not consume the generator of the sampler.
   std::vector<uint64_t> seeds(num_seeds);
-  for (size_t i = 0; i < num_seeds; i++) {
-    seeds[i] = rng_();
+  if (random_seeds.has_value()) {
+    const auto random_seeds_view = random_seeds->view();
+    for (size_t i = 0; i < num_seeds; i++) {
+      seeds[i] = random_seeds_view(i);
+    }
+  } else {
+    for (size_t i = 0; i < num_seeds; i++) {
+      seeds[i] = rng_();
+    }
   }
 
   // Start the sampling.
@@ -1011,21 +1044,24 @@ nb::tuple Sampler::ExportPaddingOverflow(
 absl::StatusOr<nb::tuple> Sampler::SampleMerged(
     const NodeIdxs& seed_node_idxs,
     std::optional<TimestampsArray> seed_timestamps,
-    std::optional<EdgeIdxs> masked_edge_idxs, const MergeConfig& config) {
+    std::optional<EdgeIdxs> masked_edge_idxs, const MergeConfig& config,
+    std::optional<RandomSeeds> random_seeds) {
   return SampleMergedImpl(seed_node_idxs, seed_timestamps, masked_edge_idxs,
-                          config, GrowMode::kPlan);
+                          random_seeds, config, GrowMode::kPlan);
 }
 
 absl::StatusOr<nb::tuple> Sampler::MultiSubGraphsMerged(
-    const NodeIdxs& seed_node_idxs, const MergeConfig& config) {
-  return SampleMergedImpl(seed_node_idxs, std::nullopt, std::nullopt, config,
-                          GrowMode::kSubGraph);
+    const NodeIdxs& seed_node_idxs, const MergeConfig& config,
+    std::optional<RandomSeeds> random_seeds) {
+  return SampleMergedImpl(seed_node_idxs, std::nullopt, std::nullopt,
+                          random_seeds, config, GrowMode::kSubGraph);
 }
 
 absl::StatusOr<nb::tuple> Sampler::SampleMergedImpl(
     const NodeIdxs& seed_node_idxs,
     const std::optional<TimestampsArray>& seed_timestamps,
-    const std::optional<EdgeIdxs>& masked_edge_idxs, const MergeConfig& config,
+    const std::optional<EdgeIdxs>& masked_edge_idxs,
+    const std::optional<RandomSeeds>& random_seeds, const MergeConfig& config,
     const GrowMode mode) {
   std::vector<std::unique_ptr<SampleBuilder>> builders;
   absl::Cleanup release_builders = [&] { ReleaseBuilders(&builders); };
@@ -1033,9 +1069,9 @@ absl::StatusOr<nb::tuple> Sampler::SampleMergedImpl(
   PaddingOverflow overflow;
   {
     nb::gil_scoped_release release;
-    DGF_ASSIGN_OR_RETURN(builders,
-                         GrowSamplesNoGil(seed_node_idxs, seed_timestamps,
-                                          masked_edge_idxs, mode));
+    DGF_ASSIGN_OR_RETURN(
+        builders, GrowSamplesNoGil(seed_node_idxs, seed_timestamps,
+                                   masked_edge_idxs, random_seeds, mode));
     DGF_ASSIGN_OR_RETURN(raw, MergeBuildersNoGil(builders, 0, builders.size(),
                                                  config, &overflow));
   }
@@ -1314,14 +1350,15 @@ absl::StatusOr<int> Sampler::EdgesetNameToEdgesetIdx(std::string& name) {
 }
 
 absl::StatusOr<nb::object> Sampler::SubGraph(
-    const std::vector<InputIdx>& seed_node_idxs) {
+    const std::vector<InputIdx>& seed_node_idxs,
+    const std::optional<uint64_t> random_seed) {
   std::vector<std::unique_ptr<SampleBuilder>> builders = AcquireBuilders(1);
   absl::Cleanup release_builders = [&] { ReleaseBuilders(&builders); };
   SampleBuilder& builder = *builders.front();
   {
     // Release the GIL.
     nb::gil_scoped_release release;
-    builder.rng = MakeRng(rng_());
+    builder.rng = MakeRng(random_seed.has_value() ? *random_seed : rng_());
     DGF_RETURN_IF_ERROR(builder.Grow(*this, seed_node_idxs, std::nullopt,
                                      /*masked_edge_idx=*/-1,
                                      GrowMode::kSubGraph));
@@ -1554,20 +1591,24 @@ NB_MODULE(_in_memory_sampler_ext, m) {
   nb::class_<Sampler>(m, "Sampler")
       .def("Sample", ValueOrThrowWrapper(&Sampler::Sample),
            nb::arg("seed_node_idx"), nb::arg("seed_timestamps") = nb::none(),
-           nb::arg("masked_edge_idxs") = nb::none())
+           nb::arg("masked_edge_idxs") = nb::none(),
+           nb::arg("random_seeds") = nb::none())
       .def("SampleMerged", ValueOrThrowWrapper(&Sampler::SampleMerged),
            nb::arg("seed_node_idx"), nb::arg("seed_timestamps") = nb::none(),
-           nb::arg("masked_edge_idxs") = nb::none(), nb::arg("config"))
+           nb::arg("masked_edge_idxs") = nb::none(), nb::arg("config"),
+           nb::arg("random_seeds") = nb::none())
       .def("CreateMergeConfig",
            ValueOrThrowWrapper(&Sampler::CreateMergeConfig),
            nb::arg("padding_num_nodes"), nb::arg("padding_num_edges"),
            nb::arg("features"), nb::arg("return_node_idxs"))
-      .def("SubGraph", ValueOrThrowWrapper(&Sampler::SubGraph))
+      .def("SubGraph", ValueOrThrowWrapper(&Sampler::SubGraph),
+           nb::arg("seed_node_idxs"), nb::arg("random_seed") = nb::none())
       .def("MultiSubGraphs", ValueOrThrowWrapper(&Sampler::MultiSubGraphs),
-           nb::arg("seed_node_idx"))
+           nb::arg("seed_node_idx"), nb::arg("random_seeds") = nb::none())
       .def("MultiSubGraphsMerged",
            ValueOrThrowWrapper(&Sampler::MultiSubGraphsMerged),
-           nb::arg("seed_node_idx"), nb::arg("config"))
+           nb::arg("seed_node_idx"), nb::arg("config"),
+           nb::arg("random_seeds") = nb::none())
       .def("RandomWalkNegativeSampling",
            ValueOrThrowWrapper(&Sampler::RandomWalkNegativeSampling),
            nb::arg("seed_node_idxs"), nb::arg("target_edgeset_idx"),

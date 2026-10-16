@@ -49,6 +49,14 @@ Common properties:
   can differ from the default `sample` (`multi_visit=True`) when `num_hops >= 3`
   and `hop_width` is smaller than the node degrees. With a large `hop_width`,
   all of them return the same graph.
+
+Randomness: By default, the sampler draws the random seed of each sample from
+its own random generator (initialized with the `seed` of `create_sampler`), in
+the order of the seed nodes. So, the graph of a seed node depends on its
+position in the list of seed nodes, and changes from one call to the next. If
+`random_seeds` is provided, the graph of a seed node only depends on the seed
+node and on its random seed (and not on its position, the previous calls, or
+the seed of the sampler).
 """
 
 from collections.abc import Callable
@@ -151,6 +159,7 @@ class Sampler:
       seed_node_idxs: int,
       seed_timestamps: int | None = None,
       masked_edge_idxs: int | None = None,
+      random_seeds: int | None = None,
   ) -> in_memory_graph_lib.InMemoryGraph:
     ...
 
@@ -160,6 +169,7 @@ class Sampler:
       seed_node_idxs: np.ndarray | list[int],
       seed_timestamps: list[int] | np.ndarray | None = None,
       masked_edge_idxs: list[int] | np.ndarray | None = None,
+      random_seeds: list[int] | np.ndarray | None = None,
   ) -> list[in_memory_graph_lib.InMemoryGraph]:
     ...
 
@@ -168,6 +178,7 @@ class Sampler:
       seed_node_idxs: int | list[int] | np.ndarray,
       seed_timestamps: int | list[int] | np.ndarray | None = None,
       masked_edge_idxs: int | list[int] | np.ndarray | None = None,
+      random_seeds: int | list[int] | np.ndarray | None = None,
   ) -> (
       in_memory_graph_lib.InMemoryGraph
       | list[in_memory_graph_lib.InMemoryGraph]
@@ -191,6 +202,10 @@ class Sampler:
         specified, masks the specified edge. Should have the same length as
         "seed_node_idxs". Requires for the sampler to be initialized with a
         masked edgeset. If a seed node idx is -1, not edge filtering is done.
+      random_seeds: Optional non-negative random seeds, one for each seed node.
+        If specified, the sample of `seed_node_idxs[i]` is generated with the
+        random seed `random_seeds[i]` (instead of a random seed drawn from the
+        random generator of the sampler). See the module docstring.
 
     Returns:
       An `InMemoryGraph` or list of `InMemoryGraph`
@@ -209,6 +224,7 @@ class Sampler:
         seed_node_idxs,
         seed_timestamps if self._has_temporal_edgesets else None,
         masked_edge_idxs,
+        _normalized_random_seeds(random_seeds, len(seed_node_idxs)),
     )
 
     self._add_finalize_graphs(graphs, seed_timestamps=seed_timestamps)
@@ -223,6 +239,7 @@ class Sampler:
       seed_node_idxs: int | list[int] | np.ndarray,
       seed_timestamps: int | list[int] | np.ndarray | None = None,
       masked_edge_idxs: int | list[int] | np.ndarray | None = None,
+      random_seeds: int | list[int] | np.ndarray | None = None,
   ) -> tuple[in_memory_graph_lib.InMemoryGraph, dict[str, np.ndarray]]:
     """Samples subgraphs and merges them into a single (padded) graph.
 
@@ -251,13 +268,14 @@ class Sampler:
         `sample`.
       masked_edge_idxs: Optional edge indices to mask during sampling. See
         `sample`.
+      random_seeds: Optional random seeds, one for each seed node. See `sample`.
 
     Returns:
       The merged graph, and the node offsets of each sample for each node set
       (with an extra sentinel value). See `GraphMerger` for details.
     """
     ((merged, offsets, _),) = self.sample_merged_sub_batches(
-        seed_node_idxs, seed_timestamps, masked_edge_idxs
+        seed_node_idxs, seed_timestamps, masked_edge_idxs, random_seeds
     )
     return merged, offsets
 
@@ -266,6 +284,7 @@ class Sampler:
       seed_node_idxs: int | list[int] | np.ndarray,
       seed_timestamps: int | list[int] | np.ndarray | None = None,
       masked_edge_idxs: int | list[int] | np.ndarray | None = None,
+      random_seeds: int | list[int] | np.ndarray | None = None,
       *,
       skip_overflow_padding_error: bool = False,
       split_overflow_padding_error: bool = False,
@@ -282,6 +301,7 @@ class Sampler:
       seed_node_idxs: See `sample_merged`.
       seed_timestamps: See `sample_merged`.
       masked_edge_idxs: See `sample_merged`.
+      random_seeds: See `sample_merged`.
       skip_overflow_padding_error: See `GraphMerger.merge_sub_batches`.
       split_overflow_padding_error: See `GraphMerger.merge_sub_batches`.
       on_skip_samples: See `GraphMerger.merge_sub_batches`.
@@ -293,6 +313,7 @@ class Sampler:
         seed_node_idxs,
         seed_timestamps,
         masked_edge_idxs,
+        random_seeds,
         subgraph=False,
         skip_overflow_padding_error=skip_overflow_padding_error,
         split_overflow_padding_error=split_overflow_padding_error,
@@ -304,6 +325,7 @@ class Sampler:
       seed_node_idxs: int | list[int] | np.ndarray,
       seed_timestamps: int | list[int] | np.ndarray | None,
       masked_edge_idxs: int | list[int] | np.ndarray | None,
+      random_seeds: int | list[int] | np.ndarray | None,
       *,
       subgraph: bool,
       skip_overflow_padding_error: bool,
@@ -318,6 +340,7 @@ class Sampler:
       seed_node_idxs: See `sample_merged`.
       seed_timestamps: See `sample_merged`. Should be None if `subgraph`.
       masked_edge_idxs: See `sample_merged`. Should be None if `subgraph`.
+      random_seeds: See `sample_merged`.
       subgraph: If true, merges the subgraphs of `multisubgraph`. Otherwise,
         merges the samples of `sample`.
       skip_overflow_padding_error: See `GraphMerger.merge_sub_batches`.
@@ -334,14 +357,17 @@ class Sampler:
             seed_node_idxs, seed_timestamps, masked_edge_idxs
         )
     )
+    random_seeds = _normalized_random_seeds(random_seeds, len(seed_node_idxs))
     if not self._merging_configured:
       self._configure_merging()
 
     if self._python_merger is not None:
       if subgraph:
-        graphs = self.multisubgraph(seed_node_idxs)
+        graphs = self.multisubgraph(seed_node_idxs, random_seeds)
       else:
-        graphs = self.sample(seed_node_idxs, seed_timestamps, masked_edge_idxs)
+        graphs = self.sample(
+            seed_node_idxs, seed_timestamps, masked_edge_idxs, random_seeds
+        )
       return list(
           self._python_merger.merge_sub_batches(
               graphs,
@@ -353,7 +379,7 @@ class Sampler:
 
     if subgraph:
       res, batch, overflow = self._cc_sampler.MultiSubGraphsMerged(
-          seed_node_idxs, self._merge_config
+          seed_node_idxs, self._merge_config, random_seeds
       )
     else:
       res, batch, overflow = self._cc_sampler.SampleMerged(
@@ -361,6 +387,7 @@ class Sampler:
           seed_timestamps if self._has_temporal_edgesets else None,
           masked_edge_idxs,
           self._merge_config,
+          random_seeds,
       )
     if overflow is None:
       merged, offsets = self._finalize_merged(*res)
@@ -606,7 +633,10 @@ class Sampler:
     return dataclasses.replace(self._schema, node_sets=node_sets)
 
   def subgraph(
-      self, seed_node_idxs: list[int], check_unique_seeds: bool = True
+      self,
+      seed_node_idxs: list[int],
+      check_unique_seeds: bool = True,
+      random_seed: int | None = None,
   ) -> in_memory_graph_lib.InMemoryGraph:
     """Extracts the subgraph around the provided seed nodes.
 
@@ -643,6 +673,9 @@ class Sampler:
       check_unique_seeds: If true, raises an error if `seed_node_idxs` contains
         the same node several times. If false, a repeated seed node appears
         several times in the output, but only its last copy is connected.
+      random_seed: Optional non-negative random seed of the subgraph. If
+        specified, it is used instead of a random seed drawn from the random
+        generator of the sampler.
 
     Returns:
       The resulting graph.
@@ -654,12 +687,18 @@ class Sampler:
           " supported by `subgraph`. Remove the duplicates, or set"
           " `check_unique_seeds=False`."
       )
-    graph = self._cc_sampler.SubGraph(seed_node_idxs)
+    if random_seed is not None:
+      random_seeds = _normalized_random_seeds(random_seed, 1)
+      assert random_seeds is not None
+      random_seed = int(random_seeds[0])
+    graph = self._cc_sampler.SubGraph(seed_node_idxs, random_seed)
     self._add_finalize_graphs([graph])
     return graph
 
   def multisubgraph(
-      self, seed_node_idxs: list[int] | np.ndarray
+      self,
+      seed_node_idxs: list[int] | np.ndarray,
+      random_seeds: list[int] | np.ndarray | None = None,
   ) -> list[in_memory_graph_lib.InMemoryGraph]:
     """Extracts the subgraphs around the provided seed nodes.
 
@@ -695,19 +734,23 @@ class Sampler:
 
     Args:
       seed_node_idxs: The indexes of the nodes to start sampling from.
+      random_seeds: Optional random seeds, one for each seed node. See `sample`.
 
     Returns:
       A list of graphs. One for each "seed_node_idxs" value.
     """
 
     graphs = self._cc_sampler.MultiSubGraphs(
-        np.asarray(seed_node_idxs, dtype=np.int64)
+        np.asarray(seed_node_idxs, dtype=np.int64),
+        _normalized_random_seeds(random_seeds, len(seed_node_idxs)),
     )
     self._add_finalize_graphs(graphs)
     return graphs
 
   def multisubgraph_merged(
-      self, seed_node_idxs: list[int] | np.ndarray
+      self,
+      seed_node_idxs: list[int] | np.ndarray,
+      random_seeds: list[int] | np.ndarray | None = None,
   ) -> tuple[in_memory_graph_lib.InMemoryGraph, dict[str, np.ndarray]]:
     """Extracts subgraphs and merges them into a single (padded) graph.
 
@@ -727,6 +770,7 @@ class Sampler:
 
     Args:
       seed_node_idxs: The indexes of the nodes to start sampling from.
+      random_seeds: Optional random seeds, one for each seed node. See `sample`.
 
     Returns:
       The merged graph, and the node offsets of each subgraph for each node set
@@ -736,6 +780,7 @@ class Sampler:
         seed_node_idxs,
         seed_timestamps=None,
         masked_edge_idxs=None,
+        random_seeds=random_seeds,
         subgraph=True,
         skip_overflow_padding_error=False,
         split_overflow_padding_error=False,
@@ -791,6 +836,32 @@ class Sampler:
             target_timestamp=target_timestamp,
             max_timeseries_len=self._max_timeseries_len,
         )
+
+
+def _normalized_random_seeds(
+    random_seeds: int | list[int] | np.ndarray | None, num_seeds: int
+) -> np.ndarray | None:
+  """Checks and converts the random seeds into a uint64 array."""
+  if random_seeds is None:
+    return None
+  if isinstance(random_seeds, int):
+    random_seeds = [random_seeds]
+  array = np.asarray(random_seeds)
+  if array.ndim != 1 or (array.size and array.dtype.kind not in "iu"):
+    raise ValueError(
+        "random_seeds must be an int, a list of ints, or a 1D integer numpy"
+        f" array, but got {random_seeds!r}."
+    )
+  if array.dtype.kind == "i" and np.any(array < 0):
+    raise ValueError(
+        f"random_seeds must be non-negative, got {random_seeds!r}."
+    )
+  if len(array) != num_seeds:
+    raise ValueError(
+        "random_seeds must have the same length as the seed nodes"
+        f" ({num_seeds}), but got {len(array)} values."
+    )
+  return array.astype(np.uint64)
 
 
 def _cc_gather_source(src: np.ndarray) -> np.ndarray | None:

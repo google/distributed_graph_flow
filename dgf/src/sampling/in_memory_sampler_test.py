@@ -2731,5 +2731,139 @@ class InMemorySamplerDiamon(parameterized.TestCase):
     )
 
 
+class RandomSeedsTest(parameterized.TestCase):
+  """Tests the samples generated with user-provided random seeds."""
+
+  @classmethod
+  def setUpClass(cls):
+    super().setUpClass()
+    cls.schema = schema_lib.GraphSchema(
+        node_sets={"n": schema_lib.NodeSchema()},
+        edge_sets={"e": schema_lib.EdgeSchema(source="n", target="n")},
+    )
+    # A random graph where the nodes have more neighbors than `hop_width`.
+    cls.graph = InMemoryGraph(
+        node_sets={"n": InMemoryNodeSet(num_nodes=50, features={})},
+        edge_sets={
+            "e": InMemoryEdgeSet(
+                adjacency=np.random.default_rng(0).integers(0, 50, (2, 400))
+            )
+        },
+    )
+
+  def _create_sampler(self, seed: int) -> in_memory_sampler_lib.Sampler:
+    return in_memory_sampler_lib.create_sampler(
+        self.graph,
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n", num_hops=3, hop_width=2, reverse=True
+        ),
+        self.schema,
+        return_features=False,
+        return_node_idxs=True,
+        batch_size=4,
+        seed=seed,
+    )
+
+  def _same_graphs(
+      self,
+      a: list[in_memory_graph_lib.InMemoryGraph],
+      b: list[in_memory_graph_lib.InMemoryGraph],
+  ) -> bool:
+    """Tests if two lists of graphs have the same nodes and edges."""
+    return len(a) == len(b) and all(
+        np.array_equal(
+            x.node_sets["n"].features["#idx"], y.node_sets["n"].features["#idx"]
+        )
+        and np.array_equal(
+            x.edge_sets["e"].adjacency, y.edge_sets["e"].adjacency
+        )
+        for x, y in zip(a, b)
+    )
+
+  @parameterized.parameters(False, True)
+  def test_order_invariant(self, use_multisubgraph: bool):
+    def call(sampler, seed_node_idxs, random_seeds=None):
+      method = sampler.multisubgraph if use_multisubgraph else sampler.sample
+      return method(seed_node_idxs, random_seeds=random_seeds)
+
+    # Different sampler seeds, permuted seed nodes.
+    graphs = call(self._create_sampler(1), [3, 7, 11], [10, 20, 30])
+    permuted = call(self._create_sampler(2), [11, 3, 7], [30, 10, 20])
+    self.assertTrue(
+        self._same_graphs(permuted, [graphs[2], graphs[0], graphs[1]])
+    )
+    # Without random seeds, the graphs depend on the position of the seeds.
+    graphs = call(self._create_sampler(1), [3, 7, 11])
+    permuted = call(self._create_sampler(1), [11, 3, 7])
+    self.assertFalse(
+        self._same_graphs(permuted, [graphs[2], graphs[0], graphs[1]])
+    )
+
+  def test_repeated_calls(self):
+    sampler = self._create_sampler(1)
+    first = sampler.sample([5], random_seeds=[1])
+    self.assertTrue(
+        self._same_graphs(sampler.sample([5], random_seeds=[1]), first)
+    )
+    self.assertFalse(
+        self._same_graphs(sampler.sample([5], random_seeds=[2]), first)
+    )
+    # A repeated seed node with the same random seed gives the same graph.
+    twice = sampler.sample([5, 5], random_seeds=[1, 1])
+    self.assertTrue(self._same_graphs(twice, first + first))
+
+  def test_does_not_consume_sampler_rng(self):
+    reference = self._create_sampler(1)
+    expected = reference.sample([1, 2]) + reference.sample([3, 4])
+    sampler = self._create_sampler(1)
+    actual = sampler.sample([1, 2])
+    sampler.sample([5, 6], random_seeds=[7, 8])
+    sampler.multisubgraph([5, 6], random_seeds=[7, 8])
+    sampler.subgraph([5, 6], random_seed=7)
+    actual += sampler.sample([3, 4])
+    self.assertTrue(self._same_graphs(actual, expected))
+
+  @parameterized.parameters(False, True)
+  def test_merged(self, subgraph: bool):
+    seed_node_idxs = [3, 7, 11]
+    random_seeds = [10, 20, 30]
+    reference = self._create_sampler(1)
+    if subgraph:
+      graphs = reference.multisubgraph(seed_node_idxs, random_seeds)
+      actual = self._create_sampler(2).multisubgraph_merged(
+          seed_node_idxs, random_seeds
+      )
+    else:
+      graphs = reference.sample(seed_node_idxs, random_seeds=random_seeds)
+      actual = self._create_sampler(2).sample_merged(
+          seed_node_idxs, random_seeds=random_seeds
+      )
+    expected = merge_lib.GraphMerger(
+        _sampler_output_schema(
+            self.schema, return_features=False, return_node_idxs=True
+        )
+    )(graphs)
+    _assert_merged_equal(self, actual, expected)
+
+  def test_subgraph(self):
+    graph = self._create_sampler(1).subgraph([3, 7], random_seed=10)
+    test_util.assert_are_equal(
+        self, self._create_sampler(2).subgraph([3, 7], random_seed=10), graph
+    )
+
+  def test_validation(self):
+    sampler = self._create_sampler(1)
+    with self.assertRaisesRegex(ValueError, "same length"):
+      sampler.sample([1, 2], random_seeds=[1])
+    with self.assertRaisesRegex(ValueError, "non-negative"):
+      sampler.multisubgraph([1], random_seeds=[-1])
+    with self.assertRaisesRegex(ValueError, "integer"):
+      sampler.sample([1], random_seeds=np.array([1.5]))
+    with self.assertRaisesRegex(ValueError, "non-negative"):
+      sampler.subgraph([1], random_seed=-1)
+    # The full uint64 range is accepted.
+    self.assertLen(sampler.sample([1], random_seeds=[2**64 - 1]), 1)
+
+
 if __name__ == "__main__":
   absltest.main()

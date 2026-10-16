@@ -25,6 +25,7 @@ typedef nb::ndarray<int64_t, nb::numpy, nb::shape<2, -1>> Adjacency;
 typedef nb::ndarray<int64_t, nb::numpy, nb::shape<-1>> NodeIdxs;
 typedef nb::ndarray<int64_t, nb::numpy, nb::shape<-1>> EdgeIdxs;
 typedef nb::ndarray<int64_t, nb::numpy, nb::shape<-1>> TimestampsArray;
+typedef nb::ndarray<uint64_t, nb::numpy, nb::shape<-1>> RandomSeeds;
 // Read-only C-contiguous array of any dtype (e.g. feature values), accessed as
 // raw bytes.
 typedef nb::ndarray<nb::ro, nb::numpy, nb::c_contig> RawArray;
