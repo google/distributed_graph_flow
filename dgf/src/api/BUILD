@@ -101,6 +101,7 @@ py_library(
     srcs = ["transform.py"],
     deps = [
         "//dgf/src/learning/ten_lines:node_prediction_dataset",
+        "//dgf/src/transform:canonicalize",
         "//dgf/src/transform:combine_graph_snapshots",
         "//dgf/src/transform:extract",
         "//dgf/src/transform:homogenize",
