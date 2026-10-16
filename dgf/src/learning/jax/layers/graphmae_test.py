@@ -137,6 +137,24 @@ class _ParentConfig:
   layer: Any = layer_registry.field()
 
 
+class _SetupParent(nn.Module):
+  """A parent module defining GraphMAE in `setup`, like a core model does."""
+
+  config: graphmae.GraphMAEConfig
+  schema: schema_lib.GraphSchema
+
+  def setup(self) -> None:
+    self.graphmae = self.config.make(self.schema, name="graphmae")
+
+  def __call__(
+      self, batch: graphmae.Batch, training: bool
+  ) -> graphmae.GraphMAEOutput:
+    return self.graphmae(batch, training=training)
+
+  def embed(self, graph: jax_graph_lib.JaxInMemoryGraph) -> jax.Array:
+    return self.graphmae.embed(graph)
+
+
 class GraphMAETest(absltest.TestCase):
 
   def test_forward_losses_and_embed(self):
@@ -200,6 +218,42 @@ class GraphMAETest(absltest.TestCase):
     emb = model.apply(params, graph, method=model.embed)
     assert isinstance(emb, jax.Array)
     self.assertEqual(emb.shape, (num_nodes, dims))
+
+  def test_embed_when_nested_in_parent_module(self):
+    """`embed` works, and shares the encoder, when GraphMAE is a submodule."""
+    dims = 8
+    graph, schema = _make_embedded_hetero_graph(dims=dims)
+    parent = _SetupParent(
+        config=_make_graphmae_config(dims=dims), schema=schema
+    )
+    batch = (graph, jnp.array([0, 1, 2], dtype=jnp.int32))
+
+    params = parent.init(
+        {
+            "params": jax.random.PRNGKey(0),
+            "dropout": jax.random.PRNGKey(1),
+            "masking": jax.random.PRNGKey(2),
+        },
+        batch,
+        training=True,
+    )
+    self.assertIn("encoder", params["params"]["graphmae"])
+
+    emb = parent.apply(params, graph, method=_SetupParent.embed)
+    self.assertEqual(emb.shape, (graph.node_sets["n1"].num_nodes, dims))
+    self.assertTrue(np.all(np.isfinite(np.asarray(emb))))
+
+    # Initializing through `embed` only creates encoder parameters, which
+    # `__call__` also has (i.e., the encoder is shared).
+    embed_params = parent.init(
+        jax.random.PRNGKey(0), graph, method=_SetupParent.embed
+    )
+    self.assertEqual(set(embed_params["params"]["graphmae"]), {"encoder"})
+    jax.tree.map(
+        lambda a, b: self.assertEqual(a.shape, b.shape),
+        embed_params["params"]["graphmae"]["encoder"],
+        params["params"]["graphmae"]["encoder"],
+    )
 
   def test_default_seed_idxs_excludes_sentinel_node(self):
     """Passing a graph directly defaults seed_idxs to all non-sentinel nodes."""

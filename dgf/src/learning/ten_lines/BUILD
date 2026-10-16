@@ -335,6 +335,55 @@ py_library(
     ],
 )
 
+py_library(
+    name = "node_embedding_core_model",
+    srcs = ["node_embedding_core_model.py"],
+    deps = [
+        # dataclasses_json dep,
+        "//dgf/src/data:jax_in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/learning/jax:common",
+        "//dgf/src/learning/jax/layers:graphmae",
+        "//dgf/src/learning/jax/layers:preprocess",
+        "//dgf/src/learning/jax/layers:registry",
+        "//dgf/src/util:log",
+        # flax:core dep,
+        # jax dep,
+    ],
+)
+
+py_library(
+    name = "node_embedding_model",
+    srcs = ["node_embedding_model.py"],
+    deps = [
+        ":common",
+        ":evaluation",
+        ":inference",
+        ":node_embedding_core_model",
+        ":node_prediction",
+        ":report",
+        ":training",
+        # dataclasses_json dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:padding",
+        "//dgf/src/data:schema",
+        "//dgf/src/data:statistics",
+        "//dgf/src/data:tf_in_memory_graph",
+        "//dgf/src/io:jax",
+        "//dgf/src/io:tf",
+        "//dgf/src/sampling:config",
+        "//dgf/src/transform:merge",
+        "//dgf/src/transform:normalize",
+        "//dgf/src/util:log",
+        "//dgf/src/util:util_py",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
+        # jax dep,
+        # jax/experimental/jax2tf dep,
+        # jaxtyping dep,
+        # numpy dep,
+    ],
+)
+
 # Test
 # =========
 
@@ -549,5 +598,29 @@ py_test(
         # jax dep,
         # numpy dep,
         # optax dep,
+    ],
+)
+
+py_test(
+    name = "node_embedding_test",
+    timeout = "long",
+    srcs = ["node_embedding_test.py"],
+    shard_count = 4,
+    deps = [
+        ":common",
+        ":dataset",
+        ":node_embedding_core_model",
+        ":node_embedding_model",
+        ":node_prediction",
+        ":node_prediction_dataset",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:schema",
+        "//dgf/src/learning/jax/layers:graphmae",
+        "//dgf/src/learning/jax/layers:hetero_gnn",
+        "//dgf/src/learning/jax/layers:preprocess",
+        "//dgf/src/learning/jax/layers:standard",
+        "//dgf/src/util:gen_test_graph",
+        # jax dep,
+        # numpy dep,
     ],
 )

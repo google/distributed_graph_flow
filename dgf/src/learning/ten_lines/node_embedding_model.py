@@ -1,0 +1,684 @@
+# Copyright 2022 Google LLC.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     https://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""User-facing unsupervised node embedding model (`NodeEmbeddingModel`)."""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterator
+import dataclasses
+import itertools
+import textwrap
+from typing import Any
+
+import dataclasses_json
+from dgf.src.data import in_memory_graph
+from dgf.src.data import padding as padding_data_lib
+from dgf.src.data import schema as schema_lib
+from dgf.src.data import statistics as statistics_lib
+from dgf.src.data import tf_in_memory_graph as tf_in_memory_graph_lib
+from dgf.src.io import jax as jax_lib
+from dgf.src.io import tf as io_tf_lib
+from dgf.src.learning.ten_lines import common
+from dgf.src.learning.ten_lines import evaluation
+from dgf.src.learning.ten_lines import inference
+from dgf.src.learning.ten_lines import node_embedding_core_model
+from dgf.src.learning.ten_lines import node_prediction_model
+from dgf.src.learning.ten_lines import report
+from dgf.src.learning.ten_lines import training
+from dgf.src.sampling import config as sampling_config_lib
+from dgf.src.transform import merge as merge_lib
+from dgf.src.transform import normalize as normalize_lib
+from dgf.src.util import log
+from dgf.src.util import util
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
+import jax
+
+if getattr(tf, "is_available", lambda: True)():
+  from jax.experimental import jax2tf
+import jax.numpy as jnp
+import jaxtyping
+import numpy as np
+
+Batch = node_embedding_core_model.Batch
+CoreModel = node_embedding_core_model.CoreModel
+CoreModelConfig = node_embedding_core_model.CoreModelConfig
+
+
+@dataclasses.dataclass
+class BatchEmbedding:
+  """Embeddings yielded by `NodeEmbeddingModel.predict_batch`.
+
+  Attributes:
+    batch_seed_node_idxs: The indices of the seed nodes in the input graph, or
+      `None` when predicting on pre-sampled subgraphs where input-graph indices
+      are unknown.
+    normalized_merged_graph: The merged and normalized graph sample used for
+      embedding extraction.
+    merged_seed_node_idxs: The indices of the seed nodes in
+      `normalized_merged_graph`.
+    embeddings: The encoder node embeddings of shape `[B, D]`.
+  """
+
+  batch_seed_node_idxs: np.ndarray | None
+  normalized_merged_graph: in_memory_graph.InMemoryGraph
+  merged_seed_node_idxs: np.ndarray
+  embeddings: np.ndarray
+
+
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass
+class HParam(common.HParam):
+  """Hyperparameters for the `NodeEmbeddingModel`."""
+
+  num_decoder_layers: int = 1
+  mask_rate: float = 0.5
+  drop_edge_rate: float = 0.5
+  replace_rate: float = 0.0
+  scaled_cosine_error_alpha: float = 3.0
+  variance_regularization_weight: float = 0.5
+  covariance_regularization_weight: float = 0.01
+  stop_gradient_target: bool = True
+  regularize_input_embeddings: bool = True
+  use_encoder_to_decoder: bool = True
+  norm: str | None = "layer_norm"
+
+
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass(kw_only=True)
+class ModelData:
+  """Serializable data of `NodeEmbeddingModel`."""
+
+  core_model_config: CoreModelConfig
+  hparams: HParam
+  schema: schema_lib.GraphSchema
+  normalizer_config: normalize_lib.GraphNormalizerConfig
+  padding: padding_data_lib.Padding
+  sampling_plan: sampling_config_lib.SamplingPlan | None
+  feature_stats: statistics_lib.GraphFeatureStatistics
+  training_stats: node_prediction_model.TrainingStats
+  excluded_features: dict[str, list[str]] = dataclasses.field(
+      default_factory=dict
+  )
+  final_evaluation: evaluation.Evaluation | None = None
+
+  # Serialized / deserialized via Orbax checkpointing in `_internal_save` /
+  # `_internal_load`.
+  model_params: jaxtyping.PyTree | None = dataclasses.field(
+      default_factory=lambda: None,
+      metadata=dataclasses_json.config(exclude=dataclasses_json.Exclude.ALWAYS),
+      repr=False,
+  )
+
+
+@dataclasses.dataclass
+class ModelLiveResource:
+  """Live JAX/normalizer resources recomputed from `ModelData` on demand."""
+
+  core_model: CoreModel
+  apply_embed: Callable[[Batch], jnp.ndarray]
+  valid_step: Callable[[Any, Any, Batch], dict[str, jax.Array]]
+  normalized_schema: schema_lib.GraphSchema
+  normalizer: normalize_lib.GraphNormalizer
+
+
+class NodeEmbeddingModel(common.Model):
+  """User-visible unsupervised node embedding model."""
+
+  def __init__(self, data: ModelData) -> None:
+    super().__init__(data)
+    self._data = data
+    self._live: ModelLiveResource | None = None
+
+  @classmethod
+  def name(cls) -> str:
+    return "NodeEmbedding"
+
+  def data(self) -> ModelData:
+    return self._data
+
+  @property
+  def target_nodeset(self) -> str:
+    return self._data.core_model_config.graphmae.target_nodeset
+
+  @property
+  def embedding_dim(self) -> int:
+    return self._data.core_model_config.graphmae.get_gnn_dims()
+
+  def _internal_save(self, path: str) -> None:
+    common.save_params(self._data.model_params, path)
+
+  def _internal_load(self, path: str) -> None:
+    self._data.model_params = common.load_params(path)
+
+  def _extract_serving_schemata(self) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Returns the Vertex AI `(instance, prediction)` serving schemas."""
+    if not self.metadata.uuid:
+      raise ValueError("Model UUID is not set.")
+    instance_schema = common.schema_to_serving_signature_dict(
+        schema_=self._data.schema,
+        target_nodeset=self.target_nodeset,
+        model_name=self.name(),
+        model_uuid=self.metadata.uuid,
+        source_sampling_plan=self._data.sampling_plan,
+    )
+    prediction_schema = {"type": "array", "items": {"type": "number"}}
+    return instance_schema, prediction_schema
+
+  def describe(self) -> util.RichDisplay:
+    """Returns a rich HTML report describing the model."""
+    graphmae_cfg = self._data.core_model_config.graphmae
+    tabs = [
+        (
+            "Objective",
+            f"""
+<p><b>Node embedding model:</b> Learn unsupervised node representations with GraphMAE.</p>
+<table class="dgf-table">
+  <tbody>
+    <tr><td>Type</td><td>Unsupervised Node Embedding (GraphMAE)</td></tr>
+    <tr><td>Target nodeset</td><td>{self.target_nodeset}</td></tr>
+    <tr><td>Embedding dimension</td><td>{self.embedding_dim}</td></tr>
+    <tr><td>Mask rate</td><td>{graphmae_cfg.mask_rate}</td></tr>
+    <tr><td>Drop edge rate</td><td>{graphmae_cfg.drop_edge_rate}</td></tr>
+  </tbody>
+</table>
+""",
+        )
+    ]
+
+    training_stats_summary = ""
+    if self.metadata.trainig_logs is not None:
+      training_stats_summary = f"""
+    <tr><td>Number of training seed nodes</td><td>{self._data.training_stats.num_train_seed_nodes}</td></tr>
+    <tr><td>Number of validation seed nodes</td><td>{self._data.training_stats.num_valid_seed_nodes}</td></tr>
+    <tr><td>Number of skipped training samples</td><td>{self._data.training_stats.num_skipped_train_samples}</td></tr>
+    <tr><td>Training duration</td><td>{util.format_duration(self._data.training_stats.train_duration_seconds)}</td></tr>
+"""
+
+    common_tabs = report.get_common_tabs(
+        hparams=self._data.hparams,
+        schemas={
+            "Raw": self._data.schema,
+            "Normalized": self._get_live().normalized_schema,
+        },
+        feature_stats={
+            "Default": self._data.feature_stats,
+        },
+        sampling_plans={"Default": self._data.sampling_plan},
+        training_logs=self.metadata.trainig_logs,
+        training_stats_summary=training_stats_summary,
+        padding={
+            "Default": self._data.padding,
+        },
+        architecture=self._data.core_model_config.architecture(),
+        num_model_weights=common.num_model_weights(self._data.model_params),
+        log_messages=self.metadata.captured_logs,
+        final_evaluation=self._data.final_evaluation,
+    )
+    tabs.extend(common_tabs)
+    return util.RichDisplay(report.html_tabs(tabs))
+
+  def predict_embedding(
+      self,
+      graph: in_memory_graph.InMemoryGraph,
+      node_idxs: common.SeedNodeIdxs | None = None,
+      *,
+      seed_node_idxs: common.SeedNodeIdxs | None = None,
+      verbose: int = 2,
+  ) -> np.ndarray:
+    """Predicts node embeddings of shape `[N, D]` for the specified target nodes.
+
+    Args:
+      graph: The input `InMemoryGraph`.
+      node_idxs: Indices of the nodes in `target_nodeset` for which to compute
+        embeddings. If None (and `seed_node_idxs` is None), embeddings are
+        computed for all nodes in `target_nodeset`.
+      seed_node_idxs: Optional alias for `node_idxs`. Cannot be specified
+        simultaneously with `node_idxs`.
+      verbose: Verbosity level (`>= 2` displays a progress bar).
+
+    Returns:
+      A `np.float32` array of shape `[N, embedding_dim]`.
+    """
+    if node_idxs is not None and seed_node_idxs is not None:
+      raise ValueError(
+          "Specify at most one of `node_idxs` and `seed_node_idxs`."
+      )
+    effective_idxs = seed_node_idxs if seed_node_idxs is not None else node_idxs
+    if effective_idxs is None:
+      num_nodes = graph.node_sets[self.target_nodeset].num_nodes
+      assert num_nodes is not None
+      effective_idxs = np.arange(num_nodes, dtype=np.int32)
+    else:
+      effective_idxs = np.asarray(effective_idxs, dtype=np.int32)
+
+    if len(effective_idxs) == 0:
+      return np.zeros((0, self.embedding_dim), dtype=np.float32)
+
+    embedding_list = []
+    for batch in self.predict_batch(
+        graph, effective_idxs, verbose=verbose
+    ):
+      embedding_list.append(batch.embeddings)
+    return np.concatenate(embedding_list, axis=0)
+
+  def predict(
+      self,
+      graph: in_memory_graph.InMemoryGraph,
+      seed_node_idxs: common.SeedNodeIdxs | None = None,
+      *,
+      verbose: int = 2,
+  ) -> np.ndarray:
+    """Alias for `predict_embedding` matching the `NodePredictionModel` API."""
+    return self.predict_embedding(
+        graph, node_idxs=seed_node_idxs, verbose=verbose
+    )
+
+  def predict_batch(
+      self,
+      graph: in_memory_graph.InMemoryGraph,
+      seed_node_idxs: common.SeedNodeIdxs | None = None,
+      *,
+      verbose: int = 2,
+  ) -> Iterator[BatchEmbedding]:
+    """Generates batches of node embeddings."""
+    sampling_plan = self._data.sampling_plan
+    if sampling_plan is None:
+      raise ValueError(textwrap.dedent("""\
+          This model cannot generate embeddings from a full graph because
+          it does not have a sampling plan: it was trained on already
+          sampled graph samples without a `sampling_plan` argument, so the
+          sampling plan used to generate those samples is unknown. Instead,
+          generate embeddings from graph samples (e.g.
+          `model.predict_on_graph_sample_batch`, `model.evaluate_generator`,
+          `model.to_tensorflow_function`), or re-train the model with the
+          `sampling_plan` argument.
+          """))
+
+    if seed_node_idxs is None:
+      num_nodes = graph.node_sets[self.target_nodeset].num_nodes
+      assert num_nodes is not None
+      seed_node_idxs = np.arange(num_nodes, dtype=np.int32)
+
+    live = self._get_live()
+    batch_size = self._data.hparams.batch_size
+
+    for normalized_batch in inference.generate_normalized_batches(
+        graph,
+        seed_node_idxs,
+        schema=self._data.schema,
+        sampling_plan=sampling_plan,
+        padding=self._data.padding,
+        normalizer=live.normalizer,
+        target_nodeset=self.target_nodeset,
+        batch_size=batch_size,
+        temporal_sampling=False,
+        sampler_schema=self._data.schema,
+        verbose=verbose,
+    ):
+      yield self._embed_normalized_batch(live, normalized_batch)
+
+  def _embed_normalized_batch(
+      self,
+      live: ModelLiveResource,
+      normalized_batch: inference.NormalizedBatch,
+  ) -> BatchEmbedding:
+    """Computes embeddings on an already merged and normalized (sub-)batch."""
+    emb = live.apply_embed(normalized_batch.jax_batch)
+    return BatchEmbedding(
+        batch_seed_node_idxs=normalized_batch.batch_seed_node_idxs,
+        normalized_merged_graph=normalized_batch.normalized_merged_graph,
+        merged_seed_node_idxs=normalized_batch.merged_seed_node_idxs,
+        embeddings=np.asarray(jax.device_get(emb), dtype=np.float32),
+    )
+
+  def predict_on_graph_sample_batch(
+      self,
+      graph_samples: list[in_memory_graph.InMemoryGraph],
+  ) -> np.ndarray:
+    """Predicts embeddings for a batch of pre-sampled graph samples."""
+    live = self._get_live()
+    merged_graph, merge_offsets = merge_lib.GraphMerger(
+        schema=self._data.schema,
+        padding=self._data.padding,
+    )(graph_samples)
+    normalized_batch = inference.merged_graph_to_normalized_batch(
+        merged_graph,
+        merge_offsets,
+        schema=self._data.schema,
+        normalizer=live.normalizer,
+        target_nodeset=self.target_nodeset,
+    )
+    return self._embed_normalized_batch(live, normalized_batch).embeddings
+
+  def evaluate(
+      self,
+      graph: in_memory_graph.InMemoryGraph,
+      num_eval_steps: int | None = 10_000,
+      *,
+      seed_node_idxs: common.SeedNodeIdxs | None = None,
+      verbose: int = 2,
+      random_seed: int | None = None,
+  ) -> evaluation.Evaluation:
+    """Evaluates reconstruction and VICReg losses on `graph`."""
+    sampling_plan = self._data.sampling_plan
+    if sampling_plan is None:
+      raise ValueError(
+          "Cannot call `evaluate` on a full graph when `sampling_plan` is None."
+      )
+
+    num_nodes = graph.node_sets[self.target_nodeset].num_nodes
+    assert num_nodes is not None
+
+    if seed_node_idxs is None:
+      seed_node_idxs = np.arange(num_nodes, dtype=np.int32)
+    else:
+      seed_node_idxs = np.asarray(seed_node_idxs, dtype=np.int32)
+
+    if num_eval_steps is not None and num_eval_steps < len(seed_node_idxs):
+      rng = np.random.default_rng(random_seed)
+      seed_node_idxs = rng.choice(
+          seed_node_idxs, size=num_eval_steps, replace=False
+      )
+
+    if verbose >= 1:
+      log.info("Evaluating model on %d samples", len(seed_node_idxs))
+
+    live = self._get_live()
+    batch_size = self._data.hparams.batch_size
+
+    normalized_batches = inference.generate_normalized_batches(
+        graph,
+        seed_node_idxs,
+        schema=self._data.schema,
+        sampling_plan=sampling_plan,
+        padding=self._data.padding,
+        normalizer=live.normalizer,
+        target_nodeset=self.target_nodeset,
+        batch_size=batch_size,
+        temporal_sampling=False,
+        sampler_schema=self._data.schema,
+        verbose=verbose,
+        progress_bar_desc="Evaluation",
+    )
+    return self._evaluate_normalized_batches(live, normalized_batches)
+
+  def evaluate_generator(
+      self,
+      graph_samples: Iterator[in_memory_graph.InMemoryGraph],
+      num_eval_steps: int | None = 10_000,
+      *,
+      verbose: int = 2,
+  ) -> evaluation.Evaluation:
+    """Evaluates reconstruction and VICReg losses on an iterator of subgraphs."""
+    if num_eval_steps is not None:
+      graph_samples = itertools.islice(graph_samples, num_eval_steps)
+
+    live = self._get_live()
+    batch_size = max(1, self._data.hparams.batch_size // 2)
+    if verbose >= 1:
+      log.info("Evaluating model on generator")
+
+    normalized_batches = inference.generate_normalized_batches_from_samples(
+        graph_samples,
+        schema=self._data.schema,
+        padding=self._data.padding,
+        normalizer=live.normalizer,
+        target_nodeset=self.target_nodeset,
+        batch_size=batch_size,
+        num_steps=num_eval_steps,
+        verbose=verbose,
+        progress_bar_desc="Evaluation",
+    )
+    return self._evaluate_normalized_batches(live, normalized_batches)
+
+  def _evaluate_normalized_batches(
+      self,
+      live: ModelLiveResource,
+      normalized_batches: Iterator[inference.NormalizedBatch],
+  ) -> evaluation.Evaluation:
+    """Aggregates validation step losses over an iterator of `NormalizedBatch`."""
+    total_examples = 0
+    weighted_loss = 0.0
+    weighted_recon = 0.0
+    weighted_var = 0.0
+    weighted_cov = 0.0
+
+    for normalized_batch in normalized_batches:
+      batch_count = len(normalized_batch.merged_seed_node_idxs)
+      metrics = live.valid_step(
+          self._data.model_params, None, normalized_batch.jax_batch
+      )
+      total_examples += batch_count
+      weighted_loss += float(metrics["loss"]) * batch_count
+      weighted_recon += float(metrics["recon_loss"]) * batch_count
+      weighted_var += float(metrics["var_loss"]) * batch_count
+      weighted_cov += float(metrics["cov_loss"]) * batch_count
+
+    if total_examples == 0:
+      raise ValueError(
+          "No examples to evaluate: the evaluation graph samples or seed nodes"
+          " are empty."
+      )
+
+    avg_loss = weighted_loss / total_examples
+    avg_recon = weighted_recon / total_examples
+    avg_var = weighted_var / total_examples
+    avg_cov = weighted_cov / total_examples
+    return evaluation.Evaluation(
+        loss=avg_loss,
+        num_examples=total_examples,
+        user_metrics={
+            "recon_loss": avg_recon,
+            "var_loss": avg_var,
+            "cov_loss": avg_cov,
+            "total_loss": avg_loss,
+        },
+    )
+
+  def _get_live(self) -> ModelLiveResource:
+    """Initializes live model resources if not already constructed."""
+    if self._live is None:
+      normalizer = self._data.normalizer_config.make()
+      normalized_schema = normalizer.output_schema()
+      core_model = self._data.core_model_config.make(normalized_schema)
+
+      @jax.jit
+      def apply_embed(batch: Batch) -> jnp.ndarray:
+        assert core_model is not None
+        out = core_model.apply(
+            self._data.model_params,
+            batch,
+            training=False,
+            method=CoreModel.embed,
+        )
+        return out  # pyrefly: ignore[bad-return]
+
+      valid_step = training.build_valid_step(
+          core_model,
+          self._data.core_model_config.compute_loss,
+          rngs={"masking": jax.random.PRNGKey(self._data.hparams.random_seed)},
+      )
+
+      self._live = ModelLiveResource(
+          core_model=core_model,
+          apply_embed=apply_embed,
+          valid_step=valid_step,
+          normalized_schema=normalized_schema,
+          normalizer=normalizer,
+      )
+    return self._live
+
+  def to_tensorflow_function(
+      self,
+      *,
+      input_format: common.TFFunctionInputFormat | str | None = None,
+      consume_tf_graph_dict: bool | None = None,
+  ) -> tf.Module:
+    """Exports the model as a TensorFlow function without the sampling step."""
+    input_format = common.resolve_tf_function_input_format(
+        input_format, consume_tf_graph_dict
+    )
+
+    live = self._get_live()
+    tf_apply_core_model = jax2tf.convert(
+        live.apply_embed,
+        polymorphic_shapes=[(None, "(b,)")],
+        native_serialization_platforms=["cpu", "cuda"],
+    )
+    schema = self._data.schema
+
+    graph_spec = io_tf_lib.schema_to_spec(schema)
+    graph_dict_spec = io_tf_lib.schema_to_dict_spec(schema)
+    seed_node_idxs_spec = tf.TensorSpec(
+        shape=[None], dtype=tf.int32, name="seed_node_idxs"
+    )
+
+    class TfPredictWrapperBase(tf.Module):
+      """Base TensorFlow module wrapping the JAX node embedding core model."""
+
+      def __init__(
+          self,
+          name: str,
+          tf_apply_fn,
+          normalizer: normalize_lib.GraphNormalizer,
+          schema: schema_lib.GraphSchema,
+          padding: padding_data_lib.Padding,
+      ):
+        super().__init__(name=name)
+        self._tf_apply_core_model = tf_apply_fn
+        self._normalizer = normalizer
+        self._schema = schema
+        self._padding = padding
+        self._normalizer_tf_resources = normalizer.tensorflow_resources()
+
+      def _predict(
+          self,
+          graph: tf_in_memory_graph_lib.TFInMemoryGraph,
+          seed_node_idxs: tf.Tensor,
+      ) -> tf.Tensor:
+        padded_graph = merge_lib.pad_graph_tensorflow(
+            graph, self._schema, self._padding
+        )
+        normalized_graph = self._normalizer.normalize_tensorflow(padded_graph)
+        jax_graph = jax_lib.graph_to_jax_graph(
+            normalized_graph, cast_arrays=False
+        )
+        return self._tf_apply_core_model((jax_graph, seed_node_idxs))
+
+    class TfPredictWrapperTFGraph(TfPredictWrapperBase):
+      """Consumes `TFInMemoryGraph` and seed node indices."""
+
+      def __init__(self, tf_apply_fn, normalizer, schema, padding):
+        super().__init__(
+            "TfPredictWrapperTFGraph",
+            tf_apply_fn,
+            normalizer,
+            schema,
+            padding,
+        )
+
+      @tf.function(
+          autograph=False,
+          input_signature=[graph_spec, seed_node_idxs_spec],
+      )
+      def __call__(
+          self,
+          graph: tf_in_memory_graph_lib.TFInMemoryGraph,
+          seed_node_idxs: tf.Tensor,
+      ) -> tf.Tensor:
+        return self._predict(graph, seed_node_idxs)
+
+    class TfPredictWrapperTFGraphDict(TfPredictWrapperBase):
+      """Consumes flattened TF graph dictionary kwargs."""
+
+      def __init__(self, tf_apply_fn, normalizer, schema, padding):
+        super().__init__(
+            "TfPredictWrapperTFGraphDict",
+            tf_apply_fn,
+            normalizer,
+            schema,
+            padding,
+        )
+
+      @tf.function(autograph=False)
+      def __call__(
+          self,
+          **kwargs,
+      ) -> tf.Tensor:
+        seed_node_idxs = kwargs.pop("seed_node_idxs")
+        graph = io_tf_lib.tf_graph_dict_to_tf_graph(kwargs)
+        return self._predict(graph, seed_node_idxs)
+
+    class TfPredictWrapperSerializedTFGNNGraphs(TfPredictWrapperBase):
+      """Consumes serialized TF GNN Graph Samples."""
+
+      def __init__(self, tf_apply_fn, normalizer, schema, padding):
+        super().__init__(
+            "TfPredictWrapperSerializedTFGNNGraphs",
+            tf_apply_fn,
+            normalizer,
+            schema,
+            padding,
+        )
+        self._parsing_spec = io_tf_lib.schema_to_tfgnn_graph_parsing_spec(
+            schema
+        )
+
+      @tf.function(
+          autograph=False,
+          input_signature=[
+              tf.TensorSpec(shape=[None], dtype=tf.string, name="examples")
+          ],
+      )
+      def __call__(self, examples: tf.Tensor) -> tf.Tensor:
+        def predict_one_example(serialized_example: tf.Tensor) -> tf.Tensor:
+          graph = io_tf_lib.tfgnn_graph_dict_to_tf_graph(
+              tf.io.parse_single_example(
+                  serialized_example, self._parsing_spec
+              ),
+              self._schema,
+          )
+          predictions = self._predict(graph, tf.constant([0], dtype=tf.int32))
+          return predictions[0]
+
+        return tf.map_fn(
+            predict_one_example,
+            examples,
+            fn_output_signature=tf.TensorSpec(shape=None, dtype=tf.float32),
+        )
+
+    wrapper_class = {
+        common.TFFunctionInputFormat.TF_GRAPH: TfPredictWrapperTFGraph,
+        common.TFFunctionInputFormat.TF_GRAPH_DICT: TfPredictWrapperTFGraphDict,
+        common.TFFunctionInputFormat.SERIALIZED_TFGNN_GRAPHS: (
+            TfPredictWrapperSerializedTFGNNGraphs
+        ),
+    }[input_format]
+    wrapper = wrapper_class(
+        tf_apply_core_model,
+        live.normalizer,
+        self._data.schema,
+        self._data.padding,
+    )
+
+    if input_format == common.TFFunctionInputFormat.TF_GRAPH_DICT:
+      spec_kwargs = dict(graph_dict_spec)
+      spec_kwargs["seed_node_idxs"] = seed_node_idxs_spec
+      wrapper.__call__ = wrapper.__call__.get_concrete_function(**spec_kwargs)
+
+    return wrapper
+
+
+common.register_model(NodeEmbeddingModel, ModelData)
