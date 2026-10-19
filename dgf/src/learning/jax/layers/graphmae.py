@@ -435,27 +435,19 @@ class GraphMAEConfig(common.ArchitectureProvider):
     return "\n".join(parts)
 
 
-class GraphMAE(nn.Module):
-  """Masked graph auto-encoder operating on an embedded graph.
-
-  Masks random target node embeddings, encodes the corrupted graph with a GNN
-  encoder to obtain latent representations, and applies a GNN decoder to
-  reconstruct the original embedded features of the masked target nodes.
-
-  The encoder weights are stored under the `encoder` scope, and are shared by
-  `__call__` and `embed`.
-  """
+class GraphMAEEncoder(nn.Module):
+  """Shared GraphMAE encoder: GNN layers followed by a norm on each nodeset."""
 
   config: GraphMAEConfig
   schema: schema_lib.GraphSchema
 
-  @nn.compact_name_scope
-  def encoder(
+  @nn.compact
+  def __call__(
       self,
       graph: jax_in_memory_graph_lib.JaxInMemoryGraph,
       training: bool,
   ) -> tuple[jax.Array, jax_in_memory_graph_lib.JaxInMemoryGraph]:
-    """Shared encoder: GNN layers followed by a norm on each nodeset.
+    """Encodes `graph`.
 
     Args:
       graph: Input graph with `"embedding"` features on each nodeset.
@@ -493,7 +485,22 @@ class GraphMAE(nn.Module):
     enc_rep = node_sets[self.config.target_nodeset].features[_EMBEDDING_FEATURE]
     return enc_rep, enc_graph
 
-  @nn.compact
+
+class GraphMAE(nn.Module):
+  """Masked graph auto-encoder operating on an embedded graph.
+
+  Masks random target node embeddings, encodes the corrupted graph with a GNN
+  encoder to obtain latent representations, and applies a GNN decoder to
+  reconstruct the original embedded features of the masked target nodes.
+
+  The encoder is a `GraphMAEEncoder` submodule named `encoder`, shared by
+  `__call__` and `embed`. Both methods go through the single compact method
+  `_forward`, so that `GraphMAE` can be nested in any parent module.
+  """
+
+  config: GraphMAEConfig
+  schema: schema_lib.GraphSchema
+
   def __call__(
       self,
       graph_or_batch: jax_in_memory_graph_lib.JaxInMemoryGraph | Batch,
@@ -535,6 +542,42 @@ class GraphMAE(nn.Module):
     else:
       graph = graph_or_batch
 
+    output = self._forward(
+        graph, seed_idxs, training=training, embed_only=False
+    )
+    assert isinstance(output, GraphMAEOutput)
+    return output
+
+  @nn.compact
+  def _forward(
+      self,
+      graph: jax_in_memory_graph_lib.JaxInMemoryGraph,
+      seed_idxs: jax.Array | None,
+      *,
+      training: bool,
+      embed_only: bool,
+  ) -> GraphMAEOutput | jax.Array:
+    """Single compact method holding all the submodules of `GraphMAE`.
+
+    Args:
+      graph: An embedded `JaxInMemoryGraph`.
+      seed_idxs: See `__call__`. Unused if `embed_only`.
+      training: Whether the model is in training mode.
+      embed_only: If True, only runs the encoder on the unmasked graph and
+        returns the encoder representations of the target nodeset (see
+        `embed`). Otherwise, runs the full forward pass (see `__call__`).
+
+    Returns:
+      The encoder representations of the target nodeset if `embed_only`, and
+      the `GraphMAEOutput` of the full forward pass otherwise.
+    """
+    encoder = GraphMAEEncoder(
+        config=self.config, schema=self.schema, name="encoder"
+    )
+    if embed_only:
+      enc_rep, _ = encoder(graph, training)
+      return enc_rep
+
     target_ns = self.config.target_nodeset
     num_target_nodes = graph.node_sets[target_ns].num_nodes
     if num_target_nodes is None:
@@ -562,7 +605,7 @@ class GraphMAE(nn.Module):
     masked_graph = drop_edges(masked_graph, training=training)
 
     # 4. Encode.
-    enc_rep, enc_graph = self.encoder(masked_graph, training)
+    enc_rep, enc_graph = encoder(masked_graph, training)
 
     # 5. Project the representations of all the nodesets to the decoder input,
     # and re-mask the masked target nodes (avoids the identity shortcut). Like
@@ -638,5 +681,6 @@ class GraphMAE(nn.Module):
         if isinstance(graph_or_batch, tuple)
         else graph_or_batch
     )
-    enc_rep, _ = self.encoder(graph, training)
+    enc_rep = self._forward(graph, None, training=training, embed_only=True)
+    assert isinstance(enc_rep, jax.Array)
     return enc_rep
