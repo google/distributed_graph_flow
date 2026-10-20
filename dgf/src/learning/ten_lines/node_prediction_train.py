@@ -64,6 +64,11 @@ ModelData = node_prediction_model.ModelData
 TrainingStats = node_prediction_model.TrainingStats
 CoreModelConfig = node_prediction_core_model.CoreModelConfig
 
+# Range of the automatic batch size. See `common.select_batch_size`.
+_AUTO_BATCH_SIZE_RANGE = (64, 128)
+# Default learning rate divided by the batch size (i.e. 4e-3 for a batch of 128).
+_LEARNING_RATE_PER_EXAMPLE = 4e-3 / 128
+
 
 def create_core_model_config(
     hparams: HParam,
@@ -163,6 +168,24 @@ def infer_task_type(
     )
 
 
+def _estimate_num_train_seed_nodes(
+    graph: common.Graph,
+    valid_graph: common.Graph | None,
+    target_nodeset: str,
+    train_seed_nodes: common.SeedNodeIdxs | None,
+    validation_ratio: float,
+) -> int | None:
+  """Estimates the number of training seed nodes, or None if unknown."""
+  if train_seed_nodes is not None:
+    return len(train_seed_nodes)
+  if not isinstance(graph, in_memory_graph.InMemoryGraph):
+    return None
+  num_nodes = graph.node_sets[target_nodeset].num_nodes
+  if num_nodes is None or valid_graph is not None:
+    return num_nodes
+  return int(num_nodes * (1 - validation_ratio))
+
+
 def train_node_model(
     graph: common.Graph,
     schema: schema_lib.GraphSchema,
@@ -176,17 +199,17 @@ def train_node_model(
     validation_ratio: float = 0.1,
     train_seed_nodes: common.SeedNodeIdxs | None = None,
     valid_seed_nodes: common.SeedNodeIdxs | None = None,
-    num_train_steps: int | None = 10_000,
+    num_train_steps: int | None = 20_000,
     num_valid_steps: int | None = 1_000,
     valid_every_n_steps: int = 1000,
     graph_format: dataset.GraphFormat | str = dataset.GraphFormat.AUTO,
     valid_graph: common.Graph | None = None,
     num_sampling_hops: int = 2,
     sampling_width: int = 15,
-    num_layers: int = 2,
-    batch_size: int = 32,
+    num_layers: int = 3,
+    batch_size: int | None = None,
     node_embedding_dim: int = 128,
-    learning_rate: float = 1e-3,
+    learning_rate: float | None = None,
     weight_decay: float = 1e-4,
     warmup_steps: int | None = None,
     gradient_clip_norm: float | None = 1.0,
@@ -199,7 +222,9 @@ def train_node_model(
     cache_normalized_features: bool = False,
     cache_normalized_features_device: Literal["host", "device"] = "device",
     export_metrics_to_xm: bool = False,
-    architecture: common.Architecture | str = common.DEFAULT_ARCHITECTURE,
+    architecture: common.Architecture | str = (
+        common.DEFAULT_NODE_PREDICTION_ARCHITECTURE
+    ),
     timeseries_encoder: common.TimeseriesEncoder | str = (
         common.DEFAULT_TIMESERIES_ENCODER
     ),
@@ -260,9 +285,12 @@ def train_node_model(
     num_sampling_hops: The number of hops to sample around the seed nodes.
     sampling_width: The number of nodes to sample at each hop.
     num_layers: The number of message passing layers in the GNN.
-    batch_size: The batch size to use for training.
+    batch_size: The batch size to use for training. If None, it is selected
+      automatically: 128, or 64 for small training sets (see
+      `common.select_batch_size`).
     node_embedding_dim: The dimension of the node embeddings.
-    learning_rate: The learning rate to use for training.
+    learning_rate: The learning rate to use for training. If None, it scales
+      linearly with the batch size (4e-3 for a batch size of 128).
     weight_decay: The decoupled weight decay of the AdamW optimizer.
     warmup_steps: The number of linear learning rate warmup steps. If None, uses
       `min(200, 1 + num_train_steps // 5)`. If 0, there is no warmup.
@@ -294,7 +322,8 @@ def train_node_model(
     export_metrics_to_xm: If True, metrics from the training and validation
       steps will be exported to XManager.
     architecture: The architecture of the GNN model. Either an `Architecture`
-      value or its name as a string (e.g. "hmpnn", "hgat", "graphsage", "gcn").
+      value or its name as a string (e.g. "mtalbis", "hmpnn", "hgat",
+      "graphsage", "gcn").
     timeseries_encoder: The encoder used to turn the timeseries features of a
       node into a fixed sized embedding. Either a `TimeseriesEncoder` value or
       its name as a string (e.g. "cnn", "transformer").
@@ -399,6 +428,17 @@ def train_node_model(
               schema, return_output=True, header=False
           ),
       )
+
+    batch_size, learning_rate = common.resolve_batch_size_and_learning_rate(
+        batch_size,
+        learning_rate,
+        num_train_examples=_estimate_num_train_seed_nodes(
+            graph, valid_graph, target_nodeset, train_seed_nodes, validation_ratio
+        ),
+        num_train_steps=num_train_steps,
+        batch_size_range=_AUTO_BATCH_SIZE_RANGE,
+        learning_rate_per_example=_LEARNING_RATE_PER_EXAMPLE,
+    )
 
     # TODO(gbm): Parametrize.
     hparams = HParam(
@@ -673,7 +713,10 @@ def train_node_model(
       )
 
     with util.print_timer("Training model", verbose >= 1):
-      with jax.profiler.TraceAnnotation("train model"):
+      with (
+          jax.profiler.TraceAnnotation("train model"),
+          common.recommend_smaller_batch_size_on_oom(hparams.batch_size),
+      ):
         checkpoint_dir = (
             os.path.join(work_dir, "checkpoint") if work_dir else None
         )

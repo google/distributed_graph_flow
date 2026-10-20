@@ -15,6 +15,8 @@
 """Ten-lines-of-code interface."""
 
 import abc
+from collections.abc import Iterator
+import contextlib
 import dataclasses
 import enum
 import os
@@ -63,6 +65,11 @@ SKIPPED_SAMPLES_CHECK_STEP = 2000
 # is still improving, when early stopping is disabled. See `is_not_converged`.
 _DEFAULT_CONVERGENCE_PATIENCE = 5
 
+# Target number of epochs covered by `num_train_steps` when the batch size is
+# selected automatically. Not reached on large datasets, where the maximum batch
+# size cannot cover it within `num_train_steps`. See `select_batch_size`.
+_AUTO_BATCH_SIZE_MIN_EPOCHS = 10
+
 
 class Architecture(enum.Enum):
   HETEROGENEOUS_MESSAGE_PASSING = "HETEROGENEOUS_MESSAGE_PASSING"
@@ -77,6 +84,8 @@ class Architecture(enum.Enum):
 
 
 DEFAULT_ARCHITECTURE = Architecture.HETEROGENEOUS_MESSAGE_PASSING
+# Default architecture of `train_node_model`.
+DEFAULT_NODE_PREDICTION_ARCHITECTURE = Architecture.MT_ALBIS
 
 
 def parse_architecture(architecture: Architecture | str) -> Architecture:
@@ -807,6 +816,78 @@ def check_number_of_seeds(
         f" than the batch size ({batch_size}). Increase the number of"
         f" validation seed {key}s or decrease the batch size."
     )
+
+
+def select_batch_size(
+    num_train_examples: int | None,
+    num_train_steps: int | None,
+    batch_size_range: tuple[int, int],
+) -> int:
+  """Returns the smallest batch size whose training steps cover enough epochs.
+
+  Starting from the minimum of `batch_size_range`, the batch size is doubled
+  (up to its maximum) until the training steps cover at least
+  `_AUTO_BATCH_SIZE_MIN_EPOCHS` epochs. Small datasets train faster with small
+  batches, while large datasets need large batches to see enough examples.
+
+  Args:
+    num_train_examples: Number of training examples, or None if unknown.
+    num_train_steps: Number of training steps, or None if unbounded.
+    batch_size_range: Minimum and maximum batch size.
+  """
+  min_batch_size, max_batch_size = batch_size_range
+  if num_train_examples is None or num_train_steps is None:
+    return max_batch_size
+  batch_size = min_batch_size
+  while (
+      batch_size < max_batch_size
+      and batch_size * num_train_steps
+      < _AUTO_BATCH_SIZE_MIN_EPOCHS * num_train_examples
+  ):
+    batch_size *= 2
+  return min(batch_size, max_batch_size)
+
+
+def resolve_batch_size_and_learning_rate(
+    batch_size: int | None,
+    learning_rate: float | None,
+    num_train_examples: int | None,
+    num_train_steps: int | None,
+    batch_size_range: tuple[int, int],
+    learning_rate_per_example: float,
+) -> tuple[int, float]:
+  """Selects the batch size and learning rate when they are None."""
+  if batch_size is None:
+    batch_size = select_batch_size(
+        num_train_examples, num_train_steps, batch_size_range
+    )
+    if batch_size < batch_size_range[1]:
+      log.info(
+          "Using batch_size=%d instead of %d because the training set is small"
+          " (~%d examples): smaller batches train faster without loss of"
+          " quality. Set `batch_size` to override.",
+          batch_size,
+          batch_size_range[1],
+          num_train_examples,
+      )
+  if learning_rate is None:
+    learning_rate = learning_rate_per_example * batch_size
+  return batch_size, learning_rate
+
+
+@contextlib.contextmanager
+def recommend_smaller_batch_size_on_oom(batch_size: int) -> Iterator[None]:
+  """Re-raises out-of-memory errors with a hint to reduce the batch size."""
+  try:
+    yield
+  except jax.errors.JaxRuntimeError as e:
+    if "RESOURCE_EXHAUSTED" not in str(e):
+      raise
+    raise MemoryError(
+        f"The model training ran out of memory with batch_size={batch_size}."
+        " Try reducing the batch size, e.g."
+        f" batch_size={max(1, batch_size // 2)}."
+    ) from e
 
 
 def check_skipped_training_samples(

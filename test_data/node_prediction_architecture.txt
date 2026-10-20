@@ -7,23 +7,15 @@ Graph Convolution Block x2:
     MPNN:
       Message(concat(source, target)):
         Dense(8)
-        Activation(silu)
-        Dense(8)
-      Aggregation(sum)
-      RelationAggregation(sum)
+        Activation(relu)
+      Aggregation(mean|sum)
+      RelationAggregation(concat)
       Update(concat(X, messages)):
         Dense(8)
-        Activation(silu)
+        Activation(relu)
         Dropout(0.1)
-        Dense(8)
     Residual(X)
     # Post MPNN
-    X = ...
-    Norm(rms_norm)
-    Dense(32)
-    Activation(silu)
-    Dense(8)
-    Dropout(0.1)
-    Residual(X)
+    Norm(layer_norm)
 Identity
 Dense(3) # Classification head

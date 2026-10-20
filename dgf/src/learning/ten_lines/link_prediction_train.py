@@ -44,6 +44,7 @@ from dgf.src.util import filesystem as fs
 from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -60,6 +61,28 @@ CoreModelConfig = link_prediction_core_model.CoreModelConfig
 EncoderConfig = link_prediction_core_model.EncoderConfig
 LinkPredictionTask = link_prediction_model.LinkPredictionTask
 HParam = link_prediction_model.HParam
+
+# Range of the automatic batch size. See `common.select_batch_size`.
+_AUTO_BATCH_SIZE_RANGE = (4, 8)
+# Default learning rate divided by the batch size (i.e. 1e-3 for a batch of 8).
+_LEARNING_RATE_PER_EXAMPLE = 1e-3 / 8
+
+
+def _estimate_num_train_seed_edges(
+    graph: in_memory_graph.InMemoryGraph,
+    valid_graph: in_memory_graph.InMemoryGraph | None,
+    target_edgeset: str,
+    train_seed_edges: common.SeedNodeIdxs | None,
+    validation_ratio: float,
+) -> int | None:
+  """Estimates the number of training seed edges, or None if unknown."""
+  if train_seed_edges is not None:
+    return len(train_seed_edges)
+  # TODO(gbm): Add support for training on pre-computed graph samples.
+  num_edges = graph.edge_sets[target_edgeset].num_edges()
+  if num_edges is None or valid_graph is not None:
+    return num_edges
+  return int(num_edges * (1 - validation_ratio))
 
 
 def compute_train_and_valid_edge_idxs(
@@ -335,9 +358,9 @@ def train_link_model(
     num_sampling_hops: int = 2,
     sampling_width: int = 15,
     num_layers: int = 2,
-    batch_size: int = 8,
+    batch_size: int | None = None,
     node_embedding_dim: int = 128,
-    learning_rate: float = 1e-3,
+    learning_rate: float | None = None,
     cache_valid_dataset: bool = True,
     time_aware: bool = False,
     num_negative_nodes: int = 8,
@@ -388,9 +411,9 @@ def train_link_model(
     work_dir: Working directory to store checkpoints.
     checkpoint_every_n_minutes: Interval, in minutes, between periodic
       checkpoints when `work_dir` is set. Periodic checkpoints are written
-      asynchronously and skipped if the previous one is still being written.
-      If None, only the final checkpoint is written at the end of training.
-      Ignored if `work_dir` is not set.
+      asynchronously and skipped if the previous one is still being written. If
+      None, only the final checkpoint is written at the end of training. Ignored
+      if `work_dir` is not set.
     verbose: Verbosity level. From 0 (no logs) to 2 (lots of logs).
     validation_ratio: Ratio of edges to use for validation. Only used if the
       "valid_graph" and "valid_seed_edges" arguments are not provided.
@@ -407,9 +430,12 @@ def train_link_model(
     num_sampling_hops: Number of sampling hops.
     sampling_width: Sampling width.
     num_layers: Number of GNN layers.
-    batch_size: Batch size.
+    batch_size: Batch size. If None, it is selected automatically: 8, or 4 for
+      small training sets (see `common.select_batch_size`). Note: This is
+      different from the node prediction models.
     node_embedding_dim: Node embedding dimension.
-    learning_rate: Learning rate.
+    learning_rate: Learning rate. If None, it scales linearly with the batch
+      size (1e-3 for a batch size of 8).
     cache_valid_dataset: If True, the validation dataset is cached in memory.
     time_aware: Enables temporal-aware training. If `False` (default), no
       temporal sampling is applied. If `True`, timestamp features are inferred
@@ -517,6 +543,21 @@ def train_link_model(
               schema, return_output=True, header=False
           ),
       )
+
+    batch_size, learning_rate = common.resolve_batch_size_and_learning_rate(
+        batch_size,
+        learning_rate,
+        num_train_examples=_estimate_num_train_seed_edges(
+            graph,
+            valid_graph,
+            target_edgeset,
+            train_seed_edges,
+            validation_ratio,
+        ),
+        num_train_steps=num_train_steps,
+        batch_size_range=_AUTO_BATCH_SIZE_RANGE,
+        learning_rate_per_example=_LEARNING_RATE_PER_EXAMPLE,
+    )
 
     # TODO(gbm): Parametrize.
     hparams = HParam(
@@ -716,7 +757,10 @@ def train_link_model(
           core_model, compute_loss
       )
 
-    with util.print_timer("Training model", verbose >= 1):
+    with (
+        util.print_timer("Training model", verbose >= 1),
+        common.recommend_smaller_batch_size_on_oom(hparams.batch_size),
+    ):
       checkpoint_dir = (
           os.path.join(work_dir, "checkpoint") if work_dir else None
       )

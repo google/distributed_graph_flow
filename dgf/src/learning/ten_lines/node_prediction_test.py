@@ -1180,6 +1180,11 @@ class NodePredictionClassificationToy(absltest.TestCase):
       self.model.label_classes()
     self.assertIn("does not have a string dictionary", str(ctx.exception))
 
+  def test_automatic_batch_size_and_learning_rate(self):
+    hparams = self.model.data().hparams
+    self.assertEqual(hparams.batch_size, 128)
+    self.assertAlmostEqual(hparams.learning_rate, 4e-3)
+
 
 class NodePredictionInferenceTest(absltest.TestCase):
 

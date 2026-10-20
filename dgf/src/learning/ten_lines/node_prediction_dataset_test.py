@@ -576,5 +576,19 @@ class GNNDatasetPreparatorTest(parameterized.TestCase):
     self.assertGreater(large_nodes, zero_nodes)
 
 
+class RepeatToBatchSizeTest(absltest.TestCase):
+
+  def test_repeats_small_seed_sets(self):
+    np.testing.assert_array_equal(
+        node_prediction_dataset.repeat_to_batch_size(np.array([1, 2]), 5),
+        [1, 2, 1, 2, 1, 2],
+    )
+
+  def test_keeps_large_seed_sets(self):
+    seeds = np.arange(10)
+    self.assertIs(node_prediction_dataset.repeat_to_batch_size(seeds, 5), seeds)
+    self.assertIsNone(node_prediction_dataset.repeat_to_batch_size(None, 5))
+
+
 if __name__ == "__main__":
   absltest.main()

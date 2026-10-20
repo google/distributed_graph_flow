@@ -798,6 +798,9 @@ def prepare_datasets(
           ts_feature=target_ts_feature,
       )
   )
+  # Small seed sets are repeated to fill at least one batch.
+  train_seed_node_idxs = repeat_to_batch_size(train_seed_node_idxs, batch_size)
+  valid_seed_node_idxs = repeat_to_batch_size(valid_seed_node_idxs, batch_size)
 
   if sampling_plan is None:
     sampling_config = sampling_config_lib.SimpleSamplingConfig(
@@ -866,3 +869,12 @@ def prepare_datasets(
   )
 
   return train_dataset, valid_dataset
+
+
+def repeat_to_batch_size(
+    seed_node_idxs: np.ndarray | None, batch_size: int
+) -> np.ndarray | None:
+  """Repeats the seed nodes an integer number of times to fill a batch."""
+  if seed_node_idxs is None or not 0 < len(seed_node_idxs) < batch_size:
+    return seed_node_idxs
+  return np.tile(seed_node_idxs, -(-batch_size // len(seed_node_idxs)))

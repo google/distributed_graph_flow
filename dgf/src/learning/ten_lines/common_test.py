@@ -603,5 +603,52 @@ class ConvergenceTest(parameterized.TestCase):
     self.assertIsNone(restored.trainig_logs.stop_reason)
 
 
+class SelectBatchSizeTest(parameterized.TestCase):
+
+  @parameterized.parameters(
+      (None, 20_000, 128),
+      (1_000, None, 128),
+      (1_175, 20_000, 64),
+      (128_000, 20_000, 64),
+      (163_263, 20_000, 128),
+      (1_000, 100, 128),
+  )
+  def test_select_batch_size(
+      self, num_train_examples, num_train_steps, expected
+  ):
+    self.assertEqual(
+        common.select_batch_size(
+            num_train_examples, num_train_steps, batch_size_range=(64, 128)
+        ),
+        expected,
+    )
+
+  def test_resolve_batch_size_and_learning_rate(self):
+    batch_size, learning_rate = common.resolve_batch_size_and_learning_rate(
+        None, None, 1_000, 20_000, (64, 128), 1e-3
+    )
+    self.assertEqual(batch_size, 64)
+    self.assertAlmostEqual(learning_rate, 0.064)
+    self.assertEqual(
+        common.resolve_batch_size_and_learning_rate(
+            32, 0.1, 1_000, 20_000, (64, 128), 1e-3
+        ),
+        (32, 0.1),
+    )
+
+
+class RecommendSmallerBatchSizeOnOomTest(absltest.TestCase):
+
+  def test_out_of_memory_recommends_smaller_batch_size(self):
+    with self.assertRaisesRegex(MemoryError, "batch_size=64"):
+      with common.recommend_smaller_batch_size_on_oom(128):
+        raise jax.errors.JaxRuntimeError("RESOURCE_EXHAUSTED: Out of memory")
+
+  def test_other_errors_are_unchanged(self):
+    with self.assertRaisesRegex(jax.errors.JaxRuntimeError, "INTERNAL"):
+      with common.recommend_smaller_batch_size_on_oom(128):
+        raise jax.errors.JaxRuntimeError("INTERNAL: Something else")
+
+
 if __name__ == "__main__":
   absltest.main()
