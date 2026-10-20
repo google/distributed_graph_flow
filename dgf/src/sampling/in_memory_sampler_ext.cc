@@ -443,6 +443,13 @@ absl::StatusOr<PooledBuilders> Sampler::GrowSamplesNoGil(
   auto seed_node_idxs_view = seed_node_idxs.view();
   std::size_t num_seeds = seed_node_idxs_view.shape(0);
 
+  // `kSubGraph` ignores the temporal options. `kPlan` requires the seed
+  // timestamps to avoid sampling future edges by mistake.
+  if (mode == GrowMode::kPlan && has_temporal_edgesets_ &&
+      !seed_timestamps.has_value()) {
+    return absl::InvalidArgumentError(
+        "seed_timestamps must be provided with temporal sampling.");
+  }
   if (seed_timestamps.has_value()) {
     if (!has_temporal_edgesets_) {
       return absl::InvalidArgumentError(
@@ -938,19 +945,20 @@ struct RandomWalkNegativeSamplerHelper {
     }
 
     // Phase 3: Selection (Top-K Ranking)
+    // Ties are broken by node index: `visit_counts` iterates in an order that
+    // changes between processes.
+    const auto more_visited = [](const Candidate& a, const Candidate& b) {
+      if (a.count != b.count) return a.count > b.count;
+      return a.node < b.node;
+    };
     const int num_extracted =
         std::min(static_cast<int>(candidates.size()), num_negatives_per_seed);
     if (num_extracted < candidates.size()) {
       std::nth_element(candidates.begin(), candidates.begin() + num_extracted,
-                       candidates.end(),
-                       [](const Candidate& a, const Candidate& b) {
-                         return a.count > b.count;
-                       });
+                       candidates.end(), more_visited);
     }
     std::sort(candidates.begin(), candidates.begin() + num_extracted,
-              [](const Candidate& a, const Candidate& b) {
-                return a.count > b.count;
-              });
+              more_visited);
 
     for (int i = 0; i < num_extracted; i++) {
       output_for_seed_node[i] = static_cast<int64_t>(candidates[i].node);
@@ -989,9 +997,28 @@ Sampler::RandomWalkNegativeSampling(const NodeIdxs& seed_node_idxs,
         "Ensure it is traversed forward in the SamplingPlan."));
   }
 
+  if (num_walks < 0 || num_negatives_per_seed < 0) {
+    return absl::InvalidArgumentError(
+        "num_walks and num_negatives_per_seed must be non-negative.");
+  }
+  // The walks start from the seed nodes at the root of the plan, and the
+  // negatives are checked against the edges of the seed nodes.
+  if (plan_.root->nodeset_idx != edgeset.source_nodeset) {
+    return absl::InvalidArgumentError(
+        absl::StrCat("The source node set of edgeset '", edgeset.name,
+                     "' should be the seed node set of the sampling plan."));
+  }
+
   const size_t num_target_nodes = nodesets_[edgeset.target_nodeset].num_nodes;
   const bool is_homogeneous =
       (edgeset.source_nodeset == edgeset.target_nodeset);
+  // The fallback samples nodes different from the seed node.
+  const size_t min_num_target_nodes = is_homogeneous ? 2 : 1;
+  if (num_negatives_per_seed > 0 && num_target_nodes < min_num_target_nodes) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "Not enough target nodes to sample negatives for edgeset '",
+        edgeset.name, "'."));
+  }
 
   RandomWalkNegativeSamplerHelper helper{
       this,           &edgeset,  num_target_nodes,
@@ -999,6 +1026,15 @@ Sampler::RandomWalkNegativeSampling(const NodeIdxs& seed_node_idxs,
 
   auto seed_node_idxs_view = seed_node_idxs.view();
   const size_t num_seeds = seed_node_idxs_view.shape(0);
+  const size_t num_source_nodes = nodesets_[edgeset.source_nodeset].num_nodes;
+  for (size_t seed_idx = 0; seed_idx < num_seeds; seed_idx++) {
+    const int64_t seed_node = seed_node_idxs_view(seed_idx);
+    if (seed_node < 0 || seed_node >= num_source_nodes) {
+      return absl::InvalidArgumentError(absl::StrCat(
+          "Seed node idx ", seed_node,
+          " is out of bounds. Should be lower than ", num_source_nodes, "."));
+    }
+  }
 
   int64_t* output_data = new int64_t[num_seeds * num_negatives_per_seed];
 
@@ -1219,6 +1255,19 @@ absl::Status Sampler::IndexEdgeSets(const nb::object& py_graph,
   // Populate the edgeset names.
   for (const auto& edgeset : schema_->edgeset_name_to_idx) {
     edgesets_[edgeset.second].name = edgeset.first;
+  }
+
+  // Check that the plan follows the edgesets as defined in the schema.
+  for (int edgeset_idx = 0; edgeset_idx < edgesets_.size(); edgeset_idx++) {
+    const auto& edgeset = edgesets_[edgeset_idx];
+    const auto& schema_edgeset = schema_->edgesets[edgeset_idx];
+    if (edgeset.source_nodeset != -1 &&
+        (edgeset.source_nodeset != schema_edgeset.source_nodeset ||
+         edgeset.target_nodeset != schema_edgeset.target_nodeset)) {
+      return absl::InvalidArgumentError(
+          absl::StrCat("The sampling plan traverses edgeset '", edgeset.name,
+                       "' between the wrong node sets."));
+    }
   }
 
   // Load and index the edges in memory.

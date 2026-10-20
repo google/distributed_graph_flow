@@ -640,9 +640,11 @@ class Sampler:
   ) -> in_memory_graph_lib.InMemoryGraph:
     """Extracts the subgraph around the provided seed nodes.
 
-    This method returns a graph containing all the nodes and edges at a
-    distance less than or equal to the configured number of hops from the
-    provided `seed_node_idxs`.
+    This method returns a graph containing the nodes and edges reached from
+    the provided `seed_node_idxs` by following the sampling plan, with up to
+    `hop_width` neighbors per expanded node (see the module docstring). With
+    `hop_width >= degree`, this is all the nodes and edges within `num_hops`
+    hops.
 
     The seed nodes are always the first nodes of their respective node set in
     the returned `InMemoryGraph`. For example, if `seed_node_idxs` contains 3
@@ -659,7 +661,7 @@ class Sampler:
     config = dgf.sampling.SimpleSamplingConfig(
         seed_nodeset="client",
         num_hops=4,
-        hop_width=1, # Not used with "subgraph".
+        hop_width=1000,
         reverse=True,
     )
     sampler = dgf.sampling.create_sampler(graph, config, schema)

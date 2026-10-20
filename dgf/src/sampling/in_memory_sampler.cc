@@ -8,6 +8,7 @@
 #include <optional>
 #include <queue>
 #include <random>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -93,12 +94,6 @@ void SampleDistinct(std::vector<InputIdx>::const_iterator first,
 absl::Status AdjacencyIndex::SampleRandomUniform(
     const InputIdx source_node, const std::size_t num_samples,
     std::vector<InputIdx>* result, Rng* rng, InputIdx masked_edge_idx) const {
-  if (!timestamps.empty()) {
-    return absl::FailedPreconditionError(
-        "Cannot use SampleRandomUniform when timestamps are available. Use "
-        "SampleRandomUniformWithTimestamp instead.");
-  }
-
   if (source_node + 1 >= source_blocks.size()) {
     return absl::InvalidArgumentError(absl::StrCat(
         "The source node idx ", source_node,
@@ -209,12 +204,6 @@ absl::Status AdjacencyIndex::SampleFirst(InputIdx source_node,
                                          std::size_t num_samples,
                                          std::vector<InputIdx>* result,
                                          InputIdx masked_edge_idx) const {
-  if (!timestamps.empty()) {
-    return absl::FailedPreconditionError(
-        "Cannot use SampleRandomUniform when timestamps are available. Use "
-        "SampleRandomUniformWithTimestamp instead.");
-  }
-
   if (source_node + 1 >= source_blocks.size()) {
     return absl::InvalidArgumentError(absl::StrCat(
         "The source node idx ", source_node,

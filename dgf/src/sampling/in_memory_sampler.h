@@ -79,7 +79,8 @@ struct AdjacencyIndex {
   // `source_blocks[n]` equals `target_node_idxs.size()`.
   std::vector<InputIdx> source_blocks;
   // Contains target node indices. Segments `[source_blocks[i],
-  // source_blocks[i+1])` are sorted.
+  // source_blocks[i+1])` are sorted by target node index, or by timestamp and
+  // then target node index if `timestamps` is not empty.
   std::vector<InputIdx> target_node_idxs;
   // Parallel array containing edge timestamps, if the edgeset has timestamps.
   // Otherwise, is empty.
@@ -126,6 +127,11 @@ struct AdjacencyIndex {
   // Checks if a directed edge exists from `source_node` to `target_node`.
   bool HasEdge(InputIdx source_node, InputIdx target_node) const {
     auto targets = Targets(source_node);
+    if (!timestamps.empty()) {
+      // The targets are not sorted by node index.
+      return std::find(targets.begin(), targets.end(), target_node) !=
+             targets.end();
+    }
     return std::binary_search(targets.begin(), targets.end(), target_node);
   }
 
@@ -156,8 +162,8 @@ struct AdjacencyIndex {
                                    InputIdx masked_edge_idx = -1) const;
 
   // Samples the first `num_samples` target nodes connected to the given
-  // `source_node` (sorted by source node id). The sampled target node indices
-  // are appended to the `result` vector.
+  // `source_node` (in the order of `target_node_idxs`). The sampled target node
+  // indices are appended to the `result` vector.
   absl::Status SampleFirst(InputIdx source_node, std::size_t num_samples,
                            std::vector<InputIdx>* result,
                            InputIdx masked_edge_idx = -1) const;
@@ -294,7 +300,8 @@ struct SamplerIndex {
 
   // If true, the sampler runs a deterministic sampling useful for debugging:
   //   - When sampling k unique edges, the k edges comming from the k nodes with
-  //   the lowest ids are sampled (and sorted).
+  //   the lowest ids are sampled (and sorted). For edge sets with timestamps,
+  //   the k earliest edges are sampled instead.
   bool debug_sampling_ = false;
 
   int edgeset_to_mask_idx_ = -1;

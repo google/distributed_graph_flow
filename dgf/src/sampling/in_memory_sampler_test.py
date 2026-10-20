@@ -1322,8 +1322,7 @@ Node(nodeset_idx=0, children=[
     )
 
     with self.assertRaisesRegex(
-        ValueError,
-        "Cannot use SampleRandomUniform when timestamps are available",
+        ValueError, "seed_timestamps must be provided with temporal sampling"
     ):
       _ = sampler.sample([0])
 
@@ -1493,6 +1492,198 @@ Node(nodeset_idx=0, children=[
     sampled = negatives[0]
     for n in sampled:
       self.assertIn(n, [0, 1, 2, 3, 4, 5])
+
+  def _create_line_sampler(
+      self, num_nodes: int, edge_timestamps: list[int] | None = None
+  ) -> in_memory_sampler_lib.Sampler:
+    """Creates a sampler on the homogeneous line graph 0->1->...->n-1."""
+    edge_features = {}
+    edge_features_schema = {}
+    if edge_timestamps is not None:
+      edge_features["t"] = np.array(edge_timestamps, dtype=np.int64)
+      edge_features_schema["t"] = schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.INTEGER_64,
+          semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+          is_creation_time=True,
+      )
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "n": in_memory_graph_lib.InMemoryNodeSet(
+                num_nodes=num_nodes, features={}
+            )
+        },
+        edge_sets={
+            "e": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array(
+                    [range(num_nodes - 1), range(1, num_nodes)], dtype=np.int64
+                ).reshape(2, -1),
+                features=edge_features,
+            )
+        },
+    )
+    schema = schema_lib.GraphSchema(
+        node_sets={"n": schema_lib.NodeSchema()},
+        edge_sets={
+            "e": schema_lib.EdgeSchema(
+                source="n", target="n", features=edge_features_schema
+            )
+        },
+    )
+    return in_memory_sampler_lib.create_sampler(
+        graph,
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n",
+            num_hops=2,
+            hop_width=10,
+            temporal_sampling=edge_timestamps is not None,
+            propagate_timestamp_to_edges=False,
+        ),
+        schema,
+        batch_size=1,
+        return_node_idxs=True,
+        seed=1,
+    )
+
+  def test_temporal_sampler_subgraphs_ignore_timestamps(self):
+    temporal = self._create_line_sampler(4, edge_timestamps=[3, 2, 1])
+    non_temporal = self._create_line_sampler(4)
+
+    def assert_same_graph(a, b):
+      np.testing.assert_array_equal(
+          a.node_sets["n"].features["#idx"], b.node_sets["n"].features["#idx"]
+      )
+      np.testing.assert_array_equal(
+          a.edge_sets["e"].adjacency, b.edge_sets["e"].adjacency
+      )
+
+    assert_same_graph(temporal.subgraph([0]), non_temporal.subgraph([0]))
+    for a, b in zip(
+        temporal.multisubgraph([0, 1]), non_temporal.multisubgraph([0, 1])
+    ):
+      assert_same_graph(a, b)
+    assert_same_graph(
+        temporal.multisubgraph_merged([1])[0],
+        non_temporal.multisubgraph_merged([1])[0],
+    )
+    # `sample` follows the seed timestamps.
+    self.assertEqual(
+        temporal.sample(0, seed_timestamps=10).edge_sets["e"].adjacency.shape,
+        (2, 2),
+    )
+    self.assertEqual(
+        temporal.sample(0, seed_timestamps=2).edge_sets["e"].adjacency.shape,
+        (2, 0),
+    )
+
+  def test_random_walk_negative_sampling_invalid_arguments(self):
+    sampler = self._create_line_sampler(3)
+    with self.assertRaisesRegex(ValueError, "out of bounds"):
+      sampler._cc_sampler.RandomWalkNegativeSampling(
+          seed_node_idxs=np.array([3], dtype=np.int64),
+          target_edgeset_idx=0,
+          num_walks=4,
+          num_negatives_per_seed=2,
+      )
+    with self.assertRaisesRegex(ValueError, "non-negative"):
+      sampler._cc_sampler.RandomWalkNegativeSampling(
+          seed_node_idxs=np.array([0], dtype=np.int64),
+          target_edgeset_idx=0,
+          num_walks=4,
+          num_negatives_per_seed=-1,
+      )
+    # A single node cannot be a negative of itself.
+    with self.assertRaisesRegex(ValueError, "Not enough target nodes"):
+      self._create_line_sampler(1)._cc_sampler.RandomWalkNegativeSampling(
+          seed_node_idxs=np.array([0], dtype=np.int64),
+          target_edgeset_idx=0,
+          num_walks=4,
+          num_negatives_per_seed=1,
+      )
+
+  def test_random_walk_negative_sampling_temporal_excludes_neighbors(self):
+    # The neighbors of 0 are {1, 2}, with timestamps in the reverse order of
+    # the node indices. The self-loop on 1 makes it the most visited node.
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "n": in_memory_graph_lib.InMemoryNodeSet(num_nodes=4, features={})
+        },
+        edge_sets={
+            "e": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array([[0, 0, 1, 2], [1, 2, 1, 3]]),
+                features={"t": np.array([2, 1, 0, 0], dtype=np.int64)},
+            )
+        },
+    )
+    schema = schema_lib.GraphSchema(
+        node_sets={"n": schema_lib.NodeSchema()},
+        edge_sets={
+            "e": schema_lib.EdgeSchema(
+                source="n",
+                target="n",
+                features={
+                    "t": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+                        is_creation_time=True,
+                    )
+                },
+            )
+        },
+    )
+    sampler = in_memory_sampler_lib.create_sampler(
+        graph,
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n",
+            num_hops=2,
+            hop_width=10,
+            temporal_sampling=True,
+            propagate_timestamp_to_edges=False,
+        ),
+        schema,
+        batch_size=1,
+        seed=1,
+    )
+    # The walks from 0 visit 1, 2 (neighbors) and 3 (the only negative).
+    negatives = sampler._cc_sampler.RandomWalkNegativeSampling(
+        seed_node_idxs=np.array([0], dtype=np.int64),
+        target_edgeset_idx=0,
+        num_walks=100,
+        num_negatives_per_seed=1,
+    )
+    np.testing.assert_array_equal(negatives, [[3]])
+
+  def test_plan_inconsistent_with_schema(self):
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "a": in_memory_graph_lib.InMemoryNodeSet(num_nodes=3, features={}),
+            "b": in_memory_graph_lib.InMemoryNodeSet(num_nodes=3, features={}),
+        },
+        edge_sets={
+            "e": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array([[0, 1], [2, 0]])
+            )
+        },
+    )
+    schema = schema_lib.GraphSchema(
+        node_sets={"a": schema_lib.NodeSchema(), "b": schema_lib.NodeSchema()},
+        edge_sets={"e": schema_lib.EdgeSchema(source="a", target="b")},
+    )
+    # Traverses "e" forward from "b", while "e" goes from "a" to "b".
+    plan = config_lib.SamplingPlan(
+        root=config_lib.PlanNode(
+            nodeset="b",
+            children=[
+                config_lib.PlanEdge(
+                    edgeset="e",
+                    reversed=False,
+                    hop_width=5,
+                    node=config_lib.PlanNode(nodeset="a"),
+                )
+            ],
+        )
+    )
+    with self.assertRaisesRegex(ValueError, "between the wrong node sets"):
+      in_memory_sampler_lib.create_sampler(graph, plan, schema, batch_size=1)
 
   def _create_causal_timeseries_test_graph(self):
     graph = in_memory_graph_lib.InMemoryGraph(

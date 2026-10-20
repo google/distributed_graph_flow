@@ -355,6 +355,40 @@ TEST(InMemorySamplerTest, HasEdge) {
   EXPECT_FALSE(index.HasEdge(2, 10));
 }
 
+// With timestamps, the targets are sorted by timestamp first.
+TEST(InMemorySamplerTest, HasEdge_Temporal) {
+  std::vector<Edge<true, false>> edges = {
+      {.source = 0, .target = 1, .timestamp = 30},
+      {.source = 0, .target = 2, .timestamp = 20},
+      {.source = 0, .target = 3, .timestamp = 10}};
+  ASSERT_OK_AND_ASSIGN(AdjacencyIndex index,
+                       (AdjacencyIndex::CreateFromEdgeList<true, false>(
+                           std::move(edges), 1, 4)));
+  EXPECT_THAT(index.Targets(0), ElementsAre(3, 2, 1));
+  EXPECT_FALSE(index.HasEdge(0, 0));
+  EXPECT_TRUE(index.HasEdge(0, 1));
+  EXPECT_TRUE(index.HasEdge(0, 2));
+  EXPECT_TRUE(index.HasEdge(0, 3));
+}
+
+// The sampling without seed timestamp (e.g., sub-graph extraction) ignores the
+// timestamps.
+TEST(InMemorySamplerTest, SampleWithoutTimestamp_Temporal) {
+  std::vector<Edge<true, false>> edges = {
+      {.source = 0, .target = 1, .timestamp = 30},
+      {.source = 0, .target = 2, .timestamp = 20}};
+  ASSERT_OK_AND_ASSIGN(AdjacencyIndex index,
+                       (AdjacencyIndex::CreateFromEdgeList<true, false>(
+                           std::move(edges), 1, 3)));
+  std::vector<std::size_t> result;
+  EXPECT_OK(index.SampleFirst(/*source_node=*/0, /*num_samples=*/5, &result));
+  EXPECT_THAT(result, ElementsAre(2, 1));
+  Rng rng = MakeRng(42);
+  EXPECT_OK(index.SampleRandomUniform(/*source_node=*/0, /*num_samples=*/5,
+                                      &result, &rng));
+  EXPECT_THAT(result, UnorderedElementsAre(1, 2));
+}
+
 TEST(MergeTest, ComputeMergeLayout) {
   // 2 nodesets, 1 edgeset, 3 samples. The first nodeset is padded.
   const MergeLayout layout = ComputeMergeLayout(
