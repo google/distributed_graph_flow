@@ -391,13 +391,13 @@ class LinkPredictionModel(common.Model):
       @jax.jit
       def apply_core_model(batch: InferenceBatch):
         return core_model.apply(
-            self._data.model_params, batch, method=core_model.call_inference
+            self._data.model_params, batch, method=core_model.call_inference  # pyrefly: ignore[bad-argument-type]
         )
 
       @jax.jit
       def apply_encoder_source(graph: object, offset: jax.Array):
         return core_model.apply(
-            self._data.model_params,
+            self._data.model_params,  # pyrefly: ignore[bad-argument-type]
             graph,
             offset,
             method=core_model.call_src_encoder,
@@ -406,7 +406,7 @@ class LinkPredictionModel(common.Model):
       @jax.jit
       def apply_encoder_target(graph: object, offset: jax.Array):
         return core_model.apply(
-            self._data.model_params,
+            self._data.model_params,  # pyrefly: ignore[bad-argument-type]
             graph,
             offset,
             method=core_model.call_trg_encoder,

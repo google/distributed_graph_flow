@@ -236,7 +236,7 @@ def main(argv) -> None:
     graph, seed_node_idxs = batch
     labels = graph.node_sets["nodes"].features["labels"][seed_node_idxs]
     loss, aux = loss_fn(params, batch, labels, None, False)
-    return {"loss": loss, **aux}
+    return {"loss": loss, **aux}  # pyrefly: ignore[invalid-argument]
 
   # Process a batch of data before sending it to the model.
   def process_batch(

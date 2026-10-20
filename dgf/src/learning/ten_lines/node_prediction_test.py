@@ -1121,7 +1121,7 @@ class NodePredictionRealLookingStandaloneTest(parameterized.TestCase):
         num_sampling_hops=0,  # The transactions table is not visited.
         target_nodeset="client",
         target_column="categorical_label",
-        **my_args,  # pyrefly: ignore[potential-bad-keyword-argument]
+        **my_args,  # pyrefly: ignore[bad-keyword-argument, potential-bad-keyword-argument]
     )
 
 
@@ -1318,7 +1318,7 @@ class NodePredictionBatchNormTest(absltest.TestCase):
     running_means = [
         leaf
         for path, leaf in jax.tree_util.tree_leaves_with_path(
-            model.data().model_params["batch_stats"]
+            model.data().model_params["batch_stats"]  # pyrefly: ignore[unsupported-operation]
         )
         if jax.tree_util.keystr(path).endswith("['mean']")
     ]

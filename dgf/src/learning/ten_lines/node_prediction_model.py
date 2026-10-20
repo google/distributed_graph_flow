@@ -752,7 +752,7 @@ class NodePredictionModel(common.Model):
         # TODO(gbm): Add softmax.
         assert core_model is not None
         logits = core_model.apply(
-            self._data.model_params, batch, training=False
+            self._data.model_params, batch, training=False  # pyrefly: ignore[bad-argument-type]
         )
         if self._data.task.task_type == TaskType.NODE_REGRESSION:
           head_config = self._data.core_model_config.head
