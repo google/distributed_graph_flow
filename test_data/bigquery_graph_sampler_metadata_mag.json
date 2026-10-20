@@ -1,0 +1,285 @@
+{
+  "creationTime": "2026-10-16T09:48:05.344947Z",
+  "edgeTables": [
+    {
+      "dataSourceTable": {
+        "datasetId": "mag",
+        "projectId": "biggraphs-poc",
+        "tableId": "cites"
+      },
+      "destinationNodeReference": {
+        "edgeTableColumns": [
+          "target"
+        ],
+        "nodeTable": "paper",
+        "nodeTableColumns": [
+          "id"
+        ]
+      },
+      "keyColumns": [
+        "source",
+        "target"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "cites"
+        }
+      ],
+      "name": "cites",
+      "sourceNodeReference": {
+        "edgeTableColumns": [
+          "source"
+        ],
+        "nodeTable": "paper",
+        "nodeTableColumns": [
+          "id"
+        ]
+      }
+    },
+    {
+      "dataSourceTable": {
+        "datasetId": "mag",
+        "projectId": "biggraphs-poc",
+        "tableId": "writes"
+      },
+      "destinationNodeReference": {
+        "edgeTableColumns": [
+          "target"
+        ],
+        "nodeTable": "paper",
+        "nodeTableColumns": [
+          "id"
+        ]
+      },
+      "keyColumns": [
+        "source",
+        "target"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "writes"
+        }
+      ],
+      "name": "writes",
+      "sourceNodeReference": {
+        "edgeTableColumns": [
+          "source"
+        ],
+        "nodeTable": "author",
+        "nodeTableColumns": [
+          "id"
+        ]
+      }
+    },
+    {
+      "dataSourceTable": {
+        "datasetId": "mag",
+        "projectId": "biggraphs-poc",
+        "tableId": "has_topic"
+      },
+      "destinationNodeReference": {
+        "edgeTableColumns": [
+          "target"
+        ],
+        "nodeTable": "field_of_study",
+        "nodeTableColumns": [
+          "id"
+        ]
+      },
+      "keyColumns": [
+        "source",
+        "target"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "has_topic"
+        }
+      ],
+      "name": "has_topic",
+      "sourceNodeReference": {
+        "edgeTableColumns": [
+          "source"
+        ],
+        "nodeTable": "paper",
+        "nodeTableColumns": [
+          "id"
+        ]
+      }
+    },
+    {
+      "dataSourceTable": {
+        "datasetId": "mag",
+        "projectId": "biggraphs-poc",
+        "tableId": "affiliated_with"
+      },
+      "destinationNodeReference": {
+        "edgeTableColumns": [
+          "target"
+        ],
+        "nodeTable": "institution",
+        "nodeTableColumns": [
+          "id"
+        ]
+      },
+      "keyColumns": [
+        "source",
+        "target"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "affiliated_with"
+        }
+      ],
+      "name": "affiliated_with",
+      "sourceNodeReference": {
+        "edgeTableColumns": [
+          "source"
+        ],
+        "nodeTable": "author",
+        "nodeTableColumns": [
+          "id"
+        ]
+      }
+    }
+  ],
+  "etag": "lllEXYMDU67pDeItmUn98g==",
+  "lastModifiedTime": "2026-10-16T09:48:05.344947Z",
+  "nodeTables": [
+    {
+      "dataSourceTable": {
+        "datasetId": "mag",
+        "projectId": "biggraphs-poc",
+        "tableId": "paper"
+      },
+      "keyColumns": [
+        "id"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "paper",
+          "properties": [
+            {
+              "dataType": {
+                "typeKind": "STRING"
+              },
+              "expression": "id",
+              "name": "id"
+            },
+            {
+              "dataType": {
+                "typeKind": "STRING"
+              },
+              "expression": "split",
+              "name": "split"
+            },
+            {
+              "dataType": {
+                "typeKind": "INT64"
+              },
+              "expression": "labels",
+              "name": "labels"
+            },
+            {
+              "dataType": {
+                "typeKind": "INT64"
+              },
+              "expression": "year",
+              "name": "year"
+            },
+            {
+              "dataType": {
+                "arrayElementType": {
+                  "typeKind": "FLOAT64"
+                },
+                "typeKind": "ARRAY"
+              },
+              "expression": "feat",
+              "name": "feat"
+            }
+          ]
+        }
+      ],
+      "name": "paper"
+    },
+    {
+      "dataSourceTable": {
+        "datasetId": "mag",
+        "projectId": "biggraphs-poc",
+        "tableId": "author"
+      },
+      "keyColumns": [
+        "id"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "author",
+          "properties": [
+            {
+              "dataType": {
+                "typeKind": "STRING"
+              },
+              "expression": "id",
+              "name": "id"
+            }
+          ]
+        }
+      ],
+      "name": "author"
+    },
+    {
+      "dataSourceTable": {
+        "datasetId": "mag",
+        "projectId": "biggraphs-poc",
+        "tableId": "institution"
+      },
+      "keyColumns": [
+        "id"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "institution",
+          "properties": [
+            {
+              "dataType": {
+                "typeKind": "STRING"
+              },
+              "expression": "id",
+              "name": "id"
+            }
+          ]
+        }
+      ],
+      "name": "institution"
+    },
+    {
+      "dataSourceTable": {
+        "datasetId": "mag",
+        "projectId": "biggraphs-poc",
+        "tableId": "field_of_study"
+      },
+      "keyColumns": [
+        "id"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "field_of_study",
+          "properties": [
+            {
+              "dataType": {
+                "typeKind": "STRING"
+              },
+              "expression": "id",
+              "name": "id"
+            }
+          ]
+        }
+      ],
+      "name": "field_of_study"
+    }
+  ],
+  "propertyGraphReference": {
+    "datasetId": "mag",
+    "projectId": "biggraphs-poc",
+    "propertyGraphId": "mag_graph"
+  }
+}

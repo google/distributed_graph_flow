@@ -20,36 +20,6 @@ from dgf.src.data import schema as schema_lib
 import numpy as np
 
 
-def _resolve_node_primary_key(
-    nodeset_name: str,
-    nodeset_schema: schema_lib.NodeSchema,
-) -> str:
-  """Returns the primary key feature name for a nodeset."""
-  primary_key = analyse_schema_lib.primary_feature_or_none(
-      nodeset_name, nodeset_schema
-  )
-  if primary_key is not None:
-    return primary_key
-  return analyse_schema_lib.infer_most_likely_primary_key(
-      nodeset_name, nodeset_schema
-  )
-
-
-def _resolve_edge_primary_key_or_none(
-    edgeset_name: str,
-    edgeset_schema: schema_lib.EdgeSchema,
-) -> str | None:
-  """Returns the primary key feature name for an edgeset, or None if absent."""
-  primary_key = analyse_schema_lib.primary_feature_or_none(
-      edgeset_name, edgeset_schema
-  )
-  if primary_key is not None:
-    return primary_key
-  return analyse_schema_lib.infer_most_likely_primary_key_or_none(
-      edgeset_name, edgeset_schema
-  )
-
-
 def canonicalize_graph(
     graph: in_memory_graph_lib.InMemoryGraph,
     schema: schema_lib.GraphSchema,
@@ -92,7 +62,9 @@ def canonicalize_graph(
       )
       continue
 
-    primary_key_name = _resolve_node_primary_key(nodeset_name, nodeset_schema)
+    primary_key_name = analyse_schema_lib.primary_feature(
+        nodeset_name, nodeset_schema
+    )
     primary_key_values = nodeset.features[primary_key_name]
     sort_indices = np.argsort(primary_key_values, kind="stable")
 
@@ -127,10 +99,10 @@ def canonicalize_graph(
     new_sources = source_permutation[edgeset.adjacency[0]]
     new_targets = target_permutation[edgeset.adjacency[1]]
 
-    edge_primary_key = _resolve_edge_primary_key_or_none(
+    edge_primary_key = analyse_schema_lib.primary_feature_or_none(
         edgeset_name, edgeset_schema
     )
-    if edge_primary_key is not None and edge_primary_key in edgeset.features:
+    if edge_primary_key is not None:
       edge_order = np.argsort(edgeset.features[edge_primary_key], kind="stable")
     else:
       edge_order = np.lexsort((new_targets, new_sources))

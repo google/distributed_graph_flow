@@ -419,6 +419,25 @@ def graph_element_to_features(
   return features
 
 
+def stack_feature_values(
+    feature_schema: schema_lib.FeatureSchema,
+    feature_values: Sequence[np.ndarray],
+) -> np.ndarray:
+  """Stacks per-element feature values into a single feature array."""
+  if not feature_schema.is_static_shape():
+    # Variable-length features are stored as an object array.
+    stacked = np.empty(len(feature_values), dtype=np.object_)
+    for index, feature_value in enumerate(feature_values):
+      stacked[index] = feature_value
+    return stacked
+  dtype = feature_format_lib.FEATURE_FORMAT_TO_NP_DTYPE[feature_schema.format]
+  if not feature_values:
+    # Static shapes have no `None` dimensions.
+    shape = [0] + [dim for dim in feature_schema.shape or () if dim is not None]
+    return np.empty(shape, dtype=dtype)
+  return np.stack(feature_values, axis=0, dtype=dtype)
+
+
 def create_in_memory_node_set(
     nodeset_name: str,
     graph_schema: schema_lib.GraphSchema,
@@ -481,21 +500,10 @@ def create_in_memory_node_set(
   num_nodes = len(node_ids)
 
   for feature_name, feature_values in node_set_features.items():
-    feature_schema = graph_schema.node_sets[nodeset_name].features[feature_name]
-
-    if not feature_schema.is_static_shape():
-      # Variable-length features must be stored as an object array.
-      arr = np.empty(len(feature_values), dtype=np.object_)
-      arr[:] = feature_values
-      node_set_features[feature_name] = arr  # pyrefly: ignore[unsupported-operation]
-    else:
-      node_set_features[feature_name] = np.stack(  # pyrefly: ignore[unsupported-operation]
-          feature_values,
-          axis=0,
-          dtype=feature_format_lib.FEATURE_FORMAT_TO_NP_DTYPE[
-              feature_schema.format
-          ],
-      )
+    node_set_features[feature_name] = stack_feature_values(  # pyrefly: ignore[unsupported-operation]
+        graph_schema.node_sets[nodeset_name].features[feature_name],
+        feature_values,
+    )
 
   if verbose >= 1:
     log.info(f"Loaded {num_nodes} nodes in nodeset {nodeset_name!r}")
@@ -599,21 +607,10 @@ def create_in_memory_edge_set(
   num_edges = len(source_ids)
 
   for feature_name, feature_values in edge_set_features.items():
-    feature_schema = graph_schema.edge_sets[edgeset_name].features[feature_name]
-
-    if not feature_schema.is_static_shape():
-      # Variable-length features must be stored as an object array.
-      arr = np.empty(len(feature_values), dtype=np.object_)
-      arr[:] = feature_values
-      edge_set_features[feature_name] = arr  # pyrefly: ignore[unsupported-operation]
-    else:
-      edge_set_features[feature_name] = np.stack(  # pyrefly: ignore[unsupported-operation]
-          feature_values,
-          axis=0,
-          dtype=feature_format_lib.FEATURE_FORMAT_TO_NP_DTYPE[
-              feature_schema.format
-          ],
-      )
+    edge_set_features[feature_name] = stack_feature_values(  # pyrefly: ignore[unsupported-operation]
+        graph_schema.edge_sets[edgeset_name].features[feature_name],
+        feature_values,
+    )
 
   if verbose >= 1:
     log.info(f"Loaded {num_edges} edges in the edgeset {edgeset_name!r}")

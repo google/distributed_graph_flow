@@ -81,19 +81,14 @@ def _permute_graph(
 
 class CanonicalizeTest(parameterized.TestCase):
 
-  @parameterized.parameters(
-      (False, True),
-      (True, True),
-      (False, False),
-      (True, False),
-  )
+  @parameterized.parameters(False, True)
   def test_canonicalize_recovers_original_from_permuted_graph(
-      self, edge_ids: bool, semantic: bool
+      self, edge_ids: bool
   ):
     schema = gen_test_graph.generate_schema(
         node_ids=True,
         edge_ids=edge_ids,
-        semantic=semantic,
+        semantic=True,
         variable_length=True,
     )
     expected_graph = gen_test_graph.generate_in_memory_graph(

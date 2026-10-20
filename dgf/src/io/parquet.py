@@ -105,10 +105,10 @@ def _pa_array_to_numpy(arr: pa.Array) -> np.ndarray:
       return flat_np.reshape(0, arr.type.list_size, *flat_np.shape[1:])
     return flat_np.reshape(-1, arr.type.list_size, *flat_np.shape[1:])
 
-  feature = arr.to_numpy(zero_copy_only=False)
-  if pa.types.is_string(arr.type):
-    feature = feature.astype(np.bytes_)
-  return feature
+  if pa.types.is_string(arr.type) or pa.types.is_large_string(arr.type):
+    # Keeps the UTF-8 bytes (`astype(np.bytes_)` would encode with ASCII).
+    return _pa_array_to_numpy(arr.cast(pa.binary()))
+  return arr.to_numpy(zero_copy_only=False)
 
 
 def _table_to_numpy_dict(table: pa.Table) -> dict[str, np.ndarray]:
@@ -122,10 +122,9 @@ def _table_to_numpy_dict(table: pa.Table) -> dict[str, np.ndarray]:
 
     arrays = [_pa_array_to_numpy(chunk) for chunk in value.chunks]
     if len(arrays) == 0:
-      feature = value.to_numpy()
-      if pa.types.is_string(pq_type):
-        feature = feature.astype(np.bytes_)
-      return feature
+      if pa.types.is_string(pq_type) or pa.types.is_large_string(pq_type):
+        return py_arrow_chunked_binary_to_np_bytes(value.cast(pa.binary()))
+      return value.to_numpy()
     elif len(arrays) == 1:
       return arrays[0]
     else:

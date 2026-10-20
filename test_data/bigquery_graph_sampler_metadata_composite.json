@@ -1,0 +1,88 @@
+{
+  "creationTime": "2026-10-20T07:55:24.016512Z",
+  "edgeTables": [
+    {
+      "dataSourceTable": {
+        "datasetId": "dgf_io_tests",
+        "projectId": "biggraphs-poc",
+        "tableId": "dgf_sampler_composite_edge"
+      },
+      "destinationNodeReference": {
+        "edgeTableColumns": [
+          "target_a",
+          "target_b"
+        ],
+        "nodeTable": "node",
+        "nodeTableColumns": [
+          "a",
+          "b"
+        ]
+      },
+      "keyColumns": [
+        "source_a",
+        "source_b",
+        "target_a",
+        "target_b"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "edge"
+        }
+      ],
+      "name": "edge",
+      "sourceNodeReference": {
+        "edgeTableColumns": [
+          "source_a",
+          "source_b"
+        ],
+        "nodeTable": "node",
+        "nodeTableColumns": [
+          "a",
+          "b"
+        ]
+      }
+    }
+  ],
+  "etag": "Rn44/wSj33hOvmmSz2BOLg==",
+  "lastModifiedTime": "2026-10-20T07:55:24.016512Z",
+  "nodeTables": [
+    {
+      "dataSourceTable": {
+        "datasetId": "dgf_io_tests",
+        "projectId": "biggraphs-poc",
+        "tableId": "dgf_sampler_composite_node"
+      },
+      "keyColumns": [
+        "a",
+        "b"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "node",
+          "properties": [
+            {
+              "dataType": {
+                "typeKind": "STRING"
+              },
+              "expression": "a",
+              "name": "a"
+            },
+            {
+              "dataType": {
+                "typeKind": "STRING"
+              },
+              "expression": "b",
+              "name": "b"
+            }
+          ]
+        }
+      ],
+      "name": "node"
+    }
+  ],
+  "propertyGraphReference": {
+    "datasetId": "dgf_io_tests",
+    "projectId": "biggraphs-poc",
+    "propertyGraphId": "dgf_sampler_composite_graph"
+  }
+}

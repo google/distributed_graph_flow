@@ -1,0 +1,74 @@
+{
+  "creationTime": "2026-10-20T07:55:27.975118Z",
+  "edgeTables": [
+    {
+      "dataSourceTable": {
+        "datasetId": "dgf_io_tests",
+        "projectId": "biggraphs-poc",
+        "tableId": "dgf_sampler_int_edge"
+      },
+      "destinationNodeReference": {
+        "edgeTableColumns": [
+          "target"
+        ],
+        "nodeTable": "node",
+        "nodeTableColumns": [
+          "id"
+        ]
+      },
+      "keyColumns": [
+        "source",
+        "target"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "edge"
+        }
+      ],
+      "name": "edge",
+      "sourceNodeReference": {
+        "edgeTableColumns": [
+          "source"
+        ],
+        "nodeTable": "node",
+        "nodeTableColumns": [
+          "id"
+        ]
+      }
+    }
+  ],
+  "etag": "PLgWvDuGWmH71Mu3123H3Q==",
+  "lastModifiedTime": "2026-10-20T07:55:27.975118Z",
+  "nodeTables": [
+    {
+      "dataSourceTable": {
+        "datasetId": "dgf_io_tests",
+        "projectId": "biggraphs-poc",
+        "tableId": "dgf_sampler_int_node"
+      },
+      "keyColumns": [
+        "id"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "node",
+          "properties": [
+            {
+              "dataType": {
+                "typeKind": "INT64"
+              },
+              "expression": "id",
+              "name": "id"
+            }
+          ]
+        }
+      ],
+      "name": "node"
+    }
+  ],
+  "propertyGraphReference": {
+    "datasetId": "dgf_io_tests",
+    "projectId": "biggraphs-poc",
+    "propertyGraphId": "dgf_sampler_int_graph"
+  }
+}

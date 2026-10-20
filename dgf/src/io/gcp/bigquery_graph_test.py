@@ -143,6 +143,7 @@ class BigqueryGraphTest(parameterized.TestCase):
     mock_metadata = mock.Mock(
         spec=bigquery_graph_metadata_lib.BigQueryGraphMetadata
     )
+    mock_metadata.node_tables = []
     mock_metadata.edge_tables = []
     mock_from_dict.return_value = mock_metadata
 
@@ -160,6 +161,16 @@ class BigqueryGraphTest(parameterized.TestCase):
     with self.assertRaisesRegex(
         ValueError, "expected exactly 1 property graph metadata"
     ):
+      bigquery_graph.get_metadata("project", "dataset", "graph")
+
+  @mock.patch("dgf.src.io.gcp.bigquery_graph._execute_query")
+  def test_load_metadata_composite_key_raises(self, mock_execute_query):
+    metadata_json = copy.deepcopy(infoschema_query_response_json)
+    metadata_json["nodeTables"][0]["keyColumns"] = ["id", "year"]
+    mock_execute_query.return_value = iter(
+        [{"PROPERTY_GRAPH_METADATA_JSON": metadata_json}]
+    )
+    with self.assertRaisesRegex(NotImplementedError, "composite key"):
       bigquery_graph.get_metadata("project", "dataset", "graph")
 
   def test_is_source_and_destination_pk_fk_aligned(self):

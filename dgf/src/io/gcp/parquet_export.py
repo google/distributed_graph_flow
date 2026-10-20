@@ -20,15 +20,45 @@ from dgf.src.io import graph_in_beam as gf_graph_in_beam_lib
 from dgf.src.io.gcp import bigquery_graph_metadata as bqgm_lib
 from dgf.src.util import log
 
+_BQ_TYPE_ARRAY = "ARRAY"
+_BQ_TYPE_TIMESTAMP = "TIMESTAMP"
+# DGF default values of missing (NULL) values, per BigQuery type.
+_BQ_TYPE_TO_DEFAULT_SQL = {
+    "BOOL": "FALSE",
+    "BYTES": "b''",
+    "FLOAT64": "0.0",
+    "INT64": "0",
+    "STRING": "''",
+    _BQ_TYPE_TIMESTAMP: "0",
+}
 
-def sql_grab(l: list[str], target_key: str) -> str:
-  if not l:
-    raise ValueError("Input list 'l' cannot be empty.")
-  if len(l) > 1:
-    q = "CONCAT(" + ", ".join([f"`{k}`" for k in l]) + ")"
+
+def _endpoint_projection(columns: list[str], target_key: str) -> str:
+  """Exports the single column referencing an edge endpoint as `target_key`."""
+  if len(columns) != 1:
+    raise NotImplementedError(
+        f"Composite keys are not supported. Got key columns {columns}."
+    )
+  return f"`{columns[0]}` AS `{target_key}`"
+
+
+def _property_projection(property_: bqgm_lib.Property) -> str:
+  """Exports a property with timestamps as micros and NULLs as DGF defaults."""
+  column = f"`{property_.expression}`"
+  data_type = property_.data_type
+  if data_type.type_kind == _BQ_TYPE_ARRAY:
+    # BigQuery arrays are never NULL.
+    assert data_type.array_element_type is not None
+    if data_type.array_element_type.type_kind == _BQ_TYPE_TIMESTAMP:
+      column = f"ARRAY(SELECT UNIX_MICROS(x) FROM UNNEST({column}) AS x)"
   else:
-    q = f"`{l[0]}`"
-  return f"{q} AS `{target_key}`"
+    if data_type.type_kind == _BQ_TYPE_TIMESTAMP:
+      column = f"UNIX_MICROS({column})"
+    if data_type.type_kind in _BQ_TYPE_TO_DEFAULT_SQL:
+      column = (
+          f"COALESCE({column}, {_BQ_TYPE_TO_DEFAULT_SQL[data_type.type_kind]})"
+      )
+  return f"{column} AS `{property_.name}`"
 
 
 def create_nodeset_sql(
@@ -44,13 +74,10 @@ def create_nodeset_sql(
 
   projections = set()
 
-  if len(node_table.key_columns) > 1:
-    projections.add(sql_grab(node_table.key_columns, "#id"))
-
   for label_and_properties in node_table.label_and_properties:
     if label_and_properties.properties:
       for property_ in label_and_properties.properties:
-        projections.add(f"`{property_.expression}` AS `{property_.name}`")
+        projections.add(_property_projection(property_))
 
   select_clause = ", ".join(projections)
   nodeset_sql = f"""
@@ -76,22 +103,22 @@ def create_edgeset_sql(
       f"{edge_table.data_source_table.table_id}`"
   )
   projections = set()
-
-  concat_source_node_columns = sql_grab(
-      edge_table.source_node_reference.edge_table_columns,
-      gf_graph_in_beam_lib.KEY_SOURCE,
+  projections.add(
+      _endpoint_projection(
+          edge_table.source_node_reference.edge_table_columns,
+          gf_graph_in_beam_lib.KEY_SOURCE,
+      )
   )
-  concat_target_node_columns = sql_grab(
-      edge_table.destination_node_reference.edge_table_columns,
-      gf_graph_in_beam_lib.KEY_TARGET,
+  projections.add(
+      _endpoint_projection(
+          edge_table.destination_node_reference.edge_table_columns,
+          gf_graph_in_beam_lib.KEY_TARGET,
+      )
   )
-
-  projections.add(concat_source_node_columns)
-  projections.add(concat_target_node_columns)
   for label_and_properties in edge_table.label_and_properties:
     if label_and_properties.properties:
       for property_ in label_and_properties.properties:
-        projections.add(f"`{property_.expression}` AS `{property_.name}`")
+        projections.add(_property_projection(property_))
 
   select_clause = ", ".join(projections)
   edgeset_sql = f"""

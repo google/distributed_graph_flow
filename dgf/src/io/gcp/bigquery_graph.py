@@ -192,7 +192,13 @@ def _is_source_and_destination_pk_fk_aligned(
 def _check_metadata(
     bigquery_graph_metadata: bigquery_graph_metadata_lib.BigQueryGraphMetadata,
 ):
-  """Raises an error if the graph is not PK-FK aligned."""
+  """Raises an error if the graph has composite keys or is not PK-FK aligned."""
+  for node_table in bigquery_graph_metadata.node_tables:
+    if len(node_table.key_columns) != 1:
+      raise NotImplementedError(
+          f"Node table {node_table.name!r} has a composite key"
+          f" {node_table.key_columns}. Composite keys are not supported."
+      )
   for edge_table in bigquery_graph_metadata.edge_tables:
     if not _is_source_and_destination_pk_fk_aligned(
         edge_table, bigquery_graph_metadata.node_tables

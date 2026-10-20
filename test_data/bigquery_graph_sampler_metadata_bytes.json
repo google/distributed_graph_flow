@@ -1,0 +1,81 @@
+{
+  "creationTime": "2026-10-20T07:55:20.083607Z",
+  "edgeTables": [
+    {
+      "dataSourceTable": {
+        "datasetId": "dgf_io_tests",
+        "projectId": "biggraphs-poc",
+        "tableId": "dgf_sampler_bytes_edge"
+      },
+      "destinationNodeReference": {
+        "edgeTableColumns": [
+          "target"
+        ],
+        "nodeTable": "node",
+        "nodeTableColumns": [
+          "id"
+        ]
+      },
+      "keyColumns": [
+        "source",
+        "target"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "edge"
+        }
+      ],
+      "name": "edge",
+      "sourceNodeReference": {
+        "edgeTableColumns": [
+          "source"
+        ],
+        "nodeTable": "node",
+        "nodeTableColumns": [
+          "id"
+        ]
+      }
+    }
+  ],
+  "etag": "WcJ4k/a48mHJFu8SVigCTA==",
+  "lastModifiedTime": "2026-10-20T07:55:20.083607Z",
+  "nodeTables": [
+    {
+      "dataSourceTable": {
+        "datasetId": "dgf_io_tests",
+        "projectId": "biggraphs-poc",
+        "tableId": "dgf_sampler_bytes_node"
+      },
+      "keyColumns": [
+        "id"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "node",
+          "properties": [
+            {
+              "dataType": {
+                "typeKind": "BYTES"
+              },
+              "expression": "id",
+              "name": "id"
+            },
+            {
+              "dataType": {
+                "typeKind": "BYTES"
+              },
+              "expression": "blob",
+              "name": "blob"
+            }
+          ]
+        }
+      ],
+      "name": "node"
+    }
+  ],
+  "propertyGraphReference": {
+    "datasetId": "dgf_io_tests",
+    "projectId": "biggraphs-poc",
+    "propertyGraphId": "dgf_sampler_bytes_graph"
+  }
+}

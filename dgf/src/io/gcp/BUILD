@@ -19,10 +19,14 @@ py_binary(
     deps = [
         ":bigquery_graph",
         # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/io:graph_in_memory",
+        "//dgf/src/transform:canonicalize",
         "//dgf/src/util:test_util",
         "//dgf/src/validate:in_memory_graph",
+        # numpy dep,
     ],
 )
 

@@ -1,0 +1,188 @@
+{
+  "creationTime": "2026-10-20T07:55:16.560235Z",
+  "edgeTables": [
+    {
+      "dataSourceTable": {
+        "datasetId": "dgf_io_tests",
+        "projectId": "biggraphs-poc",
+        "tableId": "dgf_sampler_buys"
+      },
+      "destinationNodeReference": {
+        "edgeTableColumns": [
+          "target"
+        ],
+        "nodeTable": "item",
+        "nodeTableColumns": [
+          "id"
+        ]
+      },
+      "keyColumns": [
+        "source",
+        "target"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "buys",
+          "properties": [
+            {
+              "dataType": {
+                "typeKind": "FLOAT64"
+              },
+              "expression": "weight",
+              "name": "weight"
+            }
+          ]
+        }
+      ],
+      "name": "buys",
+      "sourceNodeReference": {
+        "edgeTableColumns": [
+          "source"
+        ],
+        "nodeTable": "person",
+        "nodeTableColumns": [
+          "id"
+        ]
+      }
+    },
+    {
+      "dataSourceTable": {
+        "datasetId": "dgf_io_tests",
+        "projectId": "biggraphs-poc",
+        "tableId": "dgf_sampler_follows"
+      },
+      "destinationNodeReference": {
+        "edgeTableColumns": [
+          "target"
+        ],
+        "nodeTable": "person",
+        "nodeTableColumns": [
+          "id"
+        ]
+      },
+      "keyColumns": [
+        "source",
+        "target"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "follows"
+        }
+      ],
+      "name": "follows",
+      "sourceNodeReference": {
+        "edgeTableColumns": [
+          "source"
+        ],
+        "nodeTable": "person",
+        "nodeTableColumns": [
+          "id"
+        ]
+      }
+    }
+  ],
+  "etag": "uCql47CZLaPb3N5EXACyhQ==",
+  "lastModifiedTime": "2026-10-20T07:55:16.560235Z",
+  "nodeTables": [
+    {
+      "dataSourceTable": {
+        "datasetId": "dgf_io_tests",
+        "projectId": "biggraphs-poc",
+        "tableId": "dgf_sampler_person"
+      },
+      "keyColumns": [
+        "id"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "person",
+          "properties": [
+            {
+              "dataType": {
+                "typeKind": "STRING"
+              },
+              "expression": "id",
+              "name": "id"
+            },
+            {
+              "dataType": {
+                "typeKind": "INT64"
+              },
+              "expression": "age",
+              "name": "age"
+            },
+            {
+              "dataType": {
+                "typeKind": "FLOAT64"
+              },
+              "expression": "score",
+              "name": "score"
+            },
+            {
+              "dataType": {
+                "typeKind": "STRING"
+              },
+              "expression": "user_name",
+              "name": "name"
+            },
+            {
+              "dataType": {
+                "typeKind": "BOOL"
+              },
+              "expression": "active",
+              "name": "active"
+            },
+            {
+              "dataType": {
+                "arrayElementType": {
+                  "typeKind": "FLOAT64"
+                },
+                "typeKind": "ARRAY"
+              },
+              "expression": "emb",
+              "name": "emb"
+            },
+            {
+              "dataType": {
+                "typeKind": "TIMESTAMP"
+              },
+              "expression": "joined",
+              "name": "joined"
+            }
+          ]
+        }
+      ],
+      "name": "person"
+    },
+    {
+      "dataSourceTable": {
+        "datasetId": "dgf_io_tests",
+        "projectId": "biggraphs-poc",
+        "tableId": "dgf_sampler_item"
+      },
+      "keyColumns": [
+        "id"
+      ],
+      "labelAndProperties": [
+        {
+          "label": "item",
+          "properties": [
+            {
+              "dataType": {
+                "typeKind": "STRING"
+              },
+              "expression": "id",
+              "name": "id"
+            }
+          ]
+        }
+      ],
+      "name": "item"
+    }
+  ],
+  "propertyGraphReference": {
+    "datasetId": "dgf_io_tests",
+    "projectId": "biggraphs-poc",
+    "propertyGraphId": "dgf_sampler_string_graph"
+  }
+}

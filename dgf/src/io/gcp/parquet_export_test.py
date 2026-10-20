@@ -26,7 +26,7 @@ class ParquetExportTest(parameterized.TestCase):
         data_source_table=bqgm_lib.DataSourceTable(
             project_id="project", dataset_id="dataset", table_id="table"
         ),
-        key_columns=["k1", "k2"],
+        key_columns=["k1"],
         label_and_properties=[
             bqgm_lib.LabelAndProperties(
                 label="Label1",
@@ -52,8 +52,77 @@ class ParquetExportTest(parameterized.TestCase):
     self.assertIn("EXPORT DATA", sql)
     self.assertIn("URI = 'gs://bucket/path/nodesets/NodeTable1-*.parquet'", sql)
     self.assertIn("FROM `project.dataset.table`", sql)
-    self.assertIn("CONCAT(`k1`, `k2`) AS `#id`", sql)
-    self.assertIn("`col1` AS `prop1`", sql)
+    self.assertNotIn("#id", sql)
+    self.assertIn("COALESCE(`col1`, '') AS `prop1`", sql)
+
+  @parameterized.parameters(
+      ("INT64", None, "COALESCE(`col`, 0) AS `prop`"),
+      ("FLOAT64", None, "COALESCE(`col`, 0.0) AS `prop`"),
+      ("BOOL", None, "COALESCE(`col`, FALSE) AS `prop`"),
+      ("BYTES", None, "COALESCE(`col`, b'') AS `prop`"),
+      ("TIMESTAMP", None, "COALESCE(UNIX_MICROS(`col`), 0) AS `prop`"),
+      ("ARRAY", "FLOAT64", "`col` AS `prop`"),
+      (
+          "ARRAY",
+          "TIMESTAMP",
+          "ARRAY(SELECT UNIX_MICROS(x) FROM UNNEST(`col`) AS x) AS `prop`",
+      ),
+  )
+  def test_property_projection(
+      self, type_kind: str, element_type_kind: str | None, expected: str
+  ):
+    data_type = bqgm_lib.DataType(
+        type_kind=type_kind,
+        array_element_type=(
+            bqgm_lib.ArrayElementType(type_kind=element_type_kind)
+            if element_type_kind
+            else None
+        ),
+    )
+    edge_table = bqgm_lib.EdgeTable(
+        data_source_table=bqgm_lib.DataSourceTable(
+            project_id="project", dataset_id="dataset", table_id="table"
+        ),
+        source_node_reference=bqgm_lib.NodeReference(
+            edge_table_columns=["source"], node_table="n", node_table_columns=["id"]
+        ),
+        destination_node_reference=bqgm_lib.NodeReference(
+            edge_table_columns=["target"], node_table="n", node_table_columns=["id"]
+        ),
+        key_columns=["source", "target"],
+        label_and_properties=[
+            bqgm_lib.LabelAndProperties(
+                label="e",
+                properties=[
+                    bqgm_lib.Property(
+                        data_type=data_type, expression="col", name="prop"
+                    )
+                ],
+            )
+        ],
+        name="e",
+    )
+    self.assertIn(expected, parquet_export.create_edgeset_sql(edge_table))
+
+  def test_composite_edge_endpoint_raises(self):
+    edge_table = bqgm_lib.EdgeTable(
+        data_source_table=bqgm_lib.DataSourceTable(
+            project_id="project", dataset_id="dataset", table_id="table"
+        ),
+        source_node_reference=bqgm_lib.NodeReference(
+            edge_table_columns=["source_a", "source_b"],
+            node_table="n",
+            node_table_columns=["a", "b"],
+        ),
+        destination_node_reference=bqgm_lib.NodeReference(
+            edge_table_columns=["target"], node_table="n", node_table_columns=["id"]
+        ),
+        key_columns=["source_a", "source_b", "target"],
+        label_and_properties=[],
+        name="e",
+    )
+    with self.assertRaisesRegex(NotImplementedError, "Composite keys"):
+      parquet_export.create_edgeset_sql(edge_table)
 
 
 if __name__ == "__main__":
