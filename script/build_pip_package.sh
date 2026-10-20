@@ -36,7 +36,7 @@ mkdir -p package/dgf
 # Copy python files
 (cd dgf && find . -name '*.py' -type f -exec cp --parents {} ../package/dgf/ \; )
 
-cp LICENSE setup.py requirements.txt README.md package/
+cp LICENSE setup.py requirements.txt requirements-dev.txt README.md package/
 
 if [ -n "$1" ]; then
   PYTHON_VERSIONS=( "$1" )

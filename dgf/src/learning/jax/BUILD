@@ -57,7 +57,7 @@ py_library(
     srcs = ["flax_train.py"],
     deps = [
         ":common",
-        # clu/metric_writers dep,
+        ":metric_writer",
         "//dgf/src/learning:early_stopping_monitor",
         "//dgf/src/util:log",
         "//dgf/src/util:util_py",
@@ -67,6 +67,15 @@ py_library(
         # optax dep,
         # orbax/checkpoint dep,
         # tqdm dep,
+    ],
+)
+
+py_library(
+    name = "metric_writer",
+    srcs = ["metric_writer.py"],
+    deps = [
+        # absl/logging dep,
+        "//dgf/src/util/weak_dep:weak_dep_clu",
     ],
 )
 
@@ -105,7 +114,6 @@ py_test(
         ":test_utils",
         # sparse_deferred/structs:graph_struct",
         # absl/testing:absltest dep,
-        # clu dep,
         "//dgf/src/learning/jax/layers:homo_gnn_sparse_deferred",
         # flax:core dep,
         # jax dep,
@@ -114,13 +122,22 @@ py_test(
 )
 
 py_test(
+    name = "metric_writer_test",
+    srcs = ["metric_writer_test.py"],
+    deps = [
+        ":metric_writer",
+        # absl/testing:absltest dep,
+    ],
+)
+
+py_test(
     name = "flax_train_test",
     srcs = ["flax_train_test.py"],
     deps = [
         ":flax_train",
+        ":metric_writer",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
-        # clu dep,
         "//dgf/src/learning:early_stopping_monitor",
         # flax:core dep,
         # jax dep,

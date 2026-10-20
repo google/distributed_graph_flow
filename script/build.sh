@@ -50,8 +50,9 @@ chmod -R a+rw dist
 # package that is not installed is a no-op for pip.
 ${PYBIN} -m pip uninstall -y dgf dgf-nightly
 ${PYBIN} -m pip install dist/${WHEEL_NAME}-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
-# export TF_USE_LEGACY_KERAS=1 # TF_USE_LEGACY_KERAS=1 is not needed for this toy example.
-${PYBIN} script/toy.py
+# All the packages (requirements.txt and requirements-dev.txt) are installed.
+${PYBIN} script/toy_minimal.py
+${PYBIN} script/toy_full.py
 
 echo "Setting up virtual environment at /tmp/venv_serving for testing serving..."
 deactivate || true
@@ -70,7 +71,16 @@ source /tmp/venv_serving/bin/activate
 ${PYBIN} -m pip uninstall -y dgf dgf-nightly
 ${PYBIN} -m pip install -r requirements.txt
 ${PYBIN} -m pip install dist/${WHEEL_NAME}-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
-${PYBIN} script/toy.py
+# Only the packages of requirements.txt are installed. Make sure the weak
+# dependencies are not installed (e.g. pulled transitively), otherwise
+# toy_minimal.py would not test anything.
+for MODULE in tensorflow tensorflow_gnn tf_keras apache_beam ogb clu; do
+  if (cd /tmp && ${PYBIN} -c "import ${MODULE}" 2>/dev/null); then
+    echo "ERROR: ${MODULE} is installed in the minimal venv."
+    exit 1
+  fi
+done
+${PYBIN} script/toy_minimal.py
 
 # The installed package reports the expected version. Run outside of /work:
 # with /work as cwd, "import dgf" would import the source tree instead of the

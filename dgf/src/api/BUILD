@@ -1,4 +1,5 @@
 load("@rules_python//python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
     
@@ -213,5 +214,19 @@ py_library(
     srcs = ["deploy.py"],
     deps = [
         "//dgf/src/deploy:vertex",
+    ],
+)
+
+# Test
+# ====
+
+py_test(
+    name = "minimal_requirements_test",
+    timeout = "long",
+    srcs = ["minimal_requirements_test.py"],
+    deps = [
+        # absl/testing:absltest dep,
+        "//dgf",
+        "//dgf/src/util:gen_test_graph",
     ],
 )

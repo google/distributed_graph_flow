@@ -21,6 +21,7 @@ from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import flax_train
+from dgf.src.learning.jax import metric_writer as metric_writer_lib
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
@@ -544,27 +545,29 @@ class FlaxTrainTest(parameterized.TestCase):
     self.assertEqual(restored.es_state["best_loss"], 0.42)
     self.assertEqual(restored.es_state["best_step"], 5)
 
-  def test_missing_metric_writers_raises(self):
+  def test_train_without_clu(self):
     def train_step(params, opt_state, batch, rng_key):
       return params, opt_state, {"loss": jnp.array(1.0)}
 
+    working_path = self.create_tempdir().full_path
     with mock.patch.object(
-        flax_train,
-        "_METRIC_WRITERS_IMPORT_ERROR",
-        ImportError("No module named 'tensorflow'"),
+        metric_writer_lib.clu_metric_writers,
+        "is_available",
+        return_value=False,
     ):
-      with self.assertRaisesRegex(
-          ImportError, "`clu.metric_writers` could not be imported"
-      ):
-        flax_train.train(
-            model=SimpleModel(hidden_dim=8),
-            opt=optax.adam(1e-3),
-            train_step=train_step,
-            dataset_iterator=dataset_iterator(num_steps=None),
-            dummy_data_fn=lambda x: x["data"],
-            num_train_steps=1,
-            rng_key=jax.random.PRNGKey(42),
-        )
+      result = flax_train.train(
+          model=SimpleModel(hidden_dim=8),
+          opt=optax.adam(1e-3),
+          train_step=train_step,
+          dataset_iterator=dataset_iterator(num_steps=None),
+          dummy_data_fn=lambda x: x["data"],
+          num_train_steps=2,
+          rng_key=jax.random.PRNGKey(42),
+          working_path=working_path,
+          train_log_every_n_steps=1,
+      )
+    self.assertLen(result.train_logs, 2)
+    self.assertFalse(os.path.exists(os.path.join(working_path, "summary")))
 
   def test_aot_compile_and_prefetch(self):
     @jax.jit

@@ -47,6 +47,13 @@ def _read_version() -> str:
   return match.group(1)
 
 
+def _read_requirements(path: str) -> list[str]:
+  """Returns the requirements of a requirements file, without the comments."""
+  with open(path) as f:
+    lines = [line.split("#")[0].strip() for line in f]
+  return [line for line in lines if line]
+
+
 setup(
     # "dgf-nightly" for the nightly package (see script/build_pip_package.sh).
     name=os.environ.get("DGF_PACKAGE_NAME", "dgf"),
@@ -74,9 +81,10 @@ setup(
     package_data={"dgf": ["LICENSE", "**/*.so"]},
     cmdclass={"install": InstallPlatlib},
     python_requires=">=3.11",
-    install_requires=[str(r) for r in open("requirements.txt").readlines()],
+    install_requires=_read_requirements("requirements.txt"),
     extras_require={
-        "all": ["tensorflow", "apache-beam[gcp]", "tensorflow_gnn", "ogb"],
+        # The weak dependencies e.g. `pip install dgf[all]`.
+        "all": _read_requirements("requirements-dev.txt"),
     },
     classifiers=[
         "Intended Audience :: Developers",

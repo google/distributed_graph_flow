@@ -18,8 +18,8 @@ This module provides a flexible training loop for JAX/Flax models,
 handling common tasks such as:
   - Checkpointing: Saving and restoring model parameters and optimizer state,
     enabling pre-emption tolerance.
-  - Logging: Writing scalar metrics to various backends using
-  `clu.metric_writers`.
+  - Logging: Writing scalar metrics to various backends (see
+  `metric_writer.py`).
   - Metrics Accumulation: Efficiently accumulating metrics over steps.
   - Validation: Running evaluation on a validation dataset at regular intervals.
   - Progress Bar: Displaying training progress and metrics using `tqdm`.
@@ -32,22 +32,11 @@ import dataclasses
 import math
 import os
 import time
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import Any, Protocol
 
-_METRIC_WRITERS_IMPORT_ERROR: ImportError | None = None
-if TYPE_CHECKING:
-  from clu import metric_writers
-else:
-  # metric_writers transitively imports tensorflow, which is a weak dependency.
-  # So we only import it if it's actually used or if TYPE_CHECKING is True.
-  try:
-    from clu import metric_writers
-  except ImportError as e:
-    # Raised when a default metric writer is needed. See `train`.
-    _METRIC_WRITERS_IMPORT_ERROR = e
-
-from dgf.src.learning import early_stopping_monitor  # pylint: disable=g-import-not-at-top
+from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import common
+from dgf.src.learning.jax import metric_writer as metric_writer_lib
 from dgf.src.util import log
 from dgf.src.util import util
 import flax.linen as nn
@@ -292,7 +281,7 @@ def train(
     dummy_data: jt.PyTree[jt.ArrayLike] | None = None,
     dummy_data_fn: DummyDataFn | None = None,
     working_path: str | None = None,
-    metric_writer: metric_writers.MetricWriter | None = None,
+    metric_writer: metric_writer_lib.MetricWriter | None = None,
     checkpoint_manager: ocp.CheckpointManager | None = None,
     train_log_every_n_steps: int = 100,
     checkpoint_every_n_steps: int | None = None,
@@ -347,9 +336,9 @@ def train(
       when the iterator yields more than just the model input (e.g., labels).
     working_path: Optional directory path for saving checkpoints and metrics.
       Required if `checkpoint_manager` or `metric_writer` are not provided.
-    metric_writer: An optional `clu.metric_writers.MetricWriter` instance for
-      logging metrics. If `None` and `working_path` is provided, a default
-      writer will be created.
+    metric_writer: An optional `MetricWriter` (e.g. a
+      `clu.metric_writers.MetricWriter`) for logging metrics. If `None`, a
+      default writer is created (see `create_default_metric_writer`).
     checkpoint_manager: An optional `orbax.checkpoint.CheckpointManager` for
       handling model checkpointing. If `None` and `working_path` is provided, a
       default manager will be created.
@@ -416,24 +405,9 @@ def train(
     )
 
   if metric_writer is None:
-    if _METRIC_WRITERS_IMPORT_ERROR is not None:
-      raise ImportError(
-          "`clu.metric_writers` could not be imported, so no default metric"
-          " writer can be created. It depends on TensorFlow (and on `tf-keras`"
-          " if TF_USE_LEGACY_KERAS=1). Install the missing packages, or pass"
-          " `metric_writer` explicitly."
-      ) from _METRIC_WRITERS_IMPORT_ERROR
-    writers = [metric_writers.LoggingWriter()]
-    if working_path is not None:
-      writers.append(
-          metric_writers.SummaryWriter(os.path.join(working_path, "summary"))  # pyrefly: ignore[bad-argument-type]
-      )
-    if export_metrics_to_xm:
-      try:
-        writers.append(metric_writers.XmMeasurementsWriter(asynchronous=True))  # pyrefly: ignore[bad-argument-type]
-      except ImportError:
-        pass
-    metric_writer = metric_writers.MultiWriter(writers)
+    metric_writer = metric_writer_lib.create_default_metric_writer(
+        working_path=working_path, export_metrics_to_xm=export_metrics_to_xm
+    )
 
   if prefetch:
     prefetch_size = 2 if isinstance(prefetch, bool) else int(prefetch)

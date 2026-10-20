@@ -41,6 +41,15 @@ py_library(
 )
 
 py_library(
+    name = "weak_dep_clu",
+    srcs = ["weak_dep_clu.py"],
+    deps = [
+        ":weak_dep_base",
+        # clu/metric_writers dep,  # build_cleaner: keep
+    ],
+)
+
+py_library(
     name = "weak_dep_ogb",
     srcs = ["weak_dep_ogb.py"],
     deps = [":weak_dep_base"],

@@ -15,7 +15,6 @@ numba
 tabulate
 matplotlib
 fsspec[gcs]
-clu
 orbax
 frozendict
 chex
