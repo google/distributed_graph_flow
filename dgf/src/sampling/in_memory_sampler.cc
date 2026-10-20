@@ -343,6 +343,228 @@ absl::StatusOr<const SamplingPlan::Node&> SamplingPlan::StepIdxToNode(
   return *step_to_nodes[step_idx];
 }
 
+void SamplerIndex::ComputeStepSlots() {
+  step_slots_.assign(plan_.num_steps, -1);
+  num_step_slots_.assign(nodesets_.size(), 0);
+  for (const SamplingPlan::Node* node : plan_.step_to_nodes) {
+    if (!node->children.empty()) {
+      step_slots_[node->step_idx] = num_step_slots_[node->nodeset_idx]++;
+    }
+  }
+}
+
+SampleIdx SampleBuilder::AddNode(NodeSet& nodeset, InputIdx node_idx) {
+  const SampleIdx sampled_node_idx =
+      nodeset.sampled_node_idx_to_node_idx.size();
+  nodeset.sampled_node_idx_to_node_idx.push_back(node_idx);
+  nodeset.expanded_steps.resize(
+      nodeset.expanded_steps.size() + nodeset.words_per_node, 0);
+  return sampled_node_idx;
+}
+
+bool SampleBuilder::MarkExpanded(NodeSet& nodeset, SampleIdx sampled_node_idx,
+                                 int slot) {
+  uint64_t& word =
+      nodeset.expanded_steps[sampled_node_idx * nodeset.words_per_node +
+                             slot / 64];
+  const uint64_t mask = uint64_t{1} << (slot % 64);
+  if (word & mask) {
+    return false;
+  }
+  word |= mask;
+  return true;
+}
+
+absl::Status SampleBuilder::RecursiveGrow(
+    const SamplerIndex& index, const SamplingPlan::Node& plan_node,
+    InputIdx source_node, SampleIdx source_sampled_node,
+    std::optional<Timestamp> seed_timestamp, InputIdx masked_edge_idx,
+    int depth) {
+  DGF_STATUS_CHECK(depth < recursion_cache.size());
+  auto& cache_node_idxs = recursion_cache[depth];
+  cache_node_idxs.clear();
+
+  for (const auto& plan_edge : plan_node.children) {
+    // Get the edge data to sample from.
+    const SamplerIndex::EdgeSet& edgeset =
+        index.edgesets_[plan_edge.edgeset_idx];
+    const std::optional<AdjacencyIndex>& edges =
+        plan_edge.reversed ? edgeset.backward_index : edgeset.forward_index;
+    DGF_STATUS_CHECK(edges.has_value());
+
+    // Sample target nodes / edges.
+    if (seed_timestamp.has_value()) {
+      DGF_STATUS_CHECK(index.edgeset_to_mask_idx_ == -1);
+      if (index.debug_sampling_) {
+        DGF_RETURN_IF_ERROR(edges->SampleFirstWithTimestamp(
+            source_node, *seed_timestamp, plan_edge.hop_width,
+            &cache_node_idxs));
+      } else {
+        DGF_RETURN_IF_ERROR(edges->SampleRandomUniformWithTimestamp(
+            source_node, *seed_timestamp, plan_edge.hop_width, &cache_node_idxs,
+            &rng));
+      }
+    } else {
+      InputIdx current_masked_edge_idx = -1;
+      if (plan_edge.edgeset_idx == index.edgeset_to_mask_idx_) {
+        current_masked_edge_idx = masked_edge_idx;
+      }
+
+      if (index.debug_sampling_) {
+        DGF_RETURN_IF_ERROR(edges->SampleFirst(source_node, plan_edge.hop_width,
+                                               &cache_node_idxs,
+                                               current_masked_edge_idx));
+      } else {
+        DGF_RETURN_IF_ERROR(edges->SampleRandomUniform(
+            source_node, plan_edge.hop_width, &cache_node_idxs, &rng,
+            current_masked_edge_idx));
+      }
+    }
+
+    // Recursively sample the sub-nodes.
+    const SamplingPlan::Node& target_plan_node = *plan_edge.node;
+    auto& sample_target_nodeset = nodesets[target_plan_node.nodeset_idx];
+    auto& sample_edgeset = edgesets[plan_edge.edgeset_idx];
+    // -1 if the target step is a leaf i.e. there is nothing to expand.
+    const int step_slot = index.step_slots_[target_plan_node.step_idx];
+
+    const auto add_edge = [&](SampleIdx src, SampleIdx trg) {
+      if (!plan_edge.reversed) {
+        sample_edgeset.edges.push_back({src, trg});
+      } else {
+        sample_edgeset.edges.push_back({trg, src});
+      }
+    };
+
+    for (const auto target_node : cache_node_idxs) {
+      // Record the target node and create/reuse a sampled node.
+      bool recurse = step_slot >= 0;
+
+      SampleIdx target_sampled_node;
+      if (!with_replacement) {
+        // Sampling without replacement.
+        // Note: The new sampled node idx is the number of sampled nodes (and
+        // not the size of the map) since a seed node can be repeated.
+        auto [target_sampled_node_it, inserted] =
+            sample_target_nodeset.node_idx_to_sampled_node_idx.try_emplace(
+                target_node,
+                sample_target_nodeset.sampled_node_idx_to_node_idx.size());
+        target_sampled_node = target_sampled_node_it->second;
+        add_edge(source_sampled_node, target_sampled_node);
+
+        if (inserted) {
+          AddNode(sample_target_nodeset, target_node);
+        }
+
+        if (!multi_visit && recurse) {
+          // Further expand the node iff it was not already expanded at this
+          // plan step. Note that the same node can be expanded multiple
+          // times through different plan steps.
+          recurse = MarkExpanded(sample_target_nodeset, target_sampled_node,
+                                 step_slot);
+        }
+
+      } else {
+        // Sampling with replacement.
+        target_sampled_node = AddNode(sample_target_nodeset, target_node);
+        add_edge(source_sampled_node, target_sampled_node);
+      }
+
+      // Build the sub-sample.
+      if (recurse) {
+        DGF_RETURN_IF_ERROR(RecursiveGrow(index, target_plan_node, target_node,
+                                          target_sampled_node, seed_timestamp,
+                                          masked_edge_idx, depth + 1));
+      }
+    }
+  }
+  return absl::OkStatus();
+}
+
+absl::Status SampleBuilder::Grow(const SamplerIndex& index,
+                                 std::span<const InputIdx> seed_node_idxs,
+                                 std::optional<Timestamp> seed_timestamp,
+                                 InputIdx masked_edge_idx, GrowMode mode) {
+  const bool subgraph = mode == GrowMode::kSubGraph;
+  with_replacement = !subgraph && index.plan_.with_replacement;
+  multi_visit = !subgraph && index.plan_.multi_visit;
+
+  // Pre-allocate recursion cache to avoid reallocations during recursion.
+  if (recursion_cache.size() < index.plan_.num_steps) {
+    recursion_cache.resize(index.plan_.num_steps);
+  }
+
+  // Reuse capacity of edgesets and nodesets.
+  if (edgesets.size() < index.edgesets_.size()) {
+    edgesets.resize(index.edgesets_.size());
+  }
+  for (auto& es : edgesets) {
+    es.edges.clear();
+  }
+
+  if (nodesets.size() < index.nodesets_.size()) {
+    nodesets.resize(index.nodesets_.size());
+  }
+  const bool track_expanded_steps = !with_replacement && !multi_visit;
+  for (std::size_t i = 0; i < nodesets.size(); i++) {
+    auto& ns = nodesets[i];
+    ns.sampled_node_idx_to_node_idx.clear();
+    ns.node_idx_to_sampled_node_idx.clear();
+    ns.expanded_steps.clear();
+    ns.words_per_node =
+        track_expanded_steps ? (index.num_step_slots_[i] + 63) / 64 : 0;
+  }
+
+  // Record the seed nodes as the first sampled nodes.
+  const SamplingPlan::Node& root = *index.plan_.root;
+  auto& seed_nodeset = nodesets[root.nodeset_idx];
+  const std::size_t num_seed_nodeset_nodes =
+      index.nodesets_[root.nodeset_idx].num_nodes;
+  for (const InputIdx seed_node_idx : seed_node_idxs) {
+    if (seed_node_idx >= num_seed_nodeset_nodes) {
+      return absl::InvalidArgumentError(
+          absl::StrCat("Seed node idx ", seed_node_idx,
+                       " is out of bounds. Should be lower than ",
+                       num_seed_nodeset_nodes, "."));
+    }
+    const SampleIdx sample_seed_node_idx = AddNode(seed_nodeset, seed_node_idx);
+    if (!with_replacement) {
+      // Note: If a seed node is repeated, the last occurrence is used.
+      seed_nodeset.node_idx_to_sampled_node_idx[seed_node_idx] =
+          sample_seed_node_idx;
+    }
+  }
+
+  // Recursive transversal.
+  for (std::size_t i = 0; i < seed_node_idxs.size(); i++) {
+    const InputIdx seed_node_idx = seed_node_idxs[i];
+    const SampleIdx sample_seed_node_idx =
+        with_replacement
+            ? static_cast<SampleIdx>(i)
+            : seed_nodeset.node_idx_to_sampled_node_idx[seed_node_idx];
+    DGF_RETURN_IF_ERROR(RecursiveGrow(index, root, seed_node_idx,
+                                      sample_seed_node_idx, seed_timestamp,
+                                      masked_edge_idx,
+                                      /*depth=*/0));
+  }
+
+  // Deduplicate the edges. Without replacement, the same edge can be reached
+  // several times (e.g., from both of its nodes when `reverse=True`).
+  // Note: We also sort edges in debug mode.
+  const bool dedup_edges = !with_replacement;
+  if (dedup_edges || index.debug_sampling_) {
+    for (auto& sampled_edgeset : edgesets) {
+      std::sort(sampled_edgeset.edges.begin(), sampled_edgeset.edges.end());
+      if (dedup_edges) {
+        sampled_edgeset.edges.erase(std::unique(sampled_edgeset.edges.begin(),
+                                                sampled_edgeset.edges.end()),
+                                    sampled_edgeset.edges.end());
+      }
+    }
+  }
+  return absl::OkStatus();
+}
+
 absl::Status AdjacencyIndex::SampleRandomUniformWithTimestamp(
     const InputIdx source_node, Timestamp seed_timestamp,
     const std::size_t num_samples, std::vector<InputIdx>* result,

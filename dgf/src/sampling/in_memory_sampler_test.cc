@@ -1,5 +1,6 @@
 #include "dgf/src/sampling/in_memory_sampler.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/status/status.h"
 #include "dgf/src/util/test_util.h"
+#include "dgf/src/util/util.h"
 
 namespace dgf::sampling::in_memory_sampler {
 namespace {
@@ -26,6 +28,9 @@ using ::testing::IsSubsetOf;
 using ::testing::Pair;
 using ::testing::SizeIs;
 using ::testing::UnorderedElementsAre;
+
+// Number of nodes of the graph of `CreateTestEdges`.
+constexpr std::size_t kNumTestNodes = 30;
 
 AdjacencyIndex CreateTestIndex() {
   return {{0, 3, 3, 5}, {10, 11, 12, 20, 21}};
@@ -465,6 +470,201 @@ TEST(MergeTest, AppendGatherRowsTasks) {
   EXPECT_EQ(range(tasks[2]), std::make_tuple(4, 5, true));
   EXPECT_EQ(range(tasks[3]), std::make_tuple(5, 7, false));
   EXPECT_EQ(range(tasks[4]), std::make_tuple(7, 8, false));
+}
+
+using NodePair = std::pair<InputIdx, InputIdx>;
+
+// Creates a plan node expanding the edgeset 0 in both directions for
+// `num_hops` hops.
+std::unique_ptr<SamplingPlan::Node> CreatePlanNode(const int num_hops,
+                                                   const int hop_width) {
+  auto node = std::make_unique<SamplingPlan::Node>();
+  node->nodeset_idx = 0;
+  if (num_hops > 0) {
+    for (const bool reversed : {false, true}) {
+      node->children.push_back({.edgeset_idx = 0,
+                                .reversed = reversed,
+                                .node = CreatePlanNode(num_hops - 1, hop_width),
+                                .hop_width = hop_width});
+    }
+  }
+  return node;
+}
+
+// Creates a homogeneous graph with the given directed edges, sampled with a
+// `num_hops` plan following the edges in both directions.
+SamplerIndex CreateSamplerIndex(const std::size_t num_nodes,
+                                const std::vector<NodePair>& edges,
+                                const int num_hops, const int hop_width,
+                                const bool multi_visit) {
+  std::vector<Edge<false, false>> forward;
+  std::vector<Edge<false, false>> backward;
+  for (const auto& [source, target] : edges) {
+    forward.push_back({.source = source, .target = target});
+    backward.push_back({.source = target, .target = source});
+  }
+  SamplerIndex index;
+  index.nodesets_.push_back({.name = "n", .num_nodes = num_nodes});
+  SamplerIndex::EdgeSet edgeset{.name = "e",
+                                .source_nodeset = 0,
+                                .target_nodeset = 0,
+                                .need_forward = true,
+                                .need_backward = true};
+  edgeset.forward_index = AdjacencyIndex::CreateFromEdgeList<false, false>(
+                              std::move(forward), num_nodes, num_nodes)
+                              .value();
+  edgeset.backward_index = AdjacencyIndex::CreateFromEdgeList<false, false>(
+                               std::move(backward), num_nodes, num_nodes)
+                               .value();
+  index.edgesets_.push_back(std::move(edgeset));
+  index.plan_.root = CreatePlanNode(num_hops, hop_width);
+  index.plan_.with_replacement = false;
+  index.plan_.multi_visit = multi_visit;
+  index.plan_.ComputeStepIdx();
+  index.ComputeStepSlots();
+  return index;
+}
+
+// Returns the edges of a small graph. If `with_hub`, node 0 is connected to all
+// the other nodes. The max degree is less than 2 * kNumTestNodes.
+std::vector<NodePair> CreateTestEdges(const bool with_hub) {
+  std::vector<NodePair> edges;
+  for (InputIdx i = 0; i < kNumTestNodes; i++) {
+    edges.push_back({i, (i * 7 + 3) % kNumTestNodes});
+    edges.push_back({i, (i * 11 + 5) % kNumTestNodes});
+    if (with_hub && i > 0) {
+      edges.push_back({0, i});
+    }
+  }
+  return edges;
+}
+
+// Grows a sample from `seeds`.
+absl::StatusOr<SampleBuilder> GrowSample(const SamplerIndex& index,
+                                         const std::vector<InputIdx>& seeds,
+                                         const GrowMode mode,
+                                         const uint64_t rng_seed) {
+  SampleBuilder builder;
+  builder.rng = MakeRng(rng_seed);
+  DGF_RETURN_IF_ERROR(builder.Grow(index, seeds, std::nullopt,
+                                   /*masked_edge_idx=*/-1, mode));
+  return builder;
+}
+
+// Returns the sorted original node idxs of a sample.
+std::vector<InputIdx> OriginalNodes(const SampleBuilder& builder) {
+  std::vector<InputIdx> nodes =
+      builder.nodesets[0].sampled_node_idx_to_node_idx;
+  std::sort(nodes.begin(), nodes.end());
+  return nodes;
+}
+
+// Returns the sorted edges of a sample, as pairs of original node idxs.
+std::vector<NodePair> OriginalEdges(const SampleBuilder& builder) {
+  const auto& node_idxs = builder.nodesets[0].sampled_node_idx_to_node_idx;
+  std::vector<NodePair> edges;
+  for (const auto& [source, target] : builder.edgesets[0].edges) {
+    edges.push_back({node_idxs[source], node_idxs[target]});
+  }
+  std::sort(edges.begin(), edges.end());
+  return edges;
+}
+
+TEST(SampleBuilderTest, Grow_SeedNodesFirst) {
+  const SamplerIndex index =
+      CreateSamplerIndex(kNumTestNodes, CreateTestEdges(/*with_hub=*/true),
+                         /*num_hops=*/2, /*hop_width=*/3,
+                         /*multi_visit=*/true);
+  ASSERT_OK_AND_ASSIGN(const SampleBuilder builder,
+                       GrowSample(index, {5, 2}, GrowMode::kSubGraph, 1));
+  const auto& node_idxs = builder.nodesets[0].sampled_node_idx_to_node_idx;
+  ASSERT_GE(node_idxs.size(), 2);
+  EXPECT_EQ(node_idxs[0], 5);
+  EXPECT_EQ(node_idxs[1], 2);
+}
+
+TEST(SampleBuilderTest, Grow_OutOfBoundsSeed) {
+  const SamplerIndex index =
+      CreateSamplerIndex(kNumTestNodes, CreateTestEdges(/*with_hub=*/true),
+                         /*num_hops=*/1, /*hop_width=*/3,
+                         /*multi_visit=*/true);
+  EXPECT_EQ(GrowSample(index, {kNumTestNodes}, GrowMode::kSubGraph, 1)
+                .status()
+                .code(),
+            absl::StatusCode::kInvalidArgument);
+}
+
+TEST(SampleBuilderTest, Grow_NoDuplicateEdgesWithoutReplacement) {
+  const std::vector<NodePair> graph_edges = CreateTestEdges(/*with_hub=*/true);
+  const SamplerIndex index =
+      CreateSamplerIndex(kNumTestNodes, graph_edges, /*num_hops=*/3,
+                         /*hop_width=*/3, /*multi_visit=*/false);
+  for (const GrowMode mode : {GrowMode::kPlan, GrowMode::kSubGraph}) {
+    for (uint64_t rng_seed = 0; rng_seed < 20; rng_seed++) {
+      ASSERT_OK_AND_ASSIGN(
+          const SampleBuilder builder,
+          GrowSample(index, {rng_seed % kNumTestNodes}, mode, rng_seed));
+      const std::vector<NodePair> edges = OriginalEdges(builder);
+      EXPECT_EQ(std::adjacent_find(edges.begin(), edges.end()), edges.end());
+      EXPECT_THAT(edges, IsSubsetOf(graph_edges));
+    }
+  }
+}
+
+TEST(SampleBuilderTest, Grow_SubGraphEqualsPlanWithoutMultiVisit) {
+  const std::vector<NodePair> graph_edges = CreateTestEdges(/*with_hub=*/true);
+  const SamplerIndex index_no_multi_visit =
+      CreateSamplerIndex(kNumTestNodes, graph_edges, /*num_hops=*/3,
+                         /*hop_width=*/3, /*multi_visit=*/false);
+  // `kSubGraph` ignores the `multi_visit` option of the plan.
+  const SamplerIndex index_multi_visit =
+      CreateSamplerIndex(kNumTestNodes, graph_edges, /*num_hops=*/3,
+                         /*hop_width=*/3, /*multi_visit=*/true);
+  for (uint64_t rng_seed = 0; rng_seed < 20; rng_seed++) {
+    const std::vector<InputIdx> seeds = {rng_seed % kNumTestNodes};
+    ASSERT_OK_AND_ASSIGN(
+        const SampleBuilder plan,
+        GrowSample(index_no_multi_visit, seeds, GrowMode::kPlan, rng_seed));
+    ASSERT_OK_AND_ASSIGN(
+        const SampleBuilder subgraph,
+        GrowSample(index_multi_visit, seeds, GrowMode::kSubGraph, rng_seed));
+    EXPECT_EQ(plan.nodesets[0].sampled_node_idx_to_node_idx,
+              subgraph.nodesets[0].sampled_node_idx_to_node_idx);
+    EXPECT_EQ(plan.edgesets[0].edges, subgraph.edgesets[0].edges);
+  }
+}
+
+// With a hop width larger than the max degree, there is no randomness: The
+// result does not depend on the random seed nor on the order of the seeds, and
+// the sub-graph of several seeds is the union of their sub-graphs.
+TEST(SampleBuilderTest, Grow_SubGraphWithLargeHopWidth) {
+  const SamplerIndex index = CreateSamplerIndex(
+      kNumTestNodes, CreateTestEdges(/*with_hub=*/false), /*num_hops=*/2,
+      /*hop_width=*/2 * kNumTestNodes, /*multi_visit=*/true);
+  ASSERT_OK_AND_ASSIGN(const SampleBuilder a,
+                       GrowSample(index, {1}, GrowMode::kSubGraph, 1));
+  ASSERT_OK_AND_ASSIGN(const SampleBuilder a_other_rng,
+                       GrowSample(index, {1}, GrowMode::kSubGraph, 2));
+  ASSERT_OK_AND_ASSIGN(const SampleBuilder b,
+                       GrowSample(index, {17}, GrowMode::kSubGraph, 1));
+  ASSERT_OK_AND_ASSIGN(const SampleBuilder ab,
+                       GrowSample(index, {1, 17}, GrowMode::kSubGraph, 1));
+  ASSERT_OK_AND_ASSIGN(const SampleBuilder ba,
+                       GrowSample(index, {17, 1}, GrowMode::kSubGraph, 2));
+
+  EXPECT_EQ(OriginalNodes(a), OriginalNodes(a_other_rng));
+  EXPECT_EQ(OriginalEdges(a), OriginalEdges(a_other_rng));
+  EXPECT_EQ(OriginalNodes(ab), OriginalNodes(ba));
+  EXPECT_EQ(OriginalEdges(ab), OriginalEdges(ba));
+
+  std::vector<InputIdx> union_nodes = OriginalNodes(a);
+  const std::vector<InputIdx> b_nodes = OriginalNodes(b);
+  union_nodes.insert(union_nodes.end(), b_nodes.begin(), b_nodes.end());
+  std::sort(union_nodes.begin(), union_nodes.end());
+  union_nodes.erase(std::unique(union_nodes.begin(), union_nodes.end()),
+                    union_nodes.end());
+  EXPECT_EQ(OriginalNodes(ab), union_nodes);
+  EXPECT_LT(union_nodes.size(), kNumTestNodes);
 }
 
 }  // namespace

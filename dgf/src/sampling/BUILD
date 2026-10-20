@@ -148,7 +148,6 @@ nanobind_extension(
         ":in_memory_sampler_cc",
         ":in_memory_sampler_nb",
         "@abseil-cpp//absl/base:core_headers",
-        "@abseil-cpp//absl/cleanup",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/log",
         "@abseil-cpp//absl/random",
@@ -221,6 +220,8 @@ cc_test(
         "@googletest//:gtest_main",
         "@abseil-cpp//absl/container:flat_hash_set",
         "@abseil-cpp//absl/status",
+        "@abseil-cpp//absl/status:statusor",
+        "//dgf/src/util",
         "//dgf/src/util:test_util_cc",
     ],
 )
