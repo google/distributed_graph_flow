@@ -4,6 +4,9 @@ tensorflow
 tf-keras
 # clu.metric_writers imports TensorFlow.
 clu
+tensorflow-hub
+tensorflow-text
+keras-hub
 # jax>=0.11 exports StableHLO artifacts (e.g. `vhlo.custom_call_v2`) that
 # tensorflow 2.21 cannot deserialize, which breaks the jax2tf export tests.
 jax<0.11

@@ -52,6 +52,10 @@ class LazyModule(types.ModuleType):
           _error_message(self._library_name, self._pip, self._bazel_rule)
       ) from e
 
+  def force_import(self) -> types.ModuleType:
+    """Imports and returns the wrapped module (e.g., to register its ops)."""
+    return self._load()
+
   def is_available(self) -> bool:
     try:
       importlib.import_module(self._import_path)

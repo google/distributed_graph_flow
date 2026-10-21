@@ -30,9 +30,8 @@ if typing.TYPE_CHECKING:
   import tensorflow as _tf
 
   ExtensionType = _tf.experimental.ExtensionType
+  Module = _tf.Module
 else:
-  ExtensionType = (
-      tf.experimental.ExtensionType
-      if getattr(tf, "is_available", lambda: True)()
-      else object
-  )
+  _tf_available = getattr(tf, "is_available", lambda: True)()
+  ExtensionType = tf.experimental.ExtensionType if _tf_available else object
+  Module = tf.Module if _tf_available else object

@@ -32,6 +32,7 @@ class WeakDepTest(absltest.TestCase):
     )
     self.assertEqual(math_module.cos(0), 1.0)
     self.assertTrue(math_module.is_available())
+    self.assertEqual(math_module.force_import().__name__, "math")
 
   def test_import_weak_dependency_failure(self):
     non_existent = LazyModule(
@@ -48,6 +49,8 @@ class WeakDepTest(absltest.TestCase):
         " non_existent.*//non/existent",
     ):
       _ = non_existent.foo
+    with self.assertRaisesRegex(RuntimeError, "NonExistent"):
+      non_existent.force_import()
 
     self.assertFalse(non_existent.is_available())
 

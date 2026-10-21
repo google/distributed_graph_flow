@@ -72,6 +72,33 @@ py_library(
 )
 
 py_library(
+    name = "weak_dep_tensorflow_hub",
+    srcs = ["weak_dep_tensorflow_hub.py"],
+    deps = [
+        ":weak_dep_base",
+        # tensorflow_hub dep,  # build_cleaner: keep
+    ],
+)
+
+py_library(
+    name = "weak_dep_tensorflow_text",
+    srcs = ["weak_dep_tensorflow_text.py"],
+    deps = [
+        ":weak_dep_base",
+        # tensorflow_text dep,  # build_cleaner: keep
+    ],
+)
+
+py_library(
+    name = "weak_dep_keras_hub",
+    srcs = ["weak_dep_keras_hub.py"],
+    deps = [
+        ":weak_dep_base",
+        "//third_party/py/keras_hub",  # build_cleaner: keep
+    ],
+)
+
+py_library(
     name = "weak_dep",
     srcs = ["__init__.py"],
 )
