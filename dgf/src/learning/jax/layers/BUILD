@@ -178,11 +178,22 @@ py_library(
 )
 
 py_library(
+    name = "pallas_spmm",
+    srcs = ["pallas_spmm.py"],
+    deps = [
+        # jax dep,
+        # jax/experimental:pallas dep,
+        # jax/experimental:pallas_tpu dep,
+    ],
+)
+
+py_library(
     name = "hetero_gnn",
     srcs = ["hetero_gnn.py"],
     deps = [
         ":graph_attention",
         ":message_passing_ops",
+        ":pallas_spmm",
         ":registry",
         ":standard",
         # dataclasses_json dep,
@@ -339,6 +350,18 @@ py_test(
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         # flax:core dep,
+        # jax dep,
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "pallas_spmm_test",
+    srcs = ["pallas_spmm_test.py"],
+    deps = [
+        ":pallas_spmm",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
         # jax dep,
         # numpy dep,
     ],

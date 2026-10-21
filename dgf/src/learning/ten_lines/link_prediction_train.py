@@ -384,6 +384,7 @@ def train_link_model(
     target_sampling_plan: sampling_config_lib.SamplingPlan | None = None,
     early_stopping: bool | int = True,
     fast_compile: bool = False,
+    use_pallas: bool = False,
 ) -> LinkPredictionModel:
   """Trains a supervised Graph Neural Network model for edge prediction.
 
@@ -491,6 +492,9 @@ def train_link_model(
       runtime execution speed. Useful for fast iteration, interactive debugging,
       and unit tests. Specifically, this disables expensive XLA GEMM autotuning
       (--xla_gpu_autotune_level=0).
+    use_pallas: If True, aggregates node-projected messages using the O(N)
+      memory Pallas TPU SpMM kernel instead of materializing O(E * D) edge
+      messages. Supported for `GRAPH_CONVOLUTIONAL_NETWORK` and `GRAPH_SAGE`.
 
   Returns:
     A LinkPredictionModel instance.
@@ -580,6 +584,7 @@ def train_link_model(
         early_stopping=early_stopping_monitor.normalize_early_stopping_config(
             early_stopping
         ),
+        use_pallas=use_pallas,
     )
 
     task = LinkPredictionTask(target_edgeset=target_edgeset)

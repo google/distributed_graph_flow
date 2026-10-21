@@ -132,12 +132,21 @@ class TrainingStats:
     train_duration_seconds: The duration of the training in seconds.
     num_skipped_train_samples: The number of training samples skipped due to
       padding overflow.
+    train_step_temp_bytes: Optional compiled HLO temporary memory in bytes for
+      the training step.
+    train_step_peak_bytes: Optional compiled HLO peak memory in bytes for the
+      training step.
+    device_peak_bytes: Optional peak live device memory in bytes recorded during
+      training.
   """
 
   num_train_seed_nodes: int | None
   num_valid_seed_nodes: int | None
   train_duration_seconds: float
   num_skipped_train_samples: int = 0
+  train_step_temp_bytes: int | None = None
+  train_step_peak_bytes: int | None = None
+  device_peak_bytes: int | None = None
 
 
 @dataclasses_json.dataclass_json
