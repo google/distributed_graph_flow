@@ -235,6 +235,7 @@ def train_node_model(
     evaluate_final_model: bool = True,
     padding_margin: float = 0.1,
     fast_compile: bool = False,
+    use_pallas: bool = False,
 ) -> NodePredictionModel:
   """Trains a supervised Graph Neural Network model for node-level prediction.
 
@@ -353,6 +354,9 @@ def train_node_model(
       runtime execution speed. Useful for fast iteration, interactive debugging,
       and unit tests. Specifically, this disables expensive XLA GEMM autotuning
       (--xla_gpu_autotune_level=0).
+    use_pallas: If True, aggregates node-projected messages using the O(N)
+      memory Pallas TPU SpMM kernel instead of materializing O(E * D) edge
+      messages. Supported for `GRAPH_CONVOLUTIONAL_NETWORK` and `GRAPH_SAGE`.
 
   Returns:
     A trained `NodePredictionModel` instance.
@@ -461,6 +465,7 @@ def train_node_model(
             early_stopping
         ),
         padding_margin=padding_margin,
+        use_pallas=use_pallas,
     )
 
     task = NodePredictionTask(
@@ -784,6 +789,9 @@ def train_node_model(
                 else None,
                 train_duration_seconds=train_duration,
                 num_skipped_train_samples=num_skipped_train_samples,
+                train_step_temp_bytes=train_results.train_step_temp_bytes,
+                train_step_peak_bytes=train_results.train_step_peak_bytes,
+                device_peak_bytes=train_results.device_peak_bytes,
             ),
         ),
     )

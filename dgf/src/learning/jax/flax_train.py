@@ -170,6 +170,12 @@ class TrainResult:
     valid_logs: A list of LogItem objects containing the validation metrics.
     num_train_step: Number of training steps.
     stop_reason: Why the training stopped.
+    train_step_temp_bytes: Optional compiled HLO temporary memory in bytes for
+      the training step.
+    train_step_peak_bytes: Optional compiled HLO peak memory in bytes for the
+      training step.
+    device_peak_bytes: Optional peak live device memory in bytes recorded during
+      training.
   """
 
   model_params: optax.Params
@@ -178,6 +184,46 @@ class TrainResult:
   valid_logs: list[LogItem]
   num_train_step: int
   stop_reason: StopReason
+  train_step_temp_bytes: int | None = None
+  train_step_peak_bytes: int | None = None
+  device_peak_bytes: int | None = None
+
+
+def _extract_hlo_memory_bytes(
+    compiled_fn: Any,
+) -> tuple[int | None, int | None]:
+  """Returns `(temp_bytes, peak_bytes)` from a compiled JAX executable."""
+  if not hasattr(compiled_fn, "memory_analysis"):
+    return None, None
+  try:
+    mem_stats = compiled_fn.memory_analysis()
+  except NotImplementedError:
+    return None, None
+  if mem_stats is None:
+    return None, None
+  temp_bytes = int(mem_stats.temp_size_in_bytes)
+  peak_bytes = int(getattr(mem_stats, "peak_memory_in_bytes", 0))
+  if peak_bytes <= 0:
+    peak_bytes = int(
+        mem_stats.argument_size_in_bytes
+        + mem_stats.output_size_in_bytes
+        - mem_stats.alias_size_in_bytes
+        + mem_stats.temp_size_in_bytes
+    )
+  return temp_bytes, peak_bytes
+
+
+def _extract_device_peak_bytes() -> int | None:
+  """Returns `peak_bytes_in_use` from `jax.local_devices()[0]`, if available."""
+  try:
+    devices = jax.local_devices()
+    if devices and hasattr(devices[0], "memory_stats"):
+      dev_stats = devices[0].memory_stats()
+      if dev_stats and "peak_bytes_in_use" in dev_stats:
+        return int(dev_stats["peak_bytes_in_use"])
+  except Exception:  # pylint: disable=broad-exception-caught
+    pass
+  return None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -576,6 +622,8 @@ def train(
         "Will checkpoint model every %s minute(s)", checkpoint_every_n_minutes
     )
 
+  train_step_temp_bytes: int | None = None
+  train_step_peak_bytes: int | None = None
   if aot_compile and hasattr(train_step, "lower"):
     sample_batch = first_batch if first_batch is not None else dummy_data
     if sample_batch is not None:
@@ -587,6 +635,18 @@ def train(
             sample_batch,
             aot_step_key,
         ).compile()
+      train_step_temp_bytes, train_step_peak_bytes = _extract_hlo_memory_bytes(
+          train_step
+      )
+      if (
+          train_step_temp_bytes is not None
+          and train_step_peak_bytes is not None
+      ):
+        log.info(
+            "Train step HLO memory: temp=%.2f MiB, peak=%.2f MiB",
+            train_step_temp_bytes / (1024 * 1024),
+            train_step_peak_bytes / (1024 * 1024),
+        )
 
   log.info("Start training.")
   start_time = time.time()
@@ -754,6 +814,13 @@ def train(
 
   log.info(f"Final metrics: {list_display_dict}")
 
+  device_peak_bytes = _extract_device_peak_bytes()
+  if device_peak_bytes is not None:
+    log.info(
+        "Device peak memory in use: %.2f MiB",
+        device_peak_bytes / (1024 * 1024),
+    )
+
   if hasattr(dataset_iterator, "close"):
     dataset_iterator.close()
 
@@ -764,4 +831,7 @@ def train(
       valid_logs=valid_logs,
       num_train_step=effective_num_train_steps,
       stop_reason=stop_reason,
+      train_step_temp_bytes=train_step_temp_bytes,
+      train_step_peak_bytes=train_step_peak_bytes,
+      device_peak_bytes=device_peak_bytes,
   )

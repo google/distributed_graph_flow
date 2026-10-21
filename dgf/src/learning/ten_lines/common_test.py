@@ -156,6 +156,44 @@ class TenLines(parameterized.TestCase):
     config = common.build_gnn_config(hparams)
     self.assertIn(expected_in_architecture, config.architecture())
 
+  @parameterized.parameters(
+      (
+          common.Architecture.GRAPH_CONVOLUTIONAL_NETWORK,
+          "Aggregation(symmetric, pallas)",
+      ),
+      (common.Architecture.GRAPH_SAGE, "Aggregation(mean, pallas)"),
+  )
+  def test_build_gnn_config_use_pallas_supported(
+      self, architecture: common.Architecture, expected_in_architecture: str
+  ):
+    hparams = common.HParam(
+        node_embedding_dim=8,
+        architecture=architecture,
+        use_pallas=True,
+    )
+    config = common.build_gnn_config(hparams)
+    self.assertIn(expected_in_architecture, config.architecture())
+
+  @parameterized.parameters(
+      common.Architecture.GRAPH_ATTENTION_NETWORK,
+      common.Architecture.GRAPH_ATTENTION_NETWORK_V2,
+      common.Architecture.MT_ALBIS,
+      common.Architecture.HETEROGENEOUS_MESSAGE_PASSING,
+      common.Architecture.HETEROGENEOUS_GRAPH_ATTENTION_NETWORK,
+  )
+  def test_build_gnn_config_use_pallas_unsupported_fails(
+      self, architecture: common.Architecture
+  ):
+    hparams = common.HParam(
+        node_embedding_dim=8,
+        architecture=architecture,
+        use_pallas=True,
+    )
+    with self.assertRaisesRegex(
+        ValueError, "use_pallas=True is only supported"
+    ):
+      common.build_gnn_config(hparams)
+
   def test_parse_architecture_invalid_fails(self):
     with self.assertRaisesRegex(ValueError, "Unknown architecture: invalid"):
       common.parse_architecture("invalid")

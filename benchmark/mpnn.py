@@ -44,6 +44,7 @@ class LayerType(enum.Enum):
   HETERO_GAT = "HeterogeneousGraphAttentionNetwork"
   GRAPHSAGE = "GraphSAGE"
   GCN = "GCN"
+  GCN_PALLAS = "GCN_Pallas"
   GAT = "GAT"
   GATV2 = "GATv2"
 
@@ -148,6 +149,47 @@ DEFAULT_SCENARIOS: tuple[Scenario, ...] = (
         description="'small_loops' with 100% padding.",
     ),
 )
+
+LARGE_SCENARIOS: tuple[Scenario, ...] = (
+    Scenario(
+        name="large_dense_u16",
+        num_nodesets=1,
+        num_edgesets=1,
+        treeness=0.05,
+        batch_size=512,
+        hop_width=50,
+        description=(
+            "Homogeneous dense batch, N < 65536 (u16) and E ~ 650K"
+            " (avg degree ~ 16)."
+        ),
+    ),
+    Scenario(
+        name="xlarge_dense_u16",
+        num_nodesets=1,
+        num_edgesets=1,
+        treeness=0.03,
+        batch_size=512,
+        hop_width=80,
+        description=(
+            "Homogeneous very dense batch, N < 65536 (u16) and E ~ 1.6M"
+            " (avg degree ~ 25)."
+        ),
+    ),
+    Scenario(
+        name="xlarge_many_nodes",
+        num_nodesets=1,
+        num_edgesets=1,
+        treeness=0.03,
+        batch_size=1024,
+        hop_width=80,
+        description=(
+            "Homogeneous large dense batch, N >= 65536 and E ~ 3.2M"
+            " (avg degree ~ 25)."
+        ),
+    ),
+)
+
+ALL_SCENARIOS: tuple[Scenario, ...] = DEFAULT_SCENARIOS + LARGE_SCENARIOS
 
 
 def generate_synthetic_schema(
@@ -416,6 +458,10 @@ def _make_model(
     layer_cfg = dgf.jax.layers.HeterogeneousGraphConvolutionConfig.gcn(
         dims=dims
     )
+  elif layer_type == LayerType.GCN_PALLAS:
+    layer_cfg = dgf.jax.layers.HeterogeneousGraphConvolutionConfig.gcn(
+        dims=dims, use_pallas=True
+    )
   elif layer_type == LayerType.GAT:
     layer_cfg = dgf.jax.layers.HeterogeneousGraphConvolutionConfig.gat(
         dims=dims, num_heads=num_heads
@@ -430,6 +476,49 @@ def _make_model(
       make_layer=lambda name: layer_cfg.make(schema, name=name),
       num_layers=num_layers,
   )
+
+
+def _extract_hlo_memory_mib(compiled: Any) -> tuple[float, float]:
+  """Returns `(temp_mib, peak_mib)` from compiled HLO memory analysis."""
+  if not hasattr(compiled, "memory_analysis"):
+    return -1.0, -1.0
+  try:
+    stats = compiled.memory_analysis()
+  except NotImplementedError:
+    return -1.0, -1.0
+  if stats is None:
+    return -1.0, -1.0
+  mib = 1024.0 * 1024.0
+  temp_bytes = int(stats.temp_size_in_bytes)
+  peak_bytes = int(getattr(stats, "peak_memory_in_bytes", 0))
+  if peak_bytes <= 0:
+    peak_bytes = int(
+        stats.argument_size_in_bytes
+        + stats.output_size_in_bytes
+        - stats.alias_size_in_bytes
+        + stats.temp_size_in_bytes
+    )
+  return float(temp_bytes) / mib, float(peak_bytes) / mib
+
+
+def _extract_device_memory_mib() -> tuple[float, float]:
+  """Returns `(live_mib, peak_mib)` from `jax.local_devices()[0]`."""
+  try:
+    devices = jax.local_devices()
+    if not devices or not hasattr(devices[0], "memory_stats"):
+      return -1.0, -1.0
+    stats = devices[0].memory_stats()
+    if not stats:
+      return -1.0, -1.0
+    mib = 1024.0 * 1024.0
+    live_bytes = stats.get("bytes_in_use", -1)
+    peak_bytes = stats.get("peak_bytes_in_use", -1)
+    return (
+        float(live_bytes) / mib if live_bytes >= 0 else -1.0,
+        float(peak_bytes) / mib if peak_bytes >= 0 else -1.0,
+    )
+  except Exception:  # pylint: disable=broad-exception-caught
+    return -1.0, -1.0
 
 
 class RunMPNN(benchmark_utils.Benchmark):
@@ -462,6 +551,10 @@ class RunMPNN(benchmark_utils.Benchmark):
     self.set_unit_multiplicator(scenario.batch_size)
 
     self._step_fn: Callable[[Any, dgf.data.JaxInMemoryGraph], Any] | None = None
+    self._hlo_temp_mib: float = -1.0
+    self._hlo_peak_mib: float = -1.0
+    self._dev_live_mib: float = -1.0
+    self._dev_peak_mib: float = -1.0
     self._total_nodes = sum(
         ns.num_nodes or 0 for ns in self.jax_graph.node_sets.values()
     )
@@ -475,7 +568,7 @@ class RunMPNN(benchmark_utils.Benchmark):
   def setup(self):
     model = self.model
     if self.mode == Mode.FORWARD:
-      self._step_fn = jax.jit(lambda p, g: model.apply(p, g, training=False))
+      jitted_fn = jax.jit(lambda p, g: model.apply(p, g, training=False))
     elif self.mode == Mode.FORWARD_BACKWARD:
 
       def loss_fn(p, g):
@@ -485,13 +578,17 @@ class RunMPNN(benchmark_utils.Benchmark):
             for ns in out_g.node_sets.values()
         )
 
-      self._step_fn = jax.jit(
+      jitted_fn = jax.jit(
           jax.value_and_grad(loss_fn, argnums=(0, 1), allow_int=True)
       )
     else:
       raise ValueError(f"Unsupported mode: {self.mode}")
 
-    # Compile outside of the timed region.
+    # Lower and compile once outside of the timed region, and extract HLO memory
+    # stats before running.
+    compiled = jitted_fn.lower(self.variables, self.jax_graph).compile()
+    self._hlo_temp_mib, self._hlo_peak_mib = _extract_hlo_memory_mib(compiled)
+    self._step_fn = compiled
     out = self._step_fn(self.variables, self.jax_graph)
     jax.block_until_ready(out)
 
@@ -499,6 +596,12 @@ class RunMPNN(benchmark_utils.Benchmark):
     assert self._step_fn is not None
     out = self._step_fn(self.variables, self.jax_graph)
     jax.block_until_ready(out)
+
+  def clean(self):
+    self._dev_live_mib, self._dev_peak_mib = _extract_device_memory_mib()
+    # Release the compiled executable before the next benchmark compiles so
+    # multiple large HLO executables do not occupy HBM simultaneously.
+    self._step_fn = None
 
   def details(self) -> str:
     return (
@@ -512,6 +615,9 @@ class RunMPNN(benchmark_utils.Benchmark):
         f" padding={self.scenario.padding_relative_margin}"
         f" nodes={self._total_nodes}"
         f" edges={self._total_edges}"
+        f" hlo_temp_mib={self._hlo_temp_mib:.2f}"
+        f" hlo_peak_mib={self._hlo_peak_mib:.2f}"
+        f" dev_peak_mib={self._dev_peak_mib:.2f}"
         f" backend={jax.default_backend()}"
         f" relations={describe_relations(self.jax_graph, self.schema)}"
     )

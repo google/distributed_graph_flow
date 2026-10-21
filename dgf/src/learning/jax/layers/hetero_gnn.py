@@ -24,6 +24,7 @@ from dgf.src.data import schema as schema_lib
 from dgf.src.learning.jax import common
 from dgf.src.learning.jax.layers import graph_attention
 from dgf.src.learning.jax.layers import message_passing_ops
+from dgf.src.learning.jax.layers import pallas_spmm
 from dgf.src.learning.jax.layers import standard
 from dgf.src.learning.jax.layers.registry import registry as layer_registry  # pylint: disable=g-importing-member
 from flax import linen as nn
@@ -284,6 +285,9 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
     force_basic_implementation: If True, always compute messages with the
       generic per-edge implementation (no node-level projection, no edge
       sorting). Mostly useful in tests to validate the optimized paths.
+    use_pallas: If True, aggregates node-projected messages using the O(N)
+      memory Pallas TPU SpMM kernel instead of materializing O(E * D) edge
+      messages. Requires `message_consumes_target=False`.
     attention_dropout_rate: Dropout rate applied to the attention weights during
       training. Requires `message_aggregation='attention'`.
     message: Optional module to apply to edge features to generate messages.
@@ -308,6 +312,7 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
   combine: Combine = Combine.CONCAT
   residual: bool = True
   force_basic_implementation: bool = False
+  use_pallas: bool = False
   attention_dropout_rate: float = 0.0
 
   message: common.GenericLayer | None = layer_registry.field(default=None)
@@ -367,6 +372,15 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
       raise ValueError(
           "relation_aggregation='concat' requires combine='concat'."
       )
+    if self.use_pallas and self.message_consumes_target:
+      raise ValueError(
+          "use_pallas=True requires message_consumes_target=False."
+      )
+    if self.use_pallas and is_attention:
+      raise ValueError(
+          "use_pallas=True is not supported with"
+          " message_aggregation='attention'."
+      )
 
   @classmethod
   def graphsage(
@@ -375,6 +389,7 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
       activation: str = "relu",
       dropout_rate: float = 0.0,
       plan: Plan | None = None,
+      use_pallas: bool = False,
   ) -> "HeterogeneousGraphConvolutionConfig":
     """GraphSAGE template: `h_v' = act(W [h_v ; mean_{u in N(v)} h_u] + b)`.
 
@@ -390,6 +405,7 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
         message_consumes_target=False,
         combine=Combine.CONCAT,
         residual=False,
+        use_pallas=use_pallas,
         message=standard.identity(),
         update=standard.GenericBlockConfig(
             "LAD" if dropout_rate > 0.0 else "LA",
@@ -407,6 +423,7 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
       activation: str = "relu",
       dropout_rate: float = 0.0,
       plan: Plan | None = None,
+      use_pallas: bool = False,
   ) -> "HeterogeneousGraphConvolutionConfig":
     """GCN template: `H' = act((D^-1/2 A D^-1/2 H + H) W + b)`.
 
@@ -422,6 +439,7 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
         message_consumes_target=False,
         combine=Combine.SUM,
         residual=False,
+        use_pallas=use_pallas,
         message=standard.identity(),
         update=standard.GenericBlockConfig(
             "LAD" if dropout_rate > 0.0 else "LA",
@@ -667,7 +685,10 @@ class HeterogeneousGraphConvolutionConfig(common.ArchitectureProvider):
           textwrap.indent(self.attention.architecture(), prefix="    ")
       )
     else:
-      parts.append(f"  Aggregation({self.message_aggregation.value})")
+      agg_str = self.message_aggregation.value
+      if self.use_pallas:
+        agg_str += ", pallas"
+      parts.append(f"  Aggregation({agg_str})")
     parts.append(f"  RelationAggregation({self.relation_aggregation.value})")
     parts.append(f"  Update({combine_input}):")
     parts.append(textwrap.indent(self.update.architecture(), prefix="    "))
@@ -928,8 +949,8 @@ class HeterogeneousGraphConvolution(nn.Module):
     """
     linear_activation_linear = self.linear_activation_linear()
     if not self.config.message_consumes_target:
-      aggregate = self.segment_sum(
-          relation, self.source_messages(relation, src_weights, training)
+      aggregate = self.aggregate_source_messages(
+          relation, src_weights, training
       )
     elif linear_activation_linear is not None:
       assert src_weights is None
@@ -1020,6 +1041,20 @@ class HeterogeneousGraphConvolution(nn.Module):
     else:
       return self.basic_messages(relation, training)
 
+  def source_node_messages(
+      self,
+      relation: Relation,
+      src_weights: jt.Float[jt.Array, "num_src_nodes 1"] | None,
+      training: bool,
+  ) -> jt.Float[jt.Array, "num_src_nodes msg_dims"]:
+    """Computes `message(x_j) * src_weights[j]` for each source node j."""
+    assert self.config.message is not None
+    message_fn = self.config.message.make(name=f"msg_{relation.name}")
+    node_messages = message_fn(relation.src_values, training=training)
+    if src_weights is not None:
+      node_messages = node_messages * src_weights
+    return node_messages
+
   def source_messages(
       self,
       relation: Relation,
@@ -1027,13 +1062,13 @@ class HeterogeneousGraphConvolution(nn.Module):
       training: bool,
   ) -> jt.Float[jt.Array, "num_edges msg_dims"]:
     """Computes `message(x_j) * src_weights[j]` for each edge (j -> i)."""
-    assert self.config.message is not None
-    message_fn = self.config.message.make(name=f"msg_{relation.name}")
     if (
         self.config.force_basic_implementation
         or relation.num_src_nodes > relation.num_edges
     ):
       # Message on the edges.
+      assert self.config.message is not None
+      message_fn = self.config.message.make(name=f"msg_{relation.name}")
       messages = message_fn(
           relation.src_values[relation.source_idxs], training=training
       )
@@ -1041,10 +1076,27 @@ class HeterogeneousGraphConvolution(nn.Module):
         messages = messages * src_weights[relation.source_idxs]
       return messages
     # Message on the nodes, then gather on the edges.
-    node_messages = message_fn(relation.src_values, training=training)
-    if src_weights is not None:
-      node_messages = node_messages * src_weights
-    return node_messages[relation.source_idxs]
+    return self.source_node_messages(relation, src_weights, training)[
+        relation.source_idxs
+    ]
+
+  def aggregate_source_messages(
+      self,
+      relation: Relation,
+      src_weights: jt.Float[jt.Array, "num_src_nodes 1"] | None,
+      training: bool,
+  ) -> jt.Float[jt.Array, "num_dst_nodes msg_dims"]:
+    """Sums `message(x_j) * src_weights[j]` over edges incoming to each target."""
+    if (
+        self.config.force_basic_implementation
+        or relation.num_src_nodes > relation.num_edges
+    ):
+      return self.segment_sum(
+          relation, self.source_messages(relation, src_weights, training)
+      )
+    return self.gather_and_segment_sum(
+        relation, self.source_node_messages(relation, src_weights, training)
+    )
 
   def basic_messages(
       self, relation: Relation, training: bool
@@ -1177,6 +1229,25 @@ class HeterogeneousGraphConvolution(nn.Module):
         relation.num_dst_nodes,
         indices_are_sorted=relation.indices_are_sorted,
     )
+
+  def gather_and_segment_sum(
+      self,
+      relation: Relation,
+      src_node_values: jt.Float[jt.Array, "num_src_nodes dims"],
+  ) -> jt.Float[jt.Array, "num_dst_nodes dims"]:
+    """Gathers source node values along edges and sums them by target node."""
+    if (
+        self.config.use_pallas
+        and not self.config.force_basic_implementation
+        and relation.num_edges > 0
+    ):
+      return pallas_spmm.pallas_spmm(
+          src_node_values,
+          relation.target_idxs,
+          relation.source_idxs,
+          relation.num_dst_nodes,
+      )
+    return self.segment_sum(relation, src_node_values[relation.source_idxs])
 
   def combine_relations(
       self, aggregates: list[jt.Float[jt.Array, "num_dst_nodes msg_dims"]]

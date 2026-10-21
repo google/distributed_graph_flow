@@ -35,7 +35,7 @@ _SCENARIOS = flags.DEFINE_list(
     "scenarios",
     [s.name for s in mpnn.DEFAULT_SCENARIOS],
     "Comma-separated list of scenario names to benchmark. Available:"
-    f" {', '.join(s.name for s in mpnn.DEFAULT_SCENARIOS)}.",
+    f" {', '.join(s.name for s in mpnn.ALL_SCENARIOS)}.",
 )
 _LAYER_TYPES = flags.DEFINE_multi_enum_class(
     "layer_types",
@@ -64,7 +64,7 @@ def main(argv):
   if len(argv) > 1:
     raise app.UsageError("Too many command-line arguments.")
 
-  scenarios_by_name = {s.name: s for s in mpnn.DEFAULT_SCENARIOS}
+  scenarios_by_name = {s.name: s for s in mpnn.ALL_SCENARIOS}
   unknown = [name for name in _SCENARIOS.value if name not in scenarios_by_name]
   if unknown:
     raise app.UsageError(
