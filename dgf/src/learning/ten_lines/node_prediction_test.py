@@ -543,6 +543,24 @@ class NodePredictionRealLooking(parameterized.TestCase):
         seed_node_idxs,
     )
 
+  @parameterized.named_parameters(
+      dict(testcase_name="host", to_host=True, expected_type=np.ndarray),
+      dict(testcase_name="device", to_host=False, expected_type=jax.Array),
+  )
+  def test_predict_batch_array_type(self, to_host: bool, expected_type: type):
+    batches = list(
+        self.model.predict_batch(
+            graph=self.graph,
+            seed_node_idxs=[0, 1, 2],
+            input_features_only=True,
+            verbose=0,
+            to_host=to_host,
+        )
+    )
+    self.assertNotEmpty(batches)
+    for batch in batches:
+      self.assertIsInstance(batch.predictions, expected_type)
+
   def test_predict_without_labels(self):
     graph_without_labels = copy.deepcopy(self.graph)
     del graph_without_labels.node_sets["client"].features["categorical_label"]

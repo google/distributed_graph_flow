@@ -27,6 +27,7 @@ from dgf.src.data import schema as schema_lib
 from dgf.src.io import tf as tf_io
 from dgf.src.learning.jax.layers import standard
 from dgf.src.learning.ten_lines import common as common_lib
+from dgf.src.learning.ten_lines import evaluation
 from dgf.src.learning.ten_lines import link_prediction_model
 from dgf.src.learning.ten_lines import link_prediction_train
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
@@ -369,6 +370,136 @@ class LinkPredictionToyTest(parameterized.TestCase):
 
     test_util.assert_are_equal(self, pos_probs, expected_pos_probs)
     test_util.assert_are_equal(self, neg_probs, expected_neg_probs)
+
+  def test_sum_ranking_metrics(self):
+    probs = np.array([0.9, 0.1, 0.2, 0.3, 0.5, 0.4], dtype=np.float32)
+    examples_per_seed_edge = 3
+
+    metric_sums = link_prediction_model._sum_ranking_metrics(
+        jnp.asarray(probs), examples_per_seed_edge=examples_per_seed_edge
+    )
+
+    pos_probs, neg_probs = (
+        link_prediction_model._separate_positives_and_negatives(
+            probs, examples_per_seed_edge
+        )
+    )
+    expected_metrics = evaluation.compute_ranking_metrics(pos_probs, neg_probs)
+    self.assertSetEqual(set(metric_sums), set(expected_metrics))
+    for key, expected_value in expected_metrics.items():
+      self.assertIsInstance(metric_sums[key], jax.Array)
+      self.assertAlmostEqual(
+          float(metric_sums[key]), float(expected_value) * 2, places=5
+      )
+
+  def test_sum_ranking_metrics_ties(self):
+    # The second group has ties between the positive and the negatives.
+    probs = np.array(
+        [0.9, 0.1, 0.9, 0.3, 0.5, 0.5, 0.5, 0.5], dtype=np.float32
+    )
+    examples_per_seed_edge = 4
+
+    metric_sums = link_prediction_model._sum_ranking_metrics(
+        jnp.asarray(probs), examples_per_seed_edge=examples_per_seed_edge
+    )
+
+    pos_probs, neg_probs = (
+        link_prediction_model._separate_positives_and_negatives(
+            probs, examples_per_seed_edge
+        )
+    )
+    expected_metrics = evaluation.compute_ranking_metrics(pos_probs, neg_probs)
+    for key, expected_value in expected_metrics.items():
+      self.assertAlmostEqual(
+          float(metric_sums[key]), float(expected_value) * 2, places=5
+      )
+
+  def test_sum_ranking_metrics_nans(self):
+    probs = np.array([0.9, 0.1, 0.2, np.nan, 0.5, 0.4], dtype=np.float32)
+
+    metric_sums = link_prediction_model._sum_ranking_metrics(
+        jnp.asarray(probs), examples_per_seed_edge=3
+    )
+
+    for value in metric_sums.values():
+      self.assertTrue(np.isnan(float(value)))
+
+  @parameterized.named_parameters(
+      dict(testcase_name="host", to_host=True, expected_type=np.ndarray),
+      dict(testcase_name="device", to_host=False, expected_type=jax.Array),
+  )
+  def test_predict_batch_array_type(self, to_host: bool, expected_type: type):
+    batches = list(
+        self.model.predict_batch(
+            self.graph,
+            source_node_idxs=[0, 1],
+            target_node_idxs=[3, 4],
+            all_combinations=False,
+            verbose=0,
+            to_host=to_host,
+        )
+    )
+    self.assertNotEmpty(batches)
+    for batch in batches:
+      self.assertIsInstance(batch.predictions, expected_type)
+
+  def test_evaluate_with_groups_across_batches(self):
+    # The batch sizes are not multiples of the group size (1 + 5 negatives),
+    # so the groups are split across batches. The predictions are rounded to
+    # create ties.
+    num_negative_nodes = 5
+    examples_per_seed_edge = 1 + num_negative_nodes
+    batch_sizes = [4, 7, 1, 13]
+    rng = np.random.default_rng(1)
+    all_probs = []
+
+    def fake_predict_batch(graph, source_node_idxs, target_node_idxs, **kwargs):
+      del graph, kwargs
+      probs = np.round(rng.uniform(size=len(source_node_idxs)), 1).astype(
+          np.float32
+      )
+      all_probs.append(probs)
+      begin = 0
+      batch_idx = 0
+      while begin < len(probs):
+        end = min(begin + batch_sizes[batch_idx % len(batch_sizes)], len(probs))
+        yield link_prediction_model.BatchPrediction(
+            batch_source_node_idxs=np.asarray(source_node_idxs[begin:end]),
+            batch_target_node_idxs=np.asarray(target_node_idxs[begin:end]),
+            predictions=jnp.asarray(probs[begin:end]),
+        )
+        begin = end
+        batch_idx += 1
+
+    with unittest.mock.patch.object(
+        self.model, "predict_batch", side_effect=fake_predict_batch
+    ):
+      result = self.model.evaluate(
+          self.graph,
+          num_eval_steps=50,
+          num_negative_nodes=num_negative_nodes,
+          random_seed=1,
+          verbose=0,
+      )
+
+    self.assertLen(all_probs, 1)
+    pos_probs, neg_probs = (
+        link_prediction_model._separate_positives_and_negatives(
+            all_probs[0], examples_per_seed_edge
+        )
+    )
+    self.assertLen(pos_probs, 50)
+    expected_metrics = evaluation.compute_ranking_metrics(pos_probs, neg_probs)
+    expected = evaluation.Evaluation(
+        num_examples=50,
+        mrr=float(expected_metrics["mrr"]),
+        auc=float(expected_metrics["auc"]),
+        hit_at={
+            1: float(expected_metrics["hit_at_1"]),
+            5: float(expected_metrics["hit_at_5"]),
+        },
+    )
+    test_util.assert_are_equal(self, result, expected, abs_tol=1e-5)
 
   def test_model(self):
     self.assertEqual(self.model.data().task.target_edgeset, "A_to_B")
