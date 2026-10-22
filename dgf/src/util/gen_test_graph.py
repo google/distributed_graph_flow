@@ -2192,8 +2192,18 @@ def gen_toy_regression_dataset(
 
 def generate_temporal_in_memory_graph(
     include_e2: bool,
+    include_edge_timeseries: bool = False,
 ) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
-  """Generates a temporal InMemoryGraph for testing."""
+  """Generates a temporal InMemoryGraph for testing.
+
+  Args:
+    include_e2: If true, adds a non-temporal edgeset "e2".
+    include_edge_timeseries: If true, adds a timestamp timeseries feature
+      "deletion_time" (with its own group) to the edgeset "e1".
+
+  Returns:
+    The graph and its schema.
+  """
 
   edge_sets_schema = {
       "e1": schema_lib.EdgeSchema(
@@ -2215,6 +2225,21 @@ def generate_temporal_in_memory_graph(
           features={"timestamp": np.array([15, 25, 35], dtype=np.int64)},
       )
   }
+
+  if include_edge_timeseries:
+    edge_sets_schema["e1"].features["deletion_time"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+        shape=(None,),
+        is_timeseries=True,
+        is_creation_time=True,
+        group="deletion_time",
+    )
+    deletion_time = np.empty(3, dtype=object)
+    deletion_time[0] = np.array([50], dtype=np.int64)
+    deletion_time[1] = np.array([], dtype=np.int64)
+    deletion_time[2] = np.array([45, 55], dtype=np.int64)
+    edge_sets_data["e1"].features["deletion_time"] = deletion_time
 
   if include_e2:
     edge_sets_schema["e2"] = schema_lib.EdgeSchema(

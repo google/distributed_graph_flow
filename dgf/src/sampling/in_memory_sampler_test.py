@@ -1369,6 +1369,68 @@ Node(nodeset_idx=0, children=[
     )
     self.assertLen(samples, 2)
 
+  def test_temporal_sampling_with_edge_timeseries_features(self):
+    # Regression test: Edge timeseries features used to raise a KeyError as the
+    # sampler tried to slice them while it does not return edge features.
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
+        include_e2=False, include_edge_timeseries=True
+    )
+    sampler = in_memory_sampler_lib.create_sampler(
+        graph,
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1",
+            num_hops=2,
+            hop_width=2,
+            reverse=False,
+            temporal_sampling=True,
+        ),
+        schema,
+        batch_size=5,
+    )
+    samples = sampler.sample(
+        np.array([0, 1]),
+        seed_timestamps=np.array([30, 40]),
+    )
+    self.assertLen(samples, 2)
+    for sample in samples:
+      self.assertIn("feat", sample.node_sets["n1"].features)
+      self.assertEmpty(sample.edge_sets["e1"].features)
+
+    # The output schema only contains the returned features.
+    self.assertIn("deletion_time", schema.edge_sets["e1"].features)
+    output_schema = sampler.output_schema()
+    self.assertEqual(
+        output_schema.node_sets["n1"].features,
+        schema.node_sets["n1"].features,
+    )
+    self.assertEmpty(output_schema.edge_sets["e1"].features)
+
+  def test_output_schema(self):
+    sampler = in_memory_sampler_lib.create_sampler(
+        self.graph,
+        config_lib.SimpleSamplingConfig(seed_nodeset="n1", num_hops=1),
+        self.schema,
+        batch_size=5,
+        return_features=True,
+        return_node_idxs=True,
+    )
+    output_schema = sampler.output_schema()
+    self.assertEqual(
+        output_schema.node_sets["n1"].features,
+        self.schema.node_sets["n1"].features
+        | {
+            "#idx": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.INTEGER_64
+            )
+        },
+    )
+    for edge_set_schema in output_schema.edge_sets.values():
+      self.assertEmpty(edge_set_schema.features)
+
+    sampler.set_return_options(return_features=False, return_node_idxs=False)
+    for node_set_schema in sampler.output_schema().node_sets.values():
+      self.assertEmpty(node_set_schema.features)
+
   def test_edgeset_name_to_idx(self):
     sampling_config = config_lib.SimpleSamplingConfig(
         seed_nodeset="n1", num_hops=1

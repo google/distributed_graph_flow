@@ -106,8 +106,12 @@ class Sampler:
     self._slice_timeseries_by_seed = slice_timeseries_by_seed
     self._max_timeseries_len = max_timeseries_len
     self._has_temporal_edgesets = has_temporal_edgesets
+    # The sampled graphs only contain node features (see
+    # `add_features_to_samples`): Edge timeseries features are not sliced.
     self._timeseries_schema_cache = (
-        temporal_util.extract_timeseries_schema_cache(self._schema)
+        temporal_util.extract_timeseries_schema_cache(
+            _drop_edge_features(self._schema)
+        )
     )
 
     if self._max_timeseries_len <= 0:
@@ -494,7 +498,7 @@ class Sampler:
       # clipping to `max_timeseries_len`, and timeseries padding) in the c++
       # merging, and remove `_python_merger`.
       self._python_merger = merge_lib.GraphMerger(
-          schema=self._output_schema(), padding=self._padding
+          schema=self.output_schema(), padding=self._padding
       )
       return
 
@@ -614,8 +618,23 @@ class Sampler:
         )
     return seed_node_idxs, seed_timestamps, masked_edge_idxs
 
-  def _output_schema(self) -> schema_lib.GraphSchema:
-    """Schema of the sampled graphs given the `return_*` options."""
+  def output_schema(self) -> schema_lib.GraphSchema:
+    """Returns the schema of the sampled graphs.
+
+    The output schema is the sampler schema reduced to what the sampled graphs
+    actually contain: Node features are only present with `return_features`,
+    the "#idx" node feature is only present with `return_node_idxs`, and edge
+    features are never present.
+
+    Usage example:
+    ```python
+    sampler = dgf.sampling.create_sampler(graph, config, schema)
+    output_schema = sampler.output_schema()
+    ```
+
+    Returns:
+      The schema of the graphs returned by the sampling methods.
+    """
     node_sets = {}
     for node_set_name, node_set_schema in self._schema.node_sets.items():
       features = {}
@@ -630,7 +649,9 @@ class Sampler:
       node_sets[node_set_name] = dataclasses.replace(
           node_set_schema, features=features
       )
-    return dataclasses.replace(self._schema, node_sets=node_sets)
+    return dataclasses.replace(
+        _drop_edge_features(self._schema), node_sets=node_sets
+    )
 
   def subgraph(
       self,
@@ -838,6 +859,26 @@ class Sampler:
             target_timestamp=target_timestamp,
             max_timeseries_len=self._max_timeseries_len,
         )
+
+
+def _drop_edge_features(
+    schema: schema_lib.GraphSchema,
+) -> schema_lib.GraphSchema:
+  """Removes the edge features of a schema.
+
+  The sampled graphs do not contain edge features.
+
+  Args:
+    schema: The schema to reduce.
+
+  Returns:
+    A copy of `schema` without edge features.
+  """
+  edge_sets = {
+      edge_set_name: dataclasses.replace(edge_set_schema, features={})
+      for edge_set_name, edge_set_schema in schema.edge_sets.items()
+  }
+  return dataclasses.replace(schema, edge_sets=edge_sets)
 
 
 def _normalized_random_seeds(

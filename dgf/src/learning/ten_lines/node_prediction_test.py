@@ -1712,6 +1712,40 @@ class NodePredictionTemporalValidationTest(absltest.TestCase):
     self.assertTrue(model.data().temporal_sampling)
     self.assertTrue(_sampling_plan(model).temporal_sampling)
 
+  def test_temporal_training_with_edge_timeseries_features(self):
+    # Regression test: Edge timeseries features used to raise a KeyError
+    # during temporal sampling.
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
+        include_e2=False, include_edge_timeseries=True
+    )
+    schema.node_sets["n1"].features["label"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+    )
+    graph.node_sets["n1"].features["label"] = np.array(
+        [1.0, 2.0, 3.0, 4.0], dtype=np.float32
+    )
+
+    model = node_prediction_lib.train_node_model(
+        graph=graph,
+        valid_graph=graph,
+        schema=schema,
+        target_nodeset="n1",
+        target_column="label",
+        time_aware=True,
+        num_train_steps=2,
+        valid_every_n_steps=1,
+        batch_size=2,
+        sampling_width=2,
+        num_sampling_hops=1,
+        node_embedding_dim=4,
+        num_layers=1,
+        verbose=0,
+    )
+    self.assertTrue(model.data().temporal_sampling)
+    predictions = model.predict(graph, seed_node_idxs=np.array([0, 1, 2, 3]))
+    self.assertEqual(predictions.shape, (4,))
+
 
 class NodePredictionTimeseriesTest(absltest.TestCase):
 
