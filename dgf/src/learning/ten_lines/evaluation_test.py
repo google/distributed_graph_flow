@@ -82,6 +82,43 @@ class EvaluationTest(absltest.TestCase):
     self.assertTrue(np.isnan(float(metrics["hit_at_5"])))
     self.assertTrue(np.isnan(float(metrics["auc"])))
 
+  def test_compute_ranking_metrics_sum_reduction(self):
+    # Two positive edges with 4 negatives each, including ties.
+    pos_scores = np.array([0.5, 0.8], dtype=np.float32)
+    neg_scores = np.array(
+        [0.2, 0.5, 0.7, 0.9, 0.8, 0.1, 0.8, 0.3], dtype=np.float32
+    )
+    num_pos = len(pos_scores)
+    for xp in (np, jnp):
+      mean_metrics = evaluation_lib.compute_ranking_metrics(
+          xp.asarray(pos_scores), xp.asarray(neg_scores)
+      )
+      sum_metrics = evaluation_lib.compute_ranking_metrics(
+          xp.asarray(pos_scores), xp.asarray(neg_scores), reduction="sum"
+      )
+      self.assertSetEqual(set(sum_metrics), set(mean_metrics))
+      for key, mean_value in mean_metrics.items():
+        self.assertAlmostEqual(
+            float(sum_metrics[key]), float(mean_value) * num_pos, places=5
+        )
+
+  def test_compute_ranking_metrics_sum_reduction_nans(self):
+    pos_scores = np.array([np.nan, 0.5])
+    neg_scores = np.array([0.2] * 16)
+    metrics = evaluation_lib.compute_ranking_metrics(
+        pos_scores, neg_scores, reduction="sum"
+    )
+    for value in metrics.values():
+      self.assertTrue(np.isnan(float(value)))
+
+  def test_compute_ranking_metrics_unknown_reduction(self):
+    with self.assertRaisesRegex(ValueError, "Unknown reduction"):
+      evaluation_lib.compute_ranking_metrics(
+          np.array([0.5]),
+          np.array([0.2]),
+          reduction="max",  # pyrefly: ignore[bad-argument-type]
+      )
+
   def test_classification_evaluation_accumulator(self):
     np.random.seed(42)
     num_classes = 3

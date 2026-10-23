@@ -79,13 +79,14 @@ class BatchPrediction:
     merged_seed_node_idxs: The indices of the seed nodes in the
       `normalized_merged_graph`.
     predictions: The model's output predictions (e.g., probabilities) for the
-      batch.
+      batch. A host `np.ndarray` if `predict_batch` is called with
+      `to_host=True` (default), and a device `jax.Array` otherwise.
   """
 
   batch_seed_node_idxs: np.ndarray | None
   normalized_merged_graph: in_memory_graph.InMemoryGraph
   merged_seed_node_idxs: np.ndarray
-  predictions: np.ndarray
+  predictions: np.ndarray | jax.Array
 
 
 # TODO(gbm): Populate.
@@ -373,8 +374,24 @@ class NodePredictionModel(common.Model):
       seed_node_idxs: common.SeedNodeIdxs,
       input_features_only: bool,
       verbose: int = 2,
+      *,
+      to_host: bool = True,
   ) -> Iterator[BatchPrediction]:
-    """Generate batches of predictions."""
+    """Generate batches of predictions.
+
+    Args:
+      graph: The input graph.
+      seed_node_idxs: The indices of the seed nodes in the target nodeset.
+      input_features_only: If true, only the input features (i.e., not the
+        label) are sampled.
+      verbose: The verbosity level.
+      to_host: If true, the predictions are transferred to the host as
+        `np.ndarray`. If false, the predictions stay on device as `jax.Array`,
+        which avoids a device synchronization at each batch.
+
+    Yields:
+      The batches of predictions.
+    """
     sampling_plan = self._data.sampling_plan
     if sampling_plan is None:
       raise ValueError(textwrap.dedent("""\
@@ -434,7 +451,9 @@ class NodePredictionModel(common.Model):
     for normalized_batch in util.prefetch_iterator(
         normalized_batches, prefetch_size=_PREDICT_PREFETCH_SIZE
     ):
-      yield self._predict_normalized_batch(live, normalized_batch)
+      yield self._predict_normalized_batch(
+          live, normalized_batch, to_host=to_host
+      )
 
   def _should_cache_normalized_features(
       self, graph: in_memory_graph.InMemoryGraph, num_seed_nodes: int
@@ -463,10 +482,24 @@ class NodePredictionModel(common.Model):
       self,
       live: ModelLiveResource,
       normalized_batch: inference.NormalizedBatch,
+      *,
+      to_host: bool = True,
   ) -> BatchPrediction:
-    """Predicts on an already merged and normalized (sub-)batch."""
-    probabilities = live.apply_core_model(normalized_batch.jax_batch)
-    predictions = np.asarray(probabilities)
+    """Predicts on an already merged and normalized (sub-)batch.
+
+    Args:
+      live: The live model resources.
+      normalized_batch: The merged and normalized batch.
+      to_host: If true, the predictions are transferred to the host as
+        `np.ndarray` (which blocks until the device computation is done). If
+        false, the predictions stay on device as `jax.Array`.
+
+    Returns:
+      The batch prediction.
+    """
+    predictions = live.apply_core_model(normalized_batch.jax_batch)
+    if to_host:
+      predictions = np.asarray(predictions)
     return BatchPrediction(
         batch_seed_node_idxs=normalized_batch.batch_seed_node_idxs,
         normalized_merged_graph=normalized_batch.normalized_merged_graph,
@@ -501,7 +534,9 @@ class NodePredictionModel(common.Model):
         normalizer=live.normalizer,
         target_nodeset=self._data.task.target_nodeset,
     )
-    return self._predict_normalized_batch(live, normalized_batch).predictions
+    return np.asarray(
+        self._predict_normalized_batch(live, normalized_batch).predictions
+    )
 
   def evaluate(
       self,
@@ -563,7 +598,11 @@ class NodePredictionModel(common.Model):
 
     return self._evaluate_on_batch_iterator(
         self.predict_batch(
-            graph, seed_node_idxs, verbose=verbose, input_features_only=False
+            graph,
+            seed_node_idxs,
+            input_features_only=False,
+            verbose=verbose,
+            to_host=False,
         )
     )
 
@@ -652,7 +691,9 @@ class NodePredictionModel(common.Model):
           verbose=verbose,
       )
       for normalized_batch in normalized_batches:
-        yield self._predict_normalized_batch(live, normalized_batch)
+        yield self._predict_normalized_batch(
+            live, normalized_batch, to_host=False
+        )
 
     if verbose >= 1:
       log.info("Evaluating model on generator")
@@ -662,6 +703,20 @@ class NodePredictionModel(common.Model):
       self,
       batch_iterator: Iterator[BatchPrediction],
   ) -> evaluation.Evaluation:
+    """Evaluates the model on batches of predictions.
+
+    The metrics are accumulated on device, and only transferred to the host at
+    the end, to avoid a device synchronization at each batch. The only
+    exception is the classification per-class metrics (e.g., ROC AUC), which
+    are accumulated on the host.
+
+    Args:
+      batch_iterator: The batches of predictions, ideally with predictions on
+        device.
+
+    Returns:
+      The evaluation.
+    """
     num_good_predictions = jnp.array(0)
     total_squared_error = jnp.array(0.0)
     sum_labels = jnp.array(0.0)
@@ -677,7 +732,12 @@ class NodePredictionModel(common.Model):
       num_classes = self.num_label_classes()
       accumulator = evaluation.ClassificationEvaluationAccumulator(num_classes)
 
-    for batch in batch_iterator:
+    # Each batch is processed only after the next batch is fetched, i.e., after
+    # the model computation of the next batch is dispatched to the device. This
+    # way, the host-side work on the current batch (notably the per-class
+    # metrics accumulator) overlaps with the device computation of the next
+    # batch, instead of leaving the device idle.
+    for batch in util.lookahead_iterator(batch_iterator):
       labels = batch.normalized_merged_graph.node_sets[target_nodeset].features[
           target_normalized_feature
       ][batch.merged_seed_node_idxs]
@@ -692,6 +752,9 @@ class NodePredictionModel(common.Model):
         predictions = jnp.argmax(batch.predictions, axis=-1)
         num_good_predictions += jnp.sum(labels == predictions)
         assert accumulator is not None
+        # Note: The per-class metrics accumulator runs on the host, so this
+        # transfers the predictions to the host. Thanks to the lookahead above,
+        # the device computes the next batch in the meantime.
         accumulator.add_predictions(
             np.asarray(batch.predictions, dtype=np.float32),
             np.asarray(labels, dtype=np.int32),

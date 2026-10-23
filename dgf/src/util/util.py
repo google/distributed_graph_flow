@@ -14,6 +14,7 @@
 
 """Utility functions for the DGF project."""
 
+import collections
 from collections.abc import Iterator
 import contextlib
 import math
@@ -427,3 +428,28 @@ def prefetch_iterator(
   if prefetch_size <= 0:
     return iterator
   return BackgroundPrefetcher(iterator, prefetch_size=prefetch_size)
+
+
+def lookahead_iterator(iterator: Iterator[T], lookahead: int = 1) -> Iterator[T]:
+  """Yields each element only after the next `lookahead` elements are fetched.
+
+  Unlike `prefetch_iterator`, no background thread is used: the next elements
+  are fetched on the calling thread, right before the current element is
+  yielded. This is useful when fetching an element starts some asynchronous
+  work (e.g., dispatching a JAX computation to the device): the asynchronous
+  work of the next elements then overlaps with the processing of the current
+  element by the caller.
+
+  Args:
+    iterator: The source iterator.
+    lookahead: The number of elements to fetch ahead of the yielded element.
+
+  Yields:
+    The elements of `iterator`, in order.
+  """
+  buffer = collections.deque()
+  for item in iterator:
+    buffer.append(item)
+    if len(buffer) > lookahead:
+      yield buffer.popleft()
+  yield from buffer
