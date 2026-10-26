@@ -14,7 +14,7 @@
 
 """Evaluation utilities for ten_lines model."""
 
-from typing import Any
+from typing import Any, Literal
 from dgf.src.data import evaluation as evaluation_data_lib
 from dgf.src.learning.ten_lines import evaluation_ext
 import jax
@@ -100,6 +100,7 @@ class ClassificationEvaluationAccumulator:
 def compute_ranking_metrics(
     pos_scores: jax.Array | np.ndarray,
     neg_scores: jax.Array | np.ndarray,
+    reduction: Literal["mean", "sum"] = "mean",
 ) -> dict[str, jax.Array | np.ndarray]:
   """Computes ranking metrics (MRR, Hit@1, Hit@5, AUC) from scores.
 
@@ -108,11 +109,21 @@ def compute_ranking_metrics(
   Args:
     pos_scores: Scores for positive edges, shape (B,).
     neg_scores: Scores for negative edges, shape (B * N,).
+    reduction: How the per-positive-edge metrics are reduced over the B
+      positive edges. "mean" returns the average metrics. "sum" returns the
+      sum of the metrics, which is useful to accumulate metrics over batches
+      of different sizes without the extra rounding of `mean * B`.
 
   Returns:
     A dictionary containing the computed metrics.
   """
   xp = np if isinstance(pos_scores, np.ndarray) else jnp
+  if reduction == "mean":
+    reduce_fn = xp.mean
+  elif reduction == "sum":
+    reduce_fn = xp.sum
+  else:
+    raise ValueError(f"Unknown reduction: {reduction!r}")
 
   neg_scores_reshaped = neg_scores.reshape(pos_scores.shape[0], -1)
 
@@ -120,13 +131,13 @@ def compute_ranking_metrics(
   equal = xp.sum(neg_scores_reshaped == pos_scores[:, None], axis=-1)
 
   mid_ranks = greater + 1 + equal / 2.0
-  mrr = xp.mean(1.0 / mid_ranks)
+  mrr = reduce_fn(1.0 / mid_ranks)
 
   def hit_at_k(k):
     slots = k - greater
     total_tied = equal + 1
     prob = xp.clip(slots / total_tied, 0.0, 1.0)
-    return xp.mean(prob)
+    return reduce_fn(prob)
 
   hit_at_1 = hit_at_k(1)
   hit_at_5 = hit_at_k(5)
@@ -134,7 +145,8 @@ def compute_ranking_metrics(
   auc_matrix = (pos_scores[:, None] > neg_scores_reshaped).astype(
       xp.float32
   ) + 0.5 * (pos_scores[:, None] == neg_scores_reshaped).astype(xp.float32)
-  auc = xp.mean(auc_matrix)
+  # Per-positive-edge AUC, reduced over the positive edges.
+  auc = reduce_fn(xp.mean(auc_matrix, axis=-1))
 
   invalid = xp.any(xp.isnan(pos_scores)) | xp.any(xp.isnan(neg_scores))
 

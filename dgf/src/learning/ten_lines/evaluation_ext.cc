@@ -56,6 +56,9 @@ class ClassificationEvaluationAccumulator {
           std::to_string(num_examples));
     }
 
+    // The arrays are kept alive by the caller, so the GIL can be released. This
+    // lets other Python threads (e.g., batch prefetching) run in the meantime.
+    nb::gil_scoped_release release;
     for (size_t i = 0; i < num_examples; i++) {
       int32_t true_class = target_view(i);
       if (true_class < 0 || true_class >= num_classes_) {

@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 import dataclasses
+import functools
+import math
 import os
 from typing import Any, Literal
 
@@ -147,11 +149,19 @@ class ModelLiveResource:
 
 @dataclasses.dataclass
 class BatchPrediction:
-  """Prediction yielded by "predict_batch" function."""
+  """Prediction yielded by "predict_batch" function.
+
+  Attributes:
+    batch_source_node_idxs: The indices of the source nodes.
+    batch_target_node_idxs: The indices of the target nodes.
+    predictions: The predicted probabilities. A host `np.ndarray` if
+      `predict_batch` is called with `to_host=True` (default), and a device
+      `jax.Array` otherwise.
+  """
 
   batch_source_node_idxs: np.ndarray
   batch_target_node_idxs: np.ndarray
-  predictions: np.ndarray
+  predictions: np.ndarray | jax.Array
 
 
 def _interleave_positives_and_negatives(
@@ -201,8 +211,8 @@ def _interleave_positives_and_negatives(
 
 
 def _separate_positives_and_negatives(
-    probs: np.ndarray, examples_per_seed_edge: int
-) -> tuple[np.ndarray, np.ndarray]:
+    probs: np.ndarray | jax.Array, examples_per_seed_edge: int
+) -> tuple[np.ndarray | jax.Array, np.ndarray | jax.Array]:
   """Separates positive and negative probabilities from a combined array.
 
   Toy Example:
@@ -227,6 +237,29 @@ def _separate_positives_and_negatives(
   pos_probs = reshaped_probs[:, 0]
   neg_probs = reshaped_probs[:, 1:].flatten()
   return pos_probs, neg_probs
+
+
+@functools.partial(jax.jit, static_argnames=("examples_per_seed_edge",))
+def _sum_ranking_metrics(
+    probs: jax.Array, examples_per_seed_edge: int
+) -> dict[str, jax.Array]:
+  """Computes the sum (over the seed edges) of the ranking metrics.
+
+  Args:
+    probs: Combined probabilities array, shape (num_groups *
+      examples_per_seed_edge,). See `_separate_positives_and_negatives`.
+    examples_per_seed_edge: Number of examples per seed edge (1 pos + K neg).
+
+  Returns:
+    The sum (over the seed edges) of the per-seed-edge ranking metrics of
+    `evaluation.compute_ranking_metrics`.
+  """
+  pos_probs, neg_probs = _separate_positives_and_negatives(
+      probs, examples_per_seed_edge
+  )
+  return evaluation.compute_ranking_metrics(  # pyrefly: ignore[bad-return]
+      pos_probs, neg_probs, reduction="sum"
+  )
 
 
 def _rename_spec(spec: Any, name: str) -> Any:
@@ -577,8 +610,27 @@ class LinkPredictionModel(common.Model):
       verbose: int = 2,
       source_sampler: in_memory_sampler_lib.Sampler | None = None,
       target_sampler: in_memory_sampler_lib.Sampler | None = None,
+      *,
+      to_host: bool = True,
   ) -> Iterator[BatchPrediction]:
-    """Generate batches of predictions."""
+    """Generate batches of predictions.
+
+    Args:
+      graph: The input graph.
+      source_node_idxs: The indices of the source nodes.
+      target_node_idxs: The indices of the target nodes.
+      all_combinations: If true, predict all the source x target combinations.
+      edge_timestamps: Optional timestamps of the edges to predict.
+      verbose: The verbosity level.
+      source_sampler: Optional sampler for the source nodes.
+      target_sampler: Optional sampler for the target nodes.
+      to_host: If true, the predictions are transferred to the host as
+        `np.ndarray`. If false, the predictions stay on device as `jax.Array`,
+        which avoids a device synchronization at each batch.
+
+    Yields:
+      The batches of predictions.
+    """
     live = self._get_live()
 
     np_source_node_idxs = np.asarray(source_node_idxs)
@@ -714,7 +766,9 @@ class LinkPredictionModel(common.Model):
       )
 
       logits = live.apply_core_model(batch)
-      predictions = np.asarray(jax.nn.sigmoid(logits))
+      predictions = jax.nn.sigmoid(logits)
+      if to_host:
+        predictions = np.asarray(predictions)
 
       yield BatchPrediction(
           batch_source_node_idxs=sub_src,
@@ -1396,15 +1450,20 @@ class LinkPredictionModel(common.Model):
         neighbor_idxs.neg_trg_node_idxs,
     )
 
-    total_mrr = 0.0
-    total_hit_at_1 = 0.0
-    total_hit_at_5 = 0.0
-    total_auc = 0.0
+    # The metrics are summed on device for each batch, and only transferred to
+    # the host at the end, to avoid a device synchronization at each batch. The
+    # per-batch sums are then accumulated on the host in float64, to avoid the
+    # precision loss of a float32 accumulation over many batches.
+    # TODO(simonmeierhans): Bound the memory usage by periodically compacting
+    # `batch_metric_sums` (e.g., every 10k batches, transfer the pending sums to
+    # the host, accumulate them into float64 running totals, and clear the
+    # list). This keeps virtually the same speed (one sync every 10k batches).
+    batch_metric_sums: list[dict[str, jax.Array]] = []
 
     # Each group contains one positive prediction, followed by
     # num_negative_nodes corresponding predictions.
     examples_per_seed_edge = 1 + num_negative_nodes
-    carry_over_probs = np.array([])
+    carry_over_probs = jnp.zeros((0,), dtype=jnp.float32)
 
     full_timestamps = None
     if self._data.temporal_sampling:
@@ -1418,12 +1477,14 @@ class LinkPredictionModel(common.Model):
         graph,
         full_src.tolist(),
         full_trg.tolist(),
+        all_combinations=False,
         edge_timestamps=full_timestamps,
         verbose=verbose,
         source_sampler=source_sampler,
         target_sampler=target_sampler,
+        to_host=False,
     ):
-      combined_probs = np.concatenate(
+      combined_probs = jnp.concatenate(
           [carry_over_probs, batch_pred.predictions]
       )
 
@@ -1435,22 +1496,11 @@ class LinkPredictionModel(common.Model):
         complete_probs = combined_probs[:complete_part_len]
         carry_over_probs = combined_probs[complete_part_len:]
 
-        pos_probs, neg_probs = _separate_positives_and_negatives(
-            complete_probs, examples_per_seed_edge
+        batch_metric_sums.append(
+            _sum_ranking_metrics(
+                complete_probs, examples_per_seed_edge=examples_per_seed_edge
+            )
         )
-
-        ranking_metrics = evaluation.compute_ranking_metrics(
-            pos_probs, neg_probs
-        )
-
-        total_mrr += float(ranking_metrics["mrr"]) * num_complete_groups
-        total_hit_at_1 += (
-            float(ranking_metrics["hit_at_1"]) * num_complete_groups
-        )
-        total_hit_at_5 += (
-            float(ranking_metrics["hit_at_5"]) * num_complete_groups
-        )
-        total_auc += float(ranking_metrics["auc"]) * num_complete_groups
       else:
         carry_over_probs = combined_probs
 
@@ -1460,6 +1510,19 @@ class LinkPredictionModel(common.Model):
           " examples left over. Total number of examples must be a multiple of"
           f" {examples_per_seed_edge}."
       )
+    if not batch_metric_sums:
+      raise ValueError("No examples to evaluate: the seed edges are empty.")
+
+    # Single device-to-host transfer.
+    host_batch_metric_sums = jax.device_get(batch_metric_sums)
+
+    def total(key: str) -> float:
+      return math.fsum(float(m[key]) for m in host_batch_metric_sums)
+
+    total_mrr = total("mrr")
+    total_hit_at_1 = total("hit_at_1")
+    total_hit_at_5 = total("hit_at_5")
+    total_auc = total("auc")
 
     return evaluation.Evaluation(
         num_examples=num_examples,

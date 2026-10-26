@@ -379,5 +379,36 @@ class PrefetchIteratorTest(absltest.TestCase):
       next(it)
 
 
+class LookaheadIteratorTest(absltest.TestCase):
+
+  def test_lookahead_basic(self):
+    items = list(range(10))
+    self.assertEqual(list(util.lookahead_iterator(iter(items))), items)
+    self.assertEqual(
+        list(util.lookahead_iterator(iter(items), lookahead=3)), items
+    )
+
+  def test_lookahead_short_and_empty(self):
+    self.assertEqual(list(util.lookahead_iterator(iter([1]), lookahead=3)), [1])
+    self.assertEqual(list(util.lookahead_iterator(iter([]))), [])
+
+  def test_lookahead_fetches_next_before_yield(self):
+    num_fetched = 0
+
+    def counting_iterator():
+      nonlocal num_fetched
+      for i in range(4):
+        num_fetched += 1
+        yield i
+
+    it = util.lookahead_iterator(counting_iterator(), lookahead=1)
+    self.assertEqual(next(it), 0)
+    self.assertEqual(num_fetched, 2)
+    self.assertEqual(next(it), 1)
+    self.assertEqual(num_fetched, 3)
+    self.assertEqual(list(it), [2, 3])
+    self.assertEqual(num_fetched, 4)
+
+
 if __name__ == "__main__":
   absltest.main()

@@ -462,6 +462,7 @@ py_test(
     shard_count = 4,
     deps = [
         ":common",
+        ":evaluation",
         ":link_prediction_model",
         ":link_prediction_train",
         #"//learning/brain/research/jax:gpu_support",
