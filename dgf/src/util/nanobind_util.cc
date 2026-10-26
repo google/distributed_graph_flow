@@ -7,6 +7,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "absl/log/check.h"
@@ -37,11 +38,16 @@ std::string_view remove_tailing_zeros(std::string_view src) {
 
 absl::StatusOr<NumpyBytesArray> NumpyBytesArray::Create(
     const nb::object& data) {
-  PyObject* py_obj = data.ptr();
-  Py_buffer view;
-  if (PyObject_GetBuffer(py_obj, &view, PyBUF_FULL) != 0) {
+  NumpyBytesArray ret;
+  if (PyObject_GetBuffer(data.ptr(), &ret.view_, PyBUF_FULL) != 0) {
+    PyErr_Clear();
     return absl::InvalidArgumentError("Not a buffer object");
   }
+  // From here, `ret` owns the buffer export: it is released when `ret` is
+  // destroyed, including on the error paths below. The data pointer stays
+  // valid while the caller keeps the Python array alive (as before).
+  ret.owns_view_ = true;
+  const Py_buffer& view = ret.view_;
   if (view.ndim != 1) {
     return absl::InvalidArgumentError("Wrong shape");
   }
@@ -51,20 +57,43 @@ absl::StatusOr<NumpyBytesArray> NumpyBytesArray::Create(
         "Expecting a buffer of np.bytes (i.e. 's') array. Got a buffer of \'",
         type, "\' instead"));
   }
-  auto ret = NumpyBytesArray{
-      .data_ = (char*)view.buf,
-      .stride_ = (size_t)view.strides[0],
-      .itemsize_ = (size_t)view.itemsize,
-      .size_ = (size_t)view.shape[0],
-  };
-  // We explicitly do NOT call PyBuffer_Release(&view) here. NumpyBytesArray is
-  // a non-owning view that directly references `view.buf`. Releasing the
-  // buffer view inside this factory method would immediately invalidate the
-  // memory pointer, causing use-after-free crashes when accessing elements
-  // later. The Python object memory is guaranteed to remain locked as long as
-  // the parent Python array is kept alive by the caller.
-  // PyBuffer_Release(&view);
+  ret.data_ = (char*)view.buf;
+  ret.stride_ = (size_t)view.strides[0];
+  ret.itemsize_ = (size_t)view.itemsize;
+  ret.size_ = (size_t)view.shape[0];
   return ret;
+}
+
+NumpyBytesArray::~NumpyBytesArray() { Release(); }
+
+NumpyBytesArray::NumpyBytesArray(NumpyBytesArray&& other) noexcept
+    : data_(std::exchange(other.data_, nullptr)),
+      stride_(std::exchange(other.stride_, 0)),
+      itemsize_(std::exchange(other.itemsize_, 0)),
+      size_(std::exchange(other.size_, 0)),
+      view_(std::exchange(other.view_, Py_buffer{})),
+      owns_view_(std::exchange(other.owns_view_, false)) {}
+
+NumpyBytesArray& NumpyBytesArray::operator=(NumpyBytesArray&& other) noexcept {
+  if (this != &other) {
+    Release();
+    // Leave `other` in a valid empty state: it must not expose the data of a
+    // buffer export it no longer owns.
+    data_ = std::exchange(other.data_, nullptr);
+    stride_ = std::exchange(other.stride_, 0);
+    itemsize_ = std::exchange(other.itemsize_, 0);
+    size_ = std::exchange(other.size_, 0);
+    view_ = std::exchange(other.view_, Py_buffer{});
+    owns_view_ = std::exchange(other.owns_view_, false);
+  }
+  return *this;
+}
+
+void NumpyBytesArray::Release() {
+  if (owns_view_) {
+    PyBuffer_Release(&view_);
+    owns_view_ = false;
+  }
 }
 
 std::string_view NumpyBytesArray::operator[](size_t i) const {

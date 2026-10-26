@@ -70,11 +70,22 @@ inline nanobind::str string_to_py_str(const std::string& v) {
 // View to Numpy multi-bytes array (e.g. dtype=S5) with 1 dimensions.
 // The creation and destruction of "NumpyBytesArray" requires being in the GIL.
 //
+// The view holds the Python buffer export (`PyObject_GetBuffer`) of the array
+// and releases it (`PyBuffer_Release`) when destroyed, so the array is not kept
+// alive (leaked) after the view is gone. The view is movable but not copyable.
+//
 // Avoid the limitation of nanobind with bytes arrays.
 // https://github.com/wjakob/nanobind/issues/1217
 struct NumpyBytesArray {
   // Wraps a single dimensional np::array of bytes.
   static absl::StatusOr<NumpyBytesArray> Create(const nanobind::object& data);
+
+  NumpyBytesArray() = default;
+  ~NumpyBytesArray();
+  NumpyBytesArray(const NumpyBytesArray&) = delete;
+  NumpyBytesArray& operator=(const NumpyBytesArray&) = delete;
+  NumpyBytesArray(NumpyBytesArray&& other) noexcept;
+  NumpyBytesArray& operator=(NumpyBytesArray&& other) noexcept;
 
   // Number of items.
   size_t size() const { return size_; }
@@ -88,10 +99,17 @@ struct NumpyBytesArray {
   // String with all the values.
   std::string ToString() const;
 
-  char* data_;
-  size_t stride_;
-  size_t itemsize_;
-  size_t size_;
+  char* data_ = nullptr;
+  size_t stride_ = 0;
+  size_t itemsize_ = 0;
+  size_t size_ = 0;
+
+ private:
+  // Releases `view_` if owned.
+  void Release();
+
+  Py_buffer view_{};
+  bool owns_view_ = false;
 };
 
 // Converts a list of python bytes into a c++ vector of string.
