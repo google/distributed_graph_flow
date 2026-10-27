@@ -15,6 +15,7 @@
 from absl.testing import absltest
 import dgf
 from dgf.benchmark import mpnn
+import jax
 import jax.numpy as jnp
 
 
@@ -92,6 +93,52 @@ class MPNNBenchmarkTest(absltest.TestCase):
         mpnn.describe_relations(make_graph(70000, 10, 60000), schema),
         "e0[70000->10:60000 r1/r1 sort]",
     )
+
+  def test_large_scenarios_and_memory_details(self):
+    all_names = {s.name for s in mpnn.ALL_SCENARIOS}
+    for name in ("large_dense_u16", "xlarge_dense_u16", "xlarge_many_nodes"):
+      self.assertIn(name, all_names)
+
+    scenario = mpnn.Scenario(
+        name="tiny_homogeneous",
+        num_nodesets=1,
+        num_edgesets=1,
+        treeness=0.5,
+        batch_size=4,
+        num_hops=1,
+        hop_width=3,
+    )
+    schema = mpnn.generate_synthetic_schema(
+        num_nodesets=1, num_edgesets=1, dims=16, num_hops=1
+    )
+    jax_graph = mpnn.generate_padded_jax_batch(schema, scenario, dims=16)
+    model = mpnn._make_model(
+        schema,
+        mpnn.LayerType.GCN_PALLAS,
+        num_layers=1,
+        dims=16,
+        num_heads=4,
+    )
+    variables = model.init(jax.random.PRNGKey(0), jax_graph, training=False)
+    runner = mpnn.RunMPNN(
+        jax_graph=jax_graph,
+        schema=schema,
+        scenario=scenario,
+        model=model,
+        variables=variables,
+        layer_type=mpnn.LayerType.GCN_PALLAS,
+        mode=mpnn.Mode.FORWARD,
+        num_layers=1,
+        dims=16,
+        max_runtime_seconds=0.01,
+    )
+    runner.setup()
+    runner.run_unit()
+    runner.clean()
+    details = runner.details()
+    self.assertIn("hlo_temp_mib=", details)
+    self.assertIn("hlo_peak_mib=", details)
+    self.assertIn("dev_peak_mib=", details)
 
 
 if __name__ == "__main__":

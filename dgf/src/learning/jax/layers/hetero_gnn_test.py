@@ -635,6 +635,150 @@ class HeteroGNNTest(parameterized.TestCase):
     with self.assertRaisesRegex(ValueError, "same dimension"):
       gnn.init(jax.random.PRNGKey(0), make_graph(num_edges=4), training=False)
 
+  def test_use_pallas_validation(self):
+    with self.assertRaisesRegex(ValueError, "message_consumes_target=False"):
+      Config(dims=DIMS, use_pallas=True)
+    with self.assertRaisesRegex(ValueError, "not supported"):
+      Config(
+          dims=DIMS,
+          use_pallas=True,
+          message_consumes_target=False,
+          message_aggregation=MessageAggregation.ATTENTION,
+          attention=graph_attention.GatAttentionConfig(num_heads=4),
+      )
+
+  def test_gcn_and_graphsage_pallas_architecture_string(self):
+    cfg_base = Config.gcn(dims=DIMS, use_pallas=False)
+    cfg_pallas = Config.gcn(dims=DIMS, use_pallas=True)
+    self.assertIn("Aggregation(symmetric)", cfg_base.architecture())
+    self.assertNotIn("pallas", cfg_base.architecture())
+    self.assertIn("Aggregation(symmetric, pallas)", cfg_pallas.architecture())
+
+    sage_base = Config.graphsage(dims=DIMS, use_pallas=False)
+    sage_pallas = Config.graphsage(dims=DIMS, use_pallas=True)
+    self.assertIn("Aggregation(mean)", sage_base.architecture())
+    self.assertNotIn("pallas", sage_base.architecture())
+    self.assertIn("Aggregation(mean, pallas)", sage_pallas.architecture())
+
+  @parameterized.parameters(
+      ("gcn", 2),
+      ("gcn", 30),
+      ("graphsage", 2),
+      ("graphsage", 30),
+  )
+  def test_pallas_template_matches_baseline_fwd_and_bwd(
+      self, template: str, num_edges: int
+  ):
+    graph = make_graph(num_edges=num_edges)
+    template_fn = getattr(Config, template)
+    gnn_base = template_fn(dims=DIMS, use_pallas=False).make(SCHEMA)
+    gnn_pallas = template_fn(dims=DIMS, use_pallas=True).make(SCHEMA)
+
+    variables = gnn_base.init(jax.random.PRNGKey(0), graph, training=False)
+    vars_pallas = gnn_pallas.init(jax.random.PRNGKey(0), graph, training=False)
+    self.assertEqual(
+        jax.tree.structure(variables), jax.tree.structure(vars_pallas)
+    )
+
+    def loss_fn(model, params, g):
+      out = model.apply(params, g, training=False)
+      loss = sum(
+          jnp.sum(ns.features["embedding"] ** 2)
+          for ns in out.node_sets.values()
+      )
+      return loss, out
+
+    (loss_base, out_base), (grad_params_base, grad_g_base) = jax.value_and_grad(
+        lambda p, g: loss_fn(gnn_base, p, g),
+        argnums=(0, 1),
+        has_aux=True,
+        allow_int=True,
+    )(variables, graph)
+    (loss_pallas, out_pallas), (grad_params_pallas, grad_g_pallas) = (
+        jax.value_and_grad(
+            lambda p, g: loss_fn(gnn_pallas, p, g),
+            argnums=(0, 1),
+            has_aux=True,
+            allow_int=True,
+        )(variables, graph)
+    )
+
+    np.testing.assert_allclose(loss_pallas, loss_base, rtol=1e-5, atol=1e-5)
+    self.assert_graphs_close(out_pallas, out_base, tolerance=1e-5)
+    self.assert_graphs_close(grad_g_pallas, grad_g_base, tolerance=1e-5)
+    for g_pal, g_ref in zip(
+        jax.tree.leaves(grad_params_pallas), jax.tree.leaves(grad_params_base)
+    ):
+      np.testing.assert_allclose(g_pal, g_ref, rtol=1e-5, atol=1e-5)
+
+  def test_gcn_pallas_homogeneous_graph_parity(self):
+    homo_dims = 128
+    num_nodes = 16
+    num_edges = 64
+    homo_schema = schema_lib.GraphSchema(
+        node_sets={},
+        edge_sets={"e0": schema_lib.EdgeSchema(source="n0", target="n0")},
+    )
+    k1, k2 = jax.random.split(jax.random.PRNGKey(123))
+    graph = jax_in_memory_graph.JaxInMemoryGraph(
+        node_sets={
+            "n0": jax_in_memory_graph.JaxInMemoryNodeSet(
+                features={
+                    "embedding": jax.random.normal(k1, (num_nodes, homo_dims))
+                },
+                num_nodes=num_nodes,
+            )
+        },
+        edge_sets={
+            "e0": jax_in_memory_graph.JaxInMemoryEdgeSet(
+                adjacency=jax.random.randint(k2, (2, num_edges), 0, num_nodes)
+            )
+        },
+    )
+    gnn_base = Config.gcn(dims=homo_dims, use_pallas=False).make(homo_schema)
+    gnn_pallas = Config.gcn(dims=homo_dims, use_pallas=True).make(homo_schema)
+    variables = gnn_base.init(jax.random.PRNGKey(7), graph, training=False)
+
+    loss_base, out_base, grad_base = loss_and_grads(gnn_base, variables, graph)
+    loss_pallas, out_pallas, grad_pallas = loss_and_grads(
+        gnn_pallas, variables, graph
+    )
+    np.testing.assert_allclose(loss_pallas, loss_base, rtol=1e-5, atol=1e-5)
+    self.assert_graphs_close(out_pallas, out_base, tolerance=1e-5)
+    self.assert_graphs_close(grad_pallas, grad_base, tolerance=1e-5)
+
+  @parameterized.parameters(
+      MessageAggregation.SUM,
+      MessageAggregation.MEAN,
+      MessageAggregation.MEAN_SUM,
+      MessageAggregation.SYMMETRIC,
+  )
+  def test_pallas_with_learnable_source_messages(
+      self, aggregation: MessageAggregation
+  ):
+    graph = make_graph(num_edges=30)
+
+    def make_model(use_pallas: bool):
+      return Config(
+          dims=DIMS,
+          message_aggregation=aggregation,
+          message_consumes_target=False,
+          use_pallas=use_pallas,
+          message=standard.GenericBlockConfig("LA", dims=DIMS),
+      ).make(SCHEMA)
+
+    gnn_base = make_model(use_pallas=False)
+    gnn_pallas = make_model(use_pallas=True)
+    variables = gnn_base.init(jax.random.PRNGKey(0), graph, training=False)
+
+    loss_base, out_base, grad_base = loss_and_grads(gnn_base, variables, graph)
+    loss_pallas, out_pallas, grad_pallas = loss_and_grads(
+        gnn_pallas, variables, graph
+    )
+    np.testing.assert_allclose(loss_pallas, loss_base, rtol=1e-5, atol=1e-5)
+    self.assert_graphs_close(out_pallas, out_base, tolerance=1e-5)
+    self.assert_graphs_close(grad_pallas, grad_base, tolerance=1e-5)
+
 
 if __name__ == "__main__":
   absltest.main()

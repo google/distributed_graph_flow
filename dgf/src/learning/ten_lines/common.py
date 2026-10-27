@@ -522,6 +522,9 @@ class HParam:
     padding_margin: Relative margin added to observed maximum node and edge
       counts when estimating static graph padding. The margin is estimated from
       the training data and decreases with batch size.
+    use_pallas: If True, aggregates node-projected messages using the O(N)
+      memory Pallas TPU SpMM kernel instead of materializing O(E * D) edge
+      messages. Supported for `GRAPH_CONVOLUTIONAL_NETWORK` and `GRAPH_SAGE`.
   """
 
   num_sampling_hops: int = 1
@@ -547,6 +550,7 @@ class HParam:
       None
   )
   padding_margin: float = 0.1
+  use_pallas: bool = False
 
 
 def save_model(model: Model, path: str) -> None:
@@ -644,6 +648,16 @@ def load_params(path: str) -> Any:
 
 def build_gnn_config(hparams: HParam) -> jax_common.GenericLayer:
   """Creates the GNN layer configuration from the hyper-parameters."""
+  if hparams.use_pallas and hparams.architecture not in (
+      Architecture.GRAPH_SAGE,
+      Architecture.GRAPH_CONVOLUTIONAL_NETWORK,
+  ):
+    raise ValueError(
+        "use_pallas=True is only supported for"
+        f" {Architecture.GRAPH_CONVOLUTIONAL_NETWORK.value} and"
+        f" {Architecture.GRAPH_SAGE.value} architectures, got"
+        f" {hparams.architecture.value}."
+    )
 
   if hparams.architecture == Architecture.HETEROGENEOUS_MESSAGE_PASSING:
     return hetero_gnn.HeterogeneousGraphConvolutionConfig(  # pyrefly: ignore[bad-return]
@@ -664,12 +678,14 @@ def build_gnn_config(hparams: HParam) -> jax_common.GenericLayer:
     return hetero_gnn.HeterogeneousGraphConvolutionConfig.graphsage(  # pyrefly: ignore[bad-return]
         dims=hparams.node_embedding_dim,
         dropout_rate=hparams.dropout,
+        use_pallas=hparams.use_pallas,
     )
 
   elif hparams.architecture == Architecture.GRAPH_CONVOLUTIONAL_NETWORK:
     return hetero_gnn.HeterogeneousGraphConvolutionConfig.gcn(  # pyrefly: ignore[bad-return]
         dims=hparams.node_embedding_dim,
         dropout_rate=hparams.dropout,
+        use_pallas=hparams.use_pallas,
     )
 
   elif hparams.architecture == Architecture.GRAPH_ATTENTION_NETWORK:
