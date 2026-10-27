@@ -40,16 +40,27 @@ py_library(
 )
 
 py_library(
+    name = "normalize_base",
+    srcs = ["normalize_base.py"],
+    deps = [
+        "//dgf/src/data:schema",
+        "//dgf/src/util:dataclass_registry",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
+        # numpy dep,
+    ],
+)
+
+py_library(
     name = "normalize",
     srcs = ["normalize.py"],
     deps = [
+        ":normalize_base",
         # dataclasses_json dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:jax_in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/data:statistics",
         "//dgf/src/data:tf_in_memory_graph",
-        "//dgf/src/util:dataclass_registry",
         "//dgf/src/util:log",
         "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # jax dep,
