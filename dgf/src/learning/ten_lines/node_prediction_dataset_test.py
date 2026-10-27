@@ -567,7 +567,7 @@ class GNNDatasetPreparatorTest(parameterized.TestCase):
         batch_size=2,
         drop_remainder=True,
         shuffle=False,
-        padding_margin=1.0,
+        padding_margin=20.0,
     )
     prep_large.prepare()
     large_nodes = prep_large.get_live().padding.node_sets["n1"].num_nodes

@@ -36,12 +36,12 @@ class PaddingTest(absltest.TestCase):
     padding = padding_lib.padding_from_graph_generator(schema, iter(graphs))
     expected_padding = padding_data_lib.Padding(
         node_sets={
-            "n1": padding_data_lib.NodeSetPadding(num_nodes=3 + 64),
-            "n2": padding_data_lib.NodeSetPadding(num_nodes=3 + 64),
+            "n1": padding_data_lib.NodeSetPadding(num_nodes=128),
+            "n2": padding_data_lib.NodeSetPadding(num_nodes=128),
         },
         edge_sets={
-            "e1": padding_data_lib.EdgeSetPadding(num_edges=3 + 64),
-            "e2": padding_data_lib.EdgeSetPadding(num_edges=3 + 64),
+            "e1": padding_data_lib.EdgeSetPadding(num_edges=128),
+            "e2": padding_data_lib.EdgeSetPadding(num_edges=128),
         },
     )
     test_util.assert_are_equal(self, padding, expected_padding)
@@ -50,7 +50,11 @@ class PaddingTest(absltest.TestCase):
     schema = gen_test_graph.generate_schema()
     graphs = [gen_test_graph.generate_in_memory_graph()]
     padding = padding_lib.padding_from_graph_generator(
-        schema, iter(graphs), relative_margin=0.5, absolute_margin=2
+        schema,
+        iter(graphs),
+        relative_margin=0.5,
+        absolute_margin=2,
+        size_multiple=1,
     )
     # Each node set / edge set has 2 nodes / edges: ceil(2 * 1.5) + 2 = 5.
     expected_padding = padding_data_lib.Padding(
@@ -61,6 +65,29 @@ class PaddingTest(absltest.TestCase):
         edge_sets={
             "e1": padding_data_lib.EdgeSetPadding(num_edges=5),
             "e2": padding_data_lib.EdgeSetPadding(num_edges=5),
+        },
+    )
+    test_util.assert_are_equal(self, padding, expected_padding)
+
+  def test_size_multiple(self):
+    schema = gen_test_graph.generate_schema()
+    graphs = [gen_test_graph.generate_in_memory_graph()]
+    padding = padding_lib.padding_from_graph_generator(
+        schema,
+        iter(graphs),
+        relative_margin=0.5,
+        absolute_margin=2,
+        size_multiple=4,
+    )
+    # ceil(2 * 1.5) + 2 = 5, rounded up to a multiple of 4 -> 8.
+    expected_padding = padding_data_lib.Padding(
+        node_sets={
+            "n1": padding_data_lib.NodeSetPadding(num_nodes=8),
+            "n2": padding_data_lib.NodeSetPadding(num_nodes=8),
+        },
+        edge_sets={
+            "e1": padding_data_lib.EdgeSetPadding(num_edges=8),
+            "e2": padding_data_lib.EdgeSetPadding(num_edges=8),
         },
     )
     test_util.assert_are_equal(self, padding, expected_padding)
@@ -142,7 +169,7 @@ class PaddingTest(absltest.TestCase):
     expected_padding = padding_data_lib.Padding(
         node_sets={
             "n": padding_data_lib.NodeSetPadding(
-                num_nodes=3 + 64,
+                num_nodes=128,
                 features={
                     "static_ts": padding_data_lib.FeaturePadding(
                         max_timeseries_len=4
@@ -158,7 +185,7 @@ class PaddingTest(absltest.TestCase):
         },
         edge_sets={
             "e": padding_data_lib.EdgeSetPadding(
-                num_edges=2 + 64,
+                num_edges=128,
                 features={
                     "edge_ts": padding_data_lib.FeaturePadding(
                         max_timeseries_len=4

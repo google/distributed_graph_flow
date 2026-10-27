@@ -21,6 +21,22 @@ from dgf.src.data import schema as schema_lib
 # TODO(gbm): Implement Beam version.
 
 
+def _padded_size(
+    max_size: int,
+    relative_margin: float,
+    absolute_margin: int,
+    size_multiple: int,
+) -> int:
+  """Computes the padded size with margins, rounded up to `size_multiple`."""
+  if size_multiple <= 0:
+    raise ValueError(f"size_multiple must be >= 1, got {size_multiple}")
+  size = math.ceil(max_size * (1.0 + relative_margin)) + absolute_margin
+  return max(
+      size_multiple,
+      ((size + size_multiple - 1) // size_multiple) * size_multiple,
+  )
+
+
 def _feature_padding_from_schema(
     features_schema: schema_lib.FeatureSetSchema,
     max_timeseries_len: int | None = None,
@@ -42,6 +58,7 @@ def padding_from_graph_generator(
     relative_margin: float = 0.1,
     absolute_margin: int = 64,
     max_timeseries_len: int | None = None,
+    size_multiple: int = 128,
 ) -> padding_lib.Padding:
   """Creates a padding configuration from a set of in-memory graphs.
 
@@ -62,14 +79,18 @@ def padding_from_graph_generator(
 
   The padding size is:
     ceil(<maximum observed value> * (1 + relative_margin)) + absolute_margin
+  rounded up to a multiple of `size_multiple`.
 
-  The margins serve two purposes:
+  The margins and rounding serve three purposes:
   - JAX requires fixed size arrays. Graphs larger than the padding (e.g.,
     samples not observed by this function) cannot be merged.
   - The padding edges are spread over the padding nodes (a.k.a. sentinel
     nodes). Merging requires at least one padding node, and many padding
     nodes make message passing faster on GPU (all the padding edges pointing
     to a single node serializes the scatter-adds).
+  - Rounding the number of nodes and edges to a multiple of `size_multiple`
+    (128 by default) avoids split-K padding copies in GPU matrix
+    multiplications during the backward pass.
 
   Args:
     schema: The graph schema.
@@ -79,6 +100,8 @@ def padding_from_graph_generator(
       padding nodes.
     max_timeseries_len: Optional maximum sequence length for timeseries
       features.
+    size_multiple: Positive integer to which the padded node and edge counts are
+      rounded up (use 1 to disable rounding).
 
   Returns:
     Padding configuration compatible with the graphs.
@@ -109,10 +132,11 @@ def padding_from_graph_generator(
 
   padded_node_sets = {}
   for node_set_name, max_n in max_nodes.items():
-    padded_n = math.ceil(max_n * (1.0 + relative_margin)) + absolute_margin
     node_set_schema = schema.node_sets[node_set_name]
     padded_node_sets[node_set_name] = padding_lib.NodeSetPadding(
-        num_nodes=padded_n,
+        num_nodes=_padded_size(
+            max_n, relative_margin, absolute_margin, size_multiple
+        ),
         features=_feature_padding_from_schema(
             node_set_schema.features, max_timeseries_len
         ),
@@ -121,10 +145,11 @@ def padding_from_graph_generator(
   # Create the padding with a margin.
   padded_edge_sets = {}
   for edge_set_name, max_e in max_edges.items():
-    padded_e = math.ceil(max_e * (1.0 + relative_margin)) + absolute_margin
     edge_set_schema = schema.edge_sets[edge_set_name]
     padded_edge_sets[edge_set_name] = padding_lib.EdgeSetPadding(
-        num_edges=padded_e,
+        num_edges=_padded_size(
+            max_e, relative_margin, absolute_margin, size_multiple
+        ),
         features=_feature_padding_from_schema(
             edge_set_schema.features, max_timeseries_len
         ),
