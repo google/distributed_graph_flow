@@ -89,9 +89,14 @@ import jax
 import jax.numpy as jnp
 
 # Node feature read and written by the masking layer and encoder GNN layers.
-_EMBEDDING_FEATURE = "embedding"
+EMBEDDING_FEATURE = "embedding"
 
 Batch = tuple[jax_in_memory_graph_lib.JaxInMemoryGraph, jax.Array]
+
+
+def _safe_normalize(v: jax.Array, eps: float = 1e-6) -> jax.Array:
+  """L2-normalizes `v` along the last axis; zero vectors stay zero."""
+  return v * jax.lax.rsqrt(jnp.sum(v**2, axis=-1, keepdims=True) + eps**2)
 
 
 def sce_loss(
@@ -114,12 +119,8 @@ def sce_loss(
   Returns:
     Scalar mean SCE loss over the masked nodes.
   """
-
-  def safe_normalize(v: jax.Array) -> jax.Array:
-    return v * jax.lax.rsqrt(jnp.sum(v**2, axis=-1, keepdims=True) + eps**2)
-
-  x = safe_normalize(x)
-  y = safe_normalize(y)
+  x = _safe_normalize(x, eps)
+  y = _safe_normalize(y, eps)
   cos_sim = (x * y).sum(axis=-1)
   # Float32 rounding can make `cos_sim` slightly larger than 1. Clamp so that
   # `jnp.power` with a non-integer exponent never gets a negative base (NaN).
@@ -165,6 +166,36 @@ def vicreg_loss(
   cov_loss = (cov_off_diag**2).sum() / z.shape[1]
 
   return var_loss, cov_loss
+
+
+def effective_rank_ratio(z: jax.Array) -> jax.Array:
+  """Effective rank of the rows of `z`, divided by the maximum possible rank.
+
+  The effective rank (Roy & Vetterli, 2007) is the exponential of the entropy
+  of the normalized eigenvalues of the covariance matrix of `z`. It is 1 if all
+  the variance lies along a single direction (e.g., collapsed embeddings), and
+  equal to the number of dimensions if the variance is spread uniformly.
+
+  Since `N` rows span at most `N - 1` dimensions after centering, the effective
+  rank is divided by `min(D, N - 1)`, so that 1 is reachable for any batch size.
+
+  Args:
+    z: Representation matrix of shape ``[N, D]``.
+
+  Returns:
+    A scalar in ``(0, 1]``. Close to 1 means that the representations use all
+    the available dimensions, and close to 0 means that they collapsed to a
+    low-dimensional subspace.
+  """
+  num_nodes, dims = z.shape
+  z_centered = z - z.mean(axis=0, keepdims=True)
+  cov = (z_centered.T @ z_centered) / max(num_nodes, 1)
+  eigvals = jnp.maximum(jnp.linalg.eigvalsh(cov), 0.0)
+  probs = eigvals / jnp.maximum(eigvals.sum(), 1e-12)
+  # 0 * log(0) = 0.
+  entropy = -jnp.sum(probs * jnp.log(jnp.where(probs > 0, probs, 1.0)))
+  max_rank = max(min(dims, num_nodes - 1), 1)
+  return jnp.exp(entropy) / max_rank
 
 
 @struct.dataclass(frozen=True)
@@ -256,6 +287,80 @@ def compute_losses(
       reconstruction=reconstruction,
       variance=config.variance_regularization_weight * var_loss,
       covariance=config.covariance_regularization_weight * cov_loss,
+  )
+
+
+@struct.dataclass(frozen=True)
+class Metrics:
+  """Interpretable, scale-free metrics of a `GraphMAE` forward pass.
+
+  Unlike `Losses`, these metrics do not depend on the loss weights nor on
+  `scaled_cosine_error_alpha`, and are not optimized. See `compute_metrics`.
+
+  Attributes:
+    reconstruction_cosine: Mean cosine similarity in ``[-1, 1]`` between the
+      reconstructed and the original embeddings of the masked seed nodes. 1 is
+      a perfect reconstruction.
+    reconstruction_relative_error: Cosine error of the reconstruction relative
+      to the best constant prediction: ``(1 - cos) / (1 - baseline_cos)``,
+      where ``baseline_cos`` is the mean cosine similarity of the best constant
+      prediction (the mean direction of the targets). 0 is a perfect
+      reconstruction, 1 is no better than predicting the same embedding for
+      all the nodes, and values above 1 are worse than that. Ill-conditioned
+      if the targets collapsed (see `target_rank_ratio`).
+    embedding_rank_ratio: `effective_rank_ratio` of the node embeddings, i.e.,
+      the encoder representations (`enc_rep`) of the seed nodes.
+    target_rank_ratio: `effective_rank_ratio` of the reconstruction targets,
+      i.e., the input feature embeddings (`x_init`) of the seed nodes.
+  """
+
+  reconstruction_cosine: jax.Array
+  reconstruction_relative_error: jax.Array
+  embedding_rank_ratio: jax.Array
+  target_rank_ratio: jax.Array
+
+
+def compute_metrics(output: GraphMAEOutput, eps: float = 1e-6) -> Metrics:
+  """Computes interpretable metrics for monitoring and evaluation.
+
+  The reconstruction metrics are computed on the masked seed nodes
+  (`output.loss_mask`), like the reconstruction loss, and are 0 if no seed node
+  is masked. The rank metrics are computed on all the seed nodes, like the
+  VICReg regularization. The metrics are computed per batch, and are noisier
+  for batches with few seed nodes.
+
+  Args:
+    output: The output of the `GraphMAE` forward pass.
+    eps: Small constant for numerical stability.
+
+  Returns:
+    The computed `Metrics`.
+  """
+  output = jax.lax.stop_gradient(output)
+  mask = output.loss_mask
+  num_masked = jnp.maximum(mask.sum(), 1.0)
+
+  def masked_mean(v: jax.Array) -> jax.Array:
+    return jnp.where(mask, v, 0.0).sum() / num_masked
+
+  target = _safe_normalize(output.x_init, eps)
+  recon = _safe_normalize(output.recon, eps)
+  reconstruction_cosine = masked_mean((recon * target).sum(axis=-1))
+  # The constant prediction maximizing the mean cosine similarity is the mean
+  # direction of the targets, and its mean cosine similarity is the norm of the
+  # mean of the normalized targets.
+  mean_target = jnp.where(mask[:, None], target, 0.0).sum(axis=0) / num_masked
+  baseline_cosine = jnp.linalg.norm(mean_target)
+  # With no masked seed node, `masked_mean` is 0 and the relative error is 0.
+  reconstruction_relative_error = masked_mean(
+      1.0 - (recon * target).sum(axis=-1)
+  ) / jnp.maximum(1.0 - baseline_cosine, eps)
+
+  return Metrics(
+      reconstruction_cosine=reconstruction_cosine,
+      reconstruction_relative_error=reconstruction_relative_error,
+      embedding_rank_ratio=effective_rank_ratio(output.enc_rep),
+      target_rank_ratio=effective_rank_ratio(output.x_init),
   )
 
 
@@ -368,10 +473,10 @@ class GraphMAEConfig(common.ArchitectureProvider):
           f" encoder output: `decoder_conv.dims` ({self.decoder_conv.dims})"
           f" must be equal to `encoder_conv.dims` ({self.encoder_conv.dims})."
       )
-    if self.encoder_conv.embedding_feature != _EMBEDDING_FEATURE:
+    if self.encoder_conv.embedding_feature != EMBEDDING_FEATURE:
       raise ValueError(
           "`encoder_conv.embedding_feature` must be"
-          f" {_EMBEDDING_FEATURE!r}. Got"
+          f" {EMBEDDING_FEATURE!r}. Got"
           f" {self.encoder_conv.embedding_feature!r}."
       )
     if self.target_nodeset not in schema.node_sets:
@@ -383,17 +488,17 @@ class GraphMAEConfig(common.ArchitectureProvider):
     # connections require the embedding dimension to be `encoder_conv.dims`.
     expected_shape = (self.encoder_conv.dims,)
     for nodeset_name, nodeset_schema in schema.node_sets.items():
-      feature_schema = nodeset_schema.features.get(_EMBEDDING_FEATURE)
+      feature_schema = nodeset_schema.features.get(EMBEDDING_FEATURE)
       if feature_schema is None:
         raise ValueError(
-            f"Nodeset {nodeset_name!r} must have an {_EMBEDDING_FEATURE!r}"
+            f"Nodeset {nodeset_name!r} must have an {EMBEDDING_FEATURE!r}"
             " feature in the embedded schema. Available:"
             f" {sorted(nodeset_schema.features)}."
         )
       shape = feature_schema.shape
       if shape is None or tuple(shape) != expected_shape:
         raise ValueError(
-            f"The {_EMBEDDING_FEATURE!r} feature of nodeset {nodeset_name!r}"
+            f"The {EMBEDDING_FEATURE!r} feature of nodeset {nodeset_name!r}"
             f" must have shape {expected_shape} to match `encoder_conv.dims`."
             f" Got {shape}."
         )
@@ -407,7 +512,7 @@ class GraphMAEConfig(common.ArchitectureProvider):
     """Configuration of the layer masking the target nodes."""
     return graph_masking.MaskNodeFeaturesConfig(
         nodeset=self.target_nodeset,
-        feature=_EMBEDDING_FEATURE,
+        feature=EMBEDDING_FEATURE,
         mask_rate=self.mask_rate,
         replace_rate=self.replace_rate,
     )
@@ -471,18 +576,18 @@ class GraphMAEEncoder(nn.Module):
     for nodeset_name in self.schema.node_sets:
       nodeset = enc_graph.node_sets[nodeset_name]
       embedding = standard.norm(
-          nodeset.features[_EMBEDDING_FEATURE],
+          nodeset.features[EMBEDDING_FEATURE],
           self.config.norm,
           training,
           name=f"encoder_norm_{nodeset_name}",
       )
       node_sets[nodeset_name] = jax_in_memory_graph_lib.JaxInMemoryNodeSet(
-          num_nodes=nodeset.num_nodes, features={_EMBEDDING_FEATURE: embedding}
+          num_nodes=nodeset.num_nodes, features={EMBEDDING_FEATURE: embedding}
       )
     enc_graph = jax_in_memory_graph_lib.JaxInMemoryGraph(
         node_sets=node_sets, edge_sets=enc_graph.edge_sets
     )
-    enc_rep = node_sets[self.config.target_nodeset].features[_EMBEDDING_FEATURE]
+    enc_rep = node_sets[self.config.target_nodeset].features[EMBEDDING_FEATURE]
     return enc_rep, enc_graph
 
 
@@ -588,7 +693,7 @@ class GraphMAE(nn.Module):
       seed_idxs = jnp.arange(max(num_target_nodes - 1, 0))
 
     # 1. Reconstruction target: the embedded features of the seed nodes.
-    x_init = graph.node_sets[target_ns].features[_EMBEDDING_FEATURE][seed_idxs]
+    x_init = graph.node_sets[target_ns].features[EMBEDDING_FEATURE][seed_idxs]
 
     # 2. Masking. All the target nodes can be masked, but only the masked seed
     # nodes are reconstructed in the loss.
@@ -616,7 +721,7 @@ class GraphMAE(nn.Module):
     dec_node_sets = {}
     for nodeset_name in self.schema.node_sets:
       nodeset = enc_graph.node_sets[nodeset_name]
-      rep = nodeset.features[_EMBEDDING_FEATURE]
+      rep = nodeset.features[EMBEDDING_FEATURE]
       if self.config.use_encoder_to_decoder:
         rep = nn.Dense(
             decoder_config.dims,

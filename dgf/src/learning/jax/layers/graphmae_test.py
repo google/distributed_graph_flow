@@ -546,6 +546,70 @@ class GraphMAELossTest(absltest.TestCase):
     np.testing.assert_allclose(grad_stopped, 0.0)
     self.assertGreater(float(jnp.linalg.norm(grad_unstopped)), 1e-2)
 
+  def test_effective_rank_ratio(self):
+    rng = np.random.RandomState(0)
+    # Isotropic: close to full rank.
+    isotropic = jnp.asarray(rng.randn(4096, 8).astype(np.float32))
+    self.assertGreater(float(graphmae.effective_rank_ratio(isotropic)), 0.95)
+    # Variance along a single direction: effective rank 1.
+    line = jnp.asarray(rng.randn(64, 1).astype(np.float32)) * jnp.ones((1, 8))
+    self.assertAlmostEqual(
+        float(graphmae.effective_rank_ratio(line)), 1.0 / 8, places=4
+    )
+    # Constant (collapsed): effective rank 1, finite.
+    self.assertAlmostEqual(
+        float(graphmae.effective_rank_ratio(jnp.ones((16, 8)))), 1.0 / 8
+    )
+    # Fewer nodes than dimensions: normalized by `num_nodes - 1`.
+    two_points = jnp.array([[1.0, 0.0, 0.0, 0.0], [-1.0, 0.0, 0.0, 0.0]])
+    self.assertAlmostEqual(
+        float(graphmae.effective_rank_ratio(two_points)), 1.0, places=5
+    )
+
+  def test_compute_metrics(self):
+    x_init = jnp.array([[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]])
+    mask = jnp.array([True, True, True, False])
+
+    def metrics(recon, loss_mask=mask):
+      return graphmae.compute_metrics(
+          graphmae.GraphMAEOutput(
+              recon=recon, x_init=x_init, loss_mask=loss_mask, enc_rep=x_init
+          )
+      )
+
+    # Perfect reconstruction (up to scale).
+    perfect = metrics(2.0 * x_init)
+    self.assertAlmostEqual(float(perfect.reconstruction_cosine), 1.0, places=5)
+    self.assertAlmostEqual(
+        float(perfect.reconstruction_relative_error), 0.0, places=5
+    )
+    self.assertAlmostEqual(float(perfect.embedding_rank_ratio), 1.0, places=5)
+    self.assertAlmostEqual(float(perfect.target_rank_ratio), 1.0, places=5)
+
+    # Best constant prediction: the mean direction of the masked targets,
+    # here [0, 1], has a relative error of 1.
+    constant = metrics(jnp.tile(jnp.array([[0.0, 1.0]]), (4, 1)))
+    self.assertAlmostEqual(
+        float(constant.reconstruction_cosine), 1.0 / 3, places=5
+    )
+    self.assertAlmostEqual(
+        float(constant.reconstruction_relative_error), 1.0, places=5
+    )
+
+    # Opposite reconstruction: worse than the constant prediction.
+    opposite = metrics(-x_init)
+    self.assertAlmostEqual(
+        float(opposite.reconstruction_cosine), -1.0, places=5
+    )
+    self.assertAlmostEqual(
+        float(opposite.reconstruction_relative_error), 3.0, places=5
+    )
+
+    # Empty mask: the reconstruction metrics are 0, not NaN.
+    empty = metrics(x_init, loss_mask=jnp.zeros((4,), dtype=bool))
+    self.assertEqual(float(empty.reconstruction_cosine), 0.0)
+    self.assertEqual(float(empty.reconstruction_relative_error), 0.0)
+
 
 # Dimension of the learned input embeddings in the anti-collapse tests.
 _TOY_DIMS = 8
