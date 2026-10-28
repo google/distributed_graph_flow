@@ -337,6 +337,39 @@ class ParquetTest(parameterized.TestCase):
     self.assertEqual(data["f1"].shape, (0, 2, 3))
     self.assertEqual(data["f1"].dtype, np.float32)
 
+  def test_read_list_with_static_features_schema(self):
+    # Parquet files written by non-Arrow writers (such as Go parquet-go) store
+    # fixed-length repeated fields as variable-length list<T> rather than
+    # fixed_size_list<T>[K]. Passing `features_schema` reshapes them into a
+    # contiguous 2D array.
+    tmpdir = self.tmp_dir()
+    file_path = os.path.join(tmpdir, "repeated_as_list.parquet")
+    with filesystem.open_write(file_path, True) as f:
+      pq.write_table(
+          pa.Table.from_pydict({
+              "feat": pa.array(
+                  [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                  type=pa.list_(pa.float32()),
+              ),
+          }),
+          f,
+      )
+    features_schema = {
+        "feat": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32, shape=(3,)
+        )
+    }
+    data, num_rows = parquet_lib.read_parquet_to_numpy_dict(
+        [file_path], features_schema=features_schema
+    )
+    self.assertEqual(num_rows, 2)
+    self.assertEqual(data["feat"].shape, (2, 3))
+    self.assertEqual(data["feat"].dtype, np.float32)
+    np.testing.assert_allclose(
+        data["feat"],
+        np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=np.float32),
+    )
+
   def disabled_test_write_numpy_dict_to_parquet_empty(self):
     tmpdir = self.tmp_dir()
 

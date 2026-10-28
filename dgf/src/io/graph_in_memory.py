@@ -96,7 +96,10 @@ def _read_container(
   try:
     if container_type == gf_metadata_lib.Container.PARQUET:
       return parquet_lib.read_parquet_to_numpy_dict(
-          paths=sharded_files, columns=list(features_def), verbose=verbose
+          paths=sharded_files,
+          columns=list(features_def),
+          verbose=verbose,
+          features_schema=features_def,
       )
     elif container_type in (
         gf_metadata_lib.Container.TF_RECORD,
