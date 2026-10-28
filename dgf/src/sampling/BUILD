@@ -120,6 +120,7 @@ py_library(
 )
 
 nanobind_library(
+    linkstatic = True,
     name = "in_memory_sampler_nb",
     srcs = ["in_memory_sampler_nb.cc"],
     hdrs = ["in_memory_sampler_nb.h"],

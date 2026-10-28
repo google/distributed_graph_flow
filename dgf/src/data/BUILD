@@ -170,6 +170,7 @@ cc_library(
 )
 
 nanobind_library(
+    linkstatic = True,
     name = "schema_nb",
     srcs = ["schema_nb.cc"],
     hdrs = ["schema_nb.h"],
@@ -185,6 +186,7 @@ nanobind_library(
 
 # Reusable heavier nanobind library for in-memory graphs.
 nanobind_library(
+    linkstatic = True,
     name = "in_memory_graph_nb",
     srcs = ["in_memory_graph_nb.cc"],
     hdrs = ["in_memory_graph_nb.h"],

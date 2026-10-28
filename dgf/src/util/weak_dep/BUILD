@@ -94,7 +94,7 @@ py_library(
     srcs = ["weak_dep_keras_hub.py"],
     deps = [
         ":weak_dep_base",
-        "//third_party/py/keras_hub",  # build_cleaner: keep
+        # keras_hub dep,  # build_cleaner: keep
     ],
 )
 
