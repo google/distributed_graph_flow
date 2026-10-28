@@ -15,8 +15,9 @@
 """Graph attention layer for attention MPNN."""
 
 import abc
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 import dataclasses
+import functools
 import math
 import dataclasses_json
 from dgf.src.learning.jax import common
@@ -217,11 +218,15 @@ class Gatv2AttentionConfig(GraphAttentionConfig):
     num_heads: Number of attention heads.
     dims: Dimension of the hidden projection. Must be divisible by `num_heads`.
     negative_slope: Slope of the LeakyReLU for negative values.
+    force_basic_implementation: If True, always compute the attention logits
+      without the node-aggregated custom VJP. Mostly useful in tests to validate
+      the optimized path.
   """
 
   num_heads: int = 8
   dims: int = 128
   negative_slope: float = 0.2
+  force_basic_implementation: bool = False
 
   def __post_init__(self):
     if self.dims % self.num_heads != 0:
@@ -238,6 +243,118 @@ class Gatv2AttentionConfig(GraphAttentionConfig):
         f"Gatv2Attention(heads={self.num_heads}, dims={self.dims},"
         f" negative_slope={self.negative_slope})"
     )
+
+
+@functools.cache
+def _make_fused_gatv2_logits(
+    negative_slope: float,
+    indices_are_sorted: bool,
+) -> Callable[
+    [
+        jt.Float[jt.Array, "num_src_nodes dims"],
+        jt.Float[jt.Array, "num_dst_nodes dims"],
+        jt.Float[jt.Array, "num_heads head_dims"],
+        jt.Int[jt.Array, " num_edges"],
+        jt.Int[jt.Array, " num_edges"],
+    ],
+    jt.Float[jt.Array, "num_edges num_heads"],
+]:
+  """Creates a fused GATv2 edge-logit op with a custom VJP.
+
+  The backward pass aggregates per-edge gradients onto the source and target
+  nodes before multiplying by `attention_vector` and computing
+  `grad_attention_vector`, avoiding an edge-level reduction over `num_edges`
+  that would cause XLA to transpose the edge gather into an uncoalesced layout.
+  """
+
+  @jax.custom_vjp
+  def fused_gatv2_logits(
+      src_projection: jt.Float[jt.Array, "num_src_nodes dims"],
+      dst_projection: jt.Float[jt.Array, "num_dst_nodes dims"],
+      attention_vector: jt.Float[jt.Array, "num_heads head_dims"],
+      source_idxs: jt.Int[jt.Array, " num_edges"],
+      target_idxs: jt.Int[jt.Array, " num_edges"],
+  ) -> jt.Float[jt.Array, "num_edges num_heads"]:
+    num_heads, head_dims = attention_vector.shape
+    hidden = jax.nn.leaky_relu(
+        src_projection[source_idxs] + dst_projection[target_idxs],
+        negative_slope=negative_slope,
+    ).reshape(source_idxs.shape[0], num_heads, head_dims)
+    return jnp.einsum("ehd,hd->eh", hidden, attention_vector)
+
+  def forward(
+      src_projection: jt.Float[jt.Array, "num_src_nodes dims"],
+      dst_projection: jt.Float[jt.Array, "num_dst_nodes dims"],
+      attention_vector: jt.Float[jt.Array, "num_heads head_dims"],
+      source_idxs: jt.Int[jt.Array, " num_edges"],
+      target_idxs: jt.Int[jt.Array, " num_edges"],
+  ):
+    out = fused_gatv2_logits(
+        src_projection,
+        dst_projection,
+        attention_vector,
+        source_idxs,
+        target_idxs,
+    )
+    return out, (
+        src_projection,
+        dst_projection,
+        attention_vector,
+        source_idxs,
+        target_idxs,
+    )
+
+  def backward(
+      residuals,
+      grad_logits: jt.Float[jt.Array, "num_edges num_heads"],
+  ):
+    (
+        src_projection,
+        dst_projection,
+        attention_vector,
+        source_idxs,
+        target_idxs,
+    ) = residuals
+    num_edges = source_idxs.shape[0]
+    num_heads, head_dims = attention_vector.shape
+    dims = num_heads * head_dims
+    pre_activation = (
+        src_projection[source_idxs] + dst_projection[target_idxs]
+    ).reshape(num_edges, num_heads, head_dims)
+    grad_hidden = jnp.where(
+        pre_activation >= 0,
+        grad_logits[:, :, None],
+        negative_slope * grad_logits[:, :, None],
+    ).reshape(num_edges, dims)
+    agg_src = jax.ops.segment_sum(
+        grad_hidden,
+        source_idxs,
+        src_projection.shape[0],
+        indices_are_sorted=False,
+    )
+    agg_dst = jax.ops.segment_sum(
+        grad_hidden,
+        target_idxs,
+        dst_projection.shape[0],
+        indices_are_sorted=indices_are_sorted,
+    )
+    flat_attention = attention_vector.reshape(1, dims)
+    grad_src_projection = agg_src * flat_attention
+    grad_dst_projection = agg_dst * flat_attention
+    grad_attention_vector = (
+        jnp.sum(src_projection * agg_src, axis=0)
+        + jnp.sum(dst_projection * agg_dst, axis=0)
+    ).reshape(num_heads, head_dims)
+    return (
+        grad_src_projection,
+        grad_dst_projection,
+        grad_attention_vector,
+        None,
+        None,
+    )
+
+  fused_gatv2_logits.defvjp(forward, backward)
+  return fused_gatv2_logits
 
 
 class Gatv2Attention(nn.Module):
@@ -258,23 +375,38 @@ class Gatv2Attention(nn.Module):
           dims, use_bias=False, name=f"att_{relation.name}_src"
       )
       dense_dst = nn.Dense(dims, use_bias=True, name=f"att_{relation.name}_dst")
-      hidden = jax.nn.leaky_relu(
-          message_passing_ops.project_on_edges(
-              dense_src, relation.src_values, relation.source_idxs
-          )
-          + message_passing_ops.project_on_edges(
-              dense_dst, relation.dst_values, relation.target_idxs
-          ),
-          negative_slope=self.config.negative_slope,
-      ).reshape(
-          relation.num_edges, num_heads, head_dims
-      )  # [E, H, head_dims]
       attention_vector = self.param(
           f"att_{relation.name}",
           nn.initializers.glorot_uniform(),
           (num_heads, head_dims),
       )
-      logits_by_relation[relation.name] = jnp.einsum(
-          "ehd,hd->eh", hidden, attention_vector
-      )  # [E, H]
+      if (
+          not self.config.force_basic_implementation
+          and relation.num_src_nodes + relation.num_dst_nodes
+          <= 2 * relation.num_edges
+      ):
+        logits_by_relation[relation.name] = _make_fused_gatv2_logits(
+            self.config.negative_slope, relation.indices_are_sorted
+        )(
+            dense_src(relation.src_values),
+            dense_dst(relation.dst_values),
+            attention_vector,
+            relation.source_idxs,
+            relation.target_idxs,
+        )
+      else:
+        hidden = jax.nn.leaky_relu(
+            message_passing_ops.project_on_edges(
+                dense_src, relation.src_values, relation.source_idxs
+            )
+            + message_passing_ops.project_on_edges(
+                dense_dst, relation.dst_values, relation.target_idxs
+            ),
+            negative_slope=self.config.negative_slope,
+        ).reshape(
+            relation.num_edges, num_heads, head_dims
+        )  # [E, H, head_dims]
+        logits_by_relation[relation.name] = jnp.einsum(
+            "ehd,hd->eh", hidden, attention_vector
+        )  # [E, H]
     return logits_by_relation

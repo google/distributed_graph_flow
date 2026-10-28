@@ -14,6 +14,7 @@
 
 """Tests for the attention scores."""
 
+import dataclasses
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.learning.jax.layers import graph_attention
@@ -185,6 +186,62 @@ class GraphAttentionTest(parameterized.TestCase):
       np.testing.assert_allclose(
           logits[relation.name], expected, rtol=1e-5, atol=1e-5
       )
+
+  @parameterized.parameters(False, True)
+  def test_gatv2_optimized_matches_basic_implementation(
+      self, indices_are_sorted: bool
+  ):
+    relations = []
+    for relation in self.relations:
+      if indices_are_sorted:
+        sorted_src, sorted_dst = message_passing_ops.sort_edges_by_dst(
+            relation.source_idxs,
+            relation.target_idxs,
+            relation.num_src_nodes,
+            relation.num_dst_nodes,
+        )
+        relation = dataclasses.replace(
+            relation,
+            source_idxs=sorted_src,
+            target_idxs=sorted_dst,
+            indices_are_sorted=True,
+        )
+      relations.append(relation)
+    fast = graph_attention.Gatv2AttentionConfig(
+        num_heads=NUM_HEADS, dims=DIMS, negative_slope=0.2
+    ).make()
+    basic = graph_attention.Gatv2AttentionConfig(
+        num_heads=NUM_HEADS,
+        dims=DIMS,
+        negative_slope=0.2,
+        force_basic_implementation=True,
+    ).make()
+    variables = fast.init(jax.random.PRNGKey(0), relations)
+    src_values = [relation.src_values for relation in relations]
+    dst_values = [relation.dst_values for relation in relations]
+
+    def loss_fn(module, params, src_vals, dst_vals):
+      rels = [
+          dataclasses.replace(relation, src_values=s, dst_values=d)
+          for relation, s, d in zip(relations, src_vals, dst_vals)
+      ]
+      logits = module.apply({"params": params}, rels)
+      loss = sum(jnp.sum(l**2) for l in logits.values())
+      return loss, logits
+
+    grad_fn = jax.value_and_grad(loss_fn, argnums=(1, 2, 3), has_aux=True)
+    (loss_fast, logits_fast), grads_fast = grad_fn(
+        fast, variables["params"], src_values, dst_values
+    )
+    (loss_basic, logits_basic), grads_basic = grad_fn(
+        basic, variables["params"], src_values, dst_values
+    )
+    np.testing.assert_allclose(loss_fast, loss_basic, rtol=1e-5, atol=1e-5)
+    jax.tree.map(
+        lambda a, b: np.testing.assert_allclose(a, b, rtol=1e-5, atol=1e-5),
+        (logits_fast, grads_fast),
+        (logits_basic, grads_basic),
+    )
 
   @parameterized.parameters(
       graph_attention.DotProductAttentionConfig,
