@@ -82,14 +82,35 @@ def py_arrow_chunked_binary_to_np_bytes(column: pa.ChunkedArray) -> np.ndarray:
   return out.view(f"S{max_len}")
 
 
-def _pa_array_to_numpy(arr: pa.Array) -> np.ndarray:
+def _pa_array_to_numpy(
+    arr: pa.Array,
+    expected_shape: tuple[int | None, ...] | list[int | None] | None = None,
+) -> np.ndarray:
   """Recursively converts a pyarrow Array to a numpy array, preserving multidimensional structure."""
   if pa.types.is_binary(arr.type) or pa.types.is_large_binary(arr.type):
     return py_arrow_chunked_binary_to_np_bytes(pa.chunked_array([arr]))
 
   if pa.types.is_list(arr.type) or pa.types.is_large_list(arr.type):
+    inner_shape = (
+        expected_shape[1:]
+        if expected_shape is not None and len(expected_shape) >= 1
+        else None
+    )
     flat_arr = arr.flatten()
-    flat_np = _pa_array_to_numpy(flat_arr)
+    flat_np = _pa_array_to_numpy(flat_arr, inner_shape)
+    if (
+        expected_shape is not None
+        and len(expected_shape) >= 1
+        and expected_shape[0] is not None
+    ):
+      # The schema gives this dimension a static size, which all the lists have.
+      dim0 = expected_shape[0]
+      if len(flat_np) == 0:
+        # No values: an empty array with the static shape.
+        return flat_np.reshape(0, dim0, *flat_np.shape[1:])
+      if len(flat_np) == len(arr) * dim0:
+        # All the lists have the static size: they form a dense array.
+        return flat_np.reshape(-1, dim0, *flat_np.shape[1:])
     offsets = arr.offsets.to_numpy()
     if len(offsets) < 2:
       return np.empty(0, dtype=object)
@@ -100,41 +121,65 @@ def _pa_array_to_numpy(arr: pa.Array) -> np.ndarray:
     return res
 
   if pa.types.is_fixed_size_list(arr.type):
-    flat_np = _pa_array_to_numpy(arr.flatten())
+    inner_shape = (
+        expected_shape[1:]
+        if expected_shape is not None and len(expected_shape) >= 1
+        else None
+    )
+    flat_np = _pa_array_to_numpy(arr.flatten(), inner_shape)
     if len(flat_np) == 0:
       return flat_np.reshape(0, arr.type.list_size, *flat_np.shape[1:])
     return flat_np.reshape(-1, arr.type.list_size, *flat_np.shape[1:])
 
   if pa.types.is_string(arr.type) or pa.types.is_large_string(arr.type):
     # Keeps the UTF-8 bytes (`astype(np.bytes_)` would encode with ASCII).
-    return _pa_array_to_numpy(arr.cast(pa.binary()))
+    return _pa_array_to_numpy(arr.cast(pa.binary()), expected_shape)
   return arr.to_numpy(zero_copy_only=False)
 
 
-def _table_to_numpy_dict(table: pa.Table) -> dict[str, np.ndarray]:
+def _table_to_numpy_dict(
+    table: pa.Table,
+    features_schema: schema_lib.FeatureSetSchema | None = None,
+) -> dict[str, np.ndarray]:
   """Converts a pyarrow Table to a dictionary of numpy arrays."""
 
-  def process_column(value: pa.ChunkedArray):
+  def process_column(
+      value: pa.ChunkedArray,
+      expected_shape: tuple[int | None, ...] | list[int | None] | None,
+  ):
     pq_type = value.type
     if pa.types.is_binary(pq_type) or pa.types.is_large_binary(pq_type):
       # A numpy array of np.bytes
       return py_arrow_chunked_binary_to_np_bytes(value)
 
-    arrays = [_pa_array_to_numpy(chunk) for chunk in value.chunks]
+    arrays = [_pa_array_to_numpy(chunk, expected_shape) for chunk in value.chunks]
     if len(arrays) == 0:
       if pa.types.is_string(pq_type) or pa.types.is_large_string(pq_type):
         return py_arrow_chunked_binary_to_np_bytes(value.cast(pa.binary()))
+      if expected_shape:
+        # A column without chunks still gets the static shape of its feature.
+        return _pa_array_to_numpy(pa.array([], type=pq_type), expected_shape)
       return value.to_numpy()
     elif len(arrays) == 1:
       return arrays[0]
     else:
       return np.concatenate(arrays, axis=0)
 
-  return {key: process_column(table[key]) for key in table.column_names}
+  return {
+      key: process_column(
+          table[key],
+          features_schema[key].shape
+          if features_schema is not None and key in features_schema
+          else None,
+      )
+      for key in table.column_names
+  }
 
 
 def _read_single_parquet_file(
-    path: str, columns: Sequence[str] | None = None
+    path: str,
+    columns: Sequence[str] | None = None,
+    features_schema: schema_lib.FeatureSetSchema | None = None,
 ) -> dict[str, np.ndarray]:
   """Reads a single Parquet file into a pyarrow Table."""
   try:
@@ -143,7 +188,7 @@ def _read_single_parquet_file(
           f, pre_buffer=True, buffer_size=256 * 1024 * 1024
       ).read(columns=columns)
       # Note: We immediately convert the table into numpy array.
-      return _table_to_numpy_dict(table)
+      return _table_to_numpy_dict(table, features_schema=features_schema)
   except Exception as e:
     raise ValueError(f"Failed to read Parquet file {path!r}") from e
 
@@ -152,6 +197,7 @@ def read_parquet_to_numpy_dict(
     paths: Sequence[str],
     columns: Sequence[str] | None = None,
     verbose: bool = False,
+    features_schema: schema_lib.FeatureSetSchema | None = None,
 ) -> tuple[dict[str, np.ndarray], int]:
   """Reads multiple Parquet files into a single pyarrow Table.
 
@@ -159,6 +205,10 @@ def read_parquet_to_numpy_dict(
     paths: A sequence of paths to the Parquet files to read.
     columns: An optional sequence of column names to read.
     verbose: Show informations.
+    features_schema: Optional feature schema map used to reshape repeated
+      Parquet columns with fixed static shapes (such as those written by
+      non-Arrow Parquet writers like Go `parquet-go`) into multidimensional
+      numpy arrays instead of 1D object arrays.
 
   Returns:
     A tuple containing: a dictionary mapping column names to concatenated numpy
@@ -169,7 +219,9 @@ def read_parquet_to_numpy_dict(
       max_workers=max(1, min(len(paths), 20))
   ) as executor:
     future_list = [
-        executor.submit(_read_single_parquet_file, path, columns)
+        executor.submit(
+            _read_single_parquet_file, path, columns, features_schema
+        )
         for path in paths
     ]
     num_paths = len(paths)

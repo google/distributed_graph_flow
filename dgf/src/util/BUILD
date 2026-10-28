@@ -115,7 +115,6 @@ cc_library(
 )
 
 nanobind_library(
-    linkstatic = True,
     name = "nanobind_util",
     srcs = ["nanobind_util.cc"],
     hdrs = ["nanobind_util.h"],
