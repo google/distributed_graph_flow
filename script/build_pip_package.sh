@@ -1,13 +1,27 @@
 #!/bin/bash
 # This script runs in the exported directory to prepare the build and run Docker.
+# On Linux, the tests and the package build run in a manylinux Docker container.
+# On macOS, they run directly on the host (in the venvs /tmp/venv and
+# /tmp/venv_serving).
 # This script IS exported by copybara.
 
 # Warning: Make sure to update the DGF version before creating a new pip:
 # - third_party/py/dgf/__init__.py (`__version__`, also used by setup.py)
+#
+# New versions are released with the GitHub "Release" workflow
+# (.github/workflows/release.yml), which runs this script on Linux and macOS.
 
 set -vex
 
-which patchelf >/dev/null 2>&1 || sudo apt-get install -y patchelf
+OS="$(uname -s)"
+if [ "${OS}" != "Linux" ] && [ "${OS}" != "Darwin" ]; then
+  echo "ERROR: Unsupported OS: ${OS}" >&2
+  exit 1
+fi
+
+if [ "${OS}" = "Linux" ]; then
+  which patchelf >/dev/null 2>&1 || sudo apt-get install -y patchelf
+fi
 
 # Nightly package: "DGF_NIGHTLY=1 ./script/build_pip_package.sh" builds
 # "dgf-nightly" versioned as the next patch version with a ".dev<UTC date>"
@@ -28,13 +42,15 @@ fi
 # Create the missing __init__.py files
 find dgf -type d -exec sh -c 'touch "$1/__init__.py"' _ {} \;
 
-docker build -t dgf-builder .
+if [ "${OS}" = "Linux" ]; then
+  docker build -t dgf-builder .
+fi
 
 rm -fr package
 mkdir -p package/dgf
 
-# Copy python files
-(cd dgf && find . -name '*.py' -type f -exec cp --parents {} ../package/dgf/ \; )
+# Copy python files (portable equivalent of "cp --parents", which is GNU only).
+(cd dgf && find . -name '*.py' -type f | tar -cf - -T -) | (cd package/dgf && tar -xf -)
 
 cp LICENSE setup.py requirements.txt requirements-dev.txt README.md package/
 
@@ -69,7 +85,8 @@ DOCKER_OPTS=(
 # owned by another user. Bazel refuses to use an output directory that is not
 # owned by the current user (root in the container), and fails with
 # "mkdir(...): Permission denied".
-if [[ "${BAZEL_CACHE}" == /* ]]; then
+# BAZEL_CACHE is ignored on macOS (Bazel runs on the host).
+if [ "${OS}" = "Linux" ] && [[ "${BAZEL_CACHE}" == /* ]]; then
   mkdir -p "${BAZEL_CACHE}"
   docker run --rm -v "${BAZEL_CACHE}:/root/.cache" --entrypoint chown \
       dgf-builder -R 0:0 /root/.cache
@@ -89,7 +106,7 @@ run_stage() {
   local stage_log
   stage_log=$(mktemp)
   if ! "$@" 2>&1 | tee "${stage_log}"; then
-    set +x
+    set +v +x
     emit_github_error "${stage} failed (Python ${PYVERSION})" \
       "$(tail -n 50 "${stage_log}")"
     rm -f "${stage_log}"
@@ -100,6 +117,22 @@ run_stage() {
 
 set -o pipefail
 for PYVERSION in ${PYTHON_VERSIONS[*]} ; do
+  if [ "${OS}" = "Darwin" ]; then
+    # The venvs are on the host and shared by all the Python versions: Remove
+    # them if they were created for another version.
+    for VENV in /tmp/venv /tmp/venv_serving; do
+      VENV_PYVER=$("${VENV}/bin/python" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || true)
+      if [ -n "${VENV_PYVER}" ] && [ "${VENV_PYVER}" != "${PYVERSION}" ]; then
+        rm -rf "${VENV}"
+      fi
+    done
+    export PYTHONDONTWRITEBYTECODE=1
+    export WORK_DIR="$(pwd)"
+    run_stage "Tests" script/test.sh "$PYVERSION"
+    run_stage "Package build" script/build.sh "$PYVERSION"
+    continue
+  fi
+
   # Version-specific venv cache volume
   VENV_VOLUME="dgf_venv_cache_${PYVERSION//./}"
 

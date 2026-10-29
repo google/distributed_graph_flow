@@ -1,5 +1,6 @@
 #!/bin/bash
-# This script runs INSIDE the docker container to build and test the pip package.
+# This script runs INSIDE the docker container (Linux) or on the host (macOS) to
+# build and test the pip package.
 # This script IS exported by copybara.
 set -vex
 
@@ -29,27 +30,62 @@ PACKAGE_NAME="${DGF_PACKAGE_NAME:-dgf}"
 # Wheel file names use "_" instead of "-" (e.g. dgf_nightly-0.1.1.dev20261008-...).
 WHEEL_NAME="${PACKAGE_NAME//-/_}"
 
+# Repository root: "/work" in the Docker container (Linux), the exported
+# directory on macOS (set by build_pip_package.sh).
+WORK_DIR="${WORK_DIR:-/work}"
+OS="$(uname -s)"
+# The macOS wheels support macOS >= 12 (see .bazelrc) on arm64.
+MACOS_PLATFORM="macosx_12_0_arm64"
+
+# The final (repaired) wheel.
+if [ "${OS}" = "Darwin" ]; then
+  export MACOSX_DEPLOYMENT_TARGET=12.0
+  WHEEL_FILE="dist/${WHEEL_NAME}-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-${MACOS_PLATFORM}.whl"
+else
+  WHEEL_FILE="dist/${WHEEL_NAME}-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl"
+fi
+
 bazel build -c opt //dgf --@rules_python//python/config_settings:python_version=${PYVERSION}
-cd /work/bazel-bin/dgf
-find . -name '*.so' -type f -exec cp --parents {} /work/package/dgf \;
+cd "${WORK_DIR}/bazel-bin/dgf"
+# Portable equivalent of "cp --parents" (GNU only).
+find . -name '*.so' -type f | tar -cf - -T - | (cd "${WORK_DIR}/package/dgf" && tar -xf -)
 if [ -n "${DGF_PACKAGE_VERSION:-}" ]; then
   # Patched in the packaged copy only: dgf.__version__ and setup.py (which
-  # reads it) report the nightly version.
-  sed -i "s/^__version__ = \".*\"$/__version__ = \"${DGF_PACKAGE_VERSION}\"/" /work/package/dgf/__init__.py
-  grep -q "^__version__ = \"${DGF_PACKAGE_VERSION}\"$" /work/package/dgf/__init__.py
+  # reads it) report the nightly version. "-i.bak" works with GNU and BSD sed.
+  sed -i.bak "s/^__version__ = \".*\"$/__version__ = \"${DGF_PACKAGE_VERSION}\"/" "${WORK_DIR}/package/dgf/__init__.py"
+  rm "${WORK_DIR}/package/dgf/__init__.py.bak"
+  grep -q "^__version__ = \"${DGF_PACKAGE_VERSION}\"$" "${WORK_DIR}/package/dgf/__init__.py"
 fi
 export PIP_EXTRA_INDEX_URL="https://pypi.org/simple/"
-${PYBIN} -m pip install setuptools auditwheel
-cd /work/package
-${PYBIN} setup.py bdist_wheel --dist-dir /work/dist
-cd /work
+${PYBIN} -m pip install setuptools
+cd "${WORK_DIR}/package"
+if [ "${OS}" = "Darwin" ]; then
+  # Explicit platform tag: the Python interpreter can be "universal2" while the
+  # extensions are only compiled for arm64.
+  ${PYBIN} setup.py bdist_wheel --dist-dir "${WORK_DIR}/dist" --plat-name "${MACOS_PLATFORM}"
+else
+  ${PYBIN} setup.py bdist_wheel --dist-dir "${WORK_DIR}/dist"
+fi
+cd "${WORK_DIR}"
 chmod -R a+rw package
-${PYBIN} -m auditwheel repair --plat manylinux_2_28_x86_64 -w dist dist/${WHEEL_NAME}-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-linux_x86_64.whl
+if [ "${OS}" = "Darwin" ]; then
+  ${PYBIN} -m pip install delocate
+  # Checks the architecture and minimum macOS version of the extensions, and
+  # bundles the non-system shared libraries (if any). The repaired wheel has
+  # the same name and replaces the original one.
+  rm -rf dist/delocated
+  delocate-wheel --require-archs arm64 -w dist/delocated -v ${WHEEL_FILE}
+  mv -f dist/delocated/*.whl dist/
+  rm -rf dist/delocated
+else
+  ${PYBIN} -m pip install auditwheel
+  ${PYBIN} -m auditwheel repair --plat manylinux_2_28_x86_64 -w dist dist/${WHEEL_NAME}-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-linux_x86_64.whl
+fi
 chmod -R a+rw dist
 # "dgf" and "dgf-nightly" both provide the "dgf" import package. Uninstalling a
 # package that is not installed is a no-op for pip.
 ${PYBIN} -m pip uninstall -y dgf dgf-nightly
-${PYBIN} -m pip install dist/${WHEEL_NAME}-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+${PYBIN} -m pip install ${WHEEL_FILE}
 # All the packages (requirements.txt and requirements-dev.txt) are installed.
 ${PYBIN} script/toy_minimal.py
 ${PYBIN} script/toy_full.py
@@ -70,7 +106,7 @@ fi
 source /tmp/venv_serving/bin/activate
 ${PYBIN} -m pip uninstall -y dgf dgf-nightly
 ${PYBIN} -m pip install -r requirements.txt
-${PYBIN} -m pip install dist/${WHEEL_NAME}-*-cp${PYVERSIONNODOT}-cp${PYVERSIONNODOT}-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl
+${PYBIN} -m pip install ${WHEEL_FILE}
 # Only the packages of requirements.txt are installed. Make sure the weak
 # dependencies are not installed (e.g. pulled transitively), otherwise
 # toy_minimal.py would not test anything.
@@ -82,9 +118,9 @@ for MODULE in tensorflow tensorflow_gnn tf_keras apache_beam ogb clu; do
 done
 ${PYBIN} script/toy_minimal.py
 
-# The installed package reports the expected version. Run outside of /work:
-# with /work as cwd, "import dgf" would import the source tree instead of the
-# installed wheel.
+# The installed package reports the expected version. Run outside of the work
+# directory: with it as cwd, "import dgf" would import the source tree instead
+# of the installed wheel.
 if [ -n "${DGF_PACKAGE_VERSION:-}" ]; then
   INSTALLED_VERSION=$(cd /tmp && ${PYBIN} -c "import dgf; print(dgf.__version__)")
   if [ "${INSTALLED_VERSION}" != "${DGF_PACKAGE_VERSION}" ]; then

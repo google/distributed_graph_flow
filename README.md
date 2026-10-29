@@ -40,7 +40,8 @@ To install DGF from [PyPI](https://pypi.org/project/dgf/), run:
 pip install dgf -U
 ```
 
-Graph Flow is available for Python 3.11–3.13 on Linux x86-64.
+Graph Flow is available for Python 3.11–3.13 on Linux x86-64 and macOS arm64
+(Apple Silicon, macOS 12+).
 
 For the latest features, install the nightly build instead
 ([`dgf-nightly`](https://pypi.org/project/dgf-nightly/), built daily from `main`):

@@ -7,6 +7,7 @@ dataclasses-json
 tqdm
 bagz
 dacite
+google-cloud-bigquery
 google-cloud-spanner
 google-api-core
 google-cloud-storage

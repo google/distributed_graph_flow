@@ -1,5 +1,9 @@
 ogb
-tensorflow-gnn
+# On macOS arm64, tensorflow-gnn declares a dependency on the discontinued
+# `tensorflow-macos` package (last released at 2.16.2, Python <=3.12), which
+# conflicts with tensorflow>=2.20 required by tensorflow-text. On macOS,
+# `script/test.sh` installs `tensorflow-gnn` with `--no-deps` instead.
+tensorflow-gnn; sys_platform != 'darwin'
 tensorflow
 tf-keras
 # clu.metric_writers imports TensorFlow.

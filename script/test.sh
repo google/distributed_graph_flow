@@ -26,6 +26,14 @@ source /tmp/venv/bin/activate
 
 # Install requirements
 ${PYBIN} -m pip install -r requirements.txt -r requirements-dev.txt
+if [ "$(uname -s)" = "Darwin" ]; then
+  # Installed with --no-deps to bypass its obsolete `tensorflow-macos`
+  # dependency marker (see requirements-dev.txt); its actual runtime
+  # dependencies (tensorflow, apache-beam, networkx, pyarrow, ml-collections,
+  # google-vizier) are installed below.
+  ${PYBIN} -m pip install --no-deps tensorflow-gnn
+  ${PYBIN} -m pip install ml-collections google-vizier
+fi
 
 # Check that absl is installed
 ${PYBIN} -c "import absl" || { echo "Error: absl is not installed in the virtual environment."; exit 1; }
@@ -40,7 +48,7 @@ source "$(dirname "$0")/github_annotations.sh"
 extract_test_failure() {
   local log="$1"
   if grep -qE '^(ERROR|FAIL): ' "${log}"; then
-    sed -n '/^\(ERROR\|FAIL\): /,$p' "${log}" | head -n 80
+    sed -En '/^(ERROR|FAIL): /,$p' "${log}" | head -n 80
   else
     tail -n 60 "${log}"
   fi
@@ -53,10 +61,11 @@ report_failures_to_github() {
   if [ "${GITHUB_ACTIONS:-}" != "true" ]; then
     return 0
   fi
-  set +x
-  # Remove the color codes (see --color=yes in .bazelrc).
+  set +v +x
+  # Remove the color codes (see --color=yes in .bazelrc). The escape character
+  # is given with $'...' since BSD sed (macOS) does not support "\x1b".
   local clean_log="${bazel_log}.clean"
-  sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' "${bazel_log}" > "${clean_log}"
+  sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "${bazel_log}" > "${clean_log}"
   local failed_targets
   failed_targets=$( (grep -E '^//[^ ]+ +(FAILED|TIMEOUT|NO STATUS|INCOMPLETE)' \
     "${clean_log}" || true) | awk '{print $1}' | sort -u)
@@ -66,7 +75,7 @@ report_failures_to_github() {
       "$(tail -n 50 "${clean_log}")"
     return 0
   fi
-  local target pkg name log status
+  local target pkg name log status emitted=0
   for target in ${failed_targets}; do
     status=$( (grep -E "^${target} +" "${clean_log}" || true) | head -n 1 \
       | sed -E 's/^[^ ]+ +//')
@@ -84,8 +93,20 @@ report_failures_to_github() {
       fi
       emit_github_error "${target} ${status} (Python ${PYVERSION})" \
         "$(extract_test_failure "${log}")"
+      emitted=1
     done
   done
+  # If any target failed without a test.log (e.g. FAILED TO BUILD or
+  # NO STATUS), also emit the ERROR: lines from the Bazel log.
+  if grep -qE '^ERROR: ' "${clean_log}"; then
+    emit_github_error "bazel errors (Python ${PYVERSION})" \
+      "$(grep -B 1 -A 6 -E '^ERROR: ' "${clean_log}" | tail -n 80)"
+    emitted=1
+  fi
+  if [ "${emitted}" -eq 0 ]; then
+    emit_github_error "bazel test failed (Python ${PYVERSION})" \
+      "$(grep -E '^(ERROR: |//[^ ]+ +(FAILED|TIMEOUT|NO STATUS|INCOMPLETE))' "${clean_log}" | tail -n 60)"
+  fi
 }
 
 # Number of tests to run in parallel. Each test can use several GB of memory
@@ -93,7 +114,13 @@ report_failures_to_github() {
 # machines with little memory per core (e.g. GitHub Actions runners: 4 cores,
 # 16GB). Can be overridden with DGF_TEST_JOBS.
 if [ -z "${DGF_TEST_JOBS:-}" ]; then
-  MEM_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+  if [ "$(uname -s)" = "Darwin" ]; then
+    MEM_KB=$(( $(sysctl -n hw.memsize) / 1024 ))
+    NUM_CPUS=$(sysctl -n hw.ncpu)
+  else
+    MEM_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
+    NUM_CPUS=$(nproc)
+  fi
   # Honor the memory limit of the container, if any (cgroup v2).
   if [ -r /sys/fs/cgroup/memory.max ] \
       && [ "$(cat /sys/fs/cgroup/memory.max)" != "max" ]; then
@@ -106,8 +133,8 @@ if [ -z "${DGF_TEST_JOBS:-}" ]; then
   if [ "${DGF_TEST_JOBS}" -lt 1 ]; then
     DGF_TEST_JOBS=1
   fi
-  if [ "${DGF_TEST_JOBS}" -gt "$(nproc)" ]; then
-    DGF_TEST_JOBS="$(nproc)"
+  if [ "${DGF_TEST_JOBS}" -gt "${NUM_CPUS}" ]; then
+    DGF_TEST_JOBS="${NUM_CPUS}"
   fi
 fi
 echo "Running ${DGF_TEST_JOBS} tests in parallel"
@@ -115,7 +142,8 @@ echo "Running ${DGF_TEST_JOBS} tests in parallel"
 # Fingerprint of the installed Python packages. Bazel does not track the
 # packages installed in the venv, so without it, cached test results would
 # survive a dependency change (e.g. a new jax release).
-VENV_FINGERPRINT=$(${PYBIN} -m pip freeze | sha256sum | cut -d' ' -f1)
+# Computed with Python since "sha256sum" is not available on macOS.
+VENV_FINGERPRINT=$(${PYBIN} -m pip freeze | ${PYBIN} -c "import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())")
 
 # Run all tests via Bazel
 echo "Running all tests via Bazel..."
@@ -125,6 +153,7 @@ if ! bazel test \
     --test_output=errors \
     --local_test_jobs="${DGF_TEST_JOBS}" \
     --test_timeout=120,900,1800,7200 \
+    --keep_going \
     --spawn_strategy=standalone \
     --test_strategy=standalone \
     --test_env=TF_USE_LEGACY_KERAS \

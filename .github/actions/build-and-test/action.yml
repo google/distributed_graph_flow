@@ -1,8 +1,9 @@
 name: Build and test the pip package
 description: >
-  Runs script/build_pip_package.sh for one Python version in the Docker build
-  container, with the Bazel cache restored from and saved to the GitHub cache.
-  Shared by the CI and the nightly workflows.
+  Runs script/build_pip_package.sh for one Python version, with the Bazel cache
+  restored from and saved to the GitHub cache. On Linux, the build runs in the
+  Docker build container. On macOS, it runs directly on the runner. Shared by
+  the CI, nightly, and release workflows.
 
 inputs:
   python-version:
@@ -20,6 +21,7 @@ runs:
     # Bazel cache, and Docker image), which exceeds the free space of a
     # standard runner. Remove pre-installed toolchains that are not needed.
     - name: Free disk space
+      if: runner.os == 'Linux'
       shell: bash
       run: |
         df -h /
@@ -27,6 +29,29 @@ runs:
           /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/share/swift \
           /usr/local/share/boost /usr/local/share/powershell
         sudo docker image prune --all --force
+        df -h /
+
+    # On macOS, the build runs on the runner (no Docker): The Python interpreter
+    # ("python<version>") and Bazel (bazelisk) are installed on the runner.
+    - name: Set up Python
+      if: runner.os == 'macOS'
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    # The Bazel output directory and bazelisk are stored in the same directory
+    # as the Linux build container's /root/.cache (see "Restore build cache").
+    - name: Set up Bazel
+      if: runner.os == 'macOS'
+      shell: bash
+      env:
+        CACHE_DIR: ${{ runner.temp }}/dgf-cache
+      run: |
+        command -v bazel >/dev/null 2>&1 || brew install bazelisk
+        command -v dot >/dev/null 2>&1 || brew install graphviz
+        mkdir -p "${CACHE_DIR}"
+        echo "startup --output_user_root=${CACHE_DIR}/bazel" >> ~/.bazelrc
+        echo "BAZELISK_HOME=${CACHE_DIR}/bazelisk" >> "${GITHUB_ENV}"
         df -h /
 
     # Cache of the build container's /root/.cache: Bazel output base and
@@ -37,14 +62,16 @@ runs:
     # and script/test.sh invalidates the cached test results when the installed
     # Python packages change.
     # Actions must be pinned to a commit hash (Google GitHub org policy).
+    # The Linux key prefix is "dgf-cache-<python>-" and the macOS one is
+    # "dgf-cache-macos-<python>-" (the caches are not compatible).
     - name: Restore build cache
       id: restore-cache
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/dgf-cache
-        key: dgf-cache-${{ inputs.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+        key: dgf-cache-${{ runner.os == 'macOS' && 'macos-' || '' }}${{ inputs.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
-          dgf-cache-${{ inputs.python-version }}-
+          dgf-cache-${{ runner.os == 'macOS' && 'macos-' || '' }}${{ inputs.python-version }}-
 
     - name: Build and Test Package
       shell: bash

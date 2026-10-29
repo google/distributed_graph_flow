@@ -11,8 +11,9 @@ emit_github_error() {
   if [ "${GITHUB_ACTIONS:-}" != "true" ]; then
     return 0
   fi
-  # Remove the color codes (see --color=yes in .bazelrc).
-  message=$(printf '%s' "${message}" | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g')
+  # Remove the color codes (see --color=yes in .bazelrc). The escape character
+  # is given with $'...' since BSD sed (macOS) does not support "\x1b".
+  message=$(printf '%s' "${message}" | sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g')
   message="${message//'%'/%25}"
   message="${message//$'\r'/}"
   message="${message//$'\n'/%0A}"

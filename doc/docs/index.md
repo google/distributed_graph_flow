@@ -63,7 +63,7 @@ tasks are:
 ## 😎 Simple usage example
 
 Install Graph Flow from [PyPI](https://pypi.org/project/dgf/) (Python 3.11–3.13,
-Linux x86-64):
+Linux x86-64 and macOS arm64):
 
 ```shell
 pip install dgf -U

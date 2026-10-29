@@ -156,7 +156,6 @@ cc_library(
     hdrs = ["concurrency.h"],
     deps = [
         "@abseil-cpp//absl/status",
-        "@abseil-cpp//absl/synchronization",
     ],
 )
 

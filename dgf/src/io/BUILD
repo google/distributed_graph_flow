@@ -491,8 +491,9 @@ nanobind_extension(
     name = "tf_graph_sample_ext",
     srcs = ["tf_graph_sample_ext.cc"],
     # Avoid the dynamic library ABI symbol collision between protobuf compiled in TensorFlow and
-    # protobuff compiled by this rule.
-    linkopts = ["-Wl,-Bsymbolic"],
+    # protobuff compiled by this rule. On macOS, `-Bsymbolic` is an ELF-only flag, so we restrict
+    # the exported symbol list to `_PyInit_tf_graph_sample_ext`.
+    linkopts = select({"@platforms//os:linux": ["-Wl,-Bsymbolic"], "//conditions:default": ["-Wl,-exported_symbol,_PyInit_tf_graph_sample_ext"]}),
     deps = [
         ":tf_graph_sample_cc",
         ":tf_graph_sample_parser",

@@ -18,13 +18,17 @@ permissions:
   contents: read
 
 jobs:
+  # Job names: "build-and-test (<python>)" on Linux and
+  # "build-and-test-macos (<python>)" on macOS (arm64). Those names are
+  # referenced by "github_check_runs" in copy.bara.sky.
   build-and-test:
-    name: build-and-test (${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    name: build-and-test${{ matrix.os == 'macos-15' && '-macos' || '' }} (${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
+        os: ["ubuntu-latest", "macos-15"]
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
@@ -34,7 +38,8 @@ jobs:
         with:
           persist-credentials: false
 
-      # Build, test, and Bazel cache handling (shared with nightly.yml).
+      # Build, test, and Bazel cache handling (shared with nightly.yml and
+      # release.yml).
       - name: Build and test
         uses: ./.github/actions/build-and-test
         with:

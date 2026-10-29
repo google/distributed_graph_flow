@@ -4,12 +4,11 @@
 #include <atomic>
 #include <cstddef>
 #include <functional>
+#include <latch>
 #include <memory>
 #include <optional>
 #include <utility>
 #include <vector>
-
-#include "absl/synchronization/notification.h"
 
 namespace dgf::util::concurrency {
 
@@ -130,14 +129,10 @@ void ScheduleConcurrentForLoop(
         function,
     std::function<void()> done) {
   const size_t effective_num_blocks = std::min(num_blocks, num_items);
-  if (effective_num_blocks == 0) {
-    done();
-    return;
-  }
 
   // Shared by the blocks since they outlive this call.
   struct State {
-    std::function<void(size_t, size_t, size_t)> function;
+    std::optional<std::function<void(size_t, size_t, size_t)>> function;
     std::function<void()> done;
     std::atomic<size_t> remaining_blocks;
 
@@ -146,29 +141,40 @@ void ScheduleConcurrentForLoop(
         return;
       }
       // The caller may tear down `function`'s captures once `done` is called.
-      function = nullptr;
+      function.reset();
       std::function<void()> local_done = std::move(done);
       local_done();
     }
   };
   auto state = std::make_shared<State>();
-  state->function = std::move(function);
+  state->function.emplace(std::move(function));
+  // Clear the moved-from `function` parameter slot immediately so that its
+  // stored callable is destroyed before any block runs (in C++, by-value
+  // parameter objects are destroyed in the caller after `ScheduleConcurrentForLoop`
+  // returns, and libc++'s `std::function` move constructor does not clear the
+  // source's heap target if it is not small-buffer-optimized).
+  std::function<void(size_t, size_t, size_t)>().swap(function);
   state->done = std::move(done);
-  state->remaining_blocks = effective_num_blocks;
+  // Extra reference held during the scheduling loop so `state->function` stays
+  // alive until all blocks have been scheduled.
+  state->remaining_blocks = effective_num_blocks + 1;
 
-  // The first `num_larger_blocks` blocks get one extra item.
-  const size_t min_block_size = num_items / effective_num_blocks;
-  const size_t num_larger_blocks = num_items % effective_num_blocks;
-  for (size_t block_idx = 0; block_idx < effective_num_blocks; block_idx++) {
-    const size_t begin_idx =
-        block_idx * min_block_size + std::min(block_idx, num_larger_blocks);
-    const size_t end_idx =
-        begin_idx + min_block_size + (block_idx < num_larger_blocks ? 1 : 0);
-    thread_pool->Schedule([state, block_idx, begin_idx, end_idx]() {
-      state->function(block_idx, begin_idx, end_idx);
-      state->FinishBlock();
-    });
+  if (effective_num_blocks > 0) {
+    // The first `num_larger_blocks` blocks get one extra item.
+    const size_t min_block_size = num_items / effective_num_blocks;
+    const size_t num_larger_blocks = num_items % effective_num_blocks;
+    for (size_t block_idx = 0; block_idx < effective_num_blocks; block_idx++) {
+      const size_t begin_idx =
+          block_idx * min_block_size + std::min(block_idx, num_larger_blocks);
+      const size_t end_idx =
+          begin_idx + min_block_size + (block_idx < num_larger_blocks ? 1 : 0);
+      thread_pool->Schedule([state, block_idx, begin_idx, end_idx]() {
+        (*state->function)(block_idx, begin_idx, end_idx);
+        state->FinishBlock();
+      });
+    }
   }
+  state->FinishBlock();
 }
 
 void ConcurrentForLoop(
@@ -179,10 +185,10 @@ void ConcurrentForLoop(
     function(0, 0, num_items);
     return;
   }
-  absl::Notification done;
+  std::latch done(1);
   ScheduleConcurrentForLoop(num_blocks, thread_pool, num_items, function,
-                            [&done]() { done.Notify(); });
-  done.WaitForNotification();
+                            [&done]() { done.count_down(); });
+  done.wait();
 }
 
 }  // namespace dgf::util::concurrency
