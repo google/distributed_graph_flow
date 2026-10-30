@@ -29,6 +29,11 @@ class ReservoirSamplingTest(parameterized.TestCase):
     self.assertEqual(r._num_in_cache, 0)
     self.assertEqual(r._num_seen, 0)
 
+  def test_quantiles_of_empty_reservoir(self):
+    r = reservoir_sampling.BatchReservoirSampling(self.cache_size)
+    r.add(np.zeros((0,), dtype=np.float32))
+    self.assertEqual(r.get_quantiles(10), ([], []))
+
   def test_add_small_data(self):
     r = reservoir_sampling.BatchReservoirSampling(self.cache_size)
     r.add(np.random.randn(self.cache_size // 4))

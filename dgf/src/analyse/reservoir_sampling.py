@@ -80,7 +80,14 @@ class BatchReservoirSampling:
       list[float],
       list[float],
   ]:
-    """Computes the quantiles and corresponding quantile arguments."""
+    """Computes the quantiles and corresponding quantile arguments.
+
+    Returns empty lists if no value was observed.
+    """
+    if self._num_in_cache == 0:
+      # On an empty input, np.nanquantile returns a single scalar NaN instead
+      # of one value per threshold.
+      return [], []
     # TODO(b/381397901): This is not optimal when a few values have a lot of
     # weights: The functions might return less than "num_quantiles" quantiles
     # when returning "num_quantiles" quantiles is possible.

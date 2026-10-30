@@ -169,6 +169,34 @@ class DictionaryIndexNormalizerTest(absltest.TestCase):
 
 class SoftQuantileNormalizerTest(absltest.TestCase):
 
+  def test_no_observed_value(self):
+    # The feature is present (count > 0) but has no value, e.g., a timeseries
+    # whose values are all after the seed timestamps.
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(None,),
+        is_timeseries=True,
+    )
+    input_stats = statistics_lib.FeatureStatistics(count=8, quantiles=[])
+    normalizer = normalize_lib.SoftQuantileNormalizer.create(
+        "test_feature", input_schema, input_stats
+    )
+    np.testing.assert_array_equal(normalizer.quantiles, [0.0, 1.0])
+
+  def test_missing_quantiles_raises(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+    )
+    input_stats = statistics_lib.FeatureStatistics(
+        count=8, minimum=-1.0, maximum=4.0, quantiles=[]
+    )
+    with self.assertRaisesRegex(ValueError, "does not have quantiles"):
+      normalize_lib.SoftQuantileNormalizer.create(
+          "test_feature", input_schema, input_stats
+      )
+
   def test_basic(self):
     input_schema = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.FLOAT_32,

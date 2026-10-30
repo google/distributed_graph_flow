@@ -21,6 +21,7 @@ import copy
 import dataclasses
 import enum
 import inspect
+import math
 from typing import Any
 
 import dataclasses_json
@@ -218,7 +219,13 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
           "SoftQuantileNormalizer only supports INTEGER or FLOAT features."
       )
 
-    if input_stats.count == 0:
+    # A variable-length feature (e.g., a timeseries) can be present on
+    # entities (count > 0) without any value, e.g. when all the values are
+    # after the seed timestamps. In this case, no min/max or quantiles exist.
+    no_observed_value = input_stats.count == 0 or (
+        not input_stats.quantiles and not math.isfinite(input_stats.minimum)
+    )
+    if no_observed_value:
       log.warning(
           f"No value observed for feature {feature_name}. Creating a empty"
           " SoftQuantileNormalizer."

@@ -14,9 +14,12 @@
 
 from absl.testing import absltest
 from dgf.src.analyse import in_process_feature_statistics as in_process_feature_statistics_lib
+from dgf.src.data import in_memory_graph as in_memory_graph_lib
+from dgf.src.data import schema as schema_lib
 from dgf.src.data import statistics as statistics_lib
 from dgf.src.util import gen_test_graph
 from dgf.src.util import test_util
+import numpy as np
 
 test_util.disable_diff_truncation()
 
@@ -95,6 +98,44 @@ class FeatureStatisticsTest(absltest.TestCase):
         }
     )
     test_util.assert_are_equal(self, stats, expected_stats)
+
+  def test_variable_length_feature_without_values(self):
+    # A timeseries present on all the nodes, but without any value (e.g., all
+    # the values are after the seed timestamps).
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n": schema_lib.NodeSchema(
+                features={
+                    "ts": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                        shape=(None,),
+                        is_timeseries=True,
+                    )
+                }
+            )
+        },
+        edge_sets={},
+    )
+    ts = np.empty(2, dtype=object)
+    ts[0] = np.zeros((0,), dtype=np.float32)
+    ts[1] = np.zeros((0,), dtype=np.float32)
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "n": in_memory_graph_lib.InMemoryNodeSet(
+                num_nodes=2, features={"ts": ts}
+            )
+        },
+        edge_sets={},
+    )
+    stats = in_process_feature_statistics_lib.feature_statistics_from_graphs(
+        iter([graph]), schema, num_quantiles=4
+    )
+    feature_stats = stats.node_sets["n"].features["ts"]
+    self.assertEqual(feature_stats.count, 2)
+    self.assertEqual(feature_stats.quantiles, [])
+    # Printing the statistics used to fail on scalar NaN quantiles.
+    self.assertEqual(str(feature_stats), "count=2")
 
 
 if __name__ == "__main__":

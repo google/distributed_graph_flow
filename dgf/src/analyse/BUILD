@@ -211,9 +211,12 @@ py_test(
         ":in_process_feature_statistics",
         # absl/testing:absltest dep,
         # apache_beam dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
         "//dgf/src/data:statistics",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
+        # numpy dep,
     ],
 )
 
