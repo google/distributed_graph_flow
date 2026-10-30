@@ -19,6 +19,7 @@ from dgf.src.data import schema as schema_lib
 from dgf.src.learning.ten_lines import common
 from dgf.src.learning.ten_lines import report
 from dgf.src.sampling import config as sampling_config_lib
+from dgf.src.transform import normalize as normalize_lib
 from dgf.src.util import log
 
 
@@ -160,6 +161,46 @@ class ReportTest(absltest.TestCase):
     self.assertIn(
         "The sampling plan is not available", tabs_dict["Graph sampling"]
     )
+
+  def test_get_common_tabs_with_text_embedding(self):
+    schema = schema_lib.GraphSchema(node_sets={}, edge_sets={})
+    norm_cfg = normalize_lib.GraphNormalizerConfig(
+        nodesets={
+            "paper": normalize_lib.NodeSetNormalizerConfig(
+                normalizers=[
+                    normalize_lib.TextEmbeddingNormalizer(
+                        input_feature="title",
+                        output_feature_name="title_TEXT_EMBEDDING",
+                        output_shape=(128,),
+                        embedder_handle="nnlm-en-dim128",
+                    ),
+                    normalize_lib.TextEmbeddingNormalizer(
+                        input_feature="abstract",
+                        output_feature_name="abstract_TEXT_EMBEDDING",
+                        output_shape=(128,),
+                        embedder_handle="nnlm-en-dim128",
+                    ),
+                ]
+            )
+        },
+        edgesets={},
+    )
+    tabs = report.get_common_tabs(
+        hparams={"lr": 0.01},
+        schemas={"MySchema": schema},
+        architecture="MyArchitecture",
+        normalizer_configs={"Default": norm_cfg},
+    )
+    tabs_dict = dict(tabs)
+    self.assertIn("Text Embedding", tabs_dict)
+    self.assertIn("nnlm-en-dim128", tabs_dict["Text Embedding"])
+    self.assertIn("title", tabs_dict["Text Embedding"])
+    self.assertIn("abstract", tabs_dict["Text Embedding"])
+    self.assertIn(
+        "1 shared model instance(s) across 2 text feature(s)",
+        tabs_dict["Text Embedding"],
+    )
+    self.assertIn("Frozen Text Embedders", tabs_dict["Architecture"])
 
 
 if __name__ == "__main__":

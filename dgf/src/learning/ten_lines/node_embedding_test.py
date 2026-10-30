@@ -279,6 +279,7 @@ def _untrained_model(
       padding_margin=hparams.padding_margin,
       keep_raw_features=set(),
       target_column=None,
+      text_embedder="nnlm-en-dim128",
   )
   live = train_dataset.get_live()
 

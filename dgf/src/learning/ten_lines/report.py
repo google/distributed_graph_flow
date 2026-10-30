@@ -30,6 +30,7 @@ from dgf.src.data import statistics as statistics_lib
 from dgf.src.learning.ten_lines import common
 from dgf.src.plot import pyvis as plot_pyvis_lib
 from dgf.src.sampling import config as sampling_config_lib
+from dgf.src.transform import normalize as normalize_lib
 from dgf.src.util import html_util
 from dgf.src.util import log
 import pandas as pd
@@ -384,8 +385,96 @@ def _get_graph_sampling_tab(
   return "Graph sampling", txt_sampling_plan
 
 
+def _collect_text_embedding_entries(
+    normalizer_configs: (
+        dict[str, normalize_lib.GraphNormalizerConfig] | None
+    ),
+) -> list[dict[str, str]]:
+  """Collects metadata about the `TextEmbeddingNormalizer`s of each config."""
+  if not normalizer_configs:
+    return []
+  entries: list[dict[str, str]] = []
+  for norm_label, norm_cfg in normalizer_configs.items():
+    set_configs = [
+        (f"nodeset:{name}", cfg) for name, cfg in norm_cfg.nodesets.items()
+    ] + [(f"edgeset:{name}", cfg) for name, cfg in norm_cfg.edgesets.items()]
+    for set_label, set_cfg in set_configs:
+      for feat_cfg in set_cfg.normalizers:
+        if not isinstance(feat_cfg, normalize_lib.TextEmbeddingNormalizer):
+          continue
+        emb_cfg = feat_cfg.embedder_config()
+        entries.append({
+            "normalizer": norm_label,
+            "set": set_label,
+            "feature": feat_cfg.input_feature,
+            "output_feature": feat_cfg.output_feature_name,
+            "model_name": emb_cfg.name,
+            "backend": emb_cfg.backend.value,
+            "handle": emb_cfg.handle,
+            "embedding_dim": str(feat_cfg.embedding_dim),
+            "trainable": "False (frozen)",
+        })
+  return entries
+
+
+def _get_text_embedding_tab(
+    normalizer_configs: dict[str, normalize_lib.GraphNormalizerConfig],
+) -> tuple[str, str] | None:
+  """Generates the Text Embedding tab if any text features are normalized."""
+  entries = _collect_text_embedding_entries(normalizer_configs)
+  if not entries:
+    return None
+
+  unique_handles = list(dict.fromkeys(e["handle"] for e in entries))
+  rows_html = ""
+  for entry in entries:
+    rows_html += (
+        "<tr>"
+        f"<td>{html.escape(entry['normalizer'])}</td>"
+        f"<td>{html.escape(entry['set'])}</td>"
+        f"<td>{html.escape(entry['feature'])}</td>"
+        f"<td>{html.escape(entry['output_feature'])}</td>"
+        f"<td>{html.escape(entry['model_name'])}</td>"
+        f"<td>{html.escape(entry['backend'])}</td>"
+        f"<td><code>{html.escape(entry['handle'])}</code></td>"
+        f"<td>{html.escape(entry['embedding_dim'])}</td>"
+        f"<td>{html.escape(entry['trainable'])}</td>"
+        "</tr>\n"
+    )
+
+  summary = (
+      f"{len(unique_handles)} shared model instance(s) across"
+      f" {len(entries)} text feature(s)"
+  )
+  content = f"""
+<p><b>Pre-trained frozen text embedding models</b> ({summary}):</p>
+<table class="dgf-table">
+  <thead>
+    <tr>
+      <th>Normalizer</th>
+      <th>Set</th>
+      <th>Feature</th>
+      <th>Output Feature</th>
+      <th>Model Name</th>
+      <th>Backend</th>
+      <th>Handle</th>
+      <th>Embedding Dim</th>
+      <th>Trainable</th>
+    </tr>
+  </thead>
+  <tbody>
+{rows_html}  </tbody>
+</table>
+"""
+  return "Text Embedding", content
+
+
 def _get_architecture_tab(
-    architecture: str, num_model_weights: dict[str, int] | None = None
+    architecture: str,
+    num_model_weights: dict[str, int] | None = None,
+    normalizer_configs: (
+        dict[str, normalize_lib.GraphNormalizerConfig] | None
+    ) = None,
 ) -> tuple[str, str]:
   """Generates the Architecture tab."""
   num_weights_str = (
@@ -397,6 +486,21 @@ def _get_architecture_tab(
       f"<b>Model Structure</b>\n<pre>{architecture}</pre>\n"
       f"<b>Model Weights</b>\n<pre>{num_weights_str}</pre>"
   )
+  entries = _collect_text_embedding_entries(normalizer_configs)
+  if entries:
+    seen_handles = set()
+    summary_lines = []
+    for entry in entries:
+      handle = entry["handle"]
+      if handle in seen_handles:
+        continue
+      seen_handles.add(handle)
+      summary_lines.append(
+          f"{entry['model_name']} ({entry['backend']},"
+          f" dim={entry['embedding_dim']}, handle={handle}, frozen)"
+      )
+    summary_text = html.escape("\n".join(summary_lines))
+    content += f"\n<b>Frozen Text Embedders</b>\n<pre>{summary_text}</pre>"
   return "Architecture", content
 
 
@@ -430,6 +534,9 @@ def get_common_tabs(
     num_model_weights: dict[str, int] | None = None,
     log_messages: list[log.Message] | None = None,
     final_evaluation: evaluation.Evaluation | None = None,
+    normalizer_configs: (
+        dict[str, normalize_lib.GraphNormalizerConfig] | None
+    ) = None,
 ) -> list[tuple[str, str]]:
   """Generates common tabs for model description."""
   tabs = []
@@ -456,11 +563,22 @@ def get_common_tabs(
   if feature_stats is not None:
     tabs.append(_get_feature_stats_tab(feature_stats))
 
+  if normalizer_configs is not None:
+    text_emb_tab = _get_text_embedding_tab(normalizer_configs)
+    if text_emb_tab is not None:
+      tabs.append(text_emb_tab)
+
   if sampling_plans is not None:
     tabs.append(_get_graph_sampling_tab(sampling_plans))
 
   if architecture is not None:
-    tabs.append(_get_architecture_tab(architecture, num_model_weights))
+    tabs.append(
+        _get_architecture_tab(
+            architecture,
+            num_model_weights,
+            normalizer_configs=normalizer_configs,
+        )
+    )
 
   if padding is not None:
     tabs.append(_get_padding_tab(padding))

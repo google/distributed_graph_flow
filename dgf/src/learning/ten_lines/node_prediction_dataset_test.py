@@ -529,6 +529,7 @@ class GNNDatasetPreparatorTest(parameterized.TestCase):
         cache_normalized_features_device="host",
         sampling_plan=None,
         padding_margin=0.1,
+        text_embedder="nnlm-en-dim128",
     )
     self.assertIsNotNone(train_dataset.seed_node_idxs)
     self.assertIsNotNone(valid_dataset)

@@ -40,6 +40,7 @@ from dgf.src.plot import network as network_lib
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
+from dgf.src.transform import normalize_text as normalize_text_lib
 from dgf.src.util import filesystem as fs
 from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
@@ -195,6 +196,7 @@ def prepare_datasets(
     target_sampling_plan: sampling_config_lib.SamplingPlan | None,
     temporal_sampling: bool,
     edgeset_timestamp_features: dict[str, str],
+    text_embedder: str | normalize_text_lib.TextEmbedderConfig,
 ) -> tuple[
     link_prediction_dataset.GNNLinkDatasetPreparator,
     link_prediction_dataset.GNNLinkDatasetPreparator | None,
@@ -258,6 +260,7 @@ def prepare_datasets(
           ignore_features_without_stats=True,
           timestamp_normalize=temporal_sampling,
           calendar_normalize=True,
+          text_embedder=text_embedder,
       ),
       "skip_overflow_padding_error": True,
       "mask_seed_edge": hparams.message_passing_on_target_edgeset,
@@ -384,6 +387,7 @@ def train_link_model(
     target_sampling_plan: sampling_config_lib.SamplingPlan | None = None,
     early_stopping: bool | int = True,
     fast_compile: bool = False,
+    text_embedder: str | normalize_text_lib.TextEmbedderConfig = "nnlm-en-dim128",
 ) -> LinkPredictionModel:
   """Trains a supervised Graph Neural Network model for edge prediction.
 
@@ -491,6 +495,9 @@ def train_link_model(
       runtime execution speed. Useful for fast iteration, interactive debugging,
       and unit tests. Specifically, this disables expensive XLA GEMM autotuning
       (--xla_gpu_autotune_level=0).
+    text_embedder: Pre-trained frozen text embedding model used to normalize
+      `TEXT` features. Can be a built-in name (e.g. `"nnlm-en-dim128"`), a
+      model handle/path, or a `TextEmbedderConfig`.
 
   Returns:
     A LinkPredictionModel instance.
@@ -604,6 +611,7 @@ def train_link_model(
           target_sampling_plan=target_sampling_plan,
           temporal_sampling=time_aware,
           edgeset_timestamp_features=edgeset_ts_features,
+          text_embedder=text_embedder,
       )
     source_normalized_schema = (
         train_dataset.get_live().source_normalizer.output_schema()

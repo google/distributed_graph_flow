@@ -400,6 +400,10 @@ class LinkPredictionModel(common.Model):
         architecture=self.data().core_model_config.architecture(),
         num_model_weights=common.num_model_weights(self.data().model_params),
         log_messages=self.metadata.captured_logs,
+        normalizer_configs={
+            "Source": self._data.source_normalizer_config,
+            "Target": self._data.target_normalizer_config,
+        },
     )
 
     tabs.extend(common_tabs)
@@ -1207,12 +1211,16 @@ class LinkPredictionModel(common.Model):
           self._schema = schema
           self._source_padding = source_padding
           self._target_padding = target_padding
-          self._source_normalizer_tf_resources = (
+          combined_resources = []
+          seen_resource_ids = set()
+          for res in (
               source_normalizer.tensorflow_resources()
-          )
-          self._target_normalizer_tf_resources = (
-              target_normalizer.tensorflow_resources()
-          )
+              + target_normalizer.tensorflow_resources()
+          ):
+            if id(res) not in seen_resource_ids:
+              seen_resource_ids.add(id(res))
+              combined_resources.append(res)
+          self._normalizer_tf_resources = combined_resources
 
         def _predict(
             self,

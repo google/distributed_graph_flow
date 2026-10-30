@@ -37,6 +37,7 @@ from dgf.src.learning.ten_lines import node_prediction_train as node_prediction_
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import merge as merge_lib
+from dgf.src.transform import normalize_text_test_util
 from dgf.src.util import filesystem as fs
 from dgf.src.util import gen_test_graph
 from dgf.src.util import log
@@ -2064,6 +2065,105 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
         padding_margin=_NO_SKIP_PADDING_MARGIN,
     )
     self.assertIsNotNone(model.data().final_evaluation)
+
+  def test_text_features_train_save_describe_and_saved_model_export(self):
+    hub_dir = self.create_tempdir("dummy_text_hub").full_path
+    normalize_text_test_util.save_dummy_tf_hub_embedder(hub_dir, dim=8)
+
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "paper": schema_lib.NodeSchema(
+                features={
+                    "#id": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+                    ),
+                    "title": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        semantic=schema_lib.FeatureSemantic.TEXT,
+                    ),
+                    "abstract": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        semantic=schema_lib.FeatureSemantic.TEXT,
+                    ),
+                    "label": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_32,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                        num_categorical_values=2,
+                    ),
+                }
+            )
+        },
+        edge_sets={
+            "cites": schema_lib.EdgeSchema(
+                source="paper", target="paper", features={}
+            )
+        },
+    )
+    graph = synthetic_lib.generate_synthetic_graph(
+        schema,
+        synthetic_lib.SyntheticGraphConfig(num_nodes=40, num_edges=80),
+    )
+
+    model = node_prediction_lib.train_node_model(
+        graph=graph,
+        schema=schema,
+        target_nodeset="paper",
+        target_column="label",
+        text_embedder=hub_dir,
+        num_train_steps=5,
+        valid_every_n_steps=5,
+        batch_size=4,
+        sampling_width=3,
+        num_sampling_hops=1,
+        node_embedding_dim=8,
+        num_layers=1,
+        evaluate_final_model=False,
+        verbose=0,
+        padding_margin=_NO_SKIP_PADDING_MARGIN,
+        fast_compile=True,
+    )
+
+    html_desc = model.describe()._repr_html_()  # pylint: disable=attribute-error
+    self.assertIn("Text Embedding", html_desc)
+    self.assertIn(
+        "1 shared model instance(s) across 2 text feature(s)", html_desc
+    )
+    self.assertIn("title", html_desc)
+    self.assertIn("abstract", html_desc)
+
+    save_dir = self.create_tempdir("saved_dgf_model").full_path
+    model.save(save_dir)
+    restored_model = common_lib.load_model(save_dir)
+    assert isinstance(restored_model, node_prediction_lib.NodePredictionModel)
+
+    sampler = in_memory_sampler_lib.create_sampler(
+        graph=graph,
+        plan=_sampling_plan(model),
+        schema=schema,
+        batch_size=4,
+    )
+    sample = sampler.sample(0)
+    expected_pred = model.predict(sample, [0], verbose=0)
+    restored_pred = restored_model.predict(sample, [0], verbose=0)
+    np.testing.assert_allclose(expected_pred, restored_pred, atol=1e-5)
+
+    tf_sample = tf_io.graph_to_tf_graph(sample, schema=schema)
+    tf_fn = restored_model.to_tensorflow_function(input_format="TF_GRAPH")
+    export_dir = self.create_tempdir("exported_tf_saved_model").full_path
+    tf.saved_model.save(tf_fn, export_dir)
+    reloaded = tf.saved_model.load(export_dir)
+
+    text_vars = [
+        v
+        for v in reloaded.signatures["serving_default"].variables
+        if normalize_text_test_util.DUMMY_EMBEDDER_VARIABLE_NAME in v.name
+    ]
+    self.assertLen(text_vars, 1)
+    tf_pred = reloaded(
+        graph=tf_sample, seed_node_idxs=tf.constant([0], dtype=tf.int32)
+    ).numpy()
+    np.testing.assert_allclose(tf_pred, expected_pred, atol=1e-5)
 
 
 if __name__ == "__main__":

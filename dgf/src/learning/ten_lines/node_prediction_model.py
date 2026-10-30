@@ -294,6 +294,7 @@ class NodePredictionModel(common.Model):
         num_model_weights=common.num_model_weights(self.data().model_params),
         log_messages=self.metadata.captured_logs,
         final_evaluation=self.data().final_evaluation,
+        normalizer_configs={"Default": self.data().normalizer_config},
     )
 
     tabs.extend(common_tabs)

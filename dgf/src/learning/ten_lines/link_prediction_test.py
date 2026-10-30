@@ -31,6 +31,7 @@ from dgf.src.learning.ten_lines import evaluation
 from dgf.src.learning.ten_lines import link_prediction_model
 from dgf.src.learning.ten_lines import link_prediction_train
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
+from dgf.src.transform import normalize_text_test_util
 from dgf.src.util import filesystem as fs
 from dgf.src.util import test_util
 import jax
@@ -1709,6 +1710,54 @@ class LinkPredictionTimeseriesTest(parameterized.TestCase):
 
     eval_result = model.evaluate(graph)
     self.assertEqual(eval_result.num_examples, 2)
+
+
+class LinkPredictionTextFeaturesTest(absltest.TestCase):
+
+  def setUp(self):
+    super().setUp()
+    self.embedder_dir = self.create_tempdir().full_path
+    normalize_text_test_util.save_dummy_tf_hub_embedder(
+        self.embedder_dir, dim=8
+    )
+
+  def test_train_describe_and_saved_model_with_text_features(self):
+    graph, schema = gen_toy_graph(
+        num_nodes_a=20, num_nodes_b=20, num_categorical_values=3
+    )
+    schema.node_sets["A"].features["bio"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.BYTES,
+        semantic=schema_lib.FeatureSemantic.TEXT,
+    )
+    schema.node_sets["B"].features["desc"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.BYTES,
+        semantic=schema_lib.FeatureSemantic.TEXT,
+    )
+    graph.node_sets["A"].features["bio"] = np.array(
+        [f"source node text {i}".encode("utf-8") for i in range(20)],
+        dtype=np.bytes_,
+    )
+    graph.node_sets["B"].features["desc"] = np.array(
+        [f"target node text {i}".encode("utf-8") for i in range(20)],
+        dtype=np.bytes_,
+    )
+
+    model = link_prediction_train.train_link_model(
+        graph=graph,
+        schema=schema,
+        target_edgeset="A_to_B",
+        text_embedder=self.embedder_dir,
+        verbose=0,
+        **RAPID_TRAINING_KWARGS,
+    )
+    html = model.describe()._repr_html_()
+    self.assertIn("Text Embedding", html)
+    self.assertIn(self.embedder_dir, html)
+
+    tf_fn = model.to_tensorflow_function(
+        encoder="both", input_format="TF_GRAPH_DICT"
+    )
+    self.assertLen(tf_fn._normalizer_tf_resources, 1)  # pylint: disable=protected-access
 
 
 if __name__ == "__main__":

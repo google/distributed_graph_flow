@@ -46,6 +46,7 @@ from dgf.src.plot import network as network_lib
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
+from dgf.src.transform import normalize_text as normalize_text_lib
 from dgf.src.util import filesystem as fs
 from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
@@ -235,6 +236,7 @@ def train_node_model(
     evaluate_final_model: bool = True,
     padding_margin: float = 0.1,
     fast_compile: bool = False,
+    text_embedder: str | normalize_text_lib.TextEmbedderConfig = "nnlm-en-dim128",
 ) -> NodePredictionModel:
   """Trains a supervised Graph Neural Network model for node-level prediction.
 
@@ -353,6 +355,10 @@ def train_node_model(
       runtime execution speed. Useful for fast iteration, interactive debugging,
       and unit tests. Specifically, this disables expensive XLA GEMM autotuning
       (--xla_gpu_autotune_level=0).
+    text_embedder: Pre-trained frozen text embedding model used to normalize
+      `TEXT` features. Can be a built-in name (e.g. `"nnlm-en-dim128"`,
+      `"use-en-dim512"`, `"bert-tiny-en-dim128"`, `"bge-base-en-dim768"`), a
+      model handle/path, or a `TextEmbedderConfig`.
 
   Returns:
     A trained `NodePredictionModel` instance.
@@ -499,6 +505,7 @@ def train_node_model(
             sampling_plan=sampling_plan,
             padding_margin=hparams.padding_margin,
             target_column=task.target_column,
+            text_embedder=text_embedder,
         )
     normalized_schema = train_dataset.generated_schema()
 

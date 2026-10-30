@@ -37,6 +37,7 @@ from dgf.src.learning.ten_lines import inference
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import temporal as sampling_temporal_lib
 from dgf.src.transform import normalize as normalize_lib
+from dgf.src.transform import normalize_text as normalize_text_lib
 from dgf.src.transform import timeseries_padding
 from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
@@ -768,6 +769,7 @@ def prepare_datasets(
     cache_normalized_features_device: Literal["host", "device"],
     sampling_plan: sampling_config_lib.SamplingPlan | None,
     padding_margin: float,
+    text_embedder: str | normalize_text_lib.TextEmbedderConfig,
     auto_normalize_config: normalize_lib.AutoNormalizeConfig | None = None,
     keep_raw_features: set[tuple[str, str]] | None = None,
     target_column: str | None = None,
@@ -820,6 +822,7 @@ def prepare_datasets(
         timestamp_normalize=temporal_sampling,
         has_seed_timestamps=target_has_creation_time,
         calendar_normalize=True,
+        text_embedder=text_embedder,
     )
   else:
     auto_normalize_config.has_seed_timestamps = target_has_creation_time
