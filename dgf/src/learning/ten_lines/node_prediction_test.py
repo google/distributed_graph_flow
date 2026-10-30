@@ -295,13 +295,13 @@ class NodePredictionRealLookingGraphAttentionNetwork(parameterized.TestCase):
             "nodes_client_reserved_size",
             "nodes_client_city",
             "nodes_client_age",
-            "nodes_client_created_at",
-            "nodes_client_categorical_label",
+            "nodes_client_created__at",
+            "nodes_client_categorical__label",
             "nodes_transaction_reserved_size",
             "nodes_transaction_date",
             "nodes_transaction_amount",
             "nodes_transaction_country",
-            "edges_transation_to_client_reserved_adjacency",
+            "edges_transation__to__client_reserved_adjacency",
         ],
         "properties": {
             "seed_node_idxs": {
@@ -326,7 +326,7 @@ class NodePredictionRealLookingGraphAttentionNetwork(parameterized.TestCase):
                 "property": "age",
                 "field_kind": "feature",
             },
-            "nodes_client_created_at": {
+            "nodes_client_created__at": {
                 "type": "array",
                 "items": {"type": "integer", "format": "int64"},
                 "input_node": "client",
@@ -334,7 +334,7 @@ class NodePredictionRealLookingGraphAttentionNetwork(parameterized.TestCase):
                 "property": "created_at",
                 "field_kind": "feature",
             },
-            "nodes_client_categorical_label": {
+            "nodes_client_categorical__label": {
                 "type": "array",
                 "items": {"type": "string", "format": "byte"},
                 "input_node": "client",
@@ -380,7 +380,7 @@ class NodePredictionRealLookingGraphAttentionNetwork(parameterized.TestCase):
                 "node_label": "transaction",
                 "field_kind": "size",
             },
-            "edges_transation_to_client_reserved_adjacency": {
+            "edges_transation__to__client_reserved_adjacency": {
                 "type": "array",
                 "min_items": 2,
                 "max_items": 2,
@@ -711,20 +711,18 @@ class NodePredictionRealLooking(parameterized.TestCase):
       signature = loaded.signatures["serving_default"]
       input_names = [t.name for t in signature.inputs]
 
-      h = f"{tf_io.BEGIN_CODE}23{tf_io.END_CODE}"
-      u = f"{tf_io.BEGIN_CODE}5f{tf_io.END_CODE}"
       expected_keys_and_shapes = [
           ("nodes_client_reserved_size", ()),
-          (f"nodes_client_{h}id", [None]),
+          ("nodes_client__id", [None]),
           ("nodes_client_city", [None]),
           ("nodes_client_age", [None]),
-          (f"nodes_client_categorical{u}label", [None]),
+          ("nodes_client_categorical__label", [None]),
           ("nodes_transaction_reserved_size", ()),
-          (f"nodes_transaction_{h}id", [None]),
+          ("nodes_transaction__id", [None]),
           ("nodes_transaction_date", [None]),
           ("nodes_transaction_amount", [None]),
           (
-              f"edges_transation{u}to{u}client_reserved_adjacency",
+              "edges_transation__to__client_reserved_adjacency",
               [2, None],
           ),
       ]

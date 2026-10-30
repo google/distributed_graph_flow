@@ -273,6 +273,8 @@ def _rename_spec(spec: Any, name: str) -> Any:
     name: The new name of the spec.
   """
   if isinstance(spec, tf.TensorSpec):
+    if spec.name is None:
+      return spec
     return tf.TensorSpec(shape=spec.shape, dtype=spec.dtype, name=name)
   if isinstance(spec, tf.RaggedTensorSpec):
     return spec

@@ -68,11 +68,43 @@ class TfTest(parameterized.TestCase):
     test_util.assert_are_equal(self, reconstructed_graph, tf_in_memory_graph)
 
   def test_tf_graph_to_tf_graph_dict_with_underscores(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "#my_nodeset": schema_lib.NodeSchema(
+                features={
+                    "my_#feat": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32, shape=(1,)
+                    ),
+                    "user_id": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32, shape=(1,)
+                    ),
+                    "_leading_feat": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32, shape=(1,)
+                    ),
+                }
+            )
+        },
+        edge_sets={
+            "#my_edgeset": schema_lib.EdgeSchema(
+                source="#my_nodeset",
+                target="#my_nodeset",
+                features={
+                    "#my_edge_feat": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32
+                    )
+                },
+            )
+        },
+    )
     tf_graph = tf_in_memory_graph_lib.TFInMemoryGraph(
         node_sets={
             "#my_nodeset": tf_in_memory_graph_lib.TFInMemoryNodeSet(
                 num_nodes=tf.constant(2, dtype=tf.int32),
-                features={"my_#feat": tf.constant([[1.0], [2.0]])},
+                features={
+                    "my_#feat": tf.constant([[1.0], [2.0]]),
+                    "user_id": tf.constant([[10.0], [20.0]]),
+                    "_leading_feat": tf.constant([[3.0], [4.0]]),
+                },
             )
         },
         edge_sets={
@@ -84,72 +116,25 @@ class TfTest(parameterized.TestCase):
     )
     graph_dict = tf_lib.tf_graph_to_tf_graph_dict(tf_graph)
 
-    h = f"{tf_lib.BEGIN_CODE}23{tf_lib.END_CODE}"
-    u = f"{tf_lib.BEGIN_CODE}5f{tf_lib.END_CODE}"
-    # Verify keys have both # and underscores replaced
-    self.assertIn(f"nodes_{h}my{u}nodeset_reserved_size", graph_dict)
-    self.assertIn(f"nodes_{h}my{u}nodeset_my{u}{h}feat", graph_dict)
-    self.assertIn(f"edges_{h}my{u}edgeset_reserved_adjacency", graph_dict)
-    self.assertIn(f"edges_{h}my{u}edgeset_{h}my{u}edge{u}feat", graph_dict)
+    self.assertIn("nodes_#my__nodeset_reserved_size", graph_dict)
+    self.assertIn("nodes_#my__nodeset_my__#feat", graph_dict)
+    self.assertIn("nodes_#my__nodeset_user__id", graph_dict)
+    self.assertIn("nodes_#my__nodeset___leading__feat", graph_dict)
+    self.assertIn("edges_#my__edgeset_reserved_adjacency", graph_dict)
+    self.assertIn("edges_#my__edgeset_#my__edge__feat", graph_dict)
+
+    # Verify that ('a_b', 'c') and ('a', 'b_c') produce distinct keys.
+    self.assertEqual(tf_lib.tf_graph_dict_edge_key("a_b", "c"), "edges_a__b_c")
+    self.assertEqual(tf_lib.tf_graph_dict_edge_key("a", "b_c"), "edges_a_b__c")
 
     reconstructed_graph = tf_lib.tf_graph_dict_to_tf_graph(graph_dict)
     test_util.assert_are_equal(self, reconstructed_graph, tf_graph)
 
-  def test_schema_to_spec_invalid_names(self):
-    inv = f"{tf_lib.BEGIN_CODE}23{tf_lib.END_CODE}"
-    # Node set name invalid
-    schema = schema_lib.GraphSchema(
-        node_sets={f"n_{inv}_1": schema_lib.NodeSchema(features={})},
-        edge_sets={},
-    )
-    with self.assertRaises(ValueError):
-      tf_lib.schema_to_spec(schema)
+    dict_spec = tf_lib.schema_to_dict_spec(schema)
+    self.assertEqual(set(dict_spec.keys()), set(graph_dict.keys()))
 
-    # Edge set name invalid
-    schema = schema_lib.GraphSchema(
-        node_sets={"n1": schema_lib.NodeSchema(features={})},
-        edge_sets={
-            f"e_{inv}_1": schema_lib.EdgeSchema(
-                source="n1", target="n1", features={}
-            )
-        },
-    )
-    with self.assertRaises(ValueError):
-      tf_lib.schema_to_spec(schema)
-
-    # Feature name invalid in node set
-    schema = schema_lib.GraphSchema(
-        node_sets={
-            "n1": schema_lib.NodeSchema(
-                features={
-                    f"f_{inv}_1": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.FLOAT_32
-                    )
-                }
-            )
-        },
-        edge_sets={},
-    )
-    with self.assertRaises(ValueError):
-      tf_lib.schema_to_spec(schema)
-
-    # Feature name invalid in edge set
-    schema = schema_lib.GraphSchema(
-        node_sets={"n1": schema_lib.NodeSchema(features={})},
-        edge_sets={
-            "e1": schema_lib.EdgeSchema(
-                source="n1",
-                target="n1",
-                features={
-                    f"f_{inv}_1": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.FLOAT_32
-                    )
-                },
-            )
-        },
-    )
-    with self.assertRaises(ValueError):
-      tf_lib.schema_to_spec(schema)
+    with self.assertRaisesRegex(ValueError, "Unrecognized key"):
+      tf_lib.tf_graph_dict_to_tf_graph({"invalid_key": tf.constant([1.0])})
 
 
 class TfgnnGraphSampleTest(parameterized.TestCase):
