@@ -24,7 +24,6 @@ import textwrap
 import time
 from typing import Literal
 from dgf.src.analyse import print_schema as print_schema_lib
-from dgf.src.data import in_memory_graph
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.data import statistics as statistics_lib
@@ -167,24 +166,6 @@ def infer_task_type(
         "Please specify the task type explicitly or use CATEGORICAL or "
         "NUMERICAL semantic."
     )
-
-
-def _estimate_num_train_seed_nodes(
-    graph: common.Graph,
-    valid_graph: common.Graph | None,
-    target_nodeset: str,
-    train_seed_nodes: common.SeedNodeIdxs | None,
-    validation_ratio: float,
-) -> int | None:
-  """Estimates the number of training seed nodes, or None if unknown."""
-  if train_seed_nodes is not None:
-    return len(train_seed_nodes)
-  if not isinstance(graph, in_memory_graph.InMemoryGraph):
-    return None
-  num_nodes = graph.node_sets[target_nodeset].num_nodes
-  if num_nodes is None or valid_graph is not None:
-    return num_nodes
-  return int(num_nodes * (1 - validation_ratio))
 
 
 def train_node_model(
@@ -438,7 +419,7 @@ def train_node_model(
     batch_size, learning_rate = common.resolve_batch_size_and_learning_rate(
         batch_size,
         learning_rate,
-        num_train_examples=_estimate_num_train_seed_nodes(
+        num_train_examples=common.estimate_num_train_seed_nodes(
             graph, valid_graph, target_nodeset, train_seed_nodes, validation_ratio
         ),
         num_train_steps=num_train_steps,

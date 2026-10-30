@@ -636,6 +636,50 @@ class SelectBatchSizeTest(parameterized.TestCase):
         (32, 0.1),
     )
 
+  def test_estimate_num_train_seed_nodes(self):
+    graph, _ = gen_test_graph.gen_toy_classification_dataset(
+        num_n1_nodes=100, num_n2_nodes=50
+    )
+    self.assertEqual(
+        common.estimate_num_train_seed_nodes(
+            graph=graph,
+            valid_graph=None,
+            target_nodeset="N1",
+            train_seed_nodes=[0, 1, 2, 3],
+            validation_ratio=0.1,
+        ),
+        4,
+    )
+    self.assertEqual(
+        common.estimate_num_train_seed_nodes(
+            graph=graph,
+            valid_graph=None,
+            target_nodeset="N1",
+            train_seed_nodes=None,
+            validation_ratio=0.1,
+        ),
+        90,
+    )
+    self.assertEqual(
+        common.estimate_num_train_seed_nodes(
+            graph=graph,
+            valid_graph=graph,
+            target_nodeset="N1",
+            train_seed_nodes=None,
+            validation_ratio=0.1,
+        ),
+        100,
+    )
+    self.assertIsNone(
+        common.estimate_num_train_seed_nodes(
+            graph="/some/path.tfrecord",
+            valid_graph=None,
+            target_nodeset="N1",
+            train_seed_nodes=None,
+            validation_ratio=0.1,
+        )
+    )
+
 
 class RecommendSmallerBatchSizeOnOomTest(absltest.TestCase):
 

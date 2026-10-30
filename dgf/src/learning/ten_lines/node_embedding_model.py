@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterator
 import dataclasses
+import html
 import itertools
 import textwrap
 from typing import Any
@@ -41,6 +42,7 @@ from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
 from dgf.src.util import log
+from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import jax
@@ -54,6 +56,9 @@ import numpy as np
 Batch = node_embedding_core_model.Batch
 CoreModel = node_embedding_core_model.CoreModel
 CoreModelConfig = node_embedding_core_model.CoreModelConfig
+
+# Number of batches sampled and normalized in advance during inference.
+_PREDICT_PREFETCH_SIZE = 2
 
 # Interpretable (not optimized) metrics returned by
 # `CoreModelConfig.compute_loss` and reported by `NodeEmbeddingModel.evaluate`.
@@ -83,7 +88,7 @@ class BatchEmbedding:
   batch_seed_node_idxs: np.ndarray | None
   normalized_merged_graph: in_memory_graph.InMemoryGraph
   merged_seed_node_idxs: np.ndarray
-  embeddings: np.ndarray
+  embeddings: np.ndarray | jax.Array
 
 
 @dataclasses_json.dataclass_json
@@ -143,7 +148,7 @@ class ModelLiveResource:
 
 
 class NodeEmbeddingModel(common.Model):
-  """User-visible unsupervised node embedding model."""
+  """The user-visible returned model object for node embedding."""
 
   def __init__(self, data: ModelData) -> None:
     super().__init__(data)
@@ -188,6 +193,15 @@ class NodeEmbeddingModel(common.Model):
   def describe(self) -> util.RichDisplay:
     """Returns a rich HTML report describing the model."""
     graphmae_cfg = self._data.core_model_config.graphmae
+    excluded_features = (
+        "; ".join(
+            f"{nodeset_name}: {', '.join(feature_names)}"
+            for nodeset_name, feature_names in sorted(
+                self._data.excluded_features.items()
+            )
+        )
+        or "None"
+    )
     tabs = [
         (
             "Objective",
@@ -198,6 +212,7 @@ class NodeEmbeddingModel(common.Model):
     <tr><td>Type</td><td>Unsupervised Node Embedding (GraphMAE)</td></tr>
     <tr><td>Target nodeset</td><td>{self.target_nodeset}</td></tr>
     <tr><td>Embedding dimension</td><td>{self.embedding_dim}</td></tr>
+    <tr><td>Excluded features</td><td>{html.escape(excluded_features)}</td></tr>
     <tr><td>Mask rate</td><td>{graphmae_cfg.mask_rate}</td></tr>
     <tr><td>Drop edge rate</td><td>{graphmae_cfg.drop_edge_rate}</td></tr>
   </tbody>
@@ -280,8 +295,40 @@ class NodeEmbeddingModel(common.Model):
       seed_node_idxs: common.SeedNodeIdxs | None = None,
       *,
       verbose: int = 2,
+      to_host: bool = True,
   ) -> Iterator[BatchEmbedding]:
-    """Generates batches of node embeddings."""
+    """Generates batches of node embeddings.
+
+    Args:
+      graph: The input graph.
+      seed_node_idxs: The indices of the seed nodes in the target nodeset. If
+        None, embeddings are generated for all nodes in the target nodeset.
+      verbose: The verbosity level.
+      to_host: If true, the embeddings are transferred to the host as
+        `np.ndarray`. If false, the embeddings stay on device as `jax.Array`,
+        which avoids a device synchronization at each batch.
+
+    Yields:
+      The batches of node embeddings.
+    """
+    self._require_sampling_plan()
+
+    if seed_node_idxs is None:
+      num_nodes = graph.node_sets[self.target_nodeset].num_nodes
+      assert num_nodes is not None
+      seed_node_idxs = np.arange(num_nodes, dtype=np.int32)
+
+    live = self._get_live()
+
+    for normalized_batch in self._generate_normalized_batches(
+        graph, seed_node_idxs, verbose=verbose
+    ):
+      yield self._embed_normalized_batch(
+          live, normalized_batch, to_host=to_host
+      )
+
+  def _require_sampling_plan(self) -> sampling_config_lib.SamplingPlan:
+    """Returns `self._data.sampling_plan`, or raises if it is `None`."""
     sampling_plan = self._data.sampling_plan
     if sampling_plan is None:
       raise ValueError(textwrap.dedent("""\
@@ -294,15 +341,55 @@ class NodeEmbeddingModel(common.Model):
           `model.to_tensorflow_function`), or re-train the model with the
           `sampling_plan` argument.
           """))
+    return sampling_plan
 
-    if seed_node_idxs is None:
-      num_nodes = graph.node_sets[self.target_nodeset].num_nodes
-      assert num_nodes is not None
-      seed_node_idxs = np.arange(num_nodes, dtype=np.int32)
+  def _should_cache_normalized_features(
+      self, graph: in_memory_graph.InMemoryGraph, num_seed_nodes: int
+  ) -> bool:
+    """Tests if the features of the entire graph should be normalized at once."""
+    live = self._get_live()
+    schema = self._data.schema
+    if (
+        "seed_timestamps" in live.normalizer.accepted_kwargs
+        or temporal_util.schema_has_timeseries_features(schema)
+        or any(not nodeset.num_nodes for nodeset in graph.node_sets.values())
+    ):
+      return False
+    num_graph_nodes = sum(n.num_nodes or 0 for n in graph.node_sets.values())
+    # The padding is an upper bound of the number of nodes in a batch.
+    num_padded_nodes = sum(
+        n.num_nodes or 0 for n in self._data.padding.node_sets.values()
+    )
+    num_sampled_nodes = (
+        num_seed_nodes * num_padded_nodes / self._data.hparams.batch_size
+    )
+    return num_sampled_nodes >= num_graph_nodes
 
+  def _generate_normalized_batches(
+      self,
+      graph: in_memory_graph.InMemoryGraph,
+      seed_node_idxs: common.SeedNodeIdxs,
+      *,
+      verbose: int,
+      progress_bar_desc: str = "Inference",
+  ) -> Iterator[inference.NormalizedBatch]:
+    """Samples, normalizes, and prefetches batches from a full graph."""
+    sampling_plan = self._require_sampling_plan()
     live = self._get_live()
 
-    for normalized_batch in inference.generate_normalized_batches(
+    # If enough nodes are sampled, normalizing the features of the entire graph
+    # once is cheaper than normalizing the features of each sampled sub-graph.
+    # The normalized features are then directly gathered by the sampler.
+    is_normalized = self._should_cache_normalized_features(
+        graph, len(seed_node_idxs)
+    )
+    if is_normalized:
+      graph = live.normalizer.normalize_numpy(graph)
+      sampler_schema = live.normalizer.output_schema()
+    else:
+      sampler_schema = self._data.schema
+
+    normalized_batches = inference.generate_normalized_batches(
         graph,
         seed_node_idxs,
         schema=self._data.schema,
@@ -312,30 +399,57 @@ class NodeEmbeddingModel(common.Model):
         target_nodeset=self.target_nodeset,
         batch_size=self._data.hparams.batch_size,
         temporal_sampling=False,
-        sampler_schema=self._data.schema,
+        sampler_schema=sampler_schema,
         verbose=verbose,
-    ):
-      yield self._embed_normalized_batch(live, normalized_batch)
+        progress_bar_desc=progress_bar_desc,
+        is_normalized=is_normalized,
+    )
+    # The next batches are sampled and normalized while the model is applied.
+    return util.prefetch_iterator(
+        normalized_batches, prefetch_size=_PREDICT_PREFETCH_SIZE
+    )
 
   def _embed_normalized_batch(
       self,
       live: ModelLiveResource,
       normalized_batch: inference.NormalizedBatch,
+      *,
+      to_host: bool = True,
   ) -> BatchEmbedding:
-    """Computes embeddings on an already merged and normalized (sub-)batch."""
+    """Computes embeddings on an already merged and normalized (sub-)batch.
+
+    Args:
+      live: The live model resources.
+      normalized_batch: The merged and normalized batch.
+      to_host: If true, the embeddings are transferred to the host as
+        `np.ndarray` (which blocks until the device computation is done). If
+        false, the embeddings stay on device as `jax.Array`.
+
+    Returns:
+      The batch embedding.
+    """
     emb = live.apply_embed(normalized_batch.jax_batch)
+    if to_host:
+      emb = np.asarray(jax.device_get(emb), dtype=np.float32)
     return BatchEmbedding(
         batch_seed_node_idxs=normalized_batch.batch_seed_node_idxs,
         normalized_merged_graph=normalized_batch.normalized_merged_graph,
         merged_seed_node_idxs=normalized_batch.merged_seed_node_idxs,
-        embeddings=np.asarray(jax.device_get(emb), dtype=np.float32),
+        embeddings=emb,
     )
 
   def predict_on_graph_sample_batch(
       self,
       graph_samples: list[in_memory_graph.InMemoryGraph],
   ) -> np.ndarray:
-    """Predicts embeddings for a batch of pre-sampled graph samples."""
+    """Predicts embeddings for a batch of pre-sampled graph samples.
+
+    Args:
+      graph_samples: A list of graph samples to compute embeddings on.
+
+    Returns:
+      A float32 array of shape `[len(graph_samples), embedding_dim]`.
+    """
     live = self._get_live()
     merged_graph, merge_offsets = merge_lib.GraphMerger(
         schema=self._data.schema,
@@ -348,7 +462,10 @@ class NodeEmbeddingModel(common.Model):
         normalizer=live.normalizer,
         target_nodeset=self.target_nodeset,
     )
-    return self._embed_normalized_batch(live, normalized_batch).embeddings
+    return np.asarray(
+        self._embed_normalized_batch(live, normalized_batch).embeddings,
+        dtype=np.float32,
+    )
 
   def evaluate(
       self,
@@ -431,10 +548,7 @@ class NodeEmbeddingModel(common.Model):
       var_loss, cov_loss, total_loss, recon_cosine, recon_relative_error,
       embedding_rank_ratio, and target_rank_ratio metrics.
     """
-    if self._data.sampling_plan is None:
-      raise ValueError(
-          "Cannot call `evaluate` on a full graph when `sampling_plan` is None."
-      )
+    self._require_sampling_plan()
 
     num_nodes = graph.node_sets[self.target_nodeset].num_nodes
     assert num_nodes is not None
@@ -454,18 +568,9 @@ class NodeEmbeddingModel(common.Model):
       log.info("Evaluating model on %d samples", len(seed_node_idxs))
 
     live = self._get_live()
-
-    normalized_batches = inference.generate_normalized_batches(
+    normalized_batches = self._generate_normalized_batches(
         graph,
         seed_node_idxs,
-        schema=self._data.schema,
-        sampling_plan=self._data.sampling_plan,
-        padding=self._data.padding,
-        normalizer=live.normalizer,
-        target_nodeset=self.target_nodeset,
-        batch_size=self._data.hparams.batch_size,
-        temporal_sampling=False,
-        sampler_schema=self._data.schema,
         verbose=verbose,
         progress_bar_desc="Evaluation",
     )
@@ -635,7 +740,45 @@ class NodeEmbeddingModel(common.Model):
       input_format: common.TFFunctionInputFormat | str | None = None,
       consume_tf_graph_dict: bool | None = None,
   ) -> tf.Module:
-    """Exports the model as a TensorFlow function without the sampling step."""
+    """Exports the model as a TensorFlow function without the sampling step.
+
+    This method creates a TensorFlow function that encapsulates the model's
+    normalization and core embedding logic. It is designed to be used with
+    pre-sampled subgraphs.
+
+    Depending on `input_format`, the returned TensorFlow function takes:
+      - TF_GRAPH: A `dgf.data.TFInMemoryGraph` named `graph`, and a 1D tensor of
+        integers named `seed_node_idxs` specifying the indices of the nodes
+        within the target nodeset for which to generate embeddings.
+      - TF_GRAPH_DICT: The items of a `dgf.data.TFInMemoryGraphDict` as keyword
+        arguments, and `seed_node_idxs`.
+      - SERIALIZED_TFGNN_GRAPHS: A 1D string tensor named `examples` containing
+        serialized TF GNN Graph Samples. One embedding is generated for each
+        graph sample, on the first node of the target nodeset (which is the
+        seed node of the DGF graph samplers).
+
+    Usage example:
+
+      ```python
+      # Consumes serialized TF GNN Graph Samples e.g. for a TFX BulkInferrer.
+      tf_embed_fn = model.to_tensorflow_function(
+          input_format="SERIALIZED_TFGNN_GRAPHS")
+      embeddings = tf_embed_fn(tf.constant([serialized_example]))
+      ```
+
+    Args:
+      input_format: Format of the inputs consumed by the returned TensorFlow
+        function. See `dgf.learning.TFFunctionInputFormat`. Defaults to
+        `TF_GRAPH`.
+      consume_tf_graph_dict: Deprecated. Use `input_format` instead.
+        `consume_tf_graph_dict=True` is equivalent to
+        `input_format="TF_GRAPH_DICT"`, and `consume_tf_graph_dict=False` is
+        equivalent to `input_format="TF_GRAPH"`.
+
+    Returns:
+      A `tf.Module` with a `__call__` method returning a float32 tensor of
+      embeddings.
+    """
     input_format = common.resolve_tf_function_input_format(
         input_format, consume_tf_graph_dict
     )

@@ -875,6 +875,24 @@ def resolve_batch_size_and_learning_rate(
   return batch_size, learning_rate
 
 
+def estimate_num_train_seed_nodes(
+    graph: Graph,
+    valid_graph: Graph | None,
+    target_nodeset: str,
+    train_seed_nodes: SeedNodeIdxs | None,
+    validation_ratio: float,
+) -> int | None:
+  """Estimates the number of training seed nodes, or None if unknown."""
+  if train_seed_nodes is not None:
+    return len(train_seed_nodes)
+  if not isinstance(graph, in_memory_graph.InMemoryGraph):
+    return None
+  num_nodes = graph.node_sets[target_nodeset].num_nodes
+  if num_nodes is None or valid_graph is not None:
+    return num_nodes
+  return int(num_nodes * (1 - validation_ratio))
+
+
 @contextlib.contextmanager
 def recommend_smaller_batch_size_on_oom(batch_size: int) -> Iterator[None]:
   """Re-raises out-of-memory errors with a hint to reduce the batch size."""
