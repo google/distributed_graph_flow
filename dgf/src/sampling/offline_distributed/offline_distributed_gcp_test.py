@@ -116,6 +116,7 @@ class OfflineDistributedGcpTest(absltest.TestCase):
             "num_samples_per_seed": 1,
             "debug_sampling": False,
             "random_seed": 42,
+            "only_one_chunk_per_node": False,
         },
     )
 
@@ -525,6 +526,29 @@ class OfflineDistributedGcpTest(absltest.TestCase):
     container_args = kwargs["worker_pool_specs"][0]["container_spec"]["args"]
     config = _get_dgf_config(container_args)
     self.assertTrue(config["debug_sampling"])
+
+  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(aiplatform, "CustomJob")
+  def test_only_one_chunk_per_node(self, mock_custom_job_cls, mock_open_write):
+    mock_open_write.return_value.__enter__.return_value = mock.MagicMock()
+    mock_custom_job_cls.return_value = mock.MagicMock()
+
+    offline_distributed_gcp.offline_distributed_sampler_gcp(
+        input_path="gs://my_bucket/graph",
+        output_path="gs://my_bucket/samples",
+        plan=self.simple_plan,
+        schema=self.mock_schema,
+        project="test-proj",
+        max_adjacency_chunk_size=100,
+        only_one_chunk_per_node=True,
+        blocking=False,
+    )
+
+    _, kwargs = mock_custom_job_cls.call_args
+    container_args = kwargs["worker_pool_specs"][0]["container_spec"]["args"]
+    config = _get_dgf_config(container_args)
+    self.assertEqual(config["max_adjacency_chunk_size"], 100)
+    self.assertTrue(config["only_one_chunk_per_node"])
 
   def test_filter_seed_node_and_input_seeds_are_exclusive(self):
     with self.assertRaisesRegex(ValueError, "are exclusive"):

@@ -245,6 +245,8 @@ class OfflineDistributedSamplingConfig:
   filter_seed_node: str | None = None
   debug_sampling: bool | None = None
   random_seed: int | None = None
+  max_adjacency_chunk_size: int | None = None
+  only_one_chunk_per_node: bool | None = None
 
 
 def _create_custom_job(
@@ -264,6 +266,8 @@ def _create_custom_job(
     shard_prefix: str,
     filter_seed_node: str | None,
     debug_sampling: bool,
+    max_adjacency_chunk_size: int | None,
+    only_one_chunk_per_node: bool,
     staging_location: str,
     temp_location: str,
     display_name: str,
@@ -284,6 +288,8 @@ def _create_custom_job(
       filter_seed_node=filter_seed_node,
       debug_sampling=debug_sampling,
       random_seed=random_seed,
+      max_adjacency_chunk_size=max_adjacency_chunk_size,
+      only_one_chunk_per_node=only_one_chunk_per_node,
   )
   # Unset fields are not exported: they do not override the sampler defaults.
   dgf_config = json.dumps({
@@ -431,6 +437,8 @@ def offline_distributed_sampler_gcp(
     shard_prefix: str = "samples",
     debug_sampling: bool = False,
     random_seed: int = 42,
+    max_adjacency_chunk_size: int | None = None,
+    only_one_chunk_per_node: bool = False,
     temp_location: str | None = None,
     staging_location: str | None = None,
     display_name: str | None = None,
@@ -501,6 +509,12 @@ def offline_distributed_sampler_gcp(
     shard_prefix: Prefix for output shards (e.g., 'samples' or 'Shard').
     debug_sampling: Enable deterministic debug sampling mode.
     random_seed: Seed of the random number generator.
+    max_adjacency_chunk_size: Maximum number of neighbors in a single adjacency
+      list chunk. If None, the sampler default is used.
+    only_one_chunk_per_node: If true, each node keeps at most
+      `max_adjacency_chunk_size` neighbors per edge set and direction, selected
+      uniformly at random, in a single adjacency list chunk. Not supported with
+      temporal sampling.
     temp_location: Optional GCS temporary directory for Dataflow.
     staging_location: Optional GCS staging directory for Dataflow and Vertex AI.
     display_name: Optional display name for the Vertex AI CustomJob.
@@ -567,6 +581,8 @@ def offline_distributed_sampler_gcp(
       shard_prefix=shard_prefix,
       filter_seed_node=filter_seed_node,
       debug_sampling=debug_sampling,
+      max_adjacency_chunk_size=max_adjacency_chunk_size,
+      only_one_chunk_per_node=only_one_chunk_per_node,
       staging_location=staging_location,
       temp_location=temp_location,
       display_name=display_name,
