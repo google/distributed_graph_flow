@@ -162,3 +162,39 @@ class _LazyFeatureFormatToTfgnnTfDtype:
 # Mapping from a FeatureFormat to the TensorFlow dtype used to store its values
 # in a TF GNN Graph Sample.
 FEATURE_FORMAT_TO_TFGNN_TF_DTYPE = _LazyFeatureFormatToTfgnnTfDtype()
+
+# Mapping from FeatureFormat to OpenAPI types.
+FEATURE_FORMAT_TO_OPENAPI_TYPE: dict[
+    schema_lib.FeatureFormat, dict[str, str]
+] = {
+    schema_lib.FeatureFormat.INTEGER_32: {"type": "integer", "format": "int32"},
+    schema_lib.FeatureFormat.INTEGER_64: {"type": "integer", "format": "int64"},
+    schema_lib.FeatureFormat.FLOAT_32: {"type": "number", "format": "float"},
+    schema_lib.FeatureFormat.FLOAT_64: {"type": "number", "format": "double"},
+    schema_lib.FeatureFormat.BOOL: {"type": "boolean"},
+    schema_lib.FeatureFormat.BYTES: {"type": "string", "format": "byte"},
+}
+
+
+def feature_schema_to_openapi_type(
+    feature_schema: schema_lib.FeatureSchema,
+) -> dict[str, Any]:
+  """Converts a FeatureSchema to the OpenAPI type of a feature array."""
+  if (
+      feature_schema.format == schema_lib.FeatureFormat.BYTES
+      and feature_schema.is_utf8_string
+  ):
+    spec: dict[str, Any] = {"type": "string"}
+  else:
+    spec = dict(FEATURE_FORMAT_TO_OPENAPI_TYPE[feature_schema.format])
+  for dim in reversed(feature_schema.shape or ()):
+    if dim is not None:
+      spec = {
+          "type": "array",
+          "min_items": dim,
+          "max_items": dim,
+          "items": spec,
+      }
+    else:
+      spec = {"type": "array", "items": spec}
+  return {"type": "array", "items": spec}

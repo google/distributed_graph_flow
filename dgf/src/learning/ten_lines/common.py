@@ -25,6 +25,7 @@ import uuid
 import dataclasses_json
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
+from dgf.src.io import feature_format as feature_format_lib
 from dgf.src.io import tf as io_tf_lib
 from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import common as jax_common
@@ -1063,33 +1064,11 @@ def extract_graph_metrics(
   return metrics
 
 
-_FEATURE_FORMAT_TO_OPENAPI_SPEC: dict[
-    schema_lib.FeatureFormat, dict[str, str]
-] = {
-    schema_lib.FeatureFormat.INTEGER_32: {
-        "type": "integer",
-        "format": "int32",
-    },
-    schema_lib.FeatureFormat.INTEGER_64: {
-        "type": "integer",
-        "format": "int64",
-    },
-    schema_lib.FeatureFormat.FLOAT_32: {
-        "type": "number",
-        "format": "float",
-    },
-    schema_lib.FeatureFormat.FLOAT_64: {
-        "type": "number",
-        "format": "double",
-    },
-    schema_lib.FeatureFormat.BYTES: {
-        "type": "string",
-        "format": "byte",
-    },
-    schema_lib.FeatureFormat.BOOL: {
-        "type": "boolean",
-    },
-}
+def pad_seed_idxs_tensorflow(seed_idxs: "tf.Tensor", size: int) -> "tf.Tensor":
+  """Pads seed indices to a static size (jax2tf exports static shapes)."""
+  return tf.ensure_shape(
+      tf.pad(seed_idxs, [[0, size - tf.shape(seed_idxs)[0]]]), [size]
+  )
 
 
 def schema_to_serving_signature_dict(
@@ -1159,31 +1138,6 @@ def schema_to_serving_signature_dict(
   }
   properties = signature["properties"]
 
-  def _format_feature_spec(
-      feat_schema: schema_lib.FeatureSchema,
-  ) -> dict[str, Any]:
-    if (
-        feat_schema.format == schema_lib.FeatureFormat.BYTES
-        and feat_schema.is_utf8_string
-    ):
-      leaf_spec: dict[str, Any] = {"type": "string"}
-    else:
-      leaf_spec = dict(_FEATURE_FORMAT_TO_OPENAPI_SPEC[feat_schema.format])
-
-    spec = dict(leaf_spec)
-    if feat_schema.shape:
-      for dim in reversed(feat_schema.shape):
-        if dim is not None:
-          spec = {
-              "type": "array",
-              "min_items": dim,
-              "max_items": dim,
-              "items": spec,
-          }
-        else:
-          spec = {"type": "array", "items": spec}
-    return {"type": "array", "items": spec}
-
   def _collect_visited_elements(
       seed_nodeset: str, sampling_plan: Any | None
   ) -> tuple[set[str], set[str]]:
@@ -1243,7 +1197,7 @@ def schema_to_serving_signature_dict(
           feat_key = io_tf_lib.tf_graph_dict_node_key(entity_name, feat_name)
           label_key = "node_label"
         properties[f"{prefix}{feat_key}"] = {
-            **_format_feature_spec(feat_schema),
+            **feature_format_lib.feature_schema_to_openapi_type(feat_schema),
             "input_node": input_node,
             label_key: entity_name,
             "property": feat_name,

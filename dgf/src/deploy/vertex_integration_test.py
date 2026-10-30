@@ -20,6 +20,10 @@ from dgf.src.deploy import vertex
 from dgf.src.learning.ten_lines import node_prediction_train
 from dgf.src.util import gen_test_graph
 
+_PROJECT = "biggraphs-poc"
+_LOCATION = "us-central1"
+_MODEL_DIR_ON_GCS = "gs://gf-experiment-gbm-test/vertex_integration_test"
+
 
 class VertexIntegrationTest(parameterized.TestCase):
 
@@ -36,12 +40,12 @@ class VertexIntegrationTest(parameterized.TestCase):
         batch_size=8,
     )
 
-    test_dir = self.create_tempdir().full_path
     endpoint = vertex.to_vertex_ai(
         model=model,
-        model_dir_on_gcs=os.path.join(test_dir, "models"),
+        model_dir_on_gcs=os.path.join(_MODEL_DIR_ON_GCS, "models"),
         display_name="test-integration-model",
-        location="us-central1",
+        location=_LOCATION,
+        project=_PROJECT,
         machine_type="n1-standard-4",
         blocking=True,
     )

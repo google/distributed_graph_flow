@@ -83,3 +83,14 @@ def drop_edge_features_from_schema(schema) -> schema_lib.GraphSchema:
   return filter_schema(
       schema, schema_lib.GraphSchemaFilter(edge_feature_fn=lambda x, _: False)
   )
+
+
+def drop_primary_id_features_from_schema(schema) -> schema_lib.GraphSchema:
+  """Drops all primary ID features from a schema."""
+  return filter_schema(
+      schema,
+      schema_lib.GraphSchemaFilter(
+          feature_fn=lambda _, feature_schema: feature_schema.semantic
+          != schema_lib.FeatureSemantic.PRIMARY_ID
+      ),
+  )
