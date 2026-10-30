@@ -51,10 +51,36 @@ py_library(
 )
 
 py_library(
+    name = "normalize_text",
+    srcs = ["normalize_text.py"],
+    deps = [
+        ":normalize_base",
+        # dataclasses_json dep,
+        "//dgf/src/data:schema",
+        "//dgf/src/util/weak_dep:weak_dep_keras_hub",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow_hub",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow_text",
+        # numpy dep,
+    ],
+)
+
+py_library(
+    name = "normalize_text_test_util",
+    testonly = True,
+    srcs = ["normalize_text_test_util.py"],
+    deps = [
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
+        # numpy dep,
+    ],
+)
+
+py_library(
     name = "normalize",
     srcs = ["normalize.py"],
     deps = [
         ":normalize_base",
+        ":normalize_text",
         # dataclasses_json dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:jax_in_memory_graph",
@@ -211,6 +237,24 @@ py_test(
         "//dgf/src/util:test_util",
         # numpy dep,
         # tensorflow:tensorflow_no_contrib dep,
+    ],
+)
+
+py_test(
+    name = "normalize_text_test",
+    srcs = ["normalize_text_test.py"],
+    deps = [
+        ":normalize",
+        ":normalize_text",
+        ":normalize_text_test_util",
+        # absl/testing:absltest dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/data:statistics",
+        "//dgf/src/io:tf",
+        # keras_hub dep,
+        # numpy dep,
+        # tensorflow dep,
     ],
 )
 

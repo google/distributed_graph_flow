@@ -30,6 +30,7 @@ from dgf.src.data import schema as schema_lib
 from dgf.src.data import statistics as statistics_lib
 from dgf.src.data import tf_in_memory_graph
 from dgf.src.transform import normalize_base
+from dgf.src.transform import normalize_text
 from dgf.src.util import log
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import jax.numpy as jnp
@@ -37,6 +38,7 @@ import numpy as np
 
 normalizer_registry = normalize_base.normalizer_registry
 AbstractFeatureNormalizer = normalize_base.AbstractFeatureNormalizer
+TextEmbeddingNormalizer = normalize_text.TextEmbeddingNormalizer
 
 
 @normalizer_registry.register
@@ -1138,6 +1140,10 @@ class AutoNormalizeConfig:
       whereas `timestamp_normalize` encodes its recency relative to the seed.
     calendar_features: The calendar components to extract when
       `calendar_normalize` is True.
+    text_normalize: If True, features with TEXT semantic and BYTES format will
+      be normalized into dense embeddings using `TextEmbeddingNormalizer`.
+    text_embedder: Name of a built-in text embedder, a model handle/path, or a
+      `TextEmbedderConfig` used when `text_normalize` is True.
   """
 
   categorical_bytes_to_index: bool = True
@@ -1161,6 +1167,8 @@ class AutoNormalizeConfig:
   # TODO(simonmeierhans): Consider enabling by default after benchmarking.
   calendar_normalize: bool = False
   calendar_features: tuple[CalendarFeature, ...] = DEFAULT_CALENDAR_FEATURES
+  text_normalize: bool = True
+  text_embedder: str | normalize_text.TextEmbedderConfig = "nnlm-en-dim128"
 
 
 def auto_normalize(
@@ -1313,6 +1321,21 @@ def auto_normalize(
         )
         feature_has_normalized = True
 
+      # Text bytes embedding
+      if (
+          config.text_normalize
+          and feature_schema.semantic == schema_lib.FeatureSemantic.TEXT
+          and feature_schema.format == schema_lib.FeatureFormat.BYTES
+      ):
+        nodeset_normalizers.append(
+            TextEmbeddingNormalizer.create(
+                feature_name,
+                feature_schema,
+                embedder=config.text_embedder,
+            )
+        )
+        feature_has_normalized = True
+
       # Categorical integer
       if (
           feature_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL
@@ -1433,6 +1456,16 @@ class EdgeSetNormalizerConfig:
   )
 
 
+def _normalizer_summary(normalizer: AbstractFeatureNormalizer) -> str:
+  """Returns a one-line human-readable summary of a feature normalizer."""
+  summary = f"{normalizer.input_feature}: {normalizer.type}"
+  if isinstance(normalizer, TextEmbeddingNormalizer):
+    summary += (
+        f" ({normalizer.embedder_handle}, dim={normalizer.embedding_dim})"
+    )
+  return summary
+
+
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass
 class GraphNormalizerConfig:
@@ -1470,7 +1503,7 @@ class GraphNormalizerConfig:
               nodeset_config.normalizers, key=lambda x: x.input_feature
           )
           for normalizer in sorted_normalizers:
-            lines.append(f"    - {normalizer.input_feature}: {normalizer.type}")
+            lines.append(f"    - {_normalizer_summary(normalizer)}")
         lines.append("")
 
     # Edge Sets
@@ -1491,7 +1524,7 @@ class GraphNormalizerConfig:
               edgeset_config.normalizers, key=lambda x: x.input_feature
           )
           for normalizer in sorted_normalizers:
-            lines.append(f"    - {normalizer.input_feature}: {normalizer.type}")
+            lines.append(f"    - {_normalizer_summary(normalizer)}")
         lines.append("")
 
     text_content = "\n".join(lines)
@@ -1694,14 +1727,16 @@ class GraphNormalizer:
 
   def tensorflow_resources(self) -> list[tf.Tensor]:
     """Returns all the tf resources of all the operations."""
-    resources = []
-    for edgeset in self.config.edgesets.values():
-      for normalizer in edgeset.normalizers:
-        resources.extend(normalizer.tensorflow_resources())
-    for nodeset in self.config.nodesets.values():
-      for normalizer in nodeset.normalizers:
-        resources.extend(normalizer.tensorflow_resources())
-    return resources
+    set_configs = [
+        *self.config.edgesets.values(),
+        *self.config.nodesets.values(),
+    ]
+    resources = {}
+    for set_config in set_configs:
+      for normalizer in set_config.normalizers:
+        for res in normalizer.tensorflow_resources():
+          resources.setdefault(id(res), res)
+    return list(resources.values())
 
   def normalize_tensorflow(
       self,

@@ -25,6 +25,14 @@ from dgf.src.validate import in_memory_graph as in_memory_graph_validate_lib
 import numpy as np
 import tqdm
 
+# Possible values for randomly generated TEXT features.
+_SYNTHETIC_TEXTS = (
+    b"I really enjoyed this, it was great.",
+    b"Excellent quality and very helpful.",
+    b"This was terrible, I am disappointed.",
+    b"Poor experience, I would not recommend it.",
+)
+
 
 @dataclasses.dataclass
 class SyntheticFeatureConfig:
@@ -300,6 +308,10 @@ def gen_feature_values(
     elif schema.format == schema_lib.FeatureFormat.BYTES:
       if schema.semantic == schema_lib.FeatureSemantic.PRIMARY_ID:
         values = np.array(f"ID_{item_idx}".encode("utf-8"), dtype=dtype)
+      elif schema.semantic == schema_lib.FeatureSemantic.TEXT:
+        total_elements = np.prod(feature_shape) if feature_shape else 1
+        sentences = random.choices(_SYNTHETIC_TEXTS, k=total_elements)
+        values = np.array(sentences, dtype=dtype).reshape(feature_shape)
       else:
         num_unique_values = schema.num_categorical_values or 100
         # Generate a pool of unique byte strings and sample from it.

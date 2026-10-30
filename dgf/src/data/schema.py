@@ -59,6 +59,8 @@ class FeatureSemantic(enum.Enum):
     MASK: The feature represents a boolean sequence padding mask. It must belong
       to a `timeseries_group`, and its shape has to be broadcastable to the
       features in that group.
+    TEXT: The feature represents free-form natural language text (stored as
+      UTF-8 BYTES) to be embedded by a pre-trained text model.
   """
 
   UNKNOWN = "UNKNOWN"
@@ -70,6 +72,7 @@ class FeatureSemantic(enum.Enum):
   TIMESERIES = "TIMESERIES"
   PRIMARY_ID = "PRIMARY_ID"
   MASK = "MASK"
+  TEXT = "TEXT"
 
 
 @dataclasses_json.dataclass_json
