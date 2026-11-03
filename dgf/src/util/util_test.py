@@ -352,6 +352,44 @@ class SplitTrainValidTest(parameterized.TestCase):
           creation_times, validation_ratio, batch_size=batch_size
       )
 
+  @mock.patch("dgf.src.util.util.log.info")
+  def test_split_temporal_verbose(self, mock_info):
+    creation_times = np.array([1000, 2000, 1700000000, 1800000000])
+    util.split_train_valid_temporal(creation_times, validation_ratio=0.5)
+    mock_info.assert_called_once()
+    message = mock_info.call_args[0][0] % mock_info.call_args[0][1:]
+    self.assertIn("2 training items", message)
+    self.assertIn("2 validation items", message)
+    self.assertIn("1700000000", message)
+    self.assertIn("2023-11-14 22:13:20 UTC", message)
+
+  @parameterized.named_parameters(
+      (
+          "microseconds",
+          np.array([1_600_000_000_000_000, 1_700_000_000_000_000]),
+      ),
+      ("overflow_float", np.array([1.0, 1e30])),
+      ("string_values", np.array(["2020-01-01", "2021-01-01"])),
+  )
+  @mock.patch("dgf.src.util.util.log.info")
+  def test_split_temporal_verbose_non_seconds_timestamp(
+      self, creation_times, mock_info
+  ):
+    util.split_train_valid_temporal(creation_times, validation_ratio=0.5)
+    mock_info.assert_called_once()
+    message = mock_info.call_args[0][0] % mock_info.call_args[0][1:]
+    self.assertIn("1 training items", message)
+    self.assertIn("1 validation items", message)
+    self.assertIn("not a Unix timestamp in seconds", message)
+
+  @mock.patch("dgf.src.util.util.log.info")
+  def test_split_temporal_verbose_false(self, mock_info):
+    creation_times = np.array([1000, 2000, 1700000000, 1800000000])
+    util.split_train_valid_temporal(
+        creation_times, validation_ratio=0.5, verbose=False
+    )
+    mock_info.assert_not_called()
+
 
 class PrefetchIteratorTest(absltest.TestCase):
 

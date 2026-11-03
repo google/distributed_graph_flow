@@ -17,6 +17,7 @@
 import collections
 from collections.abc import Iterator
 import contextlib
+import datetime
 import math
 import queue
 import threading
@@ -272,6 +273,7 @@ def split_train_valid_temporal(
     validation_ratio: float,
     batch_size: int = 1,
     max_num_valid_examples: int | None = None,
+    verbose: bool = True,
 ) -> tuple[np.ndarray, np.ndarray]:
   """Splits indices into training (past) and validation (future) sets chronologically.
 
@@ -284,6 +286,8 @@ def split_train_valid_temporal(
     validation_ratio: The ratio of values to use for validation.
     batch_size: Batch size.
     max_num_valid_examples: Optional maximum number of valid examples.
+    verbose: If True, logs the number of training/validation items and the split
+      timestamp.
 
   Returns:
     A tuple of (train_idxs, valid_idxs) containing the indices for each set.
@@ -315,6 +319,26 @@ def split_train_valid_temporal(
   train_cutoff = num_values - num_valid
   train_idxs = sorted_idxs[:train_cutoff]
   valid_idxs = sorted_idxs[train_cutoff:]
+  if verbose:
+    split_ts = (
+        creation_times[valid_idxs[0]]
+        if len(valid_idxs) > 0
+        else creation_times[train_idxs[-1]]
+    )
+    try:
+      split_date = datetime.datetime.fromtimestamp(
+          float(split_ts), tz=datetime.timezone.utc
+      ).strftime("%Y-%m-%d %H:%M:%S UTC")
+    except (ValueError, OverflowError, OSError, TypeError):
+      split_date = "not a Unix timestamp in seconds"
+    log.info(
+        "Temporal split: %d training items, %d validation items, split"
+        " timestamp: %s (%s)",
+        len(train_idxs),
+        len(valid_idxs),
+        split_ts,
+        split_date,
+    )
   return train_idxs, valid_idxs
 
 
