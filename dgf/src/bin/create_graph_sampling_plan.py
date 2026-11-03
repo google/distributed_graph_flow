@@ -79,6 +79,23 @@ _PROPAGATE_TIMESTAMP_TO_EDGES = flags.DEFINE_bool(
     "If true and temporal sampling is enabled, the edgesets without a creation"
     " time get one derived from their connected nodes.",
 )
+_WITH_REPLACEMENT = flags.DEFINE_bool(
+    "with_replacement",
+    False,
+    "If true, the sampled graphs are trees where the nodes visited several"
+    " times are duplicated.",
+)
+_MULTI_VISIT = flags.DEFINE_bool(
+    "multi_visit",
+    True,
+    "If true, a node reached several times at the same step of the plan is"
+    " expanded once per visit.",
+)
+_MAX_TIMESERIES_LEN = flags.DEFINE_integer(
+    "max_timeseries_len",
+    32,
+    "Maximum number of steps retained for each timeseries feature.",
+)
 
 
 def main(argv):
@@ -96,6 +113,9 @@ def main(argv):
       reverse=_REVERSE.value,
       temporal_sampling=_TEMPORAL_SAMPLING.value,
       propagate_timestamp_to_edges=_PROPAGATE_TIMESTAMP_TO_EDGES.value,
+      with_replacement=_WITH_REPLACEMENT.value,
+      multi_visit=_MULTI_VISIT.value,
+      max_timeseries_len=_MAX_TIMESERIES_LEN.value,
   )
 
   # Convert the config to a full sampling plan

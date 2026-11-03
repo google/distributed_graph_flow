@@ -20,6 +20,7 @@ from typing import Any
 from unittest import mock
 from absl.testing import absltest
 from dgf.src.sampling import config as config_lib
+from dgf.src.sampling.offline_distributed import common
 from dgf.src.sampling.offline_distributed import offline_distributed_gcp
 from dgf.src.util import gen_test_graph
 from dgf.src.util import log
@@ -54,7 +55,7 @@ class OfflineDistributedGcpTest(absltest.TestCase):
         hop_width=10,
     )
 
-  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(common.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
   def test_offline_distributed_sampler_gcp_blocking_success(
       self, mock_custom_job_cls, mock_open_write
@@ -140,7 +141,7 @@ class OfflineDistributedGcpTest(absltest.TestCase):
     )
     self.assertIn("Total duration:", log_messages)
 
-  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(common.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
   def test_offline_distributed_sampler_gcp_state_transitions(
       self, mock_custom_job_cls, mock_open_write
@@ -177,7 +178,7 @@ class OfflineDistributedGcpTest(absltest.TestCase):
     self.assertIn("Running", log_messages)
     self.assertIn("CustomJob completed successfully", log_messages)
 
-  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(common.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
   def test_offline_distributed_sampler_gcp_non_blocking(
       self, mock_custom_job_cls, mock_open_write
@@ -201,7 +202,7 @@ class OfflineDistributedGcpTest(absltest.TestCase):
     self.assertEqual(job, mock_job)
     mock_job.submit.assert_called_once()
 
-  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(common.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
   def test_offline_distributed_sampler_gcp_submit_failure(
       self, mock_custom_job_cls, mock_open_write
@@ -224,7 +225,7 @@ class OfflineDistributedGcpTest(absltest.TestCase):
 
     self.assertTrue(any(l.severity == log.Severity.ERROR for l in logs))
 
-  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(common.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
   def test_offline_distributed_sampler_gcp_job_failure(
       self, mock_custom_job_cls, mock_open_write
@@ -254,8 +255,8 @@ class OfflineDistributedGcpTest(absltest.TestCase):
 
     self.assertTrue(any(l.severity == log.Severity.ERROR for l in logs))
 
-  @mock.patch.object(offline_distributed_gcp.io_schema, "read_schema")
-  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(common.io_schema, "read_schema")
+  @mock.patch.object(common.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
   def test_plan_conversion_and_schema_loading(
       self, mock_custom_job_cls, mock_open_write, mock_read_schema
@@ -291,7 +292,7 @@ class OfflineDistributedGcpTest(absltest.TestCase):
           project=None,
       )
 
-  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(common.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
   def test_custom_parameters(self, mock_custom_job_cls, mock_open_write):
     mock_open_write.return_value.__enter__.return_value = mock.MagicMock()
@@ -329,7 +330,7 @@ class OfflineDistributedGcpTest(absltest.TestCase):
     self.assertIn("--staging_location=gs://custom/staging", container_args)
     self.assertIn("--temp_location=gs://custom/temp", container_args)
 
-  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(common.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
   def test_input_seeds(self, mock_custom_job_cls, mock_open_write):
     mock_open_write.return_value.__enter__.return_value = mock.MagicMock()
@@ -354,7 +355,7 @@ class OfflineDistributedGcpTest(absltest.TestCase):
     self.assertEqual(config["input_seed_container"], "RECORDIO")
     self.assertEqual(config["random_seed"], 7)
 
-  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(common.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
   def test_num_samples_per_seed(self, mock_custom_job_cls, mock_open_write):
     mock_open_write.return_value.__enter__.return_value = mock.MagicMock()
@@ -375,7 +376,7 @@ class OfflineDistributedGcpTest(absltest.TestCase):
     self.assertEqual(_get_dgf_config(container_args)["num_samples_per_seed"], 3)
     self.assertIn("--num_seeds=0", container_args)
 
-  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(common.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
   def test_only_allowed_args_are_passed(
       self, mock_custom_job_cls, mock_open_write
@@ -460,7 +461,7 @@ class OfflineDistributedGcpTest(absltest.TestCase):
           num_seeds=-1,
       )
 
-  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(common.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
   def test_output_options(self, mock_custom_job_cls, mock_open_write):
     mock_open_write.return_value.__enter__.return_value = mock.MagicMock()
@@ -485,7 +486,7 @@ class OfflineDistributedGcpTest(absltest.TestCase):
     self.assertEqual(config["output_container"], "RECORDIO")
     self.assertEqual(config["shard_prefix"], "Shard")
 
-  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(common.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
   def test_filter_seed_node(self, mock_custom_job_cls, mock_open_write):
     mock_open_write.return_value.__enter__.return_value = mock.MagicMock()
@@ -506,7 +507,7 @@ class OfflineDistributedGcpTest(absltest.TestCase):
     config = _get_dgf_config(container_args)
     self.assertEqual(config["filter_seed_node"], "#split=train")
 
-  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(common.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
   def test_debug_sampling(self, mock_custom_job_cls, mock_open_write):
     mock_open_write.return_value.__enter__.return_value = mock.MagicMock()
@@ -527,7 +528,7 @@ class OfflineDistributedGcpTest(absltest.TestCase):
     config = _get_dgf_config(container_args)
     self.assertTrue(config["debug_sampling"])
 
-  @mock.patch.object(offline_distributed_gcp.filesystem, "open_write")
+  @mock.patch.object(common.filesystem, "open_write")
   @mock.patch.object(aiplatform, "CustomJob")
   def test_only_one_chunk_per_node(self, mock_custom_job_cls, mock_open_write):
     mock_open_write.return_value.__enter__.return_value = mock.MagicMock()
@@ -612,11 +613,6 @@ class OfflineDistributedGcpTest(absltest.TestCase):
           schema=self.mock_schema,
           project="test-proj",
       )
-
-  def test_format_duration(self):
-    self.assertEqual(offline_distributed_gcp._format_duration(45), "45s")
-    self.assertEqual(offline_distributed_gcp._format_duration(125), "2m 05s")
-    self.assertEqual(offline_distributed_gcp._format_duration(3600), "60m 00s")
 
   def test_get_job_urls(self):
     console_url, logs_url = offline_distributed_gcp._get_job_urls(
