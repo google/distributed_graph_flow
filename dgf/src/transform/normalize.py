@@ -22,7 +22,7 @@ import dataclasses
 import enum
 import inspect
 import math
-from typing import Any
+from typing import Any, Literal
 
 import dataclasses_json
 from dgf.src.data import in_memory_graph
@@ -970,6 +970,548 @@ def _day_of_month_from_days_tensorflow(days: tf.Tensor) -> tf.Tensor:
 @normalizer_registry.register
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass(kw_only=True)
+class OneHotNormalizer(AbstractFeatureNormalizer):
+  """One-hot encodes integer or boolean categorical features into float32 vectors.
+
+  Categories in `[0, num_categories)` are mapped to unit basis vectors, while
+  out-of-vocabulary or out-of-range indices encode as all zeros. When
+  `drop_if_binary` is True and `num_categories == 2`, a single indicator column
+  (`value == 1`) is emitted instead of two complementary columns.
+
+  Usage example:
+
+  ```python
+  normalizer = dgf.transform.OneHotNormalizer.create(
+      "category_idx",
+      dgf.data.FeatureSchema(
+          format=dgf.data.FeatureFormat.INTEGER_64,
+          semantic=dgf.data.FeatureSemantic.CATEGORICAL,
+          shape=(),
+          num_categorical_values=3,
+      ),
+  )
+  outputs = normalizer.normalize_numpy(np.array([0, 2, 3], dtype=np.int64))
+  ```
+
+  Attributes:
+    num_categories: Number of known categories in `[0, num_categories)`.
+    output_shape: Static output feature shape (excluding the leading entity
+      dimension), ending in `1` for dropped binary features or `num_categories`.
+    output_feature_name: Name of the emitted float32 embedding feature.
+    drop_if_binary: Whether binary (`num_categories == 2`) features emit a
+      single `(..., 1)` column (`index == 1`).
+    is_timeseries: Whether the feature is a timeseries.
+    group: Optional feature group name preserved on the output schema.
+  """
+
+  num_categories: int
+  output_shape: tuple[int | None, ...]
+  output_feature_name: str
+  drop_if_binary: bool = False
+  is_timeseries: bool = False
+  group: str | None = None
+  type: str = dataclasses.field(default="OneHotNormalizer", init=False)
+
+  def __post_init__(self):
+    if self.num_categories < 1:
+      raise ValueError(
+          "OneHotNormalizer requires num_categories >= 1, got"
+          f" {self.num_categories}."
+      )
+
+  @classmethod
+  def create(
+      cls,
+      feature_name: str,
+      input_schema: schema_lib.FeatureSchema,
+      input_stats: statistics_lib.FeatureStatistics | None = None,
+      *,
+      num_categories: int | None = None,
+      drop_if_binary: bool = False,
+  ) -> "OneHotNormalizer":
+    """Creates a `OneHotNormalizer` from a feature schema and optional stats.
+
+    Args:
+      feature_name: Name of the categorical input feature.
+      input_schema: Schema of the input feature (must be INTEGER or BOOL with a
+        static shape).
+      input_stats: Optional feature statistics used to infer `num_categories`
+        from `round(input_stats.maximum) + 1` when neither `num_categories` nor
+        `input_schema.num_categorical_values` is set.
+      num_categories: Explicit category count overriding schema/stats inference.
+      drop_if_binary: If True and `num_categories == 2`, emit a single indicator
+        column (`value == 1`) of dimension 1.
+
+    Returns:
+      A configured `OneHotNormalizer`.
+    """
+    if (
+        not input_schema.format.is_integer()
+        and input_schema.format != schema_lib.FeatureFormat.BOOL
+    ):
+      raise ValueError(
+          f"Feature '{feature_name}' has format '{input_schema.format}', but"
+          " OneHotNormalizer only supports INTEGER or BOOL features."
+      )
+    if not input_schema.is_static_shape():
+      raise ValueError(
+          f"Feature '{feature_name}' has dynamic shape {input_schema.shape};"
+          " OneHotNormalizer requires a static shape."
+      )
+
+    if num_categories is not None:
+      resolved_categories = num_categories
+    elif input_schema.num_categorical_values is not None:
+      resolved_categories = input_schema.num_categorical_values
+    elif input_schema.format == schema_lib.FeatureFormat.BOOL:
+      resolved_categories = 2
+    elif input_stats is not None:
+      if input_stats.count == 0 or not math.isfinite(input_stats.maximum):
+        log.warning(
+            f"No value observed for feature {feature_name}. Creating a"
+            " 1-category OneHotNormalizer."
+        )
+        resolved_categories = 1
+      else:
+        resolved_categories = max(1, round(input_stats.maximum) + 1)
+    else:
+      raise ValueError(
+          f"Cannot infer num_categories for feature '{feature_name}'; provide"
+          " num_categories, input_schema.num_categorical_values, or"
+          " input_stats."
+      )
+
+    if resolved_categories < 1:
+      raise ValueError(
+          f"Feature '{feature_name}' resolved to invalid num_categories="
+          f"{resolved_categories}; expected >= 1."
+      )
+
+    is_binary = drop_if_binary and resolved_categories == 2
+    out_dim = 1 if is_binary else resolved_categories
+    output_shape = (*(input_schema.shape or ()), out_dim)
+    return OneHotNormalizer(
+        input_feature=feature_name,
+        num_categories=resolved_categories,
+        output_shape=output_shape,
+        output_feature_name=f"{feature_name}_ONE_HOT",
+        drop_if_binary=drop_if_binary,
+        is_timeseries=input_schema.is_timeseries,
+        group=input_schema.group,
+    )
+
+  def output_schema(self) -> schema_lib.FeatureSetSchema:
+    return {
+        self.output_feature_name: schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=self.output_shape,
+            is_timeseries=self.is_timeseries,
+            group=self.group,
+        )
+    }
+
+  def normalize_numpy(self, value: np.ndarray) -> dict[str, np.ndarray]:
+    idx = np.asarray(value, dtype=np.int64)
+    if self.drop_if_binary and self.num_categories == 2:
+      encoded = (idx[..., None] == 1).astype(np.float32)
+    else:
+      categories = np.arange(self.num_categories, dtype=np.int64)
+      encoded = (idx[..., None] == categories).astype(np.float32)
+    return {self.output_feature_name: encoded}
+
+  def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
+    idx = tf.cast(value, tf.int64)
+    if self.drop_if_binary and self.num_categories == 2:
+      encoded = tf.cast(tf.equal(tf.expand_dims(idx, axis=-1), 1), tf.float32)
+    else:
+      encoded = tf.one_hot(idx, depth=self.num_categories, dtype=tf.float32)
+    return {self.output_feature_name: encoded}
+
+
+def _validate_fixed_numeric_schema(
+    feature_name: str,
+    input_schema: schema_lib.FeatureSchema,
+    normalizer_name: str,
+) -> tuple[int, ...] | None:
+  """Validates a static-shape numeric schema and returns narrowed `int` dims."""
+  if (
+      not input_schema.format.is_integer()
+      and not input_schema.format.is_float()
+  ):
+    raise ValueError(
+        f"Feature '{feature_name}' has format '{input_schema.format}', but"
+        f" {normalizer_name} only supports INTEGER or FLOAT features."
+    )
+  if not input_schema.is_static_shape():
+    raise ValueError(
+        f"Feature '{feature_name}' has dynamic shape {input_schema.shape};"
+        f" {normalizer_name} requires a static shape."
+    )
+  if input_schema.shape is None:
+    return None
+  return tuple(int(dim) for dim in input_schema.shape if dim is not None)
+
+
+@normalizer_registry.register
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass(kw_only=True)
+class ImputeNanNormalizer(AbstractFeatureNormalizer):
+  """Replaces NaN entries in numeric features with fitted per-element constants.
+
+  Supports creating scalar fills from `FeatureStatistics` (`create`) or exact
+  per-channel fills (`most_frequent`, `median`, `mean`, `zero`) from an array of
+  training values (`from_values`).
+
+  Usage example:
+
+  ```python
+  normalizer = dgf.transform.ImputeNanNormalizer.from_values(
+      "score",
+      dgf.data.FeatureSchema(
+          format=dgf.data.FeatureFormat.FLOAT_32,
+          semantic=dgf.data.FeatureSemantic.NUMERICAL,
+          shape=(2,),
+      ),
+      train_values,
+      strategy="most_frequent",
+  )
+  outputs = normalizer.normalize_numpy(test_values)
+  ```
+
+  Attributes:
+    output_feature_name: Name of the imputed float32 output feature.
+    output_shape: Static shape of each entity's feature value.
+    fill_values: Float32 array of shape `output_shape` substituted where inputs
+      are NaN.
+    is_timeseries: Whether the feature is a timeseries.
+    group: Optional feature group name preserved on the output schema.
+  """
+
+  output_feature_name: str
+  output_shape: tuple[int, ...]
+  fill_values: np.ndarray = dataclasses.field(
+      metadata=dataclasses_json.config(
+          encoder=lambda x: np.asarray(x, dtype=np.float32).tolist(),
+          decoder=lambda x: np.asarray(x, dtype=np.float32),
+      )
+  )
+  is_timeseries: bool = False
+  group: str | None = None
+  type: str = dataclasses.field(default="ImputeNanNormalizer", init=False)
+
+  @classmethod
+  def create(
+      cls,
+      feature_name: str,
+      input_schema: schema_lib.FeatureSchema,
+      input_stats: statistics_lib.FeatureStatistics,
+      *,
+      strategy: Literal["median", "mean", "zero"] = "median",
+  ) -> "ImputeNanNormalizer":
+    """Creates an `ImputeNanNormalizer` from `FeatureStatistics`.
+
+    Args:
+      feature_name: Name of the numeric input feature.
+      input_schema: Schema of the input feature (static-shape INTEGER or FLOAT).
+      input_stats: Feature statistics providing median quantiles or mean.
+      strategy: Fill strategy (`"median"`, `"mean"`, or `"zero"`).
+
+    Returns:
+      A configured `ImputeNanNormalizer`.
+    """
+    schema_shape = _validate_fixed_numeric_schema(
+        feature_name, input_schema, "ImputeNanNormalizer"
+    )
+    output_shape: tuple[int, ...] = schema_shape or ()
+    if strategy == "zero":
+      scalar_fill = 0.0
+    elif strategy == "mean":
+      if input_stats.count == 0 or not math.isfinite(input_stats.mean):
+        log.warning(
+            f"No finite mean observed for feature {feature_name}. Defaulting"
+            " ImputeNanNormalizer fill value to 0.0."
+        )
+        scalar_fill = 0.0
+      else:
+        scalar_fill = float(input_stats.mean)
+    elif strategy == "median":
+      if input_stats.quantiles:
+        mid = len(input_stats.quantiles) // 2
+        scalar_fill = float(input_stats.quantiles[mid])
+      elif math.isfinite(input_stats.mean):
+        scalar_fill = float(input_stats.mean)
+      else:
+        log.warning(
+            f"No finite statistics observed for feature {feature_name}."
+            " Defaulting ImputeNanNormalizer fill value to 0.0."
+        )
+        scalar_fill = 0.0
+    else:
+      raise ValueError(
+          f"Unsupported ImputeNanNormalizer.create strategy '{strategy}'."
+      )
+
+    fill_values = np.full(output_shape, scalar_fill, dtype=np.float32)
+    return ImputeNanNormalizer(
+        input_feature=feature_name,
+        output_feature_name=f"{feature_name}_IMPUTED",
+        output_shape=output_shape,
+        fill_values=fill_values,
+        is_timeseries=input_schema.is_timeseries,
+        group=input_schema.group,
+    )
+
+  @classmethod
+  def from_values(
+      cls,
+      feature_name: str,
+      input_schema: schema_lib.FeatureSchema,
+      values: np.ndarray,
+      *,
+      strategy: Literal[
+          "most_frequent", "median", "mean", "zero"
+      ] = "most_frequent",
+  ) -> "ImputeNanNormalizer":
+    """Fits per-column NaN replacement statistics directly from training values.
+
+    Args:
+      feature_name: Name of the numeric input feature.
+      input_schema: Schema of the input feature (static-shape INTEGER or FLOAT).
+      values: Array of shape `(num_entities, *feature_shape)` used to fit
+        per-column fill values.
+      strategy: Imputation strategy (`"most_frequent"`, `"median"`, `"mean"`, or
+        `"zero"`). Ties in `"most_frequent"` break toward the smallest finite
+        value, matching scikit-learn `SimpleImputer(strategy="most_frequent")`.
+
+    Returns:
+      A fitted `ImputeNanNormalizer`.
+    """
+    schema_shape = _validate_fixed_numeric_schema(
+        feature_name, input_schema, "ImputeNanNormalizer"
+    )
+    arr = np.asarray(values)
+    if arr.dtype == np.object_ or arr.ndim < 1:
+      raise ValueError(
+          f"Feature '{feature_name}' must be a dense array with at least 1"
+          f" dimension, got dtype={arr.dtype}, shape={arr.shape}."
+      )
+    item_shape = tuple(int(dim) for dim in arr.shape[1:])
+    output_shape: tuple[int, ...] = (
+        schema_shape if schema_shape is not None else item_shape
+    )
+    if item_shape != output_shape:
+      raise ValueError(
+          f"Feature '{feature_name}' values have item shape {item_shape},"
+          f" expected {output_shape}."
+      )
+
+    vals = arr.astype(np.float32)
+    flat = vals.reshape(vals.shape[0], -1)
+    num_cols = flat.shape[1]
+
+    if strategy == "zero":
+      flat_fill = np.zeros(num_cols, dtype=np.float32)
+    else:
+      if vals.shape[0] == 0 or np.isnan(flat).all(axis=0).any():
+        raise ValueError(
+            f"Feature '{feature_name}' has a column that is entirely NaN and"
+            f" cannot be imputed with strategy='{strategy}'."
+        )
+      if strategy == "most_frequent":
+        fills = []
+        for col_idx in range(num_cols):
+          col = flat[:, col_idx]
+          finite = col[~np.isnan(col)]
+          uniq, counts = np.unique(finite, return_counts=True)
+          fills.append(float(uniq[int(np.argmax(counts))]))
+        flat_fill = np.asarray(fills, dtype=np.float32)
+      elif strategy == "median":
+        flat_fill = np.nanmedian(flat, axis=0).astype(np.float32)
+      elif strategy == "mean":
+        flat_fill = np.nanmean(flat, axis=0).astype(np.float32)
+      else:
+        raise ValueError(
+            f"Unsupported ImputeNanNormalizer strategy '{strategy}'."
+        )
+
+    return ImputeNanNormalizer(
+        input_feature=feature_name,
+        output_feature_name=f"{feature_name}_IMPUTED",
+        output_shape=output_shape,
+        fill_values=flat_fill.reshape(output_shape),
+        is_timeseries=input_schema.is_timeseries,
+        group=input_schema.group,
+    )
+
+  def output_schema(self) -> schema_lib.FeatureSetSchema:
+    return {
+        self.output_feature_name: schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=self.output_shape,
+            is_timeseries=self.is_timeseries,
+            group=self.group,
+        )
+    }
+
+  def normalize_numpy(self, value: np.ndarray) -> dict[str, np.ndarray]:
+    val = np.asarray(value, dtype=np.float32)
+    fill = np.asarray(self.fill_values, dtype=np.float32)
+    return {
+        self.output_feature_name: np.where(np.isnan(val), fill, val).astype(
+            np.float32
+        )
+    }
+
+  def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
+    val = tf.cast(value, tf.float32)
+    fill = tf.broadcast_to(
+        tf.constant(self.fill_values, dtype=tf.float32), tf.shape(val)
+    )
+    return {self.output_feature_name: tf.where(tf.math.is_nan(val), fill, val)}
+
+
+@normalizer_registry.register
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass(kw_only=True)
+class ZScoreNormalizer(AbstractFeatureNormalizer):
+  """Standardizes numeric or embedding features via `(value - mean) / std`.
+
+  Zero-variance or non-finite standard deviations are clamped to `1.0` when
+  fitting via `from_values` so constant channels center cleanly without dividing
+  by zero.
+
+  Usage example:
+
+  ```python
+  normalizer = dgf.transform.ZScoreNormalizer.from_values(
+      "feat",
+      dgf.data.FeatureSchema(
+          format=dgf.data.FeatureFormat.FLOAT_32,
+          semantic=dgf.data.FeatureSemantic.EMBEDDING,
+          shape=(16,),
+      ),
+      train_embeddings,
+  )
+  outputs = normalizer.normalize_numpy(test_embeddings)
+  ```
+
+  Attributes:
+    output_feature_name: Name of the standardized float32 output feature.
+    output_shape: Static shape of each entity's feature value.
+    mean: Per-element mean array of shape `output_shape`.
+    std: Per-element scale array of shape `output_shape`.
+    is_timeseries: Whether the feature is a timeseries.
+    group: Optional feature group name preserved on the output schema.
+  """
+
+  output_feature_name: str
+  output_shape: tuple[int, ...]
+  mean: np.ndarray = dataclasses.field(
+      metadata=dataclasses_json.config(
+          encoder=lambda x: np.asarray(x, dtype=np.float32).tolist(),
+          decoder=lambda x: np.asarray(x, dtype=np.float32),
+      )
+  )
+  std: np.ndarray = dataclasses.field(
+      metadata=dataclasses_json.config(
+          encoder=lambda x: np.asarray(x, dtype=np.float32).tolist(),
+          decoder=lambda x: np.asarray(x, dtype=np.float32),
+      )
+  )
+  is_timeseries: bool = False
+  group: str | None = None
+  type: str = dataclasses.field(default="ZScoreNormalizer", init=False)
+
+  @classmethod
+  def from_values(
+      cls,
+      feature_name: str,
+      input_schema: schema_lib.FeatureSchema,
+      values: np.ndarray,
+  ) -> "ZScoreNormalizer":
+    """Fits per-element mean and standard deviation across the leading axis.
+
+    Args:
+      feature_name: Name of the numeric or embedding input feature.
+      input_schema: Schema of the input feature (static-shape INTEGER or FLOAT).
+      values: Array of shape `(num_entities, *feature_shape)`. NaN values are
+        ignored when estimating mean and standard deviation, and zero/non-finite
+        standard deviations are clamped to `1.0`.
+
+    Returns:
+      A fitted `ZScoreNormalizer`.
+    """
+    schema_shape = _validate_fixed_numeric_schema(
+        feature_name, input_schema, "ZScoreNormalizer"
+    )
+    arr = np.asarray(values)
+    if arr.dtype == np.object_ or arr.ndim < 1:
+      raise ValueError(
+          f"Feature '{feature_name}' must be a dense array with at least 1"
+          f" dimension, got dtype={arr.dtype}, shape={arr.shape}."
+      )
+    item_shape = tuple(int(dim) for dim in arr.shape[1:])
+    output_shape: tuple[int, ...] = (
+        schema_shape if schema_shape is not None else item_shape
+    )
+    if item_shape != output_shape:
+      raise ValueError(
+          f"Feature '{feature_name}' values have item shape {item_shape},"
+          f" expected {output_shape}."
+      )
+
+    vals = arr.astype(np.float32)
+    if vals.shape[0] == 0 or np.isnan(vals).all():
+      mean = np.zeros(output_shape, dtype=np.float32)
+      std = np.ones(output_shape, dtype=np.float32)
+    else:
+      with np.errstate(invalid="ignore", divide="ignore"):
+        raw_mean = np.nanmean(vals, axis=0)
+        raw_std = np.nanstd(vals, axis=0)
+      mean = np.where(np.isfinite(raw_mean), raw_mean, 0.0).astype(np.float32)
+      std = np.where(
+          np.isfinite(raw_std) & (raw_std > 0), raw_std, 1.0
+      ).astype(np.float32)
+
+    return ZScoreNormalizer(
+        input_feature=feature_name,
+        output_feature_name=f"{feature_name}_Z_SCORE",
+        output_shape=output_shape,
+        mean=mean,
+        std=std,
+        is_timeseries=input_schema.is_timeseries,
+        group=input_schema.group,
+    )
+
+  def output_schema(self) -> schema_lib.FeatureSetSchema:
+    return {
+        self.output_feature_name: schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=self.output_shape,
+            is_timeseries=self.is_timeseries,
+            group=self.group,
+        )
+    }
+
+  def normalize_numpy(self, value: np.ndarray) -> dict[str, np.ndarray]:
+    val = np.asarray(value, dtype=np.float32)
+    mean = np.asarray(self.mean, dtype=np.float32)
+    std = np.asarray(self.std, dtype=np.float32)
+    return {self.output_feature_name: ((val - mean) / std).astype(np.float32)}
+
+  def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
+    val = tf.cast(value, tf.float32)
+    mean = tf.constant(self.mean, dtype=tf.float32)
+    std = tf.constant(self.std, dtype=tf.float32)
+    return {self.output_feature_name: (val - mean) / std}
+
+
+@normalizer_registry.register
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass(kw_only=True)
 class SequentialNormalizer(AbstractFeatureNormalizer):
   """Applies multiple AbstractFeatureNormalizers in sequence.
 
@@ -1121,6 +1663,12 @@ class AutoNormalizeConfig:
   Attributes:
     categorical_bytes_to_index: If True, categorical features with BYTES format
       will be converted to integer indices using `DictionaryIndexNormalizer`.
+    categorical_one_hot: If True, categorical features (BYTES when
+      `categorical_bytes_to_index` is True, INTEGER, or BOOL) are one-hot
+      encoded into float32 embeddings using `OneHotNormalizer`.
+    categorical_one_hot_drop_if_binary: If True and `categorical_one_hot` is
+      True, binary categorical features emit a single indicator column (`1`
+      dimension) instead of two complementary columns.
     numerical_soft_quantile: If True, numerical features (INTEGER or FLOAT) will
       be normalized using `SoftQuantileNormalizer`.
     keep_raw_features: A set of `(nodeset_name, feature_name)` tuples that
@@ -1158,6 +1706,8 @@ class AutoNormalizeConfig:
   """
 
   categorical_bytes_to_index: bool = True
+  categorical_one_hot: bool = False
+  categorical_one_hot_drop_if_binary: bool = False
   numerical_soft_quantile: bool = True
   keep_raw_features: set[tuple[str, str]] = dataclasses.field(
       default_factory=set,
@@ -1325,11 +1875,22 @@ def auto_normalize(
           and feature_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL
           and feature_schema.format == schema_lib.FeatureFormat.BYTES
       ):
-        nodeset_normalizers.append(
-            DictionaryIndexNormalizer.create(
-                feature_name, feature_schema, feature_stats
-            )
+        dict_norm = DictionaryIndexNormalizer.create(
+            feature_name, feature_schema, feature_stats
         )
+        if config.categorical_one_hot:
+          idx_schema = dict_norm.output_schema()[dict_norm.output_feature_name]
+          one_hot_norm = OneHotNormalizer.create(
+              dict_norm.output_feature_name,
+              idx_schema,
+              num_categories=len(dict_norm.dictionary_map),
+              drop_if_binary=config.categorical_one_hot_drop_if_binary,
+          )
+          nodeset_normalizers.append(
+              SequentialNormalizer.create([dict_norm, one_hot_norm])
+          )
+        else:
+          nodeset_normalizers.append(dict_norm)
         feature_has_normalized = True
 
       # Text bytes embedding
@@ -1347,19 +1908,32 @@ def auto_normalize(
         )
         feature_has_normalized = True
 
-      # Categorical integer
-      if (
-          feature_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL
-          and feature_schema.format.is_integer()
-      ):
-        feature_schema = copy.deepcopy(feature_schema)
-        if feature_schema.num_categorical_values is None:
-          feature_schema.num_categorical_values = (
-              round(feature_stats.maximum) + 1
+      # Categorical integer (or boolean when one-hot encoding)
+      if feature_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL and (
+          feature_schema.format.is_integer()
+          or (
+              config.categorical_one_hot
+              and feature_schema.format == schema_lib.FeatureFormat.BOOL
           )
-        nodeset_normalizers.append(
-            IdentityNormalizer(feature_name, input_schema=feature_schema)
-        )
+      ):
+        if config.categorical_one_hot:
+          nodeset_normalizers.append(
+              OneHotNormalizer.create(
+                  feature_name,
+                  feature_schema,
+                  feature_stats,
+                  drop_if_binary=config.categorical_one_hot_drop_if_binary,
+              )
+          )
+        else:
+          feature_schema = copy.deepcopy(feature_schema)
+          if feature_schema.num_categorical_values is None:
+            feature_schema.num_categorical_values = (
+                round(feature_stats.maximum) + 1
+            )
+          nodeset_normalizers.append(
+              IdentityNormalizer(feature_name, input_schema=feature_schema)
+          )
         feature_has_normalized = True
 
       # Numerical

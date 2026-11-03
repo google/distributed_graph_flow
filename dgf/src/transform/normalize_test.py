@@ -2475,5 +2475,388 @@ class GraphNormalizerKwargsTest(parameterized.TestCase):
     )
 
 
+class OneHotNormalizerTest(parameterized.TestCase):
+
+  def test_multiclass_and_oov_numpy_tf_and_json(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(),
+        num_categorical_values=3,
+    )
+    normalizer = normalize_lib.OneHotNormalizer.create(
+        "cat", input_schema, drop_if_binary=True
+    )
+    values = np.array([0, 2, 3, -1, 1], dtype=np.int64)
+    expected = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    np_out = normalizer.normalize_numpy(values)
+    np.testing.assert_array_equal(np_out["cat_ONE_HOT"], expected)
+
+    tf_out = normalizer.normalize_tensorflow(tf.constant(values))
+    np.testing.assert_array_equal(tf_out["cat_ONE_HOT"].numpy(), expected)
+
+    self.assertEqual(
+        normalizer.output_schema(),
+        {
+            "cat_ONE_HOT": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.FLOAT_32,
+                semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                shape=(3,),
+            )
+        },
+    )
+
+    cfg = normalize_lib.GraphNormalizerConfig(
+        nodesets={
+            "n": normalize_lib.NodeSetNormalizerConfig(normalizers=[normalizer])
+        },
+        edgesets={},
+    )
+    restored = normalize_lib.GraphNormalizerConfig.from_json(  # pyrefly: ignore[missing-attribute]
+        cfg.to_json()  # pyrefly: ignore[missing-attribute]
+    )
+    self.assertEqual(restored, cfg)
+
+  @parameterized.named_parameters(
+      ("int_drop", schema_lib.FeatureFormat.INTEGER_64, True, (1,)),
+      ("int_keep", schema_lib.FeatureFormat.INTEGER_64, False, (2,)),
+      ("bool_drop", schema_lib.FeatureFormat.BOOL, True, (1,)),
+      ("bool_keep", schema_lib.FeatureFormat.BOOL, False, (2,)),
+  )
+  def test_binary_drop_and_bool(self, fmt, drop_if_binary, expected_shape):
+    input_schema = schema_lib.FeatureSchema(
+        format=fmt,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(),
+    )
+    stats = statistics_lib.FeatureStatistics(
+        count=4, minimum=0.0, maximum=1.0, dictionary={}, quantiles=[]
+    )
+    normalizer = normalize_lib.OneHotNormalizer.create(
+        "flag",
+        input_schema,
+        stats if fmt != schema_lib.FeatureFormat.BOOL else None,
+        drop_if_binary=drop_if_binary,
+    )
+    if fmt == schema_lib.FeatureFormat.BOOL:
+      values = np.array([False, True, False, True], dtype=np.bool_)
+    else:
+      values = np.array([0, 1, 2, 0], dtype=np.int64)
+
+    np_out = normalizer.normalize_numpy(values)["flag_ONE_HOT"]
+    tf_out = (
+        normalizer.normalize_tensorflow(tf.constant(values))["flag_ONE_HOT"]
+        .numpy()
+    )
+    self.assertEqual(np_out.shape, (4, *expected_shape))
+    np.testing.assert_array_equal(np_out, tf_out)
+    if drop_if_binary:
+      expected_col = (values.astype(np.int64) == 1).astype(np.float32)[:, None]
+      np.testing.assert_array_equal(np_out, expected_col)
+
+  def test_multidim_feature_and_invalid_inputs(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_32,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(2,),
+        num_categorical_values=3,
+    )
+    normalizer = normalize_lib.OneHotNormalizer.create("pair", input_schema)
+    values = np.array([[0, 2], [1, 0]], dtype=np.int32)
+    np_out = normalizer.normalize_numpy(values)["pair_ONE_HOT"]
+    tf_out = (
+        normalizer.normalize_tensorflow(tf.constant(values))["pair_ONE_HOT"]
+        .numpy()
+    )
+    self.assertEqual(np_out.shape, (2, 2, 3))
+    np.testing.assert_array_equal(np_out, tf_out)
+
+    with self.assertRaisesRegex(ValueError, "INTEGER or BOOL"):
+      normalize_lib.OneHotNormalizer.create(
+          "bad",
+          schema_lib.FeatureSchema(
+              format=schema_lib.FeatureFormat.FLOAT_32,
+              semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+          ),
+          num_categories=3,
+      )
+
+
+class ImputeNanNormalizerTest(parameterized.TestCase):
+
+  @parameterized.named_parameters(
+      ("most_frequent", "most_frequent", [2.0, -3.0]),
+      ("median", "median", [2.0, 1.0]),
+      ("mean", "mean", [2.25, 1.0]),
+      ("zero", "zero", [0.0, 0.0]),
+  )
+  def test_from_values_strategies_and_tf_parity(self, strategy, expected_fills):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(2,),
+    )
+    train_values = np.array(
+        [
+            [2.0, -3.0],
+            [2.0, 5.0],
+            [1.0, -3.0],
+            [4.0, 5.0],
+            [np.nan, np.nan],
+        ],
+        dtype=np.float32,
+    )
+    normalizer = normalize_lib.ImputeNanNormalizer.from_values(
+        "num", input_schema, train_values, strategy=strategy
+    )
+    np.testing.assert_allclose(
+        normalizer.fill_values, np.array(expected_fills, dtype=np.float32)
+    )
+
+    test_values = np.array([[np.nan, 10.0], [7.0, np.nan]], dtype=np.float32)
+    np_out = normalizer.normalize_numpy(test_values)["num_IMPUTED"]
+    tf_out = (
+        normalizer.normalize_tensorflow(tf.constant(test_values))["num_IMPUTED"]
+        .numpy()
+    )
+    expected = np.array(
+        [[expected_fills[0], 10.0], [7.0, expected_fills[1]]], dtype=np.float32
+    )
+    np.testing.assert_allclose(np_out, expected)
+    np.testing.assert_allclose(tf_out, expected)
+
+    cfg = normalize_lib.GraphNormalizerConfig(
+        nodesets={
+            "n": normalize_lib.NodeSetNormalizerConfig(normalizers=[normalizer])
+        },
+        edgesets={},
+    )
+    restored = normalize_lib.GraphNormalizerConfig.from_json(  # pyrefly: ignore[missing-attribute]
+        cfg.to_json()  # pyrefly: ignore[missing-attribute]
+    )
+    test_util.assert_are_equal(self, restored, cfg)
+
+  def test_create_from_stats_and_all_nan_rejected(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    stats = statistics_lib.FeatureStatistics(
+        count=3,
+        minimum=1.0,
+        maximum=9.0,
+        dictionary={},
+        quantiles=[1.0, 4.0, 9.0],
+        mean=4.5,
+    )
+    med_norm = normalize_lib.ImputeNanNormalizer.create(
+        "x", input_schema, stats, strategy="median"
+    )
+    np.testing.assert_allclose(
+        med_norm.normalize_numpy(np.array([np.nan, 2.0], dtype=np.float32))[
+            "x_IMPUTED"
+        ],
+        np.array([4.0, 2.0], dtype=np.float32),
+    )
+
+    with self.assertRaisesRegex(ValueError, "entirely NaN"):
+      normalize_lib.ImputeNanNormalizer.from_values(
+          "x", input_schema, np.array([np.nan, np.nan], dtype=np.float32)
+      )
+
+
+class ZScoreNormalizerTest(absltest.TestCase):
+
+  def test_z_score_with_zero_variance_clamping_and_json(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.EMBEDDING,
+        shape=(3,),
+    )
+    train_values = np.array(
+        [
+            [1.0, 5.0, 2.0],
+            [3.0, 5.0, 6.0],
+            [np.nan, 5.0, 4.0],
+        ],
+        dtype=np.float32,
+    )
+    normalizer = normalize_lib.ZScoreNormalizer.from_values(
+        "emb", input_schema, train_values
+    )
+    np.testing.assert_allclose(
+        normalizer.mean, np.array([2.0, 5.0, 4.0], dtype=np.float32)
+    )
+    # Second channel has zero variance -> std clamped to 1.0.
+    self.assertEqual(float(normalizer.std[1]), 1.0)
+    np.testing.assert_allclose(float(normalizer.std[0]), 1.0)
+
+    test_values = np.array([[4.0, 5.0, 4.0], [0.0, 7.0, 4.0]], dtype=np.float32)
+    np_out = normalizer.normalize_numpy(test_values)["emb_Z_SCORE"]
+    tf_out = (
+        normalizer.normalize_tensorflow(tf.constant(test_values))["emb_Z_SCORE"]
+        .numpy()
+    )
+    np.testing.assert_allclose(np_out, tf_out, rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(np_out[:, 0], np.array([2.0, -2.0]))
+    np.testing.assert_allclose(np_out[:, 1], np.array([0.0, 2.0]))
+    np.testing.assert_allclose(np_out[:, 2], np.array([0.0, 0.0]))
+
+    cfg = normalize_lib.GraphNormalizerConfig(
+        nodesets={
+            "n": normalize_lib.NodeSetNormalizerConfig(normalizers=[normalizer])
+        },
+        edgesets={},
+    )
+    restored = normalize_lib.GraphNormalizerConfig.from_json(  # pyrefly: ignore[missing-attribute]
+        cfg.to_json()  # pyrefly: ignore[missing-attribute]
+    )
+    test_util.assert_are_equal(self, restored, cfg)
+
+
+class AutoNormalizeOneHotTest(absltest.TestCase):
+
+  def test_auto_normalize_categorical_one_hot_bytes_int_bool(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "nodes": schema_lib.NodeSchema(
+                features={
+                    "color": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                        shape=(),
+                    ),
+                    "shape": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                        shape=(),
+                    ),
+                    "flag": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                        shape=(),
+                    ),
+                    "active": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BOOL,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                        shape=(),
+                    ),
+                }
+            )
+        },
+        edge_sets={},
+    )
+    stats = statistics_lib.GraphFeatureStatistics(
+        node_sets={
+            "nodes": statistics_lib.FeatureSetStatistics(
+                features={
+                    "color": statistics_lib.FeatureStatistics(
+                        count=4,
+                        minimum=0.0,
+                        maximum=0.0,
+                        dictionary={
+                            "red": statistics_lib.DictionaryItem(0, 2),
+                            "green": statistics_lib.DictionaryItem(1, 1),
+                            "blue": statistics_lib.DictionaryItem(2, 1),
+                        },
+                        quantiles=[],
+                    ),
+                    "shape": statistics_lib.FeatureStatistics(
+                        count=4,
+                        minimum=0.0,
+                        maximum=0.0,
+                        dictionary={
+                            "circle": statistics_lib.DictionaryItem(0, 2),
+                            "square": statistics_lib.DictionaryItem(1, 2),
+                        },
+                        quantiles=[],
+                    ),
+                    "flag": statistics_lib.FeatureStatistics(
+                        count=4,
+                        minimum=0.0,
+                        maximum=1.0,
+                        dictionary={},
+                        quantiles=[],
+                    ),
+                    "active": statistics_lib.FeatureStatistics(
+                        count=4,
+                        minimum=float("nan"),
+                        maximum=float("nan"),
+                        dictionary={},
+                        quantiles=[],
+                    ),
+                }
+            )
+        }
+    )
+    normalizer = normalize_lib.auto_normalize(
+        schema,
+        stats,
+        config=normalize_lib.AutoNormalizeConfig(
+            categorical_bytes_to_index=True,
+            categorical_one_hot=True,
+            categorical_one_hot_drop_if_binary=True,
+        ),
+    )
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "nodes": in_memory_graph_lib.InMemoryNodeSet(
+                num_nodes=3,
+                features={
+                    "color": np.array([b"red", b"purple", b"blue"]),
+                    "shape": np.array([b"circle", b"square", b"triangle"]),
+                    "flag": np.array([0, 1, 0], dtype=np.int64),
+                    "active": np.array([True, False, True], dtype=np.bool_),
+                },
+            )
+        },
+        edge_sets={},
+    )
+    out_np = normalizer.normalize_numpy(graph).node_sets["nodes"].features
+    out_tf = (
+        normalizer.normalize_tensorflow(tf_io.graph_to_tf_graph(graph))
+        .node_sets["nodes"]
+        .features
+    )
+    out_jax = (
+        normalizer.normalize_numpy_to_jax(graph).node_sets["nodes"].features
+    )
+
+    # 3-way color: OOV b"purple" -> [0, 0, 0].
+    np.testing.assert_array_equal(
+        out_np["color_INDEX_ONE_HOT"],
+        np.array(
+            [[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            dtype=np.float32,
+        ),
+    )
+    # Binary BYTES shape with drop_if_binary=True: OOV b"triangle" -> [0.0].
+    np.testing.assert_array_equal(
+        out_np["shape_INDEX_ONE_HOT"],
+        np.array([[0.0], [1.0], [0.0]], dtype=np.float32),
+    )
+    np.testing.assert_array_equal(
+        out_np["flag_ONE_HOT"],
+        np.array([[0.0], [1.0], [0.0]], dtype=np.float32),
+    )
+    np.testing.assert_array_equal(
+        out_np["active_ONE_HOT"],
+        np.array([[1.0], [0.0], [1.0]], dtype=np.float32),
+    )
+    for key, expected in out_np.items():
+      np.testing.assert_array_equal(out_tf[key].numpy(), expected)
+      np.testing.assert_array_equal(np.asarray(out_jax[key]), expected)
+
+
 if __name__ == "__main__":
   absltest.main()
