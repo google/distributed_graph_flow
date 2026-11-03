@@ -14,6 +14,8 @@
 
 """Utility to convert tables to In-Memory Graphs and their schemas."""
 
+from typing import Any
+
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import feature_format
@@ -44,6 +46,42 @@ def _infer_feature_schema(
       semantic = schema_lib.FeatureSemantic.CATEGORICAL
 
   return schema_lib.FeatureSchema(format=fmt, shape=shape, semantic=semantic)
+
+
+def _column_to_numpy(values: Any) -> np.ndarray:
+  """Converts a table column to numpy, turning nullable numerics into floats.
+
+  table2graph infers the schema from the column dtypes, so nullable numeric
+  columns (pandas Float64/Int64, or object arrays of numbers with None / pd.NA)
+  must become float64 arrays with NaN for missing *before* inference;
+  otherwise they would be inferred as BYTES. Other columns are unchanged.
+
+  Args:
+    values: A pandas Series or an array-like column.
+
+  Returns:
+    A numpy array.
+  """
+  if isinstance(values, pd.Series):
+    if isinstance(values.dtype, pd.api.extensions.ExtensionDtype):
+      ext = values.array
+      if pd.api.types.is_numeric_dtype(ext.dtype) and not (
+          pd.api.types.is_bool_dtype(ext.dtype)
+      ):
+        if pd.api.types.is_integer_dtype(ext.dtype) and not ext.isna().any():
+          return ext.to_numpy()
+        return ext.to_numpy(dtype=np.float64, na_value=np.nan)
+    values = values.to_numpy()
+  values = np.asarray(values)
+  if values.dtype == np.object_ and pd.api.types.infer_dtype(
+      values, skipna=True
+  ) in ("integer", "floating", "mixed-integer-float"):
+    return (
+        pd.array(values.ravel(), dtype="Float64")
+        .to_numpy(dtype=np.float64, na_value=np.nan)
+        .reshape(values.shape)
+    )
+  return values
 
 
 def table2graph(
@@ -86,9 +124,9 @@ def table2graph(
     )
 
   if isinstance(table, pd.DataFrame):
-    features = {col: table[col].to_numpy() for col in table.columns}
+    features = {col: _column_to_numpy(table[col]) for col in table.columns}
   else:
-    features = {k: np.asarray(v) for k, v in table.items()}
+    features = {k: _column_to_numpy(v) for k, v in table.items()}
 
   if not features:
     raise ValueError("Input table is empty")

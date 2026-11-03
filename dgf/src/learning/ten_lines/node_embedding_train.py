@@ -26,6 +26,7 @@ import textwrap
 import time
 from typing import Literal
 from dgf.src.analyse import print_schema as print_schema_lib
+from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import jax as jax_lib
@@ -50,7 +51,8 @@ from dgf.src.util import filesystem as fs
 from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
-
+from dgf.src.validate import conform as conform_lib
+from dgf.src.validate import in_memory_graph as in_memory_graph_validate_lib
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -140,8 +142,7 @@ def create_core_model_config(
 def _nodeset_has_input_features(nodeset_schema: schema_lib.NodeSchema) -> bool:
   """Returns True if `nodeset_schema` has at least one model input feature."""
   return any(
-      feature_schema.semantic
-      not in (
+      feature_schema.semantic not in (
           schema_lib.FeatureSemantic.PRIMARY_ID,
           schema_lib.FeatureSemantic.UNKNOWN,
       )
@@ -298,9 +299,9 @@ def train_node_embedding_model(
       the training is not checkpointed.
     checkpoint_every_n_minutes: Interval, in minutes, between periodic
       checkpoints when `work_dir` is set. Periodic checkpoints are written
-      asynchronously and skipped if the previous one is still being written.
-      If None, only the final checkpoint is written at the end of training.
-      Ignored if `work_dir` is not set.
+      asynchronously and skipped if the previous one is still being written. If
+      None, only the final checkpoint is written at the end of training. Ignored
+      if `work_dir` is not set.
     verbose: The verbosity level. Higher values provide more output.
     validation_ratio: Ratio of the training dataset used to create the
       validation dataset in case no validation dataset is manually provided
@@ -334,8 +335,8 @@ def train_node_embedding_model(
     num_decoder_layers: The number of message passing layers in the GNN decoder.
     batch_size: The batch size to use for training. If None, it is selected
       automatically: 256, or 128 for small training sets (see
-      `common.select_batch_size`). Large batches make the VICReg regularization,
-      estimated on each batch, more accurate.
+        `common.select_batch_size`). Large batches make the VICReg
+        regularization, estimated on each batch, more accurate.
     node_embedding_dim: The dimension of the node embeddings. Must be at least
       2.
     learning_rate: The learning rate to use for training. If None, it scales
@@ -357,9 +358,9 @@ def train_node_embedding_model(
       regularization.
     stop_gradient_target: Whether to stop the gradient of the reconstruction
       loss through the reconstruction target.
-    regularize_input_embeddings: Whether to also apply the VICReg
-      regularization to the input feature embeddings (the reconstruction
-      targets), in addition to the node embeddings.
+    regularize_input_embeddings: Whether to also apply the VICReg regularization
+      to the input feature embeddings (the reconstruction targets), in addition
+      to the node embeddings.
     use_encoder_to_decoder: Whether to project the encoder representations
       before the decoder.
     norm: Normalization applied after the encoder and the decoder. One of
@@ -404,9 +405,9 @@ def train_node_embedding_model(
       graph) and `sampling_plan` is not provided, the sampling plan used to
       generate those samples is unknown: the model does not contain any sampling
       plan (i.e., `model.data().sampling_plan` is None) and it cannot generate
-      embeddings from a full graph (e.g. `model.predict`, `model.evaluate`
-      raise an error). In this case, it is recommended to provide the sampling
-      plan used to generate the graph samples.
+      embeddings from a full graph (e.g. `model.predict`, `model.evaluate` raise
+      an error). In this case, it is recommended to provide the sampling plan
+      used to generate the graph samples.
     diagnostic_dir: If provided, creates this directory and export to it
       artefacts that can be useful to understand and debug the model training.
     early_stopping: If True, use early stopping with default parameters
@@ -517,6 +518,16 @@ def train_node_embedding_model(
           print_schema_lib.print_schema(
               schema, return_output=True, header=False
           ),
+      )
+    if isinstance(graph, in_memory_graph_lib.InMemoryGraph):
+      graph = conform_lib.conform_graph(graph, schema)
+      in_memory_graph_validate_lib.validate_graph(
+          graph, schema, raise_on_warning=False
+      )
+    if isinstance(valid_graph, in_memory_graph_lib.InMemoryGraph):
+      valid_graph = conform_lib.conform_graph(valid_graph, schema)
+      in_memory_graph_validate_lib.validate_graph(
+          valid_graph, schema, raise_on_warning=False
       )
 
     batch_size, learning_rate = common.resolve_batch_size_and_learning_rate(

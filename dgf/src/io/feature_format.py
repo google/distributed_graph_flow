@@ -78,6 +78,23 @@ FEATURE_FORMAT_TO_NP_DTYPE: dict[schema_lib.FeatureFormat, Any] = {
     schema_lib.FeatureFormat.BOOL: np.bool_,
 }
 
+_INT64_NP_DTYPES = (np.int64, np.longlong)
+
+
+def np_dtype_matches(
+    actual_dtype: np.dtype[Any], expected_dtype: type[np.generic]
+) -> bool:
+  """Returns whether `actual_dtype` matches `expected_dtype`."""
+  if actual_dtype == np.object_:
+    return False
+  if actual_dtype.type == expected_dtype:
+    return True
+  return (
+      expected_dtype in _INT64_NP_DTYPES
+      and actual_dtype.type in _INT64_NP_DTYPES
+  )
+
+
 # Mapping from FeatureFormat to Avro types.
 FEATURE_FORMAT_TO_AVRO_DTYPE: dict[schema_lib.FeatureFormat, str] = {
     schema_lib.FeatureFormat.INTEGER_32: "int",
