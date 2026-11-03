@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 import json
 import os
 from typing import Any, Literal, TYPE_CHECKING
@@ -2285,6 +2286,125 @@ def generate_temporal_in_memory_graph(
 
   graph = in_memory_graph_lib.InMemoryGraph(
       node_sets={"n1": n1_nodes}, edge_sets=edge_sets_data
+  )
+  return graph, schema
+
+
+def generate_query_sensor_timeseries_in_memory_graph(
+    query_creation_times: Sequence[int] = (120, 180, 350),
+    query_labels: Sequence[float] | None = None,
+    include_sensor_reading: bool = True,
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+  """Generates a query-sensor node-timeseries InMemoryGraph for testing.
+
+  Creates 1 `sensor` node with a timestamped timeseries (`time=[100, 300]`, and
+  optionally `reading=[1.0, 10.0]` in the same `"sensor_ts"` group) connected
+  bidirectionally to `len(query_creation_times)` `query` nodes.
+
+  Args:
+    query_creation_times: Creation timestamps (`int64`) for the `query` nodes.
+    query_labels: Optional numerical `label` values (`float32`) for the `query`
+      nodes. Must match `len(query_creation_times)` when provided.
+    include_sensor_reading: If true, adds a `reading` numerical timeseries
+      feature (`[1.0, 10.0]`) to the `"sensor_ts"` group on `sensor`.
+
+  Returns:
+    The graph and its schema.
+  """
+  if query_labels is not None and len(query_labels) != len(
+      query_creation_times
+  ):
+    raise ValueError(
+        "`query_labels` and `query_creation_times` must have the same length"
+        f" (got {len(query_labels)} vs {len(query_creation_times)})."
+    )
+
+  query_features_schema: dict[str, schema_lib.FeatureSchema] = {
+      "creation_time": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.INTEGER_64,
+          semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+          is_creation_time=True,
+      ),
+  }
+  query_features_data: dict[str, np.ndarray] = {
+      "creation_time": np.asarray(query_creation_times, dtype=np.int64),
+  }
+  if query_labels is not None:
+    query_features_schema["label"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+    )
+    query_features_data["label"] = np.asarray(query_labels, dtype=np.float32)
+
+  sensor_features_schema: dict[str, schema_lib.FeatureSchema] = {
+      "time": schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.INTEGER_64,
+          semantic=schema_lib.FeatureSemantic.TIMESTAMP,
+          is_timeseries=True,
+          is_creation_time=True,
+          shape=(None,),
+          group="sensor_ts",
+      ),
+  }
+  time_data = np.empty(1, dtype=object)
+  time_data[0] = np.array([100, 300], dtype=np.int64)
+  sensor_features_data: dict[str, np.ndarray] = {"time": time_data}
+  if include_sensor_reading:
+    sensor_features_schema["reading"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        is_timeseries=True,
+        shape=(None,),
+        group="sensor_ts",
+    )
+    reading_data = np.empty(1, dtype=object)
+    reading_data[0] = np.array([1.0, 10.0], dtype=np.float32)
+    sensor_features_data["reading"] = reading_data
+
+  schema = schema_lib.GraphSchema(
+      node_sets={
+          "query": schema_lib.NodeSchema(features=query_features_schema),
+          "sensor": schema_lib.NodeSchema(features=sensor_features_schema),
+      },
+      edge_sets={
+          "query_to_sensor": schema_lib.EdgeSchema(
+              source="query",
+              target="sensor",
+              features={},
+          ),
+          "sensor_to_query": schema_lib.EdgeSchema(
+              source="sensor",
+              target="query",
+              features={},
+          ),
+      },
+  )
+
+  num_queries = len(query_creation_times)
+  query_idxs = np.arange(num_queries, dtype=np.int64)
+  sensor_idxs = np.zeros(num_queries, dtype=np.int64)
+
+  graph = in_memory_graph_lib.InMemoryGraph(
+      node_sets={
+          "query": in_memory_graph_lib.InMemoryNodeSet(
+              num_nodes=num_queries,
+              features=query_features_data,
+          ),
+          "sensor": in_memory_graph_lib.InMemoryNodeSet(
+              num_nodes=1,
+              features=sensor_features_data,
+          ),
+      },
+      edge_sets={
+          "query_to_sensor": in_memory_graph_lib.InMemoryEdgeSet(
+              adjacency=np.stack([query_idxs, sensor_idxs], axis=0),
+              features={},
+          ),
+          "sensor_to_query": in_memory_graph_lib.InMemoryEdgeSet(
+              adjacency=np.stack([sensor_idxs, query_idxs], axis=0),
+              features={},
+          ),
+      },
   )
   return graph, schema
 

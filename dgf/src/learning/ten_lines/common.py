@@ -86,6 +86,8 @@ class Architecture(enum.Enum):
 DEFAULT_ARCHITECTURE = Architecture.HETEROGENEOUS_MESSAGE_PASSING
 # Default architecture of `train_node_model`.
 DEFAULT_NODE_PREDICTION_ARCHITECTURE = Architecture.MT_ALBIS
+# Default architecture of `train_node_embedding_model`.
+DEFAULT_NODE_EMBEDDING_ARCHITECTURE = Architecture.MT_ALBIS
 
 
 def parse_architecture(architecture: Architecture | str) -> Architecture:

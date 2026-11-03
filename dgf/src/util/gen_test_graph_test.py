@@ -190,6 +190,37 @@ class GenToyDatasetTest(absltest.TestCase):
     labels = graph.node_sets["N1"].features["label"]
     self.assertEqual(labels.dtype, np.float32)
 
+  def test_generate_query_sensor_timeseries_in_memory_graph(self):
+    graph, schema = (
+        gen_test_graph.generate_query_sensor_timeseries_in_memory_graph()
+    )
+    in_memory_graph_validate_lib.validate_graph(
+        graph, schema, raise_on_warning=False
+    )
+    self.assertEqual(graph.node_sets["query"].num_nodes, 3)
+    self.assertNotIn("label", graph.node_sets["query"].features)
+    self.assertIn("reading", graph.node_sets["sensor"].features)
+
+    labeled_graph, labeled_schema = (
+        gen_test_graph.generate_query_sensor_timeseries_in_memory_graph(
+            query_creation_times=(120, 180),
+            query_labels=(1.0, 2.0),
+            include_sensor_reading=False,
+        )
+    )
+    in_memory_graph_validate_lib.validate_graph(
+        labeled_graph, labeled_schema, raise_on_warning=False
+    )
+    self.assertEqual(labeled_graph.node_sets["query"].num_nodes, 2)
+    self.assertIn("label", labeled_graph.node_sets["query"].features)
+    self.assertNotIn("reading", labeled_graph.node_sets["sensor"].features)
+
+    with self.assertRaisesRegex(ValueError, "must have the same length"):
+      gen_test_graph.generate_query_sensor_timeseries_in_memory_graph(
+          query_creation_times=(120, 180),
+          query_labels=(1.0,),
+      )
+
 
 if __name__ == "__main__":
   absltest.main()

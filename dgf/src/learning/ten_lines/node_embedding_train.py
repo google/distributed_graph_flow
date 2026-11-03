@@ -48,6 +48,7 @@ from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize_text as normalize_text_lib
 from dgf.src.util import filesystem as fs
 from dgf.src.util import log
+from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 
 import jax
@@ -245,7 +246,9 @@ def train_node_embedding_model(
     cache_normalized_features: bool = False,
     cache_normalized_features_device: Literal["host", "device"] = "device",
     export_metrics_to_xm: bool = False,
-    architecture: common.Architecture | str = common.DEFAULT_ARCHITECTURE,
+    architecture: common.Architecture | str = (
+        common.DEFAULT_NODE_EMBEDDING_ARCHITECTURE
+    ),
     timeseries_encoder: common.TimeseriesEncoder | str = (
         common.DEFAULT_TIMESERIES_ENCODER
     ),
@@ -301,8 +304,10 @@ def train_node_embedding_model(
     verbose: The verbosity level. Higher values provide more output.
     validation_ratio: Ratio of the training dataset used to create the
       validation dataset in case no validation dataset is manually provided
-      e.g., train_seed_nodes and valid_seed_nodes are provided. If set to 0, the
-      entire dataset is used for training.
+      e.g., train_seed_nodes and valid_seed_nodes are provided. If `time_aware`
+      is True, the split is temporal (past nodes for training, future nodes for
+      validation) instead of random. If set to 0, the entire dataset is used for
+      training.
     train_seed_nodes: Optional. A np.ndarray or list of integer indices
       specifying the subset of nodes within the `target_nodeset` to be used for
       training. If None, the training nodes are determined based on
@@ -362,7 +367,11 @@ def train_node_embedding_model(
     cache_valid_dataset: Whether to cache the validation dataset in memory. This
       can speed up validation if sample generation and normalization are
       time-consuming, but it will increase memory usage.
-    time_aware: Temporal-aware training is not supported yet. Must be False.
+    time_aware: Enables temporal-aware training. If `False` (default), no
+      temporal masking is applied. If `True`, timestamp features are inferred
+      from the schema (via features marked as creation timestamps), the target
+      nodeset is required to have a creation timestamp, and the train and
+      validation sets are split temporally instead of randomly.
     message_aggregation: How the messages received by a node are aggregated. One
       of `hetero_gnn.MessageAggregation` or its string value ("sum", "mean" or
       "symmetric").
@@ -426,11 +435,6 @@ def train_node_embedding_model(
     if fast_compile:
       common.enable_fast_compile()
 
-    if time_aware:
-      raise ValueError(
-          "`time_aware=True` is not supported by `train_node_embedding_model`."
-      )
-
     architecture = common.parse_architecture(architecture)
     timeseries_encoder = common.parse_timeseries_encoder(timeseries_encoder)
     begin_train_time = time.time()
@@ -466,6 +470,29 @@ def train_node_embedding_model(
           " applying `exclude_features`). The node embedding model reconstructs"
           " the features of the target nodes."
       )
+
+    if (
+        sampling_plan is not None
+        and sampling_plan.temporal_sampling != time_aware
+    ):
+      raise ValueError(
+          "`sampling_plan.temporal_sampling` must match `time_aware` (got"
+          f" sampling_plan.temporal_sampling={sampling_plan.temporal_sampling},"
+          f" time_aware={time_aware})."
+      )
+    if time_aware:
+      nodeset_ts_features = temporal_util.nodeset_timestamp_features(schema)
+      edgeset_ts_features = temporal_util.edgeset_timestamp_features(schema)
+      if target_nodeset not in nodeset_ts_features:
+        raise ValueError(
+            f"The target nodeset '{target_nodeset}' must have a creation time"
+            " feature. Set is_creation_time=True on the creation time feature"
+            " (e.g. `schema.node_sets[<target nodeset>].features[<creation time"
+            " feature>].is_creation_time = True`)."
+        )
+    else:
+      nodeset_ts_features = {}
+      edgeset_ts_features = {}
 
     # The user provides already sampled graph samples instead of a full graph.
     graph_is_pre_sampled = (
@@ -557,9 +584,9 @@ def train_node_embedding_model(
             validation_ratio=validation_ratio,
             train_seed_nodes=train_seed_nodes,
             valid_seed_nodes=valid_seed_nodes,
-            temporal_sampling=False,
-            nodeset_timestamp_features={},
-            edgeset_timestamp_features={},
+            temporal_sampling=time_aware,
+            nodeset_timestamp_features=nodeset_ts_features,
+            edgeset_timestamp_features=edgeset_ts_features,
             num_valid_steps=num_valid_steps,
             cache_valid_dataset=cache_valid_dataset,
             cache_normalized_features=cache_normalized_features,
@@ -740,6 +767,9 @@ def train_node_embedding_model(
             ),
             feature_stats=dataset_preparator.feature_stats,
             excluded_features=excluded_features,
+            temporal_sampling=time_aware,
+            nodeset_timestamp_features=nodeset_ts_features,
+            edgeset_timestamp_features=edgeset_ts_features,
             training_stats=TrainingStats(
                 num_train_seed_nodes=train_dataset.num_nodes_in_seed_nodeset(),
                 num_valid_seed_nodes=valid_dataset.num_nodes_in_seed_nodeset()

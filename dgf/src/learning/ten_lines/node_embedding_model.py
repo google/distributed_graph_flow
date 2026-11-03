@@ -96,6 +96,7 @@ class BatchEmbedding:
 class HParam(common.HParam):
   """Hyperparameters for the `NodeEmbeddingModel`."""
 
+  architecture: common.Architecture = common.DEFAULT_NODE_EMBEDDING_ARCHITECTURE
   num_decoder_layers: int = 1
   mask_rate: float = 0.5
   drop_edge_rate: float = 0.5
@@ -123,6 +124,13 @@ class ModelData:
   feature_stats: statistics_lib.GraphFeatureStatistics
   training_stats: node_prediction_model.TrainingStats
   excluded_features: dict[str, list[str]] = dataclasses.field(
+      default_factory=dict
+  )
+  temporal_sampling: bool = False
+  nodeset_timestamp_features: dict[str, str] = dataclasses.field(
+      default_factory=dict
+  )
+  edgeset_timestamp_features: dict[str, str] = dataclasses.field(
       default_factory=dict
   )
   final_evaluation: evaluation.Evaluation | None = None
@@ -249,6 +257,7 @@ class NodeEmbeddingModel(common.Model):
         num_model_weights=common.num_model_weights(self._data.model_params),
         log_messages=self.metadata.captured_logs,
         final_evaluation=self._data.final_evaluation,
+        normalizer_configs={"Default": self._data.normalizer_config},
     )
     tabs.extend(common_tabs)
     return util.RichDisplay(report.html_tabs(tabs))
@@ -350,7 +359,8 @@ class NodeEmbeddingModel(common.Model):
     live = self._get_live()
     schema = self._data.schema
     if (
-        "seed_timestamps" in live.normalizer.accepted_kwargs
+        self._data.temporal_sampling
+        or "seed_timestamps" in live.normalizer.accepted_kwargs
         or temporal_util.schema_has_timeseries_features(schema)
         or any(not nodeset.num_nodes for nodeset in graph.node_sets.values())
     ):
@@ -398,7 +408,7 @@ class NodeEmbeddingModel(common.Model):
         normalizer=live.normalizer,
         target_nodeset=self.target_nodeset,
         batch_size=self._data.hparams.batch_size,
-        temporal_sampling=False,
+        temporal_sampling=self._data.temporal_sampling,
         sampler_schema=sampler_schema,
         verbose=verbose,
         progress_bar_desc=progress_bar_desc,

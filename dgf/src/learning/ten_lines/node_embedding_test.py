@@ -142,6 +142,32 @@ class NodeEmbeddingModelStandaloneTest(absltest.TestCase):
     with self.assertRaisesRegex(ValueError, "Model UUID is not set"):
       self.model._extract_serving_schemata()
 
+  def test_should_cache_normalized_features_false_when_temporal_sampling(self):
+    _, schema = gen_test_graph.gen_toy_classification_dataset(
+        num_n1_nodes=60, num_n2_nodes=40
+    )
+    self.data.schema = schema
+    self.data.padding = padding_lib.Padding(
+        node_sets={"N1": padding_lib.NodeSetPadding(num_nodes=10)},
+        edge_sets={},
+    )
+    self.data.hparams.batch_size = 4
+    live = unittest.mock.MagicMock()
+    live.normalizer.accepted_kwargs = set()
+    with unittest.mock.patch.object(self.model, "_get_live", return_value=live):
+      self.data.temporal_sampling = False
+      self.assertTrue(
+          self.model._should_cache_normalized_features(
+              self.graph, num_seed_nodes=10_000
+          )
+      )
+      self.data.temporal_sampling = True
+      self.assertFalse(
+          self.model._should_cache_normalized_features(
+              self.graph, num_seed_nodes=10_000
+          )
+      )
+
 
 def _core_model_config(
     pre_mlp: jax_common.GenericLayer, gnn_dims: int
@@ -690,7 +716,16 @@ class NodeEmbeddingModelUntrainedTest(parameterized.TestCase):
     self.assertIn("gnn_N1_seed_node_idxs", signature["required"])
 
   def test_describe(self):
-    html_str = self.model.describe()._repr_html_()
+    with unittest.mock.patch.object(
+        node_embedding_model.report,
+        "get_common_tabs",
+        wraps=node_embedding_model.report.get_common_tabs,
+    ) as mock_get_common_tabs:
+      html_str = self.model.describe()._repr_html_()
+    self.assertEqual(
+        mock_get_common_tabs.call_args.kwargs["normalizer_configs"],
+        {"Default": self.model.data().normalizer_config},
+    )
     self.assertIn("<tr><td>Excluded features</td><td>None</td></tr>", html_str)
     for section in (
         "Objective",
@@ -796,12 +831,26 @@ class NodeEmbeddingTrainTest(parameterized.TestCase):
     self.assertIsInstance(model, node_embedding_model.NodeEmbeddingModel)
     self.assertEqual(model.target_nodeset, "N1")
     self.assertEqual(model.embedding_dim, 8)
+    self.assertEqual(
+        model.data().hparams.architecture, common_lib.Architecture.MT_ALBIS
+    )
+    self.assertEqual(
+        node_embedding_model.HParam().architecture,
+        common_lib.Architecture.MT_ALBIS,
+    )
     self.assertEqual(model.data().excluded_features, {"N1": ["label"]})
     self.assertNotIn("label", model.data().schema.node_sets["N1"].features)
     self.assertIsNotNone(model.data().final_evaluation)
     self.assertIsNotNone(model.metadata.trainig_logs)
 
-    embeddings = model.predict(self.graph, [0, 1, 2], verbose=0)
+    with log.capture_logs(log_info=True) as captured_infer_logs:
+      embeddings = model.predict(self.graph, [0, 1, 2], verbose=0)
+    self.assertTrue(
+        any(
+            "...Tracing inference model" in msg.text
+            for msg in captured_infer_logs
+        )
+    )
     self.assertEqual(embeddings.shape, (3, 8))
     self.assertTrue(np.all(np.isfinite(embeddings)))
 
@@ -1164,15 +1213,110 @@ class NodeEmbeddingTrainTest(parameterized.TestCase):
     self.assertEqual(embeddings.shape, (2, 8))
     self.assertTrue(np.all(np.isfinite(embeddings)))
 
-  def test_time_aware_raises(self):
-    with self.assertRaisesRegex(ValueError, "time_aware=True"):
+  def test_temporal_training_no_target_nodeset_timestamp_raises(self):
+    with self.assertRaisesRegex(
+        ValueError,
+        "The target nodeset 'N1' must have a creation time feature",
+    ):
       node_embedding_train.train_node_embedding_model(
           self.graph,
           self.schema,
           target_nodeset="N1",
+          exclude_features=["label"],
           time_aware=True,
           **RAPID_TRAINING_KWARGS,
       )
+
+    temporal_graph, temporal_schema = (
+        gen_test_graph.generate_temporal_in_memory_graph(include_e2=False)
+    )
+    with self.assertRaisesRegex(
+        ValueError,
+        "The target nodeset 'n1' must have a creation time feature",
+    ):
+      node_embedding_train.train_node_embedding_model(
+          temporal_graph,
+          temporal_schema,
+          target_nodeset="n1",
+          exclude_features=["timestamp"],
+          time_aware=True,
+          **RAPID_TRAINING_KWARGS,
+      )
+
+    temporal_schema.node_sets["n1"].features["timestamp"].is_creation_time = (
+        False
+    )
+    with self.assertRaisesRegex(
+        ValueError,
+        "The target nodeset 'n1' must have a creation time feature",
+    ):
+      node_embedding_train.train_node_embedding_model(
+          temporal_graph,
+          temporal_schema,
+          target_nodeset="n1",
+          time_aware=True,
+          **RAPID_TRAINING_KWARGS,
+      )
+
+  def test_temporal_training_sampling_plan_mismatch_raises(self):
+    temporal_graph, temporal_schema = (
+        gen_test_graph.generate_temporal_in_memory_graph(include_e2=False)
+    )
+    non_temporal_plan = (
+        sampling_config_lib.simple_sampling_config_to_sampling_plan(
+            sampling_config_lib.SimpleSamplingConfig(
+                seed_nodeset="n1",
+                num_hops=1,
+                hop_width=2,
+                temporal_sampling=False,
+            ),
+            temporal_schema,
+        )
+    )
+    with self.assertRaisesRegex(
+        ValueError,
+        "`sampling_plan.temporal_sampling` must match `time_aware`",
+    ):
+      node_embedding_train.train_node_embedding_model(
+          temporal_graph,
+          temporal_schema,
+          target_nodeset="n1",
+          time_aware=True,
+          sampling_plan=non_temporal_plan,
+          **RAPID_TRAINING_KWARGS,
+      )
+
+    temporal_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
+        sampling_config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1",
+            num_hops=1,
+            hop_width=2,
+            temporal_sampling=True,
+        ),
+        temporal_schema,
+    )
+    with self.assertRaisesRegex(
+        ValueError,
+        "`sampling_plan.temporal_sampling` must match `time_aware`",
+    ):
+      node_embedding_train.train_node_embedding_model(
+          temporal_graph,
+          temporal_schema,
+          target_nodeset="n1",
+          time_aware=False,
+          sampling_plan=temporal_plan,
+          **RAPID_TRAINING_KWARGS,
+      )
+
+    model = node_embedding_train.train_node_embedding_model(
+        temporal_graph,
+        temporal_schema,
+        target_nodeset="n1",
+        time_aware=True,
+        sampling_plan=temporal_plan,
+        **RAPID_TRAINING_KWARGS,
+    )
+    test_util.assert_are_equal(self, model.data().sampling_plan, temporal_plan)
 
   def test_invalid_exclude_features_raises(self):
     with self.assertRaisesRegex(ValueError, "not found in schema"):
@@ -1324,6 +1468,151 @@ class NodeEmbeddingGraphSamplesWithoutSamplingPlanTest(parameterized.TestCase):
     test_util.assert_are_equal(self, model.data().sampling_plan, sampling_plan)
     embeddings = model.predict(self.graph, [0, 1, 2], verbose=0)
     self.assertEqual(embeddings.shape, (3, 8))
+
+
+class NodeEmbeddingTemporalAndTimeseriesTest(parameterized.TestCase):
+  """Tests temporal (`time_aware=True`) and causal timeseries support."""
+
+  def test_temporal_training_split_and_edge_timeseries(self):
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
+        include_e2=False, include_edge_timeseries=True
+    )
+    # Non-monotonic creation times verify chronological train/valid splitting:
+    # oldest nodes {1 (t=10), 3 (t=20)} -> train; newest {2 (t=30), 0 (t=40)} -> valid.
+    graph.node_sets["n1"].features["timestamp"] = np.array(
+        [40, 10, 30, 20], dtype=np.int64
+    )
+
+    captured_splits: list[tuple[np.ndarray | None, np.ndarray | None]] = []
+    orig_split = node_prediction_dataset.compute_train_and_valid_node_idxs
+
+    def spy_split(*args, **kwargs):
+      train_idxs, valid_idxs = orig_split(*args, **kwargs)
+      captured_splits.append((train_idxs, valid_idxs))
+      return train_idxs, valid_idxs
+
+    training_kwargs: dict[str, Any] = {
+        **RAPID_TRAINING_KWARGS,
+        "batch_size": 2,
+        "validation_ratio": 0.5,
+        "evaluate_final_model": True,
+    }
+    with unittest.mock.patch.object(
+        node_prediction_dataset,
+        "compute_train_and_valid_node_idxs",
+        side_effect=spy_split,
+    ):
+      model = node_embedding_train.train_node_embedding_model(
+          graph=graph,
+          schema=schema,
+          target_nodeset="n1",
+          time_aware=True,
+          **training_kwargs,
+      )
+
+    self.assertLen(captured_splits, 1)
+    train_idxs, valid_idxs = captured_splits[0]
+    assert train_idxs is not None
+    assert valid_idxs is not None
+    self.assertCountEqual(train_idxs.tolist(), [1, 3])
+    self.assertCountEqual(valid_idxs.tolist(), [0, 2])
+
+    self.assertTrue(model.data().temporal_sampling)
+    self.assertEqual(
+        model.data().nodeset_timestamp_features, {"n1": "timestamp"}
+    )
+    self.assertEqual(
+        model.data().edgeset_timestamp_features, {"e1": "timestamp"}
+    )
+    sampling_plan = model.data().sampling_plan
+    assert sampling_plan is not None
+    self.assertTrue(sampling_plan.temporal_sampling)
+    self.assertIsNotNone(model.data().final_evaluation)
+
+    embeddings = model.predict(graph, seed_node_idxs=[0, 1, 2, 3], verbose=0)
+    self.assertEqual(embeddings.shape, (4, 8))
+    self.assertTrue(np.all(np.isfinite(embeddings)))
+
+    eval_res = model.evaluate(graph, seed_node_idxs=[0, 1, 2, 3], verbose=0)
+    self.assertEqual(eval_res.num_examples, 4)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      model.save(tmpdir)
+      loaded = common_lib.load_model(tmpdir)
+    assert isinstance(loaded, node_embedding_model.NodeEmbeddingModel)
+    test_util.assert_are_equal(self, model.data(), loaded.data())
+    np.testing.assert_allclose(
+        loaded.predict(graph, seed_node_idxs=[0, 1, 2, 3], verbose=0),
+        embeddings,
+        atol=1e-6,
+    )
+
+  @parameterized.parameters("cnn", "transformer")
+  def test_causal_timeseries_slicing_and_timedelta_embeddings(
+      self, timeseries_encoder: str
+  ):
+    graph, schema = (
+        gen_test_graph.generate_query_sensor_timeseries_in_memory_graph()
+    )
+    training_kwargs: dict[str, Any] = {
+        **RAPID_TRAINING_KWARGS,
+        "batch_size": 3,
+    }
+    model = node_embedding_train.train_node_embedding_model(
+        graph=graph,
+        valid_graph=graph,
+        schema=schema,
+        target_nodeset="query",
+        time_aware=True,
+        timeseries_encoder=timeseries_encoder,
+        timeseries_embedding_dim=8,
+        **training_kwargs,
+    )
+
+    embeddings = model.predict(graph, seed_node_idxs=[0, 1, 2], verbose=0)
+    self.assertEqual(embeddings.shape, (3, 8))
+    self.assertTrue(np.all(np.isfinite(embeddings)))
+    # Queries 0 (t=120) and 1 (t=180) see the same sensor prefix (t=100),
+    # differentiated by their creation_time and timedelta (-20 vs -80).
+    self.assertFalse(np.allclose(embeddings[0], embeddings[1]))
+
+    # Mutating a future sensor event (t=300 -> t=250, reading 10.0 -> -5.0)
+    # must not affect queries at t=120 and t=180, while changing t=350.
+    future_modified_graph = copy.deepcopy(graph)
+    future_modified_graph.node_sets["sensor"].features["time"][0] = np.array(
+        [100, 250], dtype=np.int64
+    )
+    future_modified_graph.node_sets["sensor"].features["reading"][0] = np.array(
+        [1.0, -5.0], dtype=np.float32
+    )
+    modified_embeddings = model.predict(
+        future_modified_graph, seed_node_idxs=[0, 1, 2], verbose=0
+    )
+    np.testing.assert_allclose(
+        modified_embeddings[:2], embeddings[:2], atol=1e-6
+    )
+    self.assertFalse(np.allclose(modified_embeddings[2], embeddings[2]))
+
+    sampling_plan = model.data().sampling_plan
+    assert sampling_plan is not None
+    sampler = in_memory_sampler_lib.create_sampler(
+        graph=graph,
+        plan=sampling_plan,
+        schema=schema,
+        batch_size=3,
+    )
+    samples = sampler.sample(
+        np.array([0, 1, 2]),
+        seed_timestamps=np.array([120, 180, 350], dtype=np.int64),
+    )
+    sample_batch_embeddings = model.predict_on_graph_sample_batch(samples)
+    np.testing.assert_allclose(sample_batch_embeddings, embeddings, atol=1e-5)
+
+    eval_gen_res = model.evaluate_generator(iter(samples), verbose=0)
+    self.assertEqual(eval_gen_res.num_examples, 3)
+
+    eval_res = model.evaluate(graph, verbose=0)
+    self.assertEqual(eval_res.num_examples, 3)
 
 
 if __name__ == "__main__":

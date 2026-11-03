@@ -182,6 +182,7 @@ class CoreModel(nn.Module):
       self, batch: Batch, training: bool = False
   ) -> jax.Array:
     """Returns encoder node embeddings of shape `[S, D]` for the seed nodes."""
+    log.info("...Tracing inference model")
     graph, seed_node_idxs = batch
     embedded_graph = self._embed_features(graph, training=training)
     all_embeddings = self.graphmae.embed(embedded_graph, training=training)

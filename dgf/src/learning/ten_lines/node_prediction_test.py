@@ -1800,91 +1800,14 @@ class NodePredictionTemporalValidationTest(absltest.TestCase):
 
 class NodePredictionTimeseriesTest(absltest.TestCase):
 
-  def _create_timeseries_graph_and_schema(
-      self,
-  ) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
-    """Creates 1 sensor node with a timeseries and 2 query nodes with different creation times."""
-
-    schema = schema_lib.GraphSchema(
-        node_sets={
-            "query": schema_lib.NodeSchema(
-                features={
-                    "creation_time": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.INTEGER_64,
-                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
-                        is_creation_time=True,
-                    ),
-                    "label": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.FLOAT_32,
-                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
-                    ),
-                }
-            ),
-            "sensor": schema_lib.NodeSchema(
-                features={
-                    "time": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.INTEGER_64,
-                        semantic=schema_lib.FeatureSemantic.TIMESTAMP,
-                        is_timeseries=True,
-                        is_creation_time=True,
-                        shape=(None,),
-                        group="sensor_ts",
-                    ),
-                }
-            ),
-        },
-        edge_sets={
-            "query_to_sensor": schema_lib.EdgeSchema(
-                source="query",
-                target="sensor",
-                features={},
-            ),
-            "sensor_to_query": schema_lib.EdgeSchema(
-                source="sensor",
-                target="query",
-                features={},
-            ),
-        },
-    )
-
-    time_data = np.empty(1, dtype=object)
-    time_data[0] = np.array([100, 300], dtype=np.int64)
-
-    sensor_nodes = in_memory_graph_lib.InMemoryNodeSet(
-        num_nodes=1,
-        features={"time": time_data},
-    )
-
-    # Query 0: creation_time = 120 -> sees t=100 (timedelta = 20), label = 1.0
-    # Query 1: creation_time = 180 -> sees t=100 (timedelta = 80), label = 2.0
-    query_nodes = in_memory_graph_lib.InMemoryNodeSet(
-        num_nodes=2,
-        features={
-            "creation_time": np.array([120, 180], dtype=np.int64),
-            "label": np.array([1.0, 2.0], dtype=np.float32),
-        },
-    )
-
-    query_to_sensor = in_memory_graph_lib.InMemoryEdgeSet(
-        adjacency=np.array([[0, 1], [0, 0]], dtype=np.int64),
-        features={},
-    )
-    sensor_to_query = in_memory_graph_lib.InMemoryEdgeSet(
-        adjacency=np.array([[0, 0], [0, 1]], dtype=np.int64),
-        features={},
-    )
-
-    graph = in_memory_graph_lib.InMemoryGraph(
-        node_sets={"query": query_nodes, "sensor": sensor_nodes},
-        edge_sets={
-            "query_to_sensor": query_to_sensor,
-            "sensor_to_query": sensor_to_query,
-        },
-    )
-    return graph, schema
-
   def test_train_and_predict_with_timeseries(self):
-    graph, schema = self._create_timeseries_graph_and_schema()
+    graph, schema = (
+        gen_test_graph.generate_query_sensor_timeseries_in_memory_graph(
+            query_creation_times=(120, 180),
+            query_labels=(1.0, 2.0),
+            include_sensor_reading=False,
+        )
+    )
 
     # The training is not seeded. With a larger learning rate, it sometimes
     # collapses to predicting the mean label (1.5) for both queries (~5% of the
