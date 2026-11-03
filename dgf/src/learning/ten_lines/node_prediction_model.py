@@ -564,15 +564,15 @@ class NodePredictionModel(common.Model):
     Args:
       graph: The input graph data. This graph should contain the true labels for
         the target column.
-      num_eval_steps: Maximum number of evaluation batches to run. If None,
+      num_eval_steps: Maximum number of seed nodes to evaluate. If None,
         evaluation is run on all specified `seed_node_idxs`.
       seed_node_idxs: Indices of the seed nodes within the target nodeset to
         evaluate. If None, all nodes in the target nodeset are used.
       verbose: The verbosity level. Higher values provide more detailed logging
         output during the evaluation process.
-      random_seed: Random seed to select the seed nodes is num_train_steps is
-        less than the number of nodes in the graph. If None, use a new random
-        seed each time.
+      random_seed: Random seed used to sub-sample the seed nodes when
+        `num_eval_steps` is smaller than the number of seed nodes. If None, use
+        a new random seed each time.
 
     Returns:
       An `evaluation.Evaluation` object containing the evaluation results,
@@ -581,12 +581,13 @@ class NodePredictionModel(common.Model):
 
     target_nodeset = self._data.task.target_nodeset
     num_nodes = graph.node_sets[target_nodeset].num_nodes
+    assert num_nodes is not None
 
     if seed_node_idxs is None:
       # Consider all the seed nodes
-      seed_node_idxs = np.arange(num_nodes)  # pyrefly: ignore[no-matching-overload]
+      seed_node_idxs = np.arange(num_nodes)
 
-    if num_eval_steps is not None and num_eval_steps < num_nodes:  # pyrefly: ignore[unsupported-operation]
+    if num_eval_steps is not None and num_eval_steps < len(seed_node_idxs):
       # Sub-select seed nodes.
       rng = np.random.default_rng(random_seed)
       seed_node_idxs = rng.choice(

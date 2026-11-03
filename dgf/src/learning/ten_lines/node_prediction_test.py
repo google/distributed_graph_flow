@@ -1279,6 +1279,38 @@ class NodePredictionInferenceTest(absltest.TestCase):
     self.assertEqual(with_cache.num_examples, without_cache.num_examples)
     self.assertAlmostEqual(with_cache.accuracy, without_cache.accuracy)  # pyrefly: ignore[no-matching-overload]
 
+  def test_evaluate_subselects_seed_nodes(self):
+    # len(seed_node_idxs) < num_eval_steps < num_nodes (50 < 100 < 300).
+    full_eval = self.model.evaluate(
+        self.graph, num_eval_steps=None, seed_node_idxs=np.arange(50), verbose=0
+    )
+    bounded_eval = self.model.evaluate(
+        self.graph,
+        num_eval_steps=100,
+        seed_node_idxs=list(range(50)),
+        verbose=0,
+    )
+    self.assertEqual(bounded_eval.num_examples, 50)
+    test_util.assert_are_equal(self, bounded_eval, full_eval)
+
+    # num_eval_steps < len(seed_node_idxs) (20 < 50).
+    subsampled_a = self.model.evaluate(
+        self.graph,
+        num_eval_steps=20,
+        seed_node_idxs=np.arange(50),
+        random_seed=42,
+        verbose=0,
+    )
+    subsampled_b = self.model.evaluate(
+        self.graph,
+        num_eval_steps=20,
+        seed_node_idxs=np.arange(50),
+        random_seed=42,
+        verbose=0,
+    )
+    self.assertEqual(subsampled_a.num_examples, 20)
+    test_util.assert_are_equal(self, subsampled_a, subsampled_b)
+
 
 class NodePredictionArchitecturesToy(parameterized.TestCase):
 
