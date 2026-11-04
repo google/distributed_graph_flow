@@ -302,13 +302,15 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
     #     smooth_bucket_idx = 1.5 # since 4 is in the middle of [3, 5).
     lower = quantiles[bucket_idx]
     upper = quantiles[bucket_idx + 1]
-    smooth_bucket_idx = bucket_idx.astype(np.float32) + (value - lower) / (
-        upper - lower
-    )
+    delta = np.maximum(upper - lower, 1e-12)
+    adjusted = (value - lower) / delta
+    smooth_bucket_idx = bucket_idx.astype(np.float32) + adjusted
 
-    # Note: This is not really a quantile.
-    soft_quantile = smooth_bucket_idx / num_buckets
-    return {self.output_feature_name: soft_quantile - 0.5}
+    # Note: This is not really a quantile, so it's fine to adjust it a little:
+    #  * Center the output to [-0.5, 0.5] so that the median is 0.
+    #  * Clip to [-100, 100] to avoid overflows when squaring downstream.
+    soft_quantile = np.clip(smooth_bucket_idx / num_buckets - 0.5, -100, 100)
+    return {self.output_feature_name: soft_quantile}
 
   def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
     value = tf.cast(value, tf.float32)
@@ -323,19 +325,21 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
 
     lower = tf.gather(quantiles, bucket_idx)
     upper = tf.gather(quantiles, bucket_idx + 1)
+    delta = tf.maximum(upper - lower, 1e-12)
+    adjusted = (value - lower) / delta
+    smooth_bucket_idx = tf.cast(bucket_idx, tf.float32) + adjusted
 
-    smooth_bucket_idx = tf.cast(bucket_idx, tf.float32) + (value - lower) / (
-        upper - lower
-    )
-
-    soft_quantile = smooth_bucket_idx / num_buckets
-    return {self.output_feature_name: soft_quantile - 0.5}
+    # See comment in normalize_numpy for details.
+    soft_quantile = smooth_bucket_idx / num_buckets - 0.5
+    soft_quantile = tf.clip_by_value(soft_quantile, -100, 100)
+    return {self.output_feature_name: soft_quantile}
 
 
 @normalizer_registry.register
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass(kw_only=True)
 class HashStringNormalizer(AbstractFeatureNormalizer):
+  """Normalizes a BYTES feature by hashing it to a bucket index."""
 
   num_buckets: int
   output_shape: tuple[int | None, ...]

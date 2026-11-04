@@ -167,7 +167,7 @@ class DictionaryIndexNormalizerTest(absltest.TestCase):
     test_util.assert_are_equal(self, output_features, expected_output_features)
 
 
-class SoftQuantileNormalizerTest(absltest.TestCase):
+class SoftQuantileNormalizerTest(parameterized.TestCase):
 
   def test_no_observed_value(self):
     # The feature is present (count > 0) but has no value, e.g., a timeseries
@@ -386,6 +386,132 @@ class SoftQuantileNormalizerTest(absltest.TestCase):
         expected_output_features,
         abs_tol=1e-6,
     )
+
+  def test_outliers_clamp_to_100(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+    )
+    input_stats = statistics_lib.FeatureStatistics(
+        count=10,
+        minimum=0.0,
+        maximum=3.0,
+        quantiles=[0.0, 1.0, 2.0, 3.0],
+    )
+    normalizer = normalize_lib.SoftQuantileNormalizer.create(
+        "test_feature", input_schema, input_stats
+    )
+    input_values = np.array(
+        [-1e30, -1e6, -300.0, 303.0, 1e6, 1e30], dtype=np.float32
+    )
+    expected = {
+        "test_feature_SOFT_QUANTILE": np.array(
+            [-100.0, -100.0, -100.0, 100.0, 100.0, 100.0], dtype=np.float32
+        )
+    }
+    np_out = normalizer.normalize_numpy(input_values)
+    tf_out = {
+        k: v.numpy()
+        for k, v in normalizer.normalize_tensorflow(
+            tf.constant(input_values)
+        ).items()
+    }
+    test_util.assert_are_equal(self, np_out, expected, abs_tol=0.0)
+    test_util.assert_are_equal(self, tf_out, expected, abs_tol=0.0)
+
+  @parameterized.named_parameters(
+      (
+          "outer_duplicate_buckets",
+          [1.0, 1.0, 2.0, 2.0],
+          [0.0, 1.0, 1.5, 2.0, 3.0],
+      ),
+      (
+          "all_equal_quantiles",
+          [5.0, 5.0, 5.0],
+          [4.0, 5.0, 6.0],
+      ),
+      (
+          "sub_1e12_bucket_width",
+          [0.0, 1e-20, 1.0, 1.0 + 1e-20],
+          [-1.0, 0.0, 0.5, 1.0, 2.0],
+      ),
+  )
+  def test_duplicate_and_tiny_width_quantiles_are_finite(
+      self, quantiles, values
+  ):
+    normalizer = normalize_lib.SoftQuantileNormalizer(
+        input_feature="test_feature",
+        output_feature_name="test_feature_SOFT_QUANTILE",
+        output_shape=(),
+        quantiles=np.asarray(quantiles, dtype=np.float32),
+    )
+    input_values = np.asarray(values, dtype=np.float32)
+    np_out = normalizer.normalize_numpy(input_values)[
+        "test_feature_SOFT_QUANTILE"
+    ]
+    tf_out = (
+        normalizer.normalize_tensorflow(tf.constant(input_values))[
+            "test_feature_SOFT_QUANTILE"
+        ].numpy()
+    )
+    self.assertEqual(np_out.dtype, np.float32)
+    self.assertEqual(tf_out.dtype, np.float32)
+    self.assertTrue(np.all(np.isfinite(np_out)))
+    self.assertTrue(np.all(np.isfinite(tf_out)))
+    self.assertTrue(np.all(np.abs(np_out) <= 100.0))
+    np.testing.assert_allclose(np_out, tf_out, rtol=1e-6, atol=1e-6)
+
+  def test_clean_data_bitwise_parity(self):
+    quantiles = np.linspace(-10.0, 50.0, num=101, dtype=np.float32)
+    normalizer = normalize_lib.SoftQuantileNormalizer(
+        input_feature="test_feature",
+        output_feature_name="test_feature_SOFT_QUANTILE",
+        output_shape=(),
+        quantiles=quantiles,
+    )
+    rng = np.random.default_rng(0)
+    # In-range values and moderate extrapolations well inside [-100, 100].
+    input_values = np.concatenate([
+        quantiles,
+        rng.uniform(-10.0, 50.0, size=200).astype(np.float32),
+        np.array([-15.0, -10.5, 50.5, 60.0], dtype=np.float32),
+    ])
+
+    # Unmodified pre-CL3 reference formula.
+    num_buckets = len(quantiles) - 1
+    bucket_idx = np.searchsorted(quantiles, input_values, side="right") - 1
+    bucket_idx = np.clip(bucket_idx, 0, len(quantiles) - 2)
+    lower = quantiles[bucket_idx]
+    upper = quantiles[bucket_idx + 1]
+    legacy_np = (
+        bucket_idx.astype(np.float32) + (input_values - lower) / (upper - lower)
+    ) / num_buckets - 0.5
+
+    tf_val = tf.constant(input_values, dtype=tf.float32)
+    tf_q = tf.constant(quantiles, dtype=tf.float32)
+    tf_idx = tf.clip_by_value(
+        tf.searchsorted(tf_q, tf_val, side="right") - 1, 0, len(quantiles) - 2
+    )
+    tf_lower = tf.gather(tf_q, tf_idx)
+    tf_upper = tf.gather(tf_q, tf_idx + 1)
+    legacy_tf = (
+        (
+            tf.cast(tf_idx, tf.float32)
+            + (tf_val - tf_lower) / (tf_upper - tf_lower)
+        )
+        / num_buckets
+        - 0.5
+    ).numpy()
+
+    np_out = normalizer.normalize_numpy(input_values)[
+        "test_feature_SOFT_QUANTILE"
+    ]
+    tf_out = (
+        normalizer.normalize_tensorflow(tf_val)["test_feature_SOFT_QUANTILE"]
+        .numpy()
+    )
+    np.testing.assert_array_equal(np_out, legacy_np)
+    np.testing.assert_array_equal(tf_out, legacy_tf)
 
 
 class HashStringNormalizerTest(absltest.TestCase):
