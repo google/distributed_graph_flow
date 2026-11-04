@@ -23,6 +23,7 @@ from dgf.src.data import schema as schema_lib
 from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax.layers import hetero_gnn
 from dgf.src.learning.ten_lines import common
+from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.util import gen_test_graph
 from dgf.src.util import log
 from dgf.src.util import test_util
@@ -405,9 +406,21 @@ class TenLines(parameterized.TestCase):
         node_sets={
             "n1": schema_lib.NodeSchema(
                 features={
+                    "id": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+                    ),
                     "f_none": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
                         shape=None,
+                    ),
+                    "f_23": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        shape=(23,),
+                    ),
+                    "f_utf8": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        is_utf8_string=True,
                     ),
                     "f_none_23": schema_lib.FeatureSchema(
                         format=schema_lib.FeatureFormat.FLOAT_32,
@@ -418,9 +431,21 @@ class TenLines(parameterized.TestCase):
                         shape=(None, 1),
                     ),
                 }
-            )
+            ),
+            "unvisited_node": schema_lib.NodeSchema(
+                features={
+                    "f_unvisited": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                    ),
+                }
+            ),
         },
-        edge_sets={},
+        edge_sets={
+            "unvisited_edge": schema_lib.EdgeSchema(
+                source="n1",
+                target="unvisited_node",
+            ),
+        },
     )
     signature = common.schema_to_serving_signature_dict(
         schema_=schema,
@@ -429,19 +454,124 @@ class TenLines(parameterized.TestCase):
         model_uuid="test_uuid",
     )
 
-    f_none = signature["gnn_n1_nodes_n1_f_none"]
-    self.assertEqual(f_none["shape"], "(None,)")
+    props = signature["properties"]
+    self.assertNotIn("nodes_n1_id", props)
+    self.assertNotIn("nodes_unvisited_node_reserved_size", props)
+    self.assertNotIn("nodes_unvisited_node_f_unvisited", props)
+    self.assertNotIn("edges_unvisited_edge_reserved_adjacency", props)
+    self.assertEqual(signature["required"], list(props.keys()))
 
-    f_none_23 = signature["gnn_n1_nodes_n1_f_none_23"]
-    self.assertEqual(f_none_23["shape"], "(-1, 23)")
+    self.assertEqual(
+        props["seed_node_idxs"],
+        {
+            "type": "array",
+            "items": {"type": "integer", "format": "int32"},
+            "input_node": "n1",
+            "field_kind": "seed_node_idxs",
+        },
+    )
+    self.assertEqual(
+        props["nodes_n1_reserved_size"],
+        {
+            "type": "integer",
+            "format": "int32",
+            "input_node": "n1",
+            "node_label": "n1",
+            "field_kind": "size",
+        },
+    )
 
-    f_none_1 = signature["gnn_n1_nodes_n1_f_none_1"]
-    self.assertEqual(f_none_1["shape"], "(-1, 1)")
+    f_none = props["nodes_n1_f_none"]
+    self.assertEqual(
+        f_none,
+        {
+            "type": "array",
+            "items": {"type": "number", "format": "float"},
+            "input_node": "n1",
+            "node_label": "n1",
+            "property": "f_none",
+            "field_kind": "feature",
+        },
+    )
+
+    f_23 = props["nodes_n1_f_23"]
+    self.assertEqual(
+        f_23,
+        {
+            "type": "array",
+            "items": {
+                "type": "array",
+                "min_items": 23,
+                "max_items": 23,
+                "items": {"type": "number", "format": "float"},
+            },
+            "input_node": "n1",
+            "node_label": "n1",
+            "property": "f_23",
+            "field_kind": "feature",
+        },
+    )
+
+    f_utf8 = props["nodes_n1_f_utf8"]
+    self.assertEqual(
+        f_utf8,
+        {
+            "type": "array",
+            "items": {"type": "string"},
+            "input_node": "n1",
+            "node_label": "n1",
+            "property": "f_utf8",
+            "field_kind": "feature",
+        },
+    )
+
+    f_none_23 = props["nodes_n1_f_none_23"]
+    self.assertEqual(
+        f_none_23,
+        {
+            "type": "array",
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "min_items": 23,
+                    "max_items": 23,
+                    "items": {"type": "number", "format": "float"},
+                },
+            },
+            "input_node": "n1",
+            "node_label": "n1",
+            "property": "f_none_23",
+            "field_kind": "feature",
+        },
+    )
+
+    f_none_1 = props["nodes_n1_f_none_1"]
+    self.assertEqual(
+        f_none_1,
+        {
+            "type": "array",
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "min_items": 1,
+                    "max_items": 1,
+                    "items": {"type": "number", "format": "float"},
+                },
+            },
+            "input_node": "n1",
+            "node_label": "n1",
+            "property": "f_none_1",
+            "field_kind": "feature",
+        },
+    )
 
   def test_schema_to_serving_signature_dict_link_prediction(self):
     schema = schema_lib.GraphSchema(
         node_sets={
             "n1": schema_lib.NodeSchema(),
+            "unvisited_node": schema_lib.NodeSchema(),
         },
         edge_sets={
             "e1": schema_lib.EdgeSchema(
@@ -453,8 +583,18 @@ class TenLines(parameterized.TestCase):
                         shape=None,
                     ),
                 },
-            )
+            ),
+            "unvisited_edge": schema_lib.EdgeSchema(
+                source="unvisited_node",
+                target="unvisited_node",
+            ),
         },
+    )
+    sampling_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
+        sampling_config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1", num_hops=1, hop_width=2
+        ),
+        schema,
     )
     signature = common.schema_to_serving_signature_dict(
         schema_=schema,
@@ -462,9 +602,92 @@ class TenLines(parameterized.TestCase):
         target_edgeset="e1",
         model_name="test_model",
         model_uuid="test_uuid",
+        source_sampling_plan=sampling_plan,
+        target_sampling_plan=sampling_plan,
     )
-    f_none = signature["source_edges_e1_f_none"]
-    self.assertEqual(f_none["shape"], "(None,)")
+    self.assertEqual(
+        [g["input_node"] for g in signature["x-google-gnn-input-graphs"]],
+        ["source", "target"],
+    )
+    props = signature["properties"]
+    self.assertEqual(signature["required"], list(props.keys()))
+    self.assertNotIn("source_nodes_unvisited_node_reserved_size", props)
+    self.assertNotIn("source_edges_unvisited_edge_reserved_size", props)
+    self.assertNotIn("target_nodes_unvisited_node_reserved_size", props)
+    self.assertNotIn("target_edges_unvisited_edge_reserved_size", props)
+    self.assertEqual(
+        props["source_seed_node_idxs"],
+        {
+            "type": "array",
+            "items": {"type": "integer", "format": "int32"},
+            "input_node": "source",
+            "field_kind": "seed_node_idxs",
+        },
+    )
+    self.assertEqual(
+        props["source_nodes_n1_reserved_size"],
+        {
+            "type": "integer",
+            "format": "int32",
+            "input_node": "source",
+            "node_label": "n1",
+            "field_kind": "size",
+        },
+    )
+    self.assertNotIn("source_edges_e1_reserved_size", props)
+    self.assertEqual(
+        props["source_edges_e1_reserved_adjacency"],
+        {
+            "type": "array",
+            "min_items": 2,
+            "max_items": 2,
+            "items": {
+                "type": "array",
+                "items": {"type": "integer", "format": "int64"},
+            },
+            "input_node": "source",
+            "edge_label": "e1",
+            "field_kind": "adjacency",
+        },
+    )
+    f_none = props["source_edges_e1_f_none"]
+    self.assertEqual(
+        f_none,
+        {
+            "type": "array",
+            "items": {"type": "number", "format": "float"},
+            "input_node": "source",
+            "edge_label": "e1",
+            "property": "f_none",
+            "field_kind": "feature",
+        },
+    )
+
+    invalid_plan = sampling_config_lib.SamplingPlan(
+        root=sampling_config_lib.PlanNode(
+            nodeset="n1",
+            children=[
+                sampling_config_lib.PlanEdge(
+                    edgeset="missing_edge",
+                    reversed=False,
+                    node=sampling_config_lib.PlanNode(nodeset="n1"),
+                    hop_width=2,
+                )
+            ],
+        )
+    )
+    with self.assertRaisesRegex(
+        ValueError, "Edge set 'missing_edge' in sampling plan is not defined"
+    ):
+      common.schema_to_serving_signature_dict(
+          schema_=schema,
+          target_nodeset=None,
+          target_edgeset="e1",
+          model_name="test_model",
+          model_uuid="test_uuid",
+          source_sampling_plan=invalid_plan,
+          target_sampling_plan=sampling_plan,
+      )
 
 
 def _training_logs(

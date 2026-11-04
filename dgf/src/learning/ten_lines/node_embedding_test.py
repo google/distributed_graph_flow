@@ -713,7 +713,8 @@ class NodeEmbeddingModelUntrainedTest(parameterized.TestCase):
     (input_graph,) = signature["x-google-gnn-input-graphs"]
     self.assertEqual(input_graph["input_node"], "N1")
     self.assertNotEmpty(input_graph["sampling_plan"])
-    self.assertIn("gnn_N1_seed_node_idxs", signature["required"])
+    self.assertIn("seed_node_idxs", signature["required"])
+    self.assertIn("seed_node_idxs", signature["properties"])
 
   def test_describe(self):
     with unittest.mock.patch.object(

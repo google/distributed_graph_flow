@@ -25,7 +25,6 @@ import uuid
 import dataclasses_json
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
-from dgf.src.io import feature_format as feature_format_lib
 from dgf.src.io import tf as io_tf_lib
 from dgf.src.learning import early_stopping_monitor
 from dgf.src.learning.jax import common as jax_common
@@ -998,6 +997,35 @@ def extract_graph_metrics(
   return metrics
 
 
+_FEATURE_FORMAT_TO_OPENAPI_SPEC: dict[
+    schema_lib.FeatureFormat, dict[str, str]
+] = {
+    schema_lib.FeatureFormat.INTEGER_32: {
+        "type": "integer",
+        "format": "int32",
+    },
+    schema_lib.FeatureFormat.INTEGER_64: {
+        "type": "integer",
+        "format": "int64",
+    },
+    schema_lib.FeatureFormat.FLOAT_32: {
+        "type": "number",
+        "format": "float",
+    },
+    schema_lib.FeatureFormat.FLOAT_64: {
+        "type": "number",
+        "format": "double",
+    },
+    schema_lib.FeatureFormat.BYTES: {
+        "type": "string",
+        "format": "byte",
+    },
+    schema_lib.FeatureFormat.BOOL: {
+        "type": "boolean",
+    },
+}
+
+
 def schema_to_serving_signature_dict(
     schema_: schema_lib.GraphSchema,
     target_nodeset: Optional[str],
@@ -1051,27 +1079,74 @@ def schema_to_serving_signature_dict(
       "title": f"{model_name}_{target_name}_{model_uuid}",
       "type": "object",
       "required": [],
+      "properties": {},
   }
+  properties = signature["properties"]
 
   def _format_feature_spec(
       feat_schema: schema_lib.FeatureSchema,
-  ) -> dict[str, str]:
-    tf_dtype = feature_format_lib.FEATURE_FORMAT_TO_TF_DTYPE[feat_schema.format]
-    dtype = f"tf.{tf_dtype.name}"
-    if feat_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL:
-      dtype = "tf.int64"
-
-    if not feat_schema.shape:
-      shape_str = "(None,)"
+  ) -> dict[str, Any]:
+    if (
+        feat_schema.format == schema_lib.FeatureFormat.BYTES
+        and feat_schema.is_utf8_string
+    ):
+      leaf_spec: dict[str, Any] = {"type": "string"}
     else:
-      dims = ["-1" if d is None else str(d) for d in feat_schema.shape]
-      shape_str = f"({', '.join(dims)})" if len(dims) > 1 else f"({dims[0]},)"
-    return {"shape": shape_str, "dtype": dtype}
+      leaf_spec = dict(_FEATURE_FORMAT_TO_OPENAPI_SPEC[feat_schema.format])
 
-  def _add_graph_to_signature(prefix_str: str, input_node: str):
-    signature[f"{prefix_str}_seed_node_idxs"] = {
-        "shape": "(None,)",
-        "dtype": "tf.int32",
+    spec = dict(leaf_spec)
+    if feat_schema.shape:
+      for dim in reversed(feat_schema.shape):
+        if dim is not None:
+          spec = {
+              "type": "array",
+              "min_items": dim,
+              "max_items": dim,
+              "items": spec,
+          }
+        else:
+          spec = {"type": "array", "items": spec}
+    return {"type": "array", "items": spec}
+
+  def _collect_visited_elements(
+      seed_nodeset: str, sampling_plan: Any | None
+  ) -> tuple[set[str], set[str]]:
+    visited_nodesets = {seed_nodeset}
+    visited_edgesets: set[str] = set()
+
+    def _visit_plan_node(plan_node: Any):
+      if plan_node is None:
+        return
+      if plan_node.nodeset:
+        visited_nodesets.add(plan_node.nodeset)
+      for plan_edge in plan_node.children:
+        if plan_edge.edgeset not in schema_.edge_sets:
+          raise ValueError(
+              f"Edge set '{plan_edge.edgeset}' in sampling plan is not"
+              " defined in schema.edge_sets."
+          )
+        visited_edgesets.add(plan_edge.edgeset)
+        edge_schema = schema_.edge_sets[plan_edge.edgeset]
+        visited_nodesets.add(edge_schema.source)
+        visited_nodesets.add(edge_schema.target)
+        _visit_plan_node(plan_edge.node)
+
+    if sampling_plan is not None and sampling_plan.root is not None:
+      _visit_plan_node(sampling_plan.root)
+    return visited_nodesets, visited_edgesets
+
+  def _add_graph_to_signature(
+      prefix: str,
+      input_node: str,
+      seed_nodeset: str,
+      sampling_plan: Any | None,
+  ):
+    visited_nodesets, visited_edgesets = _collect_visited_elements(
+        seed_nodeset, sampling_plan
+    )
+    properties[f"{prefix}seed_node_idxs"] = {
+        "type": "array",
+        "items": {"type": "integer", "format": "int32"},
         "input_node": input_node,
         "field_kind": "seed_node_idxs",
     }
@@ -1082,13 +1157,16 @@ def schema_to_serving_signature_dict(
         is_edge: bool,
     ):
       for feat_name, feat_schema in features.items():
+        # Primary keys are identifiers, not model inputs.
+        if feat_schema.semantic == schema_lib.FeatureSemantic.PRIMARY_ID:
+          continue
         if is_edge:
           feat_key = io_tf_lib.tf_graph_dict_edge_key(entity_name, feat_name)
           label_key = "edge_label"
         else:
           feat_key = io_tf_lib.tf_graph_dict_node_key(entity_name, feat_name)
           label_key = "node_label"
-        signature[f"{prefix_str}_{feat_key}"] = {
+        properties[f"{prefix}{feat_key}"] = {
             **_format_feature_spec(feat_schema),
             "input_node": input_node,
             label_key: entity_name,
@@ -1097,12 +1175,14 @@ def schema_to_serving_signature_dict(
         }
 
     for nodeset_name, nodeset_schema in schema_.node_sets.items():
+      if nodeset_name not in visited_nodesets:
+        continue
       size_key = io_tf_lib.tf_graph_dict_node_key(
           nodeset_name, io_tf_lib.TF_GRAPH_DICT_SIZE_KEY
       )
-      signature[f"{prefix_str}_{size_key}"] = {
-          "shape": "()",
-          "dtype": "tf.int32",
+      properties[f"{prefix}{size_key}"] = {
+          "type": "integer",
+          "format": "int32",
           "input_node": input_node,
           "node_label": nodeset_name,
           "field_kind": "size",
@@ -1115,22 +1195,19 @@ def schema_to_serving_signature_dict(
           if isinstance(edge_identifier, tuple)
           else edge_identifier
       )
-      size_key = io_tf_lib.tf_graph_dict_edge_key(
-          edgeset_name, io_tf_lib.TF_GRAPH_DICT_SIZE_KEY
-      )
-      signature[f"{prefix_str}_{size_key}"] = {
-          "shape": "()",
-          "dtype": "tf.int32",
-          "input_node": input_node,
-          "edge_label": edgeset_name,
-          "field_kind": "size",
-      }
+      if edgeset_name not in visited_edgesets:
+        continue
       adj_key = io_tf_lib.tf_graph_dict_edge_key(
           edgeset_name, io_tf_lib.TF_GRAPH_DICT_ADJACENCY_KEY
       )
-      signature[f"{prefix_str}_{adj_key}"] = {
-          "shape": "(2, None)",
-          "dtype": "tf.int64",
+      properties[f"{prefix}{adj_key}"] = {
+          "type": "array",
+          "min_items": 2,
+          "max_items": 2,
+          "items": {
+              "type": "array",
+              "items": {"type": "integer", "format": "int64"},
+          },
           "input_node": input_node,
           "edge_label": edgeset_name,
           "field_kind": "adjacency",
@@ -1149,34 +1226,47 @@ def schema_to_serving_signature_dict(
     target_input_node = str(target_input_node)
 
     source_plan = []
-    if source_sampling_plan:
+    if (
+        source_sampling_plan is not None
+        and source_sampling_plan.root is not None
+    ):
       source_plan = [
           _convert_plan_edge(edge)
           for edge in source_sampling_plan.root.children
       ]
     target_plan = []
-    if target_sampling_plan:
+    if (
+        target_sampling_plan is not None
+        and target_sampling_plan.root is not None
+    ):
       target_plan = [
           _convert_plan_edge(edge)
           for edge in target_sampling_plan.root.children
       ]
 
     signature["x-google-gnn-input-graphs"].append({
-        "input_node": source_input_node,
+        "input_node": "source",
         "sampling_plan": source_plan,
     })
     signature["x-google-gnn-input-graphs"].append({
-        "input_node": target_input_node,
+        "input_node": "target",
         "sampling_plan": target_plan,
     })
 
-    _add_graph_to_signature("source", source_input_node)
-    _add_graph_to_signature("target", target_input_node)
+    _add_graph_to_signature(
+        "source_", "source", source_input_node, source_sampling_plan
+    )
+    _add_graph_to_signature(
+        "target_", "target", target_input_node, target_sampling_plan
+    )
   else:
     # Node Prediction
     input_node = target_nodeset
 
-    if source_sampling_plan is not None:
+    if (
+        source_sampling_plan is not None
+        and source_sampling_plan.root is not None
+    ):
       signature["x-google-gnn-input-graphs"].append({
           "input_node": input_node,
           "sampling_plan": [
@@ -1189,18 +1279,13 @@ def schema_to_serving_signature_dict(
           "input_node": input_node,
           "sampling_plan": [],
       })
-    _add_graph_to_signature(f"gnn_{target_nodeset}", str(input_node))
+    # Field names match the inputs of the exported TF function (no prefix).
+    _add_graph_to_signature(
+        "",
+        str(input_node),
+        str(target_nodeset),
+        source_sampling_plan,
+    )
 
-  signature["required"] = [
-      k
-      for k in signature.keys()
-      if k
-      not in (
-          "x-google-graph",
-          "x-google-gnn-input-graphs",
-          "title",
-          "type",
-          "required",
-      )
-  ]
+  signature["required"] = list(properties.keys())
   return signature
