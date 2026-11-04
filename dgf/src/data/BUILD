@@ -279,6 +279,7 @@ py_test(
         ":histogram",
         ":statistics",
         # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
         "//dgf/src/util:test_util",
     ],
 )

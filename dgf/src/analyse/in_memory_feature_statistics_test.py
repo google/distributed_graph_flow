@@ -18,6 +18,7 @@ import os
 import tempfile
 
 from absl.testing import absltest
+from absl.testing import parameterized
 from apache_beam.testing import test_pipeline
 from apache_beam.testing import util
 from dgf.src.analyse import in_memory_feature_statistics
@@ -29,7 +30,7 @@ from dgf.src.util import test_util
 test_util.disable_diff_truncation()
 
 
-class InMemoryStatisticsTest(absltest.TestCase):
+class InMemoryStatisticsTest(parameterized.TestCase):
 
   def test_feature_statistics(self):
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -56,24 +57,28 @@ class InMemoryStatisticsTest(absltest.TestCase):
                           minimum=4,
                           maximum=5,
                           quantiles=[4.0, 4.0, 5.0, 5.0],
+                          mean=4.5,
                       ),
                       "f4": statistics_lib.FeatureStatistics(
                           count=4,
                           minimum=10,
                           maximum=11,
                           quantiles=[10.0000, 10.0000, 11.0000, 11.0000],
+                          mean=10.5,
                       ),
                       "f5": statistics_lib.FeatureStatistics(
                           count=4,
                           minimum=11,
                           maximum=14,
                           quantiles=[11.0, 12.0, 13.0, 14.0],
+                          mean=12.4,
                       ),
                       "f6": statistics_lib.FeatureStatistics(
                           count=4,
                           minimum=11,
                           maximum=20,
                           quantiles=[11.0, 14.0, 17.0, 20.0],
+                          mean=15.5,
                       ),
                   }
               ),

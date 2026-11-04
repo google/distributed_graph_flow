@@ -44,11 +44,15 @@ class FeatureStatistics:
   Attributes:
     count: The number of values for the feature. For multi-dim features, each
       observation counts as 1.
-    minimum: Minimum value. For INTERGER and FLOAT only.
-    maximum: Maximum value. For INTERGER and FLOAT only.
+    minimum: Minimum value. For INTEGER and FLOAT only.
+    maximum: Maximum value. For INTEGER and FLOAT only.
     dictionary: Dictionary of key->(index, count). For BYTES only. Notes:
       Non-utf8 characters are encoded using the 'surrogateescape' method.
     quantiles: Quantiles over the dataset distribution.
+    mean: Mean value. For INTEGER and FLOAT only.
+    num_nan: Number of NaN values. For FLOAT only.
+    num_posinf: Number of +inf values. For FLOAT only.
+    num_neginf: Number of -inf values. For FLOAT only.
   """
 
   count: int = 0
@@ -56,6 +60,10 @@ class FeatureStatistics:
   maximum: float = math.nan
   dictionary: Dictionary = dataclasses.field(default_factory=dict)
   quantiles: list[float] = dataclasses.field(default_factory=list)
+  mean: float = math.nan
+  num_nan: int = 0
+  num_posinf: int = 0
+  num_neginf: int = 0
 
   def __str__(self) -> str:
     s = f"count={self.count}"
@@ -86,6 +94,14 @@ class FeatureStatistics:
       else:
         s += ", ".join([f"{q:.4f}" for q in qs])
       s += "]"
+    if math.isfinite(self.mean):
+      s += f", mean={self.mean:.4f}"
+    if self.num_nan > 0:
+      s += f", num_nan={self.num_nan}"
+    if self.num_posinf > 0:
+      s += f", num_posinf={self.num_posinf}"
+    if self.num_neginf > 0:
+      s += f", num_neginf={self.num_neginf}"
     return s
 
 
@@ -136,6 +152,11 @@ class FeatureStatisticsAccumulator:
     dictionary: An dictionary mapping keys to their index + count. For
       categorical features.
     quantiles: An quantiles. For numerical and timeseries features.
+    finite_sum: The sum of finite values encountered. For numerical features.
+    num_finite: The number of finite values encountered. For numerical features.
+    num_nan: The number of NaN values encountered. For numerical features.
+    num_posinf: The number of +inf values encountered. For numerical features.
+    num_neginf: The number of -inf values encountered. For numerical features.
   """
 
   count: int
@@ -143,6 +164,11 @@ class FeatureStatisticsAccumulator:
   maximum: float
   dictionary: dict[str, int] | None
   quantiles: reservoir_sampling.BatchReservoirSampling | None
+  finite_sum: float = 0.0
+  num_finite: int = 0
+  num_nan: int = 0
+  num_posinf: int = 0
+  num_neginf: int = 0
 
 
 @dataclasses.dataclass

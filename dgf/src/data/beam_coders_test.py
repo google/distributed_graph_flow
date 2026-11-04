@@ -44,6 +44,21 @@ class BeamCodersTest(parameterized.TestCase):
               quantiles=reservoir_sampling.BatchReservoirSampling(),
           ),
       ),
+      (
+          "feature_stats_accumulator_with_nonfinite",
+          statistics.FeatureStatisticsAccumulator(
+              count=10,
+              minimum=2.0,
+              maximum=8.0,
+              dictionary=None,
+              quantiles=reservoir_sampling.BatchReservoirSampling(),
+              finite_sum=25.0,
+              num_finite=5,
+              num_nan=2,
+              num_posinf=1,
+              num_neginf=2,
+          ),
+      ),
   )
   def test_coder(self, value):
     value_type = trivial_inference.instance_to_type(value)

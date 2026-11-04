@@ -149,6 +149,7 @@ py_test(
         "//dgf/src/io:statistics",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
+        # numpy dep,
     ],
 )
 
@@ -170,6 +171,7 @@ py_test(
     deps = [
         ":in_memory_feature_statistics",
         # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
         # apache_beam dep,
         "//dgf/src/data:statistics",
         "//dgf/src/io:tf_graph_sample",
@@ -208,12 +210,15 @@ py_test(
     name = "in_process_feature_statistics_test",
     srcs = ["in_process_feature_statistics_test.py"],
     deps = [
+        ":feature_statistics",
         ":in_process_feature_statistics",
         # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
         # apache_beam dep,
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/data:statistics",
+        "//dgf/src/transform:normalize",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
         # numpy dep,

@@ -16,6 +16,7 @@
 
 import math
 from absl.testing import absltest
+from absl.testing import parameterized
 from dgf.src.data import histogram
 from dgf.src.data import statistics as statistics_lib
 from dgf.src.util import test_util
@@ -23,7 +24,7 @@ from dgf.src.util import test_util
 test_util.disable_diff_truncation()
 
 
-class StatisticsTest(absltest.TestCase):
+class StatisticsTest(parameterized.TestCase):
 
   def test_str(self):
     stats = statistics_lib.GraphFeatureStatistics(
@@ -50,6 +51,7 @@ class StatisticsTest(absltest.TestCase):
                         maximum=3.0,
                         dictionary={},
                         quantiles=[0.0, 1.0, 2.0, 3.0],
+                        mean=1.5,
                     ),
                     "f4": statistics_lib.FeatureStatistics(
                         count=3,
@@ -69,6 +71,7 @@ class StatisticsTest(absltest.TestCase):
                         maximum=5,
                         dictionary={},
                         quantiles=[4.0, 4.3333, 4.6666, 5.0],
+                        mean=4.5,
                     )
                 }
             ),
@@ -81,12 +84,57 @@ GraphFeatureStatistics:
   Node Sets (2):
     'n1':
       'f1': count=2, dictionary=(2)['red': 1, 'blue': 1]
-      'f2': count=2, min=0.0000, max=3.0000, quantiles=(4)[0.0000, 1.0000, 2.0000, 3.0000]
+      'f2': count=2, min=0.0000, max=3.0000, quantiles=(4)[0.0000, 1.0000, 2.0000, 3.0000], mean=1.5000
       'f4': count=3, dictionary=(1)['green': 3]
     'n2':
-      'f3': count=2, min=4.0000, max=5.0000, quantiles=(4)[4.0000, 4.3333, 4.6666, 5.0000]
+      'f3': count=2, min=4.0000, max=5.0000, quantiles=(4)[4.0000, 4.3333, 4.6666, 5.0000], mean=4.5000
 """,
     )
+
+  @parameterized.named_parameters(
+      (
+          "clean_without_mean",
+          statistics_lib.FeatureStatistics(
+              count=2,
+              minimum=1.0,
+              maximum=3.0,
+              quantiles=[1.0, 3.0],
+          ),
+          "count=2, min=1.0000, max=3.0000, quantiles=(2)[1.0000, 3.0000]",
+      ),
+      (
+          "with_mean_and_non_zero_counters",
+          statistics_lib.FeatureStatistics(
+              count=10,
+              minimum=1.0,
+              maximum=5.0,
+              quantiles=[1.0, 3.0, 5.0],
+              mean=3.0,
+              num_nan=2,
+              num_posinf=1,
+              num_neginf=3,
+          ),
+          (
+              "count=10, min=1.0000, max=5.0000,"
+              " quantiles=(3)[1.0000, 3.0000, 5.0000], mean=3.0000,"
+              " num_nan=2, num_posinf=1, num_neginf=3"
+          ),
+      ),
+      (
+          "all_nan_column",
+          statistics_lib.FeatureStatistics(
+              count=4,
+              minimum=math.inf,
+              maximum=-math.inf,
+              quantiles=[],
+              mean=math.nan,
+              num_nan=4,
+          ),
+          "count=4, num_nan=4",
+      ),
+  )
+  def test_feature_statistics_str_fields(self, feature_stats, expected_str):
+    self.assertEqual(str(feature_stats), expected_str)
 
   def test_topology_statistics_repr(self):
     hist1 = histogram.Histogram(values=[1.0, 2.0], bins=[0.0, 1.0, 2.0])

@@ -39,18 +39,16 @@ class Config:
 
 def _compute_dictionary(schema: schema_lib.FeatureSchema) -> bool:
   return (
-      schema.semantic
-      in [
+      schema.semantic in [
           schema_lib.FeatureSemantic.CATEGORICAL,
       ]
       and schema.format == schema_lib.FeatureFormat.BYTES
   )
 
 
-def _compute_numerical_minmax(schema: schema_lib.FeatureSchema) -> bool:
+def _compute_numerical_stats(schema: schema_lib.FeatureSchema) -> bool:
   return (
-      schema.semantic
-      in [
+      schema.semantic in [
           schema_lib.FeatureSemantic.NUMERICAL,
           schema_lib.FeatureSemantic.TIMESERIES,
           schema_lib.FeatureSemantic.CATEGORICAL,
@@ -62,8 +60,7 @@ def _compute_numerical_minmax(schema: schema_lib.FeatureSchema) -> bool:
 
 def _compute_numerical_quantiles(schema: schema_lib.FeatureSchema) -> bool:
   return (
-      schema.semantic
-      in [
+      schema.semantic in [
           schema_lib.FeatureSemantic.NUMERICAL,
           schema_lib.FeatureSemantic.TIMESERIES,
       ]
@@ -79,8 +76,7 @@ def filter_feature_schema(
   return {
       k: v
       for k, v in schema.items()
-      if v.semantic
-      not in [
+      if v.semantic not in [
           schema_lib.FeatureSemantic.UNKNOWN,
           schema_lib.FeatureSemantic.MASK,
       ]
@@ -167,11 +163,11 @@ def create_accumulator(
   for feature_name, feature_schema in schema.items():
     compute_dict = _compute_dictionary(feature_schema)
     compute_num_quant = _compute_numerical_quantiles(feature_schema)
-    compute_num_minmax = _compute_numerical_minmax(feature_schema)
+    compute_num_stats = _compute_numerical_stats(feature_schema)
     acc_features[feature_name] = statistics_lib.FeatureStatisticsAccumulator(
         count=0,
-        minimum=math.inf if compute_num_minmax else math.nan,
-        maximum=-math.inf if compute_num_minmax else math.nan,
+        minimum=math.inf if compute_num_stats else math.nan,
+        maximum=-math.inf if compute_num_stats else math.nan,
         dictionary={} if compute_dict else None,
         quantiles=reservoir_sampling.BatchReservoirSampling(
             config.reservoir_sampling_buffer_size
@@ -197,13 +193,18 @@ def merge_accumulators(
 
       merged_feature_accumulator.count += feature_accumulator.count
 
-      if _compute_numerical_minmax(feature_schema):
+      if _compute_numerical_stats(feature_schema):
         merged_feature_accumulator.minimum = min(
             merged_feature_accumulator.minimum, feature_accumulator.minimum
         )
         merged_feature_accumulator.maximum = max(
             merged_feature_accumulator.maximum, feature_accumulator.maximum
         )
+        merged_feature_accumulator.finite_sum += feature_accumulator.finite_sum
+        merged_feature_accumulator.num_finite += feature_accumulator.num_finite
+        merged_feature_accumulator.num_nan += feature_accumulator.num_nan
+        merged_feature_accumulator.num_posinf += feature_accumulator.num_posinf
+        merged_feature_accumulator.num_neginf += feature_accumulator.num_neginf
 
       if _compute_numerical_quantiles(feature_schema):
         assert merged_feature_accumulator.quantiles is not None
@@ -273,7 +274,18 @@ def add_to_accumulator(
       flat_value: np.ndarray, feature_schema: schema_lib.FeatureSchema
   ):
     assert flat_value.dtype != np.object_
-    if _compute_numerical_minmax(feature_schema):
+    if _compute_numerical_stats(feature_schema):
+      if feature_schema.format.is_float():
+        finite_mask = np.isfinite(flat_value)
+        num_finite = int(np.sum(finite_mask))
+        num_posinf = int(np.sum(flat_value == np.inf))
+        num_neginf = int(np.sum(flat_value == -np.inf))
+        num_nan = int(flat_value.size) - num_finite - num_posinf - num_neginf
+        feature_accumulator.num_nan += num_nan
+        feature_accumulator.num_posinf += num_posinf
+        feature_accumulator.num_neginf += num_neginf
+        flat_value = flat_value[finite_mask]
+
       if flat_value.size > 0:
         feature_accumulator.minimum = min(
             feature_accumulator.minimum, flat_value.min().item()
@@ -281,9 +293,14 @@ def add_to_accumulator(
         feature_accumulator.maximum = max(
             feature_accumulator.maximum, flat_value.max().item()
         )
+        feature_accumulator.finite_sum += float(
+            np.sum(flat_value, dtype=np.float64)
+        )
+        feature_accumulator.num_finite += int(flat_value.size)
     if _compute_numerical_quantiles(feature_schema):
       assert feature_accumulator.quantiles is not None
-      feature_accumulator.quantiles.add(flat_value)
+      if flat_value.size > 0:
+        feature_accumulator.quantiles.add(flat_value)
 
     if _compute_dictionary(feature_schema):
       assert feature_accumulator.dictionary is not None
@@ -438,6 +455,11 @@ def remove_feature_statistics_accumulator(
   else:
     quantiles = value.quantiles.get_quantiles(config.num_quantiles)[0]
 
+  if value.num_finite == 0:
+    mean = math.nan
+  else:
+    mean = value.finite_sum / value.num_finite
+
   return statistics_lib.FeatureStatistics(
       count=value.count,
       minimum=float(value.minimum),
@@ -446,6 +468,10 @@ def remove_feature_statistics_accumulator(
       if value.dictionary
       else {},
       quantiles=quantiles,
+      mean=mean,
+      num_nan=value.num_nan,
+      num_posinf=value.num_posinf,
+      num_neginf=value.num_neginf,
   )
 
 
