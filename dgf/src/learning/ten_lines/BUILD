@@ -32,6 +32,7 @@ py_library(
         "//dgf/src/util:filesystem",
         "//dgf/src/util:log",
         "//dgf/src/util:util_py",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # jax dep,
         # numpy dep,
         # orbax/checkpoint dep,
@@ -680,5 +681,25 @@ py_test(
         # jax dep,
         # numpy dep,
         # tensorflow dep,
+    ],
+)
+
+py_test(
+    name = "saved_model_tf_gnn_like_test",
+    size = "large",
+    srcs = ["saved_model_tf_gnn_like_test.py"],
+    deps = [
+        ":node_prediction",
+        # absl/testing:absltest dep,
+        "//third_party/py/dgf/benchmark/quality:tfgnn_solver",
+        "//dgf/src/data:schema",
+        "//dgf/src/io:hgraph_in_memory",
+        "//dgf/src/io:tf_graph_sample",
+        "//dgf/src/sampling:in_memory_sampler",
+        "//dgf/src/util:gen_test_graph",
+        # numpy dep,
+        # tensorflow dep,
+        # tensorflow_gnn dep,
+        # tensorflow_gnn/runner dep,
     ],
 )

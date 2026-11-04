@@ -926,6 +926,65 @@ class LinkPredictionToyTest(parameterized.TestCase):
           encoder="both", input_format="SERIALIZED_TFGNN_GRAPHS"
       )
 
+  @parameterized.parameters("source", "both")
+  def test_to_tensorflow_saved_model(
+      self, encoder: Literal["source", "target", "both"]
+  ):
+    schema = self.model.data().schema
+    source_sample = in_memory_sampler_lib.create_sampler(
+        plan=self.model.data().source_sampling_plan,
+        graph=self.graph,
+        schema=schema,
+        batch_size=5,
+    ).sample(0)
+    target_sample = in_memory_sampler_lib.create_sampler(
+        plan=self.model.data().target_sampling_plan,
+        graph=self.graph,
+        schema=schema,
+        batch_size=5,
+    ).sample(1)
+    source_graph_dict = tf_io.tf_graph_to_tf_graph_dict(
+        tf_io.graph_to_tf_graph(source_sample, schema=schema)
+    )
+    target_graph_dict = tf_io.tf_graph_to_tf_graph_dict(
+        tf_io.graph_to_tf_graph(target_sample, schema=schema)
+    )
+    if encoder == "source":
+      kwargs = {**source_graph_dict, "seed_node_idxs": tf.constant([0])}
+      expected = self.model.predict_embedding(
+          source_sample, [0], encoder="source"
+      )
+    else:
+      kwargs = {f"source_{k}": v for k, v in source_graph_dict.items()}
+      kwargs.update({f"target_{k}": v for k, v in target_graph_dict.items()})
+      kwargs["source_seed_node_idxs"] = tf.constant([0])
+      kwargs["target_seed_node_idxs"] = tf.constant([0])
+      expected = self.model.predict(
+          self.graph, [0], [1], all_combinations=False, verbose=0
+      )
+
+    path = self.create_tempdir().full_path
+    self.model.to_tensorflow_saved_model(path, encoder=encoder)
+    loaded = tf.saved_model.load(path)
+
+    self.assertEqual(list(loaded.signatures.keys()), ["serving_default"])
+    signature = loaded.signatures["serving_default"]
+    self.assertEqual(list(signature.structured_outputs), ["predictions"])
+    # Note: TensorFlow lowercases the names of the signature inputs.
+    predictions = signature(**{k.lower(): v for k, v in kwargs.items()})[
+        "predictions"
+    ]
+    np.testing.assert_allclose(predictions.numpy(), expected, atol=1e-5)
+
+  def test_to_tensorflow_saved_model_serialized_tfgnn_graphs_fails(self):
+    with self.assertRaisesRegex(
+        ValueError, "not supported by link prediction models"
+    ):
+      self.model.to_tensorflow_saved_model(
+          self.create_tempdir().full_path,
+          input_format="SERIALIZED_TFGNN_GRAPHS",
+      )
+
 
 class LinkPredictionToyStandaloneTest(absltest.TestCase):
 

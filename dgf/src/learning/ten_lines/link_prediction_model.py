@@ -1388,6 +1388,60 @@ class LinkPredictionModel(common.Model):
     else:
       raise ValueError(f"Invalid encoder: {encoder}")
 
+  def to_tensorflow_saved_model(
+      self,
+      path: str,
+      *,
+      encoder: Literal["source", "target", "both"] = "both",
+      input_format: common.TFFunctionInputFormat | str = (
+          common.TFFunctionInputFormat.TF_GRAPH_DICT
+      ),
+      output_name: str = common.DEFAULT_TF_SAVED_MODEL_OUTPUT_NAME,
+  ) -> None:
+    """Exports the model as a TensorFlow SavedModel without the sampling step.
+
+    The SavedModel has a single signature, "serving_default", returning a
+    dictionary with a single item named `output_name`. Depending on `encoder`,
+    this item contains the source node embeddings ("source"), the target node
+    embeddings ("target"), or the edge probabilities ("both").
+
+    The inputs of the signature are the ones of the function returned by
+    `to_tensorflow_function`, except that TensorFlow lowercases their names.
+    With `encoder="both"`, the inputs of the source and target graphs are
+    prefixed with `source_` and `target_` respectively. With the `TF_GRAPH`
+    input format, the inputs of the signature are flattened and anonymous:
+    Instead, call the loaded SavedModel directly with the same arguments as the
+    function returned by `to_tensorflow_function`. The `SERIALIZED_TFGNN_GRAPHS`
+    input format is not supported.
+
+    Usage example:
+
+    ```python
+    model = dgf.learning.train_link_model(...)
+    model.to_tensorflow_saved_model("/tmp/saved_model", encoder="source")
+
+    loaded = tf.saved_model.load("/tmp/saved_model")
+    tf_graph_dict = dgf.convert.tf_graph_to_tf_graph_dict(
+        dgf.convert.graph_to_tf_graph(source_sample, schema)
+    )
+    embeddings = loaded.signatures["serving_default"](
+        **{key.lower(): value for key, value in tf_graph_dict.items()},
+        seed_node_idxs=tf.constant([0]),
+    )["predictions"]
+    ```
+
+    Args:
+      path: Directory where the SavedModel is written.
+      encoder: Which part of the model to export: "source" (source encoder),
+        "target" (target encoder), or "both" (full model). Defaults to "both".
+      input_format: Format of the inputs of the signature. See
+        `dgf.learning.TFFunctionInputFormat` and `to_tensorflow_function`.
+        Defaults to `TF_GRAPH_DICT`.
+      output_name: Name of the output of the signature.
+    """
+    tf_module = self.to_tensorflow_function(encoder, input_format=input_format)
+    common.save_tf_module_as_saved_model(tf_module, path, output_name)
+
   def evaluate(
       self,
       graph: in_memory_graph.InMemoryGraph,

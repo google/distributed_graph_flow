@@ -55,8 +55,10 @@ def main(work_dir: str):
   assert predictions.shape[0] == 2, predictions
 
   saved_model_path = os.path.join(work_dir, "saved_model")
-  tf.saved_model.save(tf_predict_fn, saved_model_path)
-  loaded_predictions = tf.saved_model.load(saved_model_path)(serialized_samples)
+  model.to_tensorflow_saved_model(saved_model_path)
+  loaded_predictions = tf.saved_model.load(saved_model_path).signatures[
+      "serving_default"
+  ](examples=serialized_samples)["predictions"]
   assert loaded_predictions.shape == predictions.shape, loaded_predictions
 
 

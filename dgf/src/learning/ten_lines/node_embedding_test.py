@@ -675,6 +675,42 @@ class NodeEmbeddingModelUntrainedTest(parameterized.TestCase):
     self.assertTrue(any("examples" in name for name in input_names))
     np.testing.assert_allclose(loaded_embeddings.numpy(), expected, atol=1e-5)
 
+  def test_to_tensorflow_saved_model(self):
+    schema = self.model.data().schema
+    sampling_plan = self.model.data().sampling_plan
+    assert sampling_plan is not None
+    sampler = in_memory_sampler_lib.create_sampler(
+        graph=self.graph,
+        plan=sampling_plan,
+        schema=schema,
+        batch_size=5,
+    )
+    samples = [sampler.sample(0), sampler.sample(1)]
+    serialized_samples = tf.constant([
+        tf_graph_sample_lib.graph_to_tfgnn_graph(
+            sample, schema=schema
+        ).SerializeToString()
+        for sample in samples
+    ])
+    expected = np.concatenate(
+        [self.model.predict(sample, [0], verbose=0) for sample in samples],
+        axis=0,
+    )
+
+    path = self.create_tempdir().full_path
+    self.model.to_tensorflow_saved_model(path, output_name="embeddings")
+    loaded = tf.saved_model.load(path)
+
+    self.assertEqual(list(loaded.signatures.keys()), ["serving_default"])
+    signature = loaded.signatures["serving_default"]
+    self.assertEqual(
+        signature.structured_input_signature,
+        ((), {"examples": tf.TensorSpec([None], tf.string, name="examples")}),
+    )
+    self.assertEqual(list(signature.structured_outputs), ["embeddings"])
+    embeddings = signature(examples=serialized_samples)["embeddings"]
+    np.testing.assert_allclose(embeddings.numpy(), expected, atol=1e-5)
+
   def test_to_tensorflow_function_deprecated_consume_tf_graph_dict(self):
     schema = self.model.data().schema
     sampling_plan = self.model.data().sampling_plan

@@ -30,7 +30,6 @@ blaze run -c opt //third_party/py/dgf/examples:node_classification_model
 from absl import app
 from absl import flags
 import dgf
-import tensorflow as tf
 
 _OUTPUT_DIR = flags.DEFINE_string("output_dir", "/tmp/dgf_model", "")
 
@@ -86,9 +85,8 @@ def main(argv) -> None:
   # Save the model
   model.save(_OUTPUT_DIR.value + "/model")
 
-  # Export the model to TensorFlowSavedModel format
-  tf_model = model.to_tensorflow_function()
-  tf.saved_model.save(tf_model, _OUTPUT_DIR.value + "/tf_model")
+  # Export the model to the TensorFlow SavedModel format
+  model.to_tensorflow_saved_model(_OUTPUT_DIR.value + "/tf_model")
 
   print("Results are available in :", _OUTPUT_DIR.value)
 
