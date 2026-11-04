@@ -119,6 +119,21 @@ def sample_with_beam_semi_distributed_sampler_v2(
           f"'{KEY_ID}'. This feature is needed for mapping node IDs."
       )
 
+  if isinstance(plan, config_lib.SimpleSamplingConfig):
+    plan = config_lib.simple_sampling_config_to_sampling_plan(plan, schema)
+  # Note: The seed timestamps are not provided to the in-memory sampler, and the
+  # Beam feature collection does not clip the timeseries.
+  config_lib.check_supported_options(
+      plan,
+      schema,
+      "Beam semi-distributed sampler v2",
+      support_with_replacement=True,
+      support_non_with_replacement=True,
+      support_multi_visit=True,
+      support_non_multi_visit=True,
+      support_timeseries=not beam_feature_collection,
+  )
+
   # Sample the graph topology.
   samples = (
       seeds

@@ -71,6 +71,7 @@ class BigQueryGraphSamplingBenchmark(benchmark_utils.Benchmark):
         num_hops=self._num_hops,
         hop_width=self._hop_width,
         reverse=self._reverse,
+        multi_visit=False,
     )
     self._sampler = dgf.sampling.create_bigquery_graph_sampler(
         project=self._config.project_id,

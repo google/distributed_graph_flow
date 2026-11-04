@@ -147,6 +147,25 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
         strip=True,
     )
 
+  @parameterized.parameters(
+      (dict(), "multi_visit=True"),
+      (dict(multi_visit=False, with_replacement=True), "with_replacement=True"),
+      (dict(multi_visit=False, temporal_sampling=True), "temporal_sampling"),
+  )
+  def test_unsupported_options_raise(self, options, message):
+    schema = _toy_schema()
+    with self.assertRaisesRegex(NotImplementedError, message):
+      spanner_graph_sampler_lib.create_graph_spanner_sampler(
+          project="p",
+          instance="i",
+          database="d",
+          graph="g",
+          plan=config_lib.SimpleSamplingConfig(
+              seed_nodeset=next(iter(schema.node_sets)), **options
+          ),
+          schema=schema,
+      )
+
   def test_cte_result_to_in_memory_graphs(self):
     # Mock CTE flat rows.
     # Columns: [seed_id, node_id, element_type, element_class, source_id, target_id, properties_json]

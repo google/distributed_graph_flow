@@ -56,8 +56,9 @@ Limitations:
 - Parallel edges (same source and target) are merged into a single edge, as in
   the in-memory sampler. Its features are those of one of the parallel edges.
 - A node reached several times at the same step of the plan is expanded once
-  (i.e., `multi_visit=False`). Sampling with replacement and temporal sampling
-  are not supported.
+  (i.e., `multi_visit=False`), and the plan must set `multi_visit=False`.
+  Sampling with replacement, temporal sampling and timeseries features are not
+  supported.
 - Each `sample()` call runs a BigQuery query job (a few seconds of latency),
   which suits online inference or small batches rather than training.
 """
@@ -818,6 +819,7 @@ class BigQueryGraphSampler:
       seed_nodeset="nodes",
       num_hops=2,
       hop_width=5,
+      multi_visit=False,  # Required by the BigQuery sampler.
   )
   sampler = dgf.sampling.create_bigquery_graph_sampler(
       project="my-project",
@@ -849,11 +851,13 @@ class BigQueryGraphSampler:
 
     if isinstance(plan, config_lib.SimpleSamplingConfig):
       plan = config_lib.simple_sampling_config_to_sampling_plan(plan, schema)
-    if plan.with_replacement or plan.temporal_sampling:
-      raise NotImplementedError(
-          "BigQueryGraphSampler does not support sampling with replacement"
-          " or temporal sampling."
-      )
+    config_lib.check_supported_options(
+        plan,
+        schema,
+        "BigQuery graph sampler",
+        support_non_with_replacement=True,
+        support_non_multi_visit=True,
+    )
     self._plan = plan
 
     if metadata is None:

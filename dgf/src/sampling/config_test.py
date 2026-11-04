@@ -185,6 +185,99 @@ class ConfigTest(parameterized.TestCase):
     plan = config_lib.SamplingPlan(root=config_lib.PlanNode(nodeset="n1"))
     self.assertEmpty(config_lib.edgesets_in_plan(plan))
 
+  def _two_hop_plan(self, **kwargs) -> config_lib.SamplingPlan:
+    schema = schema_lib.GraphSchema(
+        node_sets={"n1": schema_lib.NodeSchema(features={})},
+        edge_sets={
+            "e1": schema_lib.EdgeSchema(source="n1", target="n1", features={})
+        },
+    )
+    return config_lib.simple_sampling_config_to_sampling_plan(
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1", num_hops=2, reverse=False, **kwargs
+        ),
+        schema,
+    )
+
+  def test_check_supported_options(self):
+    config_lib.check_supported_options(
+        self._two_hop_plan(multi_visit=False),
+        None,
+        "my sampler",
+        support_non_with_replacement=True,
+        support_non_multi_visit=True,
+    )
+    with self.assertRaisesRegex(
+        NotImplementedError,
+        "The my sampler does not support the following options:"
+        " with_replacement=True, temporal_sampling=True",
+    ):
+      config_lib.check_supported_options(
+          self._two_hop_plan(with_replacement=True, temporal_sampling=True),
+          None,
+          "my sampler",
+          support_non_with_replacement=True,
+          support_multi_visit=True,
+          support_non_multi_visit=True,
+      )
+    with self.assertRaisesRegex(NotImplementedError, "multi_visit=True"):
+      config_lib.check_supported_options(
+          self._two_hop_plan(),
+          None,
+          "my sampler",
+          support_non_with_replacement=True,
+          support_non_multi_visit=True,
+      )
+    with self.assertRaisesRegex(NotImplementedError, "multi_visit=False"):
+      config_lib.check_supported_options(
+          self._two_hop_plan(multi_visit=False),
+          None,
+          "my sampler",
+          support_non_with_replacement=True,
+          support_multi_visit=True,
+      )
+    with self.assertRaisesRegex(NotImplementedError, "with_replacement=False"):
+      config_lib.check_supported_options(
+          self._two_hop_plan(),
+          None,
+          "my sampler",
+          support_multi_visit=True,
+      )
+
+  def test_check_supported_options_timeseries(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "ts": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        shape=(None,),
+                        is_timeseries=True,
+                        group="g",
+                    )
+                }
+            )
+        },
+        edge_sets={},
+    )
+    plan = self._two_hop_plan()
+    config_lib.check_supported_options(
+        plan,
+        schema,
+        "my sampler",
+        support_non_with_replacement=True,
+        support_multi_visit=True,
+        support_timeseries=True,
+    )
+    with self.assertRaisesRegex(NotImplementedError, "timeseries features"):
+      config_lib.check_supported_options(
+          plan,
+          schema,
+          "my sampler",
+          support_non_with_replacement=True,
+          support_multi_visit=True,
+      )
+
 
 if __name__ == "__main__":
   absltest.main()
