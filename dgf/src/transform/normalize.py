@@ -42,6 +42,13 @@ AbstractFeatureNormalizer = normalize_base.AbstractFeatureNormalizer
 TextEmbeddingNormalizer = normalize_text.TextEmbeddingNormalizer
 
 
+class MissingPolicy(enum.StrEnum):
+  """Policy for handling missing values in normalization."""
+
+  ASSUME_FINITE = "assume_finite"
+  # TODO(dtl): Add other policies, like FILL, INDICATOR, and FILL_LEARNED.
+
+
 @normalizer_registry.register
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass(kw_only=True)
@@ -1155,6 +1162,7 @@ class AutoNormalizeConfig:
       be normalized into dense embeddings using `TextEmbeddingNormalizer`.
     text_embedder: Name of a built-in text embedder, a model handle/path, or a
       `TextEmbedderConfig` used when `text_normalize` is True.
+    missing_policy: Policy to use when encountering NaNs and ±infs.
   """
 
   categorical_bytes_to_index: bool = True
@@ -1180,6 +1188,10 @@ class AutoNormalizeConfig:
   calendar_features: tuple[CalendarFeature, ...] = DEFAULT_CALENDAR_FEATURES
   text_normalize: bool = True
   text_embedder: str | normalize_text.TextEmbedderConfig = "nnlm-en-dim128"
+  missing_policy: MissingPolicy = MissingPolicy.ASSUME_FINITE
+
+  def __post_init__(self):
+    self.missing_policy = MissingPolicy(self.missing_policy)
 
 
 def auto_normalize(
@@ -1441,7 +1453,11 @@ def auto_normalize(
         )
     nodesets[nodeset_name] = NodeSetNormalizerConfig(nodeset_normalizers)
   return GraphNormalizer(
-      config=GraphNormalizerConfig(nodesets=nodesets, edgesets=edgesets),
+      config=GraphNormalizerConfig(
+          nodesets=nodesets,
+          edgesets=edgesets,
+          missing_policy=config.missing_policy,
+      ),
   )
 
 
@@ -1484,6 +1500,10 @@ class GraphNormalizerConfig:
 
   nodesets: dict[str, NodeSetNormalizerConfig]
   edgesets: dict[str, EdgeSetNormalizerConfig]
+  missing_policy: MissingPolicy = MissingPolicy.ASSUME_FINITE
+
+  def __post_init__(self):
+    self.missing_policy = MissingPolicy(self.missing_policy)
 
   def make(self) -> "GraphNormalizer":
     return GraphNormalizer(config=self)
@@ -1544,6 +1564,59 @@ class GraphNormalizerConfig:
     else:
       print(text_content)
       return None
+
+
+def _check_missing_policy_numpy(
+    kind: str,
+    set_name: str,
+    feature_name: str,
+    value: np.ndarray,
+    missing_policy: MissingPolicy,
+) -> np.ndarray:
+  """Checks if `value` contains non-finite values."""
+  # We don't have access to the schema here, so we check the dtype.
+  if not np.issubdtype(value.dtype, np.floating):
+    return value
+  if missing_policy == MissingPolicy.ASSUME_FINITE:
+    non_finite_mask = ~np.isfinite(value)
+    if non_finite_mask.any():
+      bad_index = tuple(int(i) for i in np.argwhere(non_finite_mask)[0])
+      bad_value = value[bad_index]
+      bad_row = bad_index[0]
+      raise ValueError(
+          f"Feature '{feature_name}' in {kind} set '{set_name}' contains"
+          f" non-finite value {bad_value} at row {bad_row} which conflicts"
+          f" with missing_policy='{missing_policy}', please clean or"
+          " impute these values."
+      )
+    return value
+  else:
+    raise ValueError(f"Unsupported missing policy: '{missing_policy}'")
+
+
+def _check_missing_policy_tensorflow(
+    kind: str,
+    set_name: str,
+    feature_name: str,
+    value: tf.Tensor,
+    missing_policy: MissingPolicy,
+) -> tf.Tensor:
+  """Checks if `value` contains non-finite values."""
+  if not value.dtype.is_floating:
+    return value
+  if missing_policy == MissingPolicy.ASSUME_FINITE:
+    assert_all_finite_op = tf.debugging.assert_all_finite(
+        value,
+        message=(
+            f"Feature '{feature_name}' in {kind} set '{set_name}' contains"
+            f" non-finite values which conflicts with"
+            f" missing_policy='{missing_policy}'."
+        ),
+    )
+    with tf.control_dependencies([assert_all_finite_op]):
+      return tf.identity(value)
+  else:
+    raise ValueError(f"Unsupported missing policy: '{missing_policy}'")
 
 
 @dataclasses.dataclass
@@ -1689,6 +1762,13 @@ class GraphNormalizer:
           edgeset.normalizers, self._edgeset_kwargs[edgeset_name]
       ):
         input_feature_value = input_edgeset.features[normalizer.input_feature]
+        input_feature_value = _check_missing_policy_numpy(
+            "edge",
+            edgeset_name,
+            normalizer.input_feature,
+            input_feature_value,
+            self.config.missing_policy,
+        )
         output_features.update(
             _filter_and_call(
                 normalizer.normalize_numpy,
@@ -1718,6 +1798,13 @@ class GraphNormalizer:
         if normalizer.input_feature not in input_nodeset.features:
           continue
         input_feature_value = input_nodeset.features[normalizer.input_feature]
+        input_feature_value = _check_missing_policy_numpy(
+            "node",
+            nodeset_name,
+            normalizer.input_feature,
+            input_feature_value,
+            self.config.missing_policy,
+        )
         output_features.update(
             _filter_and_call(
                 normalizer.normalize_numpy,
@@ -1781,6 +1868,13 @@ class GraphNormalizer:
           edgeset.normalizers, self._edgeset_kwargs[edgeset_name]
       ):
         input_feature_value = input_edgeset.features[normalizer.input_feature]
+        input_feature_value = _check_missing_policy_tensorflow(
+            "edge",
+            edgeset_name,
+            normalizer.input_feature,
+            input_feature_value,
+            self.config.missing_policy,
+        )
         output_features.update(
             _filter_and_call(
                 normalizer.normalize_tensorflow,
@@ -1810,6 +1904,13 @@ class GraphNormalizer:
         if normalizer.input_feature not in input_nodeset.features:
           continue
         input_feature_value = input_nodeset.features[normalizer.input_feature]
+        input_feature_value = _check_missing_policy_tensorflow(
+            "node",
+            nodeset_name,
+            normalizer.input_feature,
+            input_feature_value,
+            self.config.missing_policy,
+        )
         output_features.update(
             _filter_and_call(
                 normalizer.normalize_tensorflow,
@@ -1869,6 +1970,13 @@ class GraphNormalizer:
           edgeset.normalizers, self._edgeset_kwargs[edgeset_name]
       ):
         input_feature_value = input_edgeset.features[normalizer.input_feature]
+        input_feature_value = _check_missing_policy_numpy(
+            "edge",
+            edgeset_name,
+            normalizer.input_feature,
+            input_feature_value,
+            self.config.missing_policy,
+        )
         output_features.update({
             k: asarray(v)
             for k, v in _filter_and_call(
@@ -1905,6 +2013,13 @@ class GraphNormalizer:
         if normalizer.input_feature not in input_nodeset.features:
           continue
         input_feature_value = input_nodeset.features[normalizer.input_feature]
+        input_feature_value = _check_missing_policy_numpy(
+            "node",
+            nodeset_name,
+            normalizer.input_feature,
+            input_feature_value,
+            self.config.missing_policy,
+        )
         output_features.update({
             k: asarray(v)
             for k, v in _filter_and_call(
