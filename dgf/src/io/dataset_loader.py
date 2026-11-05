@@ -19,8 +19,10 @@ from __future__ import annotations
 import contextlib
 import enum
 import functools
+import gzip
 import io
 import os
+import tarfile
 import tempfile
 from typing import Any
 import urllib.request
@@ -38,6 +40,14 @@ from dgf.src.util.weak_dep import weak_dep_ogb
 import numpy as np
 import pandas as pd
 import yaml
+
+OGBN_ARXIV_TITLEABS_URL = (
+    "https://snap.stanford.edu/ogb/data/misc/ogbn_arxiv/titleabs.tsv.gz"
+)
+OGBN_ARXIV_NODEIDX2PAPERID_URL = (
+    "https://snap.stanford.edu/ogb/data/nodeproppred/arxiv.zip"
+)
+_GZIP_MAGIC = b"\x1f\x8b"
 
 GRAPHLAND_DATASET_NAMES = [
     "web-fraud",
@@ -385,6 +395,171 @@ def load_ogbn_products() -> (
   return graph, schema
 
 
+def download_ogbn_arxiv_titleabs(
+    titleabs_source: str | None = None,
+) -> dict[int, tuple[bytes, bytes]]:
+  """Downloads and parses the OGBN-Arxiv raw titles and abstracts.
+
+  Args:
+    titleabs_source: Optional URL or local file path to `titleabs.tsv.gz` or a
+      plain `.tsv` file. If None, downloads from `OGBN_ARXIV_TITLEABS_URL`.
+
+  Returns:
+    A dictionary mapping `paper_id` (int) to `(title_bytes, abstract_bytes)`.
+  """
+  url_or_path = titleabs_source or OGBN_ARXIV_TITLEABS_URL
+  if fs.is_url(url_or_path):
+    log.info("Downloading OGBN-Arxiv titleabs from %s", url_or_path)
+    with urllib.request.urlopen(url_or_path) as response:
+      raw_bytes = response.read()
+  else:
+    with fs.open_read(url_or_path, binary=True) as f:
+      raw_bytes = f.read()
+
+  # `titleabs.tsv.gz` from Stanford SNAP is a gzip-compressed tar archive
+  # containing `titleabs.tsv`. We also accept a plain `.tsv` or gzipped `.tsv`.
+  if raw_bytes.startswith(_GZIP_MAGIC):
+    raw_bytes = gzip.decompress(raw_bytes)
+  try:
+    with tarfile.open(fileobj=io.BytesIO(raw_bytes), mode="r:") as tar:
+      member = tar.extractfile("titleabs.tsv")
+      if member is None:
+        raise ValueError(f"titleabs.tsv not found in archive {url_or_path}")
+      tsv_text = member.read().decode("utf-8", errors="replace")
+  except tarfile.ReadError:
+    tsv_text = raw_bytes.decode("utf-8", errors="replace")
+
+  paper_id_to_text: dict[int, tuple[bytes, bytes]] = {}
+  for line in tsv_text.splitlines():
+    parts = line.split("\t")
+    if len(parts) < 3:
+      continue
+    try:
+      paper_id = int(parts[0])
+    except ValueError:
+      continue
+    paper_id_to_text[paper_id] = (
+        parts[1].strip().encode("utf-8"),
+        parts[2].strip().encode("utf-8"),
+    )
+  return paper_id_to_text
+
+
+def load_ogbn_arxiv_node_paper_ids(
+    mapping_source: str | None = None,
+) -> np.ndarray:
+  """Loads the `node idx -> paper id` mapping for OGBN-Arxiv.
+
+  Args:
+    mapping_source: Optional path or URL to `nodeidx2paperid.csv.gz`.
+
+  Returns:
+    1D int64 numpy array of `paper_id` indexed by `node_idx`.
+  """
+  if mapping_source is None:
+    mapping_source = OGBN_ARXIV_NODEIDX2PAPERID_URL
+
+  if fs.is_url(mapping_source) and mapping_source.endswith(".zip"):
+    with urllib.request.urlopen(mapping_source) as response:
+      zip_bytes = response.read()
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+      with zf.open("arxiv/mapping/nodeidx2paperid.csv.gz") as f:
+        df = pd.read_csv(f, compression="gzip")
+  else:
+    with fs.open_read(mapping_source, binary=True) as f:
+      df = pd.read_csv(
+          f,
+          compression="gzip" if mapping_source.endswith(".gz") else "infer",
+      )
+  df = df.sort_values("node idx")
+  return df["paper id"].to_numpy(dtype=np.int64)
+
+
+def load_ogbn_arxiv_text(
+    base_graph_and_schema: (
+        tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema] | None
+    ) = None,
+    mapping_source: str | None = None,
+    titleabs_source: str | None = None,
+) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
+  """Loads the OGBN-Arxiv dataset with raw paper `title` and `abstract` text.
+
+  Args:
+    base_graph_and_schema: Optional pre-loaded `(graph, schema)` for
+      `ogbn-arxiv`. If None, loads `ogbn-arxiv` via `load_ogbn_arxiv()`.
+    mapping_source: Optional path to `nodeidx2paperid.csv.gz`.
+    titleabs_source: Optional URL or path to `titleabs.tsv.gz`.
+
+  Returns:
+    A tuple `(graph, schema)` where the `"nodes"` nodeset has `title` and
+    `abstract` `FeatureSemantic.TEXT` features instead of the pre-computed
+    Skip-gram `feat` embedding.
+  """
+  if base_graph_and_schema is None:
+    base_graph, base_schema = load_ogbn_arxiv()
+  else:
+    base_graph, base_schema = base_graph_and_schema
+
+  paper_ids = load_ogbn_arxiv_node_paper_ids(mapping_source=mapping_source)
+  paper_id_to_text = download_ogbn_arxiv_titleabs(
+      titleabs_source=titleabs_source
+  )
+
+  num_nodes = base_graph.node_sets["nodes"].num_nodes
+  assert num_nodes is not None
+  if len(paper_ids) != num_nodes:
+    raise ValueError(
+        f"Expected {num_nodes} paper IDs in mapping, got {len(paper_ids)}."
+    )
+
+  num_missing = sum(int(pid) not in paper_id_to_text for pid in paper_ids)
+  if num_missing:
+    log.warning(
+        "%d / %d OGBN-Arxiv papers have no title/abstract. Using empty text.",
+        num_missing,
+        num_nodes,
+    )
+  titles = np.array(
+      [paper_id_to_text.get(int(pid), (b"", b""))[0] for pid in paper_ids],
+      dtype=np.bytes_,
+  )
+  abstracts = np.array(
+      [paper_id_to_text.get(int(pid), (b"", b""))[1] for pid in paper_ids],
+      dtype=np.bytes_,
+  )
+
+  node_features = dict(base_graph.node_sets["nodes"].features)
+  node_features.pop("feat", None)
+  node_features["title"] = titles
+  node_features["abstract"] = abstracts
+
+  node_feature_schemas = dict(base_schema.node_sets["nodes"].features)
+  node_feature_schemas.pop("feat", None)
+  node_feature_schemas["title"] = schema_lib.FeatureSchema(
+      format=schema_lib.FeatureFormat.BYTES,
+      semantic=schema_lib.FeatureSemantic.TEXT,
+  )
+  node_feature_schemas["abstract"] = schema_lib.FeatureSchema(
+      format=schema_lib.FeatureFormat.BYTES,
+      semantic=schema_lib.FeatureSemantic.TEXT,
+  )
+
+  graph = in_memory_graph_lib.InMemoryGraph(
+      node_sets={
+          "nodes": in_memory_graph_lib.InMemoryNodeSet(
+              num_nodes=num_nodes,
+              features=node_features,
+          )
+      },
+      edge_sets=base_graph.edge_sets,
+  )
+  schema = schema_lib.GraphSchema(
+      node_sets={"nodes": schema_lib.NodeSchema(features=node_feature_schemas)},
+      edge_sets=base_schema.edge_sets,
+  )
+  return graph, schema
+
+
 def load_from_cns(
     name: str,
 ) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
@@ -449,11 +624,12 @@ def fetch_ogb_graph(
   if repo == Repo.OGB:
     loaders = {
         "arxiv": load_ogbn_arxiv,
+        "arxiv_text": load_ogbn_arxiv_text,
         "mag": load_ogbn_mag,
         "products": load_ogbn_products,
     }
   elif repo == Repo.CNS:
-    names = ["arxiv", "mag", "products"]
+    names = ["arxiv", "arxiv_text", "mag", "products"]
     loaders = {
         name: functools.partial(load_from_cns, name=f"ogb_{name}")
         for name in names

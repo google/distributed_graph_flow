@@ -14,8 +14,11 @@
 
 """Unit tests for load_dataset.py."""
 
+import gzip
+import io
 import logging
 import os
+import tarfile
 import time
 from typing import Any
 import unittest
@@ -100,6 +103,97 @@ class LoadDatasetTest(parameterized.TestCase):
     )
     in_memory_graph_validate_lib.validate_graph(graph, schema)
     self.assertTrue(os.path.exists(os.path.join(tmpdir, f"{graph_name}.cache")))
+
+  @parameterized.parameters("tsv", "tsv.gz", "tar.gz")
+  def test_download_ogbn_arxiv_titleabs(self, file_format: str):
+    tsv_bytes = b"100\tFirst title\tFirst abstract.\nbad line\n"
+    path = os.path.join(self.create_tempdir().full_path, "titleabs")
+    if file_format == "tsv":
+      with open(path, "wb") as f:
+        f.write(tsv_bytes)
+    elif file_format == "tsv.gz":
+      with gzip.open(path, "wb") as f:
+        f.write(tsv_bytes)
+    else:
+      with tarfile.open(path, "w:gz") as tar:
+        member = tarfile.TarInfo("titleabs.tsv")
+        member.size = len(tsv_bytes)
+        tar.addfile(member, io.BytesIO(tsv_bytes))
+    self.assertEqual(
+        dataset_loader.download_ogbn_arxiv_titleabs(titleabs_source=path),
+        {100: (b"First title", b"First abstract.")},
+    )
+
+  def test_load_ogbn_arxiv_text(self):
+    tmpdir = self.create_tempdir().full_path
+    mapping_path = os.path.join(tmpdir, "nodeidx2paperid.csv")
+    pd.DataFrame({
+        "node idx": [0, 1, 2],
+        "paper id": [100, 200, 300],
+    }).to_csv(mapping_path, index=False)
+
+    titleabs_path = os.path.join(tmpdir, "titleabs.tsv")
+    with open(titleabs_path, "w") as f:
+      f.write("100\tFirst paper title\tAbstract of the first paper.\n")
+      f.write("200\tSecond paper title\tAbstract of the second paper.\n")
+      f.write("300\tThird paper title\tAbstract of the third paper.\n")
+
+    def download_ogb_graph_mock(name: str) -> tuple[Any, Any, Any]:
+      self.assertEqual(name, "ogbn-arxiv")
+      label = np.array([[0], [1], [2]], dtype=np.int64)
+      ogb_graph = {
+          "edge_index": np.array([[0, 1], [1, 2]], dtype=np.int64),
+          "node_feat": np.zeros((3, 128), dtype=np.float32),
+          "node_year": np.array([[2018], [2019], [2020]], dtype=np.int64),
+          "num_nodes": 3,
+      }
+      splits = {
+          "train": np.array([0]),
+          "valid": np.array([1]),
+          "test": np.array([2]),
+      }
+      return ogb_graph, label, splits
+
+    with mock.patch.object(
+        dataset_loader,
+        "download_ogb_graph",
+        side_effect=download_ogb_graph_mock,
+    ):
+      graph, schema = dataset_loader.load_ogbn_arxiv_text(
+          mapping_source=mapping_path,
+          titleabs_source=titleabs_path,
+      )
+
+    in_memory_graph_validate_lib.validate_graph(graph, schema)
+    node_schemas = schema.node_sets["nodes"].features
+    self.assertNotIn("feat", node_schemas)
+    self.assertEqual(
+        node_schemas["title"].semantic,
+        dataset_loader.schema_lib.FeatureSemantic.TEXT,
+    )
+    self.assertEqual(
+        node_schemas["abstract"].semantic,
+        dataset_loader.schema_lib.FeatureSemantic.TEXT,
+    )
+    node_features = graph.node_sets["nodes"].features
+    np.testing.assert_array_equal(
+        node_features["title"],
+        np.array(
+            [b"First paper title", b"Second paper title", b"Third paper title"],
+            dtype=np.bytes_,
+        ),
+    )
+    np.testing.assert_array_equal(
+        node_features["abstract"],
+        np.array(
+            [
+                b"Abstract of the first paper.",
+                b"Abstract of the second paper.",
+                b"Abstract of the third paper.",
+            ],
+            dtype=np.bytes_,
+        ),
+    )
 
   def test_download_ogb_graph_cache_dir(self):
     mock_dataset = mock.MagicMock()
