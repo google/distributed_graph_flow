@@ -16,12 +16,14 @@ from unittest import mock
 
 from absl.testing import absltest
 from dgf.src.analyse import schema as schema_lib
+from dgf.src.data import in_memory_graph
 from dgf.src.data.schema import EdgeSchema
 from dgf.src.data.schema import FeatureFormat
 from dgf.src.data.schema import FeatureSchema
 from dgf.src.data.schema import FeatureSemantic
 from dgf.src.data.schema import GraphSchema
 from dgf.src.data.schema import NodeSchema
+import numpy as np
 
 
 class SchemaTest(absltest.TestCase):
@@ -508,6 +510,56 @@ class SchemaTest(absltest.TestCase):
     schema_lib.infer_schema_semantic(schema, raise_on_error=False)
     mock_warning.assert_called_once()
     self.assertIn("Could not infer semantic", mock_warning.call_args[0][0])
+
+  def test_infer_schema_semantic_with_graph_detects_text(self):
+    num_nodes = 20
+    graph = in_memory_graph.InMemoryGraph(
+        node_sets={
+            "nodes": in_memory_graph.InMemoryNodeSet(
+                num_nodes=num_nodes,
+                features={
+                    "description": np.array([
+                        f"This item is a high quality product with index {i}."
+                        .encode("utf-8")
+                        for i in range(num_nodes)
+                    ]),
+                    "category": np.array(
+                        [b"cat_a", b"cat_b"] * (num_nodes // 2)
+                    ),
+                },
+            )
+        },
+        edge_sets={},
+    )
+    schema = GraphSchema(
+        node_sets={
+            "nodes": NodeSchema(
+                features={
+                    "description": FeatureSchema(
+                        format=FeatureFormat.BYTES,
+                        semantic=FeatureSemantic.UNKNOWN,
+                    ),
+                    "category": FeatureSchema(
+                        format=FeatureFormat.BYTES,
+                        semantic=FeatureSemantic.UNKNOWN,
+                    ),
+                }
+            )
+        },
+        edge_sets={},
+    )
+    inferred = schema_lib.infer_schema_semantic(schema, graph=graph)
+    self.assertEqual(
+        inferred.node_sets["nodes"].features["description"].semantic,
+        FeatureSemantic.TEXT,
+    )
+    self.assertTrue(
+        inferred.node_sets["nodes"].features["description"].is_utf8_string
+    )
+    self.assertEqual(
+        inferred.node_sets["nodes"].features["category"].semantic,
+        FeatureSemantic.CATEGORICAL,
+    )
 
 
 if __name__ == "__main__":

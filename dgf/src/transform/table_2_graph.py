@@ -14,6 +14,7 @@
 
 """Utility to convert tables to In-Memory Graphs and their schemas."""
 
+from dgf.src.analyse import text_detection
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import feature_format
@@ -31,6 +32,7 @@ def _infer_feature_schema(
   shape = arr.shape[1:] if arr.ndim > 1 else ()
 
   semantic = schema_lib.FeatureSemantic.UNKNOWN
+  is_utf8_string = False
   if detect_semantic:
     if name.lower() in ("id", "#id"):
       semantic = schema_lib.FeatureSemantic.PRIMARY_ID
@@ -41,9 +43,18 @@ def _infer_feature_schema(
       else:
         semantic = schema_lib.FeatureSemantic.NUMERICAL
     elif fmt == schema_lib.FeatureFormat.BYTES:
-      semantic = schema_lib.FeatureSemantic.CATEGORICAL
+      if text_detection.looks_like_text(arr):
+        semantic = schema_lib.FeatureSemantic.TEXT
+        is_utf8_string = True
+      else:
+        semantic = schema_lib.FeatureSemantic.CATEGORICAL
 
-  return schema_lib.FeatureSchema(format=fmt, shape=shape, semantic=semantic)
+  return schema_lib.FeatureSchema(
+      format=fmt,
+      shape=shape,
+      semantic=semantic,
+      is_utf8_string=is_utf8_string,
+  )
 
 
 def table2graph(

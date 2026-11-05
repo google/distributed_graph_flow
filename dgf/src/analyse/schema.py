@@ -14,6 +14,8 @@
 
 """Analaysis / data extraction from a schema."""
 
+from dgf.src.analyse import text_detection
+from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.util import log
 
@@ -283,17 +285,20 @@ def infer_schema_semantic(
     schema: schema_lib.GraphSchema,
     raise_on_error: bool = True,
     verbose: bool = True,
+    graph: in_memory_graph.InMemoryGraph | None = None,
 ) -> schema_lib.GraphSchema:
   """Automatically detects the semantic of features with UNKNOWN semantic.
 
   Usage example:
 
   ```python
-  schema = dgf.analyse.infer_schema_semantic(schema)
+  schema = dgf.analyse.infer_schema_semantic(schema, graph=graph)
   ```
 
   The logic to infer the semantic is as follows:
-  - bytes and booleans are considered categorical.
+  - bytes features whose values in `graph` match the text heuristic are
+    considered TEXT.
+  - other bytes and booleans are considered categorical.
   - numerical values (float, integers) are considered numerical.
   - integer values where the name starts with "is_" are considered categorical.
   - features where the name starts with # are ignored.
@@ -303,24 +308,38 @@ def infer_schema_semantic(
     raise_on_error: If True, raises a ValueError if a feature's semantic cannot
       be inferred. If False, logs a warning instead.
     verbose: Print message about non-trivial decisions.
+    graph: Optional `InMemoryGraph` used to inspect feature values when
+      distinguishing free-form `TEXT` from `CATEGORICAL` bytes features.
 
   Returns:
     The modified GraphSchema.
   """
   for nodeset_name, nodeset_def in schema.node_sets.items():
+    feature_values = (
+        graph.node_sets[nodeset_name].features
+        if graph is not None and nodeset_name in graph.node_sets
+        else None
+    )
     _infer_features_semantic(
         nodeset_def.features,
         container_name=f"nodeset '{nodeset_name}'",
         raise_on_error=raise_on_error,
         verbose=verbose,
+        feature_values=feature_values,
     )
 
   for edgeset_name, edgeset_def in schema.edge_sets.items():
+    feature_values = (
+        graph.edge_sets[edgeset_name].features
+        if graph is not None and edgeset_name in graph.edge_sets
+        else None
+    )
     _infer_features_semantic(
         edgeset_def.features,
         container_name=f"edgeset '{edgeset_name}'",
         raise_on_error=raise_on_error,
         verbose=verbose,
+        feature_values=feature_values,
     )
 
   return schema
@@ -331,6 +350,7 @@ def _infer_features_semantic(
     container_name: str,
     raise_on_error: bool,
     verbose: bool,
+    feature_values: in_memory_graph.Features | None = None,
 ):
   for feature_name, feature_schema in features.items():
     if feature_name.startswith("#"):
@@ -344,13 +364,20 @@ def _infer_features_semantic(
     if feature_schema.semantic != schema_lib.FeatureSemantic.UNKNOWN:
       continue
 
-    fmt = feature_schema.format
-    inferred = False
-    if fmt in (schema_lib.FeatureFormat.BYTES, schema_lib.FeatureFormat.BOOL):
+    if feature_schema.format == schema_lib.FeatureFormat.BYTES:
+      if (
+          feature_values is not None
+          and feature_name in feature_values
+          and text_detection.looks_like_text(feature_values[feature_name])
+      ):
+        feature_schema.semantic = schema_lib.FeatureSemantic.TEXT
+        feature_schema.is_utf8_string = True
+      else:
+        feature_schema.semantic = schema_lib.FeatureSemantic.CATEGORICAL
+    elif feature_schema.format == schema_lib.FeatureFormat.BOOL:
       feature_schema.semantic = schema_lib.FeatureSemantic.CATEGORICAL
-      inferred = True
-    elif fmt.is_numerical():
-      if fmt.is_integer() and feature_name.startswith("is_"):
+    elif feature_schema.format.is_numerical():
+      if feature_schema.format.is_integer() and feature_name.startswith("is_"):
         feature_schema.semantic = schema_lib.FeatureSemantic.CATEGORICAL
         if verbose:
           log.info(
@@ -361,13 +388,11 @@ def _infer_features_semantic(
           )
       else:
         feature_schema.semantic = schema_lib.FeatureSemantic.NUMERICAL
-      inferred = True
-
-    if not inferred:
+    else:
       msg = (
           f"Could not infer semantic for feature {feature_name!r} in"
-          f" {container_name} with format {fmt!r}. Please specify the semantic"
-          " manually in the schema."
+          f" {container_name} with format {feature_schema.format!r}. Please"
+          " specify the semantic manually in the schema."
       )
       if raise_on_error:
         raise ValueError(

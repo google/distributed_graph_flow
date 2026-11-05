@@ -31,6 +31,7 @@ import tempfile
 import urllib.request
 import zipfile
 
+from dgf.src.analyse import text_detection
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import cache as cache_lib
@@ -475,9 +476,15 @@ def _infer_column_feature(
         ],
         dtype=np.bytes_,
     )
+    is_text = text_detection.looks_like_text(values)
     schema = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.BYTES,
-        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        semantic=(
+            schema_lib.FeatureSemantic.TEXT
+            if is_text
+            else schema_lib.FeatureSemantic.CATEGORICAL
+        ),
+        is_utf8_string=is_text,
     )
     return values, schema, missing_mask
   raise ValueError(

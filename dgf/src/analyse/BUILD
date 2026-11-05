@@ -124,9 +124,19 @@ py_library(
 )
 
 py_library(
+    name = "text_detection",
+    srcs = ["text_detection.py"],
+    deps = [
+        # numpy dep,
+    ],
+)
+
+py_library(
     name = "schema",
     srcs = ["schema.py"],
     deps = [
+        ":text_detection",
+        "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/util:log",
     ],
@@ -256,6 +266,18 @@ py_test(
     deps = [
         ":schema",
         # absl/testing:absltest dep,
+        "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
+        # numpy dep,
+    ],
+)
+
+py_test(
+    name = "text_detection_test",
+    srcs = ["text_detection_test.py"],
+    deps = [
+        ":text_detection",
+        # absl/testing:absltest dep,
+        # numpy dep,
     ],
 )

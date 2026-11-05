@@ -427,6 +427,36 @@ class DatasetLoaderRelbenchTest(parameterized.TestCase):
     # NaN target row in train split should be dropped.
     self.assertEqual(graph.node_sets["queries"].num_nodes, 5)
 
+  def test_string_column_with_natural_text_inferred_as_text_semantic(self):
+    num_parents = 12
+    tables = _synthetic_tables()
+    tables["parents"] = pd.DataFrame({
+        "parentId": pd.Series(range(num_parents), dtype="Int64"),
+        "name": [f"driver_{i % 3}" for i in range(num_parents)],
+        "bio": [
+            f"Driver number {i} is an experienced formula one pilot who raced"
+            f" across {i + 2} grand prix seasons"
+            for i in range(num_parents)
+        ],
+        "rating": np.arange(num_parents, dtype=np.float64),
+        "created_at": pd.to_datetime(["2020-01-01"] * num_parents),
+    })
+    graph, schema = dataset_loader_relbench.build_relational_graph(
+        tables=tables,
+        task_tables=_synthetic_task_tables(),
+        spec=_synthetic_spec(),
+        task="parent-score",
+    )
+    self.assertEmpty(in_memory_graph_validate_lib.issues(graph, schema))
+    self.assertEqual(
+        schema.node_sets["parents"].features["bio"].semantic,
+        schema_lib.FeatureSemantic.TEXT,
+    )
+    self.assertEqual(
+        schema.node_sets["parents"].features["name"].semantic,
+        schema_lib.FeatureSemantic.CATEGORICAL,
+    )
+
   def test_missing_indicator_name_collision_raises(self):
     tables = _synthetic_tables()
     tables["children"]["nullable_float"] = np.array(

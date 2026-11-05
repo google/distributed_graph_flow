@@ -144,6 +144,32 @@ class Table2GraphTest(absltest.TestCase):
         schema_lib.FeatureSemantic.CATEGORICAL,
     )
 
+  def test_text_semantic_detected(self):
+    num_rows = 20
+    table = {
+        "description": np.array([
+            f"Detailed natural language description for row number {i} here."
+            .encode("utf-8")
+            for i in range(num_rows)
+        ]),
+        "category": np.array([b"type_a", b"type_b"] * (num_rows // 2)),
+    }
+    _, schema = table_2_graph_lib.table2graph(table)
+    nodeset_schema = schema.node_sets["nodes"]
+    self.assertEqual(
+        nodeset_schema.features["description"].format,
+        schema_lib.FeatureFormat.BYTES,
+    )
+    self.assertEqual(
+        nodeset_schema.features["description"].semantic,
+        schema_lib.FeatureSemantic.TEXT,
+    )
+    self.assertTrue(nodeset_schema.features["description"].is_utf8_string)
+    self.assertEqual(
+        nodeset_schema.features["category"].semantic,
+        schema_lib.FeatureSemantic.CATEGORICAL,
+    )
+
   def test_primary_id_semantic(self):
     table = {
         "id": np.array([1, 2, 3]),

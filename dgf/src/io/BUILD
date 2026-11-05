@@ -384,6 +384,7 @@ py_library(
     deps = [
         ":cache",
         ":dataset_loader",
+        "//dgf/src/analyse:text_detection",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/util:filesystem",

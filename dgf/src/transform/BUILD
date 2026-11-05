@@ -16,6 +16,7 @@ py_library(
     name = "table_2_graph",
     srcs = ["table_2_graph.py"],
     deps = [
+        "//dgf/src/analyse:text_detection",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/io:feature_format",
