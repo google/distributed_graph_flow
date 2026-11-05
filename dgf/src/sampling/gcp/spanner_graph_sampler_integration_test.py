@@ -85,6 +85,7 @@ class E2EArxivTest(parameterized.TestCase):
         num_hops=3,
         hop_width=10,
         reverse=True,
+        multi_visit=False,
     )
 
     # CTE Sampler
@@ -184,6 +185,7 @@ class E2EMagTest(parameterized.TestCase):
         num_hops=2,
         hop_width=5,
         reverse=True,
+        multi_visit=False,
     )
 
     # CTE Sampler

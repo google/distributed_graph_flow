@@ -29,6 +29,7 @@ import collections
 import dataclasses
 import dataclasses_json
 from dgf.src.data import schema as schema_lib
+from dgf.src.util import temporal as temporal_util
 
 
 @dataclasses_json.dataclass_json
@@ -215,3 +216,50 @@ def edgesets_in_plan(plan: SamplingPlan) -> set[str]:
 
   rec_scan(plan.root)
   return edgesets
+
+
+def check_supported_options(
+    plan: SamplingPlan,
+    schema: schema_lib.GraphSchema | None,
+    sampler_name: str,
+    *,
+    support_with_replacement: bool = False,
+    support_non_with_replacement: bool = False,
+    support_multi_visit: bool = False,
+    support_non_multi_visit: bool = False,
+    support_temporal_sampling: bool = False,
+    support_timeseries: bool = False,
+) -> None:
+  """Raises a NotImplementedError if `plan` uses options a sampler lacks.
+
+  Each `support_<option>` argument tells if the sampler implements an option
+  value (e.g., `support_non_multi_visit` for `multi_visit=False`, or
+  `support_timeseries` for timeseries features in `schema`). By default, the
+  options are not supported.
+  """
+  issues = []
+  if plan.with_replacement and not support_with_replacement:
+    issues.append("with_replacement=True")
+  if not plan.with_replacement:
+    if not support_non_with_replacement:
+      issues.append("with_replacement=False")
+    if plan.multi_visit and not support_multi_visit:
+      issues.append(
+          "multi_visit=True (note: this is the default value, set"
+          " multi_visit=False)"
+      )
+    if not plan.multi_visit and not support_non_multi_visit:
+      issues.append("multi_visit=False")
+  if plan.temporal_sampling and not support_temporal_sampling:
+    issues.append("temporal_sampling=True")
+  if (
+      not support_timeseries
+      and schema is not None
+      and temporal_util.schema_has_timeseries_features(schema)
+  ):
+    issues.append("timeseries features (is_timeseries=True) in the schema")
+  if issues:
+    raise NotImplementedError(
+        f"The {sampler_name} does not support the following options: "
+        + ", ".join(issues)
+    )

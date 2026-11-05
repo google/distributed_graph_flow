@@ -288,6 +288,13 @@ class SpannerGraphSampler:
       schema: schema_lib.GraphSchema,
       debug_sampling: bool,
   ):
+    config_lib.check_supported_options(
+        plan,
+        schema,
+        "Spanner graph sampler",
+        support_non_with_replacement=True,
+        support_non_multi_visit=True,
+    )
     self._graph = graph
     self._plan = plan
     self._schema = schema

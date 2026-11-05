@@ -216,6 +216,15 @@ def _write_sampling_plan(
       log.info("Reading graph schema from %s", schema_path)
       schema = io_schema.read_schema(schema_path)
     plan = config_lib.simple_sampling_config_to_sampling_plan(plan, schema)
+  # Early check. The Go sampler validates the plan again.
+  config_lib.check_supported_options(
+      plan,
+      schema,
+      "offline distributed sampler",
+      support_non_with_replacement=True,
+      support_multi_visit=True,
+      support_temporal_sampling=True,
+  )
 
   log.info("Writing sampling plan to %s", sampling_config_path)
   with filesystem.open_write(sampling_config_path) as f:

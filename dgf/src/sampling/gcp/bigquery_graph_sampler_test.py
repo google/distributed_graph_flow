@@ -66,6 +66,7 @@ def _create_sampler(
           num_hops=num_hops,
           hop_width=hop_width,
           reverse=reverse,
+          multi_visit=False,
       ),
       schema=schema,
       metadata=metadata,
@@ -179,13 +180,13 @@ class SchemaResolutionTest(absltest.TestCase):
 
   def test_unsupported_plan_options_raise(self):
     metadata = _metadata("string")
-    with self.assertRaisesRegex(NotImplementedError, "with replacement"):
+    with self.assertRaisesRegex(NotImplementedError, "with_replacement=True"):
       bigquery_graph_sampler.create_bigquery_graph_sampler(
           project=_PROJECT,
           dataset="dgf_io_tests",
           graph="dgf_sampler_string_graph",
           plan=config_lib.SimpleSamplingConfig(
-              seed_nodeset="person", with_replacement=True
+              seed_nodeset="person", with_replacement=True, multi_visit=False
           ),
           schema=bigquery_graph_lib.metadata_to_schema(
               metadata, combine_as_json=False
@@ -398,7 +399,7 @@ class TableClusteringTest(absltest.TestCase):
           dataset="dgf_io_tests",
           graph="dgf_sampler_string_graph",
           plan=config_lib.SimpleSamplingConfig(
-              seed_nodeset="person", num_hops=1, hop_width=2
+              seed_nodeset="person", num_hops=1, hop_width=2, multi_visit=False
           ),
           schema=bigquery_graph_lib.metadata_to_schema(
               metadata, combine_as_json=False
@@ -421,7 +422,7 @@ class TableClusteringTest(absltest.TestCase):
         dataset="dgf_io_tests",
         graph="dgf_sampler_bytes_graph",
         plan=config_lib.SimpleSamplingConfig(
-            seed_nodeset="node", num_hops=1, hop_width=2
+            seed_nodeset="node", num_hops=1, hop_width=2, multi_visit=False
         ),
         schema=bigquery_graph_lib.metadata_to_schema(
             metadata, combine_as_json=False

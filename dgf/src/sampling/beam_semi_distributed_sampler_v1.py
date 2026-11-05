@@ -90,6 +90,16 @@ def sample_with_beam_semi_distributed_sampler(
     A `PCollection` of `InMemoryHeterogeneousGraph` instances, where each
     instance represents a sampled subgraph.
   """
+  config_lib.check_supported_options(
+      plan,
+      graph.schema,
+      "Beam semi-distributed sampler v1",
+      support_with_replacement=True,
+      support_non_with_replacement=True,
+      support_multi_visit=True,
+      support_non_multi_visit=True,
+  )
+
   # TODO(gbm): Extract feature values.
   logging.warning(
       "WIP: The sample_with_beam_semi_distributed_sampler method does not YET"
