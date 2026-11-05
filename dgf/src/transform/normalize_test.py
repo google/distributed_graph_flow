@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -2472,6 +2474,276 @@ class GraphNormalizerKwargsTest(parameterized.TestCase):
     np.testing.assert_array_equal(
         np.asarray(jax_out_graph.edge_sets["e"].features["time_seed_delta"]),
         expected_deltas,
+    )
+
+
+class GraphNormalizerMissingPolicyTest(parameterized.TestCase):
+
+  def _make_schema_and_stats(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "users": schema_lib.NodeSchema(
+                features={
+                    "age": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                        shape=(),
+                    ),
+                    "signal": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                        shape=(3,),
+                        is_timeseries=True,
+                        group="sensor",
+                    ),
+                }
+            )
+        },
+        edge_sets={
+            "follows": schema_lib.EdgeSchema(
+                source="users",
+                target="users",
+                features={},
+            )
+        },
+    )
+    stats = statistics_lib.GraphFeatureStatistics(
+        node_sets={
+            "users": statistics_lib.FeatureSetStatistics(
+                features={
+                    "age": statistics_lib.FeatureStatistics(
+                        count=3,
+                        minimum=10.0,
+                        maximum=30.0,
+                        quantiles=[10.0, 20.0, 30.0],
+                    ),
+                    "signal": statistics_lib.FeatureStatistics(
+                        count=9,
+                        minimum=0.0,
+                        maximum=10.0,
+                        quantiles=[0.0, 5.0, 10.0],
+                    ),
+                }
+            )
+        }
+    )
+    return schema, stats
+
+  def test_default_policy_and_old_config_deserialization(self):
+    schema, stats = self._make_schema_and_stats()
+    auto_cfg = normalize_lib.AutoNormalizeConfig()
+    self.assertEqual(
+        auto_cfg.missing_policy, normalize_lib.MissingPolicy.ASSUME_FINITE
+    )
+
+    normalizer = normalize_lib.auto_normalize(schema, stats, config=auto_cfg)
+    self.assertEqual(
+        normalizer.config.missing_policy,
+        normalize_lib.MissingPolicy.ASSUME_FINITE,
+    )
+
+    # Simulate an older serialized config (from data.json) without
+    # `missing_policy`.
+    raw_dict = json.loads(normalizer.config.to_json())  # pyrefly: ignore[missing-attribute]
+    self.assertEqual(raw_dict["missing_policy"], "assume_finite")
+    del raw_dict["missing_policy"]
+    old_json = json.dumps(raw_dict)
+
+    restored_cfg = normalize_lib.GraphNormalizerConfig.from_json(old_json)  # pyrefly: ignore[missing-attribute]
+    self.assertEqual(
+        restored_cfg.missing_policy,
+        normalize_lib.MissingPolicy.ASSUME_FINITE,
+    )
+
+    raw_auto_dict = json.loads(auto_cfg.to_json())  # pyrefly: ignore[missing-attribute]
+    del raw_auto_dict["missing_policy"]
+    restored_auto_cfg = normalize_lib.AutoNormalizeConfig.from_json(  # pyrefly: ignore[missing-attribute]
+        json.dumps(raw_auto_dict)
+    )
+    self.assertEqual(
+        restored_auto_cfg.missing_policy,
+        normalize_lib.MissingPolicy.ASSUME_FINITE,
+    )
+
+  @parameterized.named_parameters(
+      ("nan", np.nan),
+      ("posinf", np.inf),
+      ("neginf", -np.inf),
+  )
+  def test_assume_finite_static_feature_raises(self, bad_value):
+    schema, stats = self._make_schema_and_stats()
+    normalizer = normalize_lib.auto_normalize(schema, stats)
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "users": in_memory_graph_lib.InMemoryNodeSet(
+                features={
+                    "age": np.array([10.0, bad_value, 30.0], dtype=np.float32),
+                    "signal": np.zeros((3, 3), dtype=np.float32),
+                },
+                num_nodes=3,
+            )
+        },
+        edge_sets={
+            "follows": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array([[0, 1], [1, 2]]),
+                features={},
+            )
+        },
+    )
+    expected_regex = (
+        r"Feature 'age' in node set 'users' contains non-finite value .* at"
+        r" row 1 .*missing_policy='assume_finite'.*"
+    )
+    with self.assertRaisesRegex(ValueError, expected_regex):
+      normalizer.normalize_numpy(graph)
+
+    with self.assertRaisesRegex(ValueError, expected_regex):
+      normalizer.normalize_numpy_to_jax(graph)
+
+    tf_graph = tf_io.graph_to_tf_graph(graph)
+    with self.assertRaisesRegex(tf.errors.InvalidArgumentError, "age"):
+      normalizer.normalize_tensorflow(tf_graph)
+
+  @parameterized.named_parameters(
+      ("nan", np.nan),
+      ("posinf", np.inf),
+      ("neginf", -np.inf),
+  )
+  def test_assume_finite_padded_timeseries_feature_raises(self, bad_value):
+    schema, stats = self._make_schema_and_stats()
+    normalizer = normalize_lib.auto_normalize(schema, stats)
+    signal = np.array(
+        [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [0.0, bad_value, 8.0]],
+        dtype=np.float32,
+    )
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "users": in_memory_graph_lib.InMemoryNodeSet(
+                features={
+                    "age": np.array([10.0, 20.0, 30.0], dtype=np.float32),
+                    "signal": signal,
+                },
+                num_nodes=3,
+            )
+        },
+        edge_sets={
+            "follows": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array([[0, 1], [1, 2]]),
+                features={},
+            )
+        },
+    )
+    expected_regex = (
+        r"Feature 'signal' in node set 'users' contains non-finite value .* at"
+        r" row 2 .*missing_policy='assume_finite'.*"
+    )
+    with self.assertRaisesRegex(ValueError, expected_regex):
+      normalizer.normalize_numpy(graph)
+
+    with self.assertRaisesRegex(ValueError, expected_regex):
+      normalizer.normalize_numpy_to_jax(graph)
+
+    tf_graph = tf_io.graph_to_tf_graph(graph)
+    with self.assertRaisesRegex(tf.errors.InvalidArgumentError, "signal"):
+      normalizer.normalize_tensorflow(tf_graph)
+
+  def test_assume_finite_edgeset_feature_raises(self):
+    weight_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    weight_stats = statistics_lib.FeatureStatistics(
+        count=2, minimum=0.0, maximum=1.0, quantiles=[0.0, 0.5, 1.0]
+    )
+    weight_normalizer = normalize_lib.SoftQuantileNormalizer.create(
+        "weight", weight_schema, weight_stats
+    )
+    normalizer = normalize_lib.GraphNormalizer(
+        config=normalize_lib.GraphNormalizerConfig(
+            nodesets={"users": normalize_lib.NodeSetNormalizerConfig([])},
+            edgesets={
+                "follows": normalize_lib.EdgeSetNormalizerConfig(
+                    source="users",
+                    target="users",
+                    normalizers=[weight_normalizer],
+                )
+            },
+        )
+    )
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "users": in_memory_graph_lib.InMemoryNodeSet(features={}, num_nodes=2)
+        },
+        edge_sets={
+            "follows": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array([[0, 1], [1, 0]]),
+                features={
+                    "weight": np.array([0.5, np.inf], dtype=np.float32)
+                },
+            )
+        },
+    )
+    expected_regex = (
+        r"Feature 'weight' in edge set 'follows' contains non-finite value .*"
+        r" at row 1"
+    )
+    with self.assertRaisesRegex(ValueError, expected_regex):
+      normalizer.normalize_numpy(graph)
+
+    tf_graph = tf_io.graph_to_tf_graph(graph)
+    with self.assertRaisesRegex(tf.errors.InvalidArgumentError, "weight"):
+      normalizer.normalize_tensorflow(tf_graph)
+
+  def test_assume_finite_clean_data_bitwise_unchanged(self):
+    schema, stats = self._make_schema_and_stats()
+    normalizer = normalize_lib.auto_normalize(schema, stats)
+    age = np.array([10.0, 15.0, 30.0], dtype=np.float32)
+    signal = np.array(
+        [[0.0, 2.5, 5.0], [5.0, 7.5, 10.0], [1.0, 4.0, 9.0]],
+        dtype=np.float32,
+    )
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "users": in_memory_graph_lib.InMemoryNodeSet(
+                features={"age": age, "signal": signal},
+                num_nodes=3,
+            )
+        },
+        edge_sets={
+            "follows": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array([[0, 1], [1, 2]]),
+                features={},
+            )
+        },
+    )
+    out_np = normalizer.normalize_numpy(graph)
+    out_jax = normalizer.normalize_numpy_to_jax(graph)
+    out_tf = normalizer.normalize_tensorflow(tf_io.graph_to_tf_graph(graph))
+
+    age_norm = normalizer.config.nodesets["users"].normalizers[0]
+    signal_norm = normalizer.config.nodesets["users"].normalizers[1]
+    expected_age = age_norm.normalize_numpy(age)["age_SOFT_QUANTILE"]
+    expected_signal = signal_norm.normalize_numpy(signal)[
+        "signal_SOFT_QUANTILE"
+    ]
+
+    np.testing.assert_array_equal(
+        out_np.node_sets["users"].features["age_SOFT_QUANTILE"], expected_age
+    )
+    np.testing.assert_array_equal(
+        out_np.node_sets["users"].features["signal_SOFT_QUANTILE"],
+        expected_signal,
+    )
+    np.testing.assert_array_equal(
+        np.asarray(out_jax.node_sets["users"].features["age_SOFT_QUANTILE"]),
+        expected_age,
+    )
+    np.testing.assert_array_equal(
+        out_tf.node_sets["users"].features["age_SOFT_QUANTILE"].numpy(),
+         age_norm.normalize_tensorflow(tf.constant(age))[
+            "age_SOFT_QUANTILE"
+        ].numpy(),
     )
 
 

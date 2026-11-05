@@ -19,6 +19,18 @@ py_library(
 )
 
 py_library(
+    name = "conform",
+    srcs = ["conform.py"],
+    deps = [
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/io:feature_format",
+        # numpy dep,
+        # pandas dep,
+    ],
+)
+
+py_library(
     name = "in_memory_graph",
     srcs = ["in_memory_graph.py"],
     deps = [
@@ -73,6 +85,23 @@ py_test(
         "//dgf/src/util:filesystem",
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
+    ],
+)
+
+py_test(
+    name = "conform_test",
+    srcs = ["conform_test.py"],
+    deps = [
+        ":conform",
+        ":in_memory_graph",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/util:gen_test_graph",
+        "//dgf/src/util:test_util",
+        # numpy dep,
+        # pandas dep,
     ],
 )
 

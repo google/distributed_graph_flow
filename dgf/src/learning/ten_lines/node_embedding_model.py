@@ -45,6 +45,8 @@ from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
+from dgf.src.validate import conform as conform_lib
+from dgf.src.validate import in_memory_graph as in_memory_graph_validate_lib
 import jax
 
 if getattr(tf, "is_available", lambda: True)():
@@ -210,10 +212,9 @@ class NodeEmbeddingModel(common.Model):
         )
         or "None"
     )
-    tabs = [
-        (
-            "Objective",
-            f"""
+    tabs = [(
+        "Objective",
+        f"""
 <p><b>Node embedding model:</b> Learn unsupervised node representations with GraphMAE.</p>
 <table class="dgf-table">
   <tbody>
@@ -226,8 +227,7 @@ class NodeEmbeddingModel(common.Model):
   </tbody>
 </table>
 """,
-        )
-    ]
+    )]
 
     training_stats_summary = ""
     if self.metadata.trainig_logs is not None:
@@ -292,9 +292,7 @@ class NodeEmbeddingModel(common.Model):
       return np.zeros((0, self.embedding_dim), dtype=np.float32)
 
     embedding_list = []
-    for batch in self.predict_batch(
-        graph, effective_idxs, verbose=verbose
-    ):
+    for batch in self.predict_batch(graph, effective_idxs, verbose=verbose):
       embedding_list.append(batch.embeddings)
     return np.concatenate(embedding_list, axis=0)
 
@@ -386,6 +384,10 @@ class NodeEmbeddingModel(common.Model):
     """Samples, normalizes, and prefetches batches from a full graph."""
     sampling_plan = self._require_sampling_plan()
     live = self._get_live()
+    graph = conform_lib.conform_graph(graph, self._data.schema)
+    in_memory_graph_validate_lib.validate_graph(
+        graph, self._data.schema, raise_on_warning=False
+    )
 
     # If enough nodes are sampled, normalizing the features of the entire graph
     # once is cheaper than normalizing the features of each sampled sub-graph.

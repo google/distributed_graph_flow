@@ -45,6 +45,7 @@ from dgf.src.util import test_util
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 
 # Arguments to speed up the train method. Model quality will be poor,
@@ -2122,6 +2123,99 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
         graph=tf_sample, seed_node_idxs=tf.constant([0], dtype=tf.int32)
     ).numpy()
     np.testing.assert_allclose(tf_pred, expected_pred, atol=1e-5)
+
+  def test_conform_and_validate_graph_entry_points(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "A": schema_lib.NodeSchema(
+                features={
+                    "#id": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_32,
+                        semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+                    ),
+                    "f": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                    ),
+                    "cat": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                    ),
+                    "label": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                    ),
+                }
+            ),
+        },
+        edge_sets={},
+    )
+    graph_with_na = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "A": in_memory_graph_lib.InMemoryNodeSet(
+                features={
+                    "#id": np.array([0, 1, 2, 3], dtype=np.int32),
+                    "f": np.array([1.0, None, pd.NA, 2.0], dtype=object),
+                    "cat": np.array([b"x", None, pd.NA, "y"], dtype=object),
+                    "label": np.array([1.0, -1.0, 2.0, 0.0], dtype=np.float32),
+                },
+                num_nodes=4,
+            ),
+        },
+        edge_sets={},
+    )
+    with self.assertRaisesRegex(
+        ValueError,
+        r"Feature 'f' in node set 'A' contains non-finite value"
+        r" .*missing_policy='assume_finite'",
+    ):
+      node_prediction_lib.train_node_model(
+          graph=graph_with_na,
+          schema=schema,
+          target_nodeset="A",
+          target_column="label",
+          num_train_steps=2,
+          batch_size=2,
+          num_sampling_hops=1,
+          evaluate_final_model=False,
+          verbose=0,
+          fast_compile=True,
+      )
+
+    graph_clean_float = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "A": in_memory_graph_lib.InMemoryNodeSet(
+                features={
+                    "#id": np.array([0, 1, 2, 3], dtype=np.int32),
+                    "f": np.array([1.0, -1.0, 2.0, 0.5], dtype=np.float64),
+                    "cat": np.array([b"x", None, pd.NA, "y"], dtype=object),
+                    "label": np.array([1.0, -1.0, 2.0, 0.5], dtype=np.float32),
+                },
+                num_nodes=4,
+            ),
+        },
+        edge_sets={},
+    )
+    model = node_prediction_lib.train_node_model(
+        graph=graph_clean_float,
+        schema=schema,
+        target_nodeset="A",
+        target_column="label",
+        num_train_steps=2,
+        batch_size=2,
+        num_sampling_hops=1,
+        evaluate_final_model=False,
+        verbose=0,
+        fast_compile=True,
+    )
+    preds = model.predict(graph_clean_float, [0, 1], verbose=0)
+    self.assertEqual(preds.shape, (2,))
+    with self.assertRaisesRegex(
+        ValueError,
+        r"Feature 'f' in node set 'A' contains non-finite value"
+        r" .*missing_policy='assume_finite'",
+    ):
+      model.predict(graph_with_na, [0, 1], verbose=0)
 
 
 if __name__ == "__main__":
