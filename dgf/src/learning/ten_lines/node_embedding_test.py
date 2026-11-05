@@ -1470,6 +1470,29 @@ class NodeEmbeddingGraphSamplesWithoutSamplingPlanTest(parameterized.TestCase):
     embeddings = model.predict(self.graph, [0, 1, 2], verbose=0)
     self.assertEqual(embeddings.shape, (3, 8))
 
+  def test_with_explicit_simple_sampling_config(self):
+    sampling_config = sampling_config_lib.SimpleSamplingConfig(
+        seed_nodeset="N1", num_hops=1, hop_width=2, reverse=True
+    )
+    model = node_embedding_train.train_node_embedding_model(
+        graph=self.samples_path,
+        valid_graph=self.samples_path,
+        schema=self.schema,
+        target_nodeset="N1",
+        exclude_features=["label"],
+        sampling_plan=sampling_config,
+        **RAPID_TRAINING_KWARGS,
+    )
+    test_util.assert_are_equal(
+        self,
+        model.data().sampling_plan,
+        sampling_config_lib.simple_sampling_config_to_sampling_plan(
+            sampling_config, self.schema
+        ),
+    )
+    embeddings = model.predict(self.graph, [0, 1, 2], verbose=0)
+    self.assertEqual(embeddings.shape, (3, 8))
+
 
 class NodeEmbeddingTemporalAndTimeseriesTest(parameterized.TestCase):
   """Tests temporal (`time_aware=True`) and causal timeseries support."""

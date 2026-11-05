@@ -125,6 +125,18 @@ class NodeIdsBatch:
   seed_timestamps: np.ndarray | None = None
 
 
+def sampling_schema(
+    schema: schema_lib.GraphSchema,
+    target_edgeset: str,
+    mask_target_edgeset: bool,
+) -> schema_lib.GraphSchema:
+  """Returns the schema used for sampling, without the masked target edgeset."""
+  if mask_target_edgeset:
+    schema = copy.deepcopy(schema)
+    del schema.edge_sets[target_edgeset]
+  return schema
+
+
 @dataclasses.dataclass(kw_only=True)
 class GNNLinkDatasetPreparator:
   """Generates graph samples to train link prediction models.
@@ -382,11 +394,9 @@ class GNNLinkDatasetPreparator:
     )
 
   def _sampling_schema(self) -> schema_lib.GraphSchema:
-    if self.mask_target_edgeset:
-      sampling_schema = copy.deepcopy(self.schema)
-      del sampling_schema.edge_sets[self.target_edgeset]
-      return sampling_schema
-    return self.schema
+    return sampling_schema(
+        self.schema, self.target_edgeset, self.mask_target_edgeset
+    )
 
   def _edgeset_to_mask(self) -> str | None:
     return (
