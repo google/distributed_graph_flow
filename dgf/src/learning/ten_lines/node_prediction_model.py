@@ -50,6 +50,8 @@ from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
+from dgf.src.validate import conform as conform_lib
+from dgf.src.validate import in_memory_graph as in_memory_graph_validate_lib
 import jax
 
 if getattr(tf, "is_available", lambda: True)():
@@ -415,6 +417,11 @@ class NodePredictionModel(common.Model):
     else:
       sampler_schema = self._data.schema
 
+    # We use the sampler schema to avoid KeyError on the missing label column.
+    graph = conform_lib.conform_graph(graph, schema=sampler_schema)
+    in_memory_graph_validate_lib.validate_graph(
+        graph, schema=sampler_schema, raise_on_warning=False
+    )
     batch_size = self._data.hparams.batch_size
     task = self._data.task
 
@@ -1067,4 +1074,3 @@ def schema_to_input_feature_schema(
   schema = copy.deepcopy(schema)
   del schema.node_sets[task.target_nodeset].features[task.target_column]
   return schema
-

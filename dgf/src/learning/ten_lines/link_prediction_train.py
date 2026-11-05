@@ -19,6 +19,7 @@ import itertools
 import os
 import time
 from typing import Literal
+
 from dgf.src.analyse import print_schema as print_schema_lib
 from dgf.src.data import in_memory_graph
 from dgf.src.data import jax_in_memory_graph
@@ -387,7 +388,9 @@ def train_link_model(
     target_sampling_plan: sampling_config_lib.SamplingPlan | None = None,
     early_stopping: bool | int = True,
     fast_compile: bool = False,
-    text_embedder: str | normalize_text_lib.TextEmbedderConfig = "nnlm-en-dim128",
+    text_embedder: (
+        str | normalize_text_lib.TextEmbedderConfig
+    ) = "nnlm-en-dim128",
 ) -> LinkPredictionModel:
   """Trains a supervised Graph Neural Network model for edge prediction.
 
@@ -496,8 +499,8 @@ def train_link_model(
       and unit tests. Specifically, this disables expensive XLA GEMM autotuning
       (--xla_gpu_autotune_level=0).
     text_embedder: Pre-trained frozen text embedding model used to normalize
-      `TEXT` features. Can be a built-in name (e.g. `"nnlm-en-dim128"`), a
-      model handle/path, or a `TextEmbedderConfig`.
+      `TEXT` features. Can be a built-in name (e.g. `"nnlm-en-dim128"`), a model
+      handle/path, or a `TextEmbedderConfig`.
 
   Returns:
     A LinkPredictionModel instance.
@@ -549,6 +552,15 @@ def train_link_model(
           print_schema_lib.print_schema(
               schema, return_output=True, header=False
           ),
+      )
+    graph = conform_lib.conform_graph(graph, schema)
+    in_memory_graph_validate_lib.validate_graph(
+        graph, schema, raise_on_warning=False
+    )
+    if valid_graph is not None:
+      valid_graph = conform_lib.conform_graph(valid_graph, schema)
+      in_memory_graph_validate_lib.validate_graph(
+          valid_graph, schema, raise_on_warning=False
       )
 
     batch_size, learning_rate = common.resolve_batch_size_and_learning_rate(

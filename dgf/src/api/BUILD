@@ -77,6 +77,7 @@ py_library(
     srcs = ["validate.py"],
     deps = [
         "//dgf/src/analyse:schema",
+        "//dgf/src/validate:conform",
         "//dgf/src/validate:graph_snapshots",
         "//dgf/src/validate:in_memory_graph",
     ],

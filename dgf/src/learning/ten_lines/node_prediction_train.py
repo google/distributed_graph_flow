@@ -24,6 +24,7 @@ import textwrap
 import time
 from typing import Literal
 from dgf.src.analyse import print_schema as print_schema_lib
+from dgf.src.data import in_memory_graph
 from dgf.src.data import jax_in_memory_graph
 from dgf.src.data import schema as schema_lib
 from dgf.src.data import statistics as statistics_lib
@@ -51,6 +52,8 @@ from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 
+from dgf.src.validate import conform as conform_lib
+from dgf.src.validate import in_memory_graph as in_memory_graph_validate_lib
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -217,7 +220,9 @@ def train_node_model(
     evaluate_final_model: bool = True,
     padding_margin: float = 0.1,
     fast_compile: bool = False,
-    text_embedder: str | normalize_text_lib.TextEmbedderConfig = "nnlm-en-dim128",
+    text_embedder: (
+        str | normalize_text_lib.TextEmbedderConfig
+    ) = "nnlm-en-dim128",
 ) -> NodePredictionModel:
   """Trains a supervised Graph Neural Network model for node-level prediction.
 
@@ -236,9 +241,9 @@ def train_node_model(
       the training is not checkpointed.
     checkpoint_every_n_minutes: Interval, in minutes, between periodic
       checkpoints when `work_dir` is set. Periodic checkpoints are written
-      asynchronously and skipped if the previous one is still being written.
-      If None, only the final checkpoint is written at the end of training.
-      Ignored if `work_dir` is not set.
+      asynchronously and skipped if the previous one is still being written. If
+      None, only the final checkpoint is written at the end of training. Ignored
+      if `work_dir` is not set.
     verbose: The verbosity level. Higher values provide more output.
     validation_ratio: Ratio of the training dataset used to create the
       validation dataset in case no validation dataset is manually provided
@@ -270,7 +275,7 @@ def train_node_model(
     num_layers: The number of message passing layers in the GNN.
     batch_size: The batch size to use for training. If None, it is selected
       automatically: 128, or 64 for small training sets (see
-      `common.select_batch_size`).
+        `common.select_batch_size`).
     node_embedding_dim: The dimension of the node embeddings.
     learning_rate: The learning rate to use for training. If None, it scales
       linearly with the batch size (4e-3 for a batch size of 128).
@@ -415,12 +420,26 @@ def train_node_model(
               schema, return_output=True, header=False
           ),
       )
+    if isinstance(graph, in_memory_graph.InMemoryGraph):
+      graph = conform_lib.conform_graph(graph, schema)
+      in_memory_graph_validate_lib.validate_graph(
+          graph, schema, raise_on_warning=False
+      )
+    if isinstance(valid_graph, in_memory_graph.InMemoryGraph):
+      valid_graph = conform_lib.conform_graph(valid_graph, schema)
+      in_memory_graph_validate_lib.validate_graph(
+          valid_graph, schema, raise_on_warning=False
+      )
 
     batch_size, learning_rate = common.resolve_batch_size_and_learning_rate(
         batch_size,
         learning_rate,
         num_train_examples=common.estimate_num_train_seed_nodes(
-            graph, valid_graph, target_nodeset, train_seed_nodes, validation_ratio
+            graph,
+            valid_graph,
+            target_nodeset,
+            train_seed_nodes,
+            validation_ratio,
         ),
         num_train_steps=num_train_steps,
         batch_size_range=_AUTO_BATCH_SIZE_RANGE,
