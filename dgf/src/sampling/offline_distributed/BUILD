@@ -14,15 +14,27 @@ package(
 # =========
 
 py_library(
-    name = "offline_distributed_gcp",
-    srcs = ["offline_distributed_gcp.py"],
+    name = "common",
+    srcs = ["common.py"],
     deps = [
-        # dataclasses_json dep,
         "//dgf/src/data:schema",
         "//dgf/src/io:schema",
         "//dgf/src/sampling:config",
         "//dgf/src/util:filesystem",
         "//dgf/src/util:log",
+    ],
+)
+
+py_library(
+    name = "offline_distributed_gcp",
+    srcs = ["offline_distributed_gcp.py"],
+    deps = [
+        ":common",
+        # dataclasses_json dep,
+        "//dgf/src/data:schema",
+        "//dgf/src/sampling:config",
+        "//dgf/src/util:log",
+        "//dgf/src/util:util_py",
         "//dgf/src/util/weak_dep:weak_dep_aiplatform",
         # tqdm dep,
     ],
@@ -41,6 +53,7 @@ py_test(
     name = "offline_distributed_gcp_test",
     srcs = ["offline_distributed_gcp_test.py"],
     deps = [
+        ":common",
         ":offline_distributed_gcp",
         # absl/testing:absltest dep,
         "//dgf/src/sampling:config",
