@@ -576,6 +576,153 @@ class GNNDatasetPreparatorTest(parameterized.TestCase):
     assert large_nodes is not None and zero_nodes is not None
     self.assertGreater(large_nodes, zero_nodes)
 
+  def test_target_nodeset_statistics_use_seed_nodes_only(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "static_feat": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                        shape=(),
+                    ),
+                    "ts_feat": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                        shape=(None,),
+                        is_timeseries=True,
+                        group="g",
+                    ),
+                    "cat_feat": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                        shape=(),
+                    ),
+                    "label": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                        shape=(),
+                    ),
+                }
+            ),
+            "n2": schema_lib.NodeSchema(
+                features={
+                    "aux_feat": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                        shape=(),
+                    ),
+                }
+            ),
+        },
+        edge_sets={
+            "e1": schema_lib.EdgeSchema(source="n1", target="n1", features={}),
+            "e2": schema_lib.EdgeSchema(source="n2", target="n1", features={}),
+        },
+    )
+    # Nodes 0, 1 are training seeds; nodes 2..66 (65 nodes) are non-seed target
+    # nodes reached via 1-hop reverse edges from seeds 0 and 1. Having 67 total
+    # sampled n1 nodes makes padding (ceil(67) + 64 = 131 -> rounded to 256)
+    # distinguishable from seed-only (2 + 64 = 66 -> rounded to 128).
+    num_non_seed = 65
+    num_n1 = 2 + num_non_seed
+    ts_values = np.empty(num_n1, dtype=np.object_)
+    ts_values[0] = np.array([10.0, 20.0], dtype=np.float32)
+    ts_values[1] = np.array([30.0], dtype=np.float32)
+    for i in range(2, num_n1):
+      ts_values[i] = np.array([9999.0, 8888.0, 7777.0], dtype=np.float32)
+
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "n1": in_memory_graph_lib.InMemoryNodeSet(
+                num_nodes=num_n1,
+                features={
+                    "static_feat": np.array(
+                        [1.0, 2.0] + [1000.0] * num_non_seed, dtype=np.float32
+                    ),
+                    "ts_feat": ts_values,
+                    "cat_feat": np.array(
+                        [b"train_a", b"train_b"] + [b"leaked_val"] * num_non_seed
+                    ),
+                    "label": np.array(
+                        [0.1, 0.2] + [500.0] * num_non_seed, dtype=np.float32
+                    ),
+                },
+            ),
+            "n2": in_memory_graph_lib.InMemoryNodeSet(
+                num_nodes=2,
+                features={
+                    "aux_feat": np.array([5.0, 50.0], dtype=np.float32),
+                },
+            ),
+        },
+        edge_sets={
+            # Reverse sampling from seeds [0, 1] pulls in all 65 non-seed n1 nodes.
+            "e1": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array(
+                    [list(range(2, num_n1)), [0] * num_non_seed], dtype=np.int64
+                ),
+                features={},
+            ),
+            "e2": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array([[0, 1], [0, 1]], dtype=np.int64),
+                features={},
+            ),
+        },
+    )
+    sampling_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
+        sampling_config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1", num_hops=1, hop_width=100, reverse=True
+        ),
+        schema,
+    )
+    preparator = node_prediction_dataset.GNNDatasetPreparator(
+        graph=graph,
+        schema=schema,
+        sampling_plan=sampling_plan,
+        seed_node_idxs=np.array([0, 1], dtype=np.int64),
+        batch_size=2,
+        drop_remainder=True,
+        shuffle=False,
+        padding_margin=0.0,
+        target_column="label",
+        auto_normalize_config=normalize_lib.AutoNormalizeConfig(
+            keep_raw_features={("n1", "label")}
+        ),
+    )
+    preparator.prepare()
+    live = preparator.get_live()
+
+    # Target nodeset statistics must only reflect seed nodes [0, 1].
+    n1_stats = live.feature_stats.node_sets["n1"].features
+    self.assertEqual(n1_stats["static_feat"].count, 2)
+    self.assertAlmostEqual(n1_stats["static_feat"].minimum, 1.0)
+    self.assertAlmostEqual(n1_stats["static_feat"].maximum, 2.0)
+    self.assertLessEqual(max(n1_stats["static_feat"].quantiles), 2.0)
+
+    self.assertEqual(n1_stats["ts_feat"].count, 2)
+    self.assertAlmostEqual(n1_stats["ts_feat"].minimum, 10.0)
+    self.assertAlmostEqual(n1_stats["ts_feat"].maximum, 30.0)
+    self.assertLessEqual(max(n1_stats["ts_feat"].quantiles), 30.0)
+
+    self.assertEqual(n1_stats["cat_feat"].count, 2)
+    self.assertCountEqual(
+        n1_stats["cat_feat"].dictionary.keys(), ["train_a", "train_b"]
+    )
+    self.assertEqual(n1_stats["label"].count, 2)
+    self.assertAlmostEqual(n1_stats["label"].minimum, 0.1)
+    self.assertAlmostEqual(n1_stats["label"].maximum, 0.2)
+
+    # Auxiliary nodeset statistics are unchanged.
+    n2_stats = live.feature_stats.node_sets["n2"].features
+    self.assertEqual(n2_stats["aux_feat"].count, 2)
+    self.assertAlmostEqual(n2_stats["aux_feat"].minimum, 5.0)
+    self.assertAlmostEqual(n2_stats["aux_feat"].maximum, 50.0)
+
+    # Padding statistics still account for all 67 sampled n1 nodes (67 + 64
+    # margin = 131, rounded up to multiple of 128 -> 256, vs 128 if seed-only).
+    self.assertEqual(live.padding.node_sets["n1"].num_nodes, 256)
+
 
 class RepeatToBatchSizeTest(absltest.TestCase):
 
