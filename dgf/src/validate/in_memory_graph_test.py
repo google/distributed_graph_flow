@@ -583,6 +583,43 @@ class InMemoryGraphTest(absltest.TestCase):
         f"Expected differing masks error not found in: {issues}",
     )
 
+  def test_object_dtype_with_non_leading_dynamic_dim(self):
+    graph, schema = valid_graph()
+    schema.node_sets["n1"].features["var_inner"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.BYTES,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(2, None),
+    )
+    values = np.empty((2, 2), dtype=np.object_)
+    values[0, 0] = np.array([b"a", b"bc"], dtype=np.bytes_)
+    values[0, 1] = np.array([], dtype=np.bytes_)
+    values[1, 0] = np.array([b"d"], dtype=np.bytes_)
+    values[1, 1] = np.array([b"e", b"f", b"g"], dtype=np.bytes_)
+    graph.node_sets["n1"].features["var_inner"] = values
+
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertEqual(issues, [])
+
+  def test_object_dtype_with_static_shape(self):
+    graph, schema = valid_graph()
+    graph.node_sets["n1"].features["f1"] = np.array(
+        [[b"v1"], [b"v2"]], dtype=np.object_
+    )
+
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertEqual(
+        issues,
+        [
+            Issue.error(
+                "The feature 'f1' in nodeset 'n1' is stored as an object"
+                " (`dtype=object`), which is only permitted for variable-length"
+                " features. However, the schema defines a fixed shape of (1,)."
+                " If your feature is a string, make sure to cast it as a"
+                " np.bytes_."
+            )
+        ],
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

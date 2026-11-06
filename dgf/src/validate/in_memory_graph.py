@@ -15,7 +15,7 @@
 """Validate an in-memory graph object."""
 
 import collections
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dgf.src.analyse import schema as analyse_schema
 from dgf.src.data import in_memory_graph
 from dgf.src.data import schema as schema_lib
@@ -28,141 +28,263 @@ Issue = validate_lib.Issue
 KEY_ID = "#id"
 
 
-def feature_set_issues(
+def _single_feature_schema_only_issues(
+    feature_name: str,
+    feature_schema: schema_lib.FeatureSchema,
+    source: str,
+) -> Iterator[validate_lib.Issue]:
+  """Yields issues of a single feature's schema alone, without data."""
+  if feature_name != KEY_ID:
+    if (
+        feature_schema.semantic is None
+        or feature_schema.semantic == schema_lib.FeatureSemantic.UNKNOWN
+    ):
+      yield Issue.warning(
+          f"The feature {feature_name!r} in {source} has no semantic type"
+          " defined in the schema. This will make the feature harder to"
+          " consume by some tools."
+      )
+    elif (
+        feature_schema.semantic == schema_lib.FeatureSemantic.MASK
+        and feature_schema.format != schema_lib.FeatureFormat.BOOL
+    ):
+      yield Issue.error(
+          f"The mask feature {feature_name!r} in {source} must have"
+          f" format BOOL, but has format {feature_schema.format!r}."
+      )
+  elif feature_schema.semantic != schema_lib.FeatureSemantic.PRIMARY_ID:
+    yield Issue.warning(
+        f"The semantic of feature {feature_name!r} in {source} is"
+        f" not PRIMARY_ID. Instead, it is {feature_schema.semantic!r}"
+    )
+
+  if (
+      feature_schema.is_creation_time
+      and feature_schema.semantic != schema_lib.FeatureSemantic.TIMESTAMP
+  ):
+    yield Issue.error(
+        f"The feature {feature_name!r} in {source} has"
+        " is_creation_time=True, but its semantic is"
+        f" {feature_schema.semantic!r}. Features with"
+        " is_creation_time=True must have semantic=TIMESTAMP."
+    )
+
+  if (
+      feature_schema.semantic == schema_lib.FeatureSemantic.TIMESTAMP
+      and feature_schema.format != schema_lib.FeatureFormat.INTEGER_64
+  ):
+    yield Issue.error(
+        f"The feature {feature_name!r} in {source} has"
+        " semantic=TIMESTAMP, but its format is"
+        f" {feature_schema.format!r}. Features with semantic=TIMESTAMP"
+        " must have format=INTEGER_64."
+    )
+
+  if feature_schema.group is not None and not feature_schema.is_timeseries:
+    yield Issue.error(
+        f"The feature {feature_name!r} in {source} has"
+        f" group={feature_schema.group!r}, but is_timeseries=False."
+        " Non-timeseries features cannot have a group."
+    )
+
+
+def _single_feature_issues(
+    feature_name: str,
+    featureset_data: in_memory_graph.Features,
+    feature_schema: schema_lib.FeatureSchema,
+    source: str,
+) -> Iterator[validate_lib.Issue]:
+  """Yields data and schema-only issues for a single feature.
+
+  Unlike `_single_feature_schema_only_issues`, which only looks at the
+  schema, this checks the in-memory array (presence, type, dtype and shape).
+  The schema-only checks run afterwards, unless the data is too broken to
+  continue.
+
+  Args:
+    feature_name: The name of the feature.
+    featureset_data: The features of the node or edge set.
+    feature_schema: The schema of the feature.
+    source: Human-readable location of the feature set, for messages.
+
+  Yields:
+    The data issues, followed by the schema-only issues.
+  """
+  if feature_name not in featureset_data:
+    yield Issue.error(f"Missing feature {feature_name!r} in {source}.")
+    return
+  feature_data = featureset_data[feature_name]
+  if not isinstance(feature_data, np.ndarray):
+    yield Issue.error(
+        f"The feature {feature_name!r} in {source} is"
+        f" not a numpy array, but {type(feature_data).__name__!r}"
+    )
+    return
+  expected_dtype = feature_format.FEATURE_FORMAT_TO_NP_DTYPE[
+      feature_schema.format
+  ]
+  expected_shape = feature_schema.shape or ()
+  if feature_data.dtype == np.object_:
+    if feature_schema.is_static_shape():
+      yield Issue.error(
+          f"The feature {feature_name!r} in {source} is stored as an object"
+          " (`dtype=object`), which is only permitted for variable-length"
+          " features. However, the schema defines a fixed shape of"
+          f" {expected_shape}. If your feature is a string, make sure to cast"
+          " it as a np.bytes_."
+      )
+  else:
+    if not feature_format.np_dtype_matches(feature_data.dtype, expected_dtype):
+      yield Issue.error(
+          f"The feature {feature_name!r} in {source} has dtype"
+          f" {feature_data.dtype} (i.e., {feature_data.dtype.type}),"
+          f" but the schema expects format {feature_schema.format!r},"
+          f" which corresponds to dtype {expected_dtype}"
+      )
+    if len(expected_shape) + 1 != len(feature_data.shape):
+      yield Issue.error(
+          f"The feature {feature_name!r} in {source} has shape"
+          f" {feature_data.shape}, but the schema expects a shape"
+          f" compatible with {expected_shape} (i.e., one more dimension)."
+      )
+      return
+    for dim_idx, expected_dim in enumerate(expected_shape):
+      observed_dim = feature_data.shape[dim_idx + 1]
+      if expected_dim is not None and expected_dim != observed_dim:
+        yield Issue.error(
+            f"The feature {feature_name!r} in {source} has shape"
+            f" {feature_data.shape}, but the schema expects dimension"
+            f" {dim_idx} to be {expected_dim}."
+        )
+  yield from _single_feature_schema_only_issues(
+      feature_name, feature_schema, source
+  )
+
+
+def _timeseries_group_varlen_length_issues(
+    feature_name: str,
+    feat_shape: Sequence[int | None],
+    ts_name: str,
+    featureset_data: in_memory_graph.Features,
+    source: str,
+) -> Iterator[validate_lib.Issue]:
+  """Yields per-row length mismatch issues for a variable-length timeseries."""
+  if feature_name not in featureset_data or ts_name not in featureset_data:
+    return
+  if not (feat_shape and feat_shape[0] is None):
+    return
+  feature_data = featureset_data[feature_name]
+  ts_data = featureset_data[ts_name]
+  if len(feature_data) != len(ts_data):
+    return
+  for i in range(len(feature_data)):
+    f_val = feature_data[i]
+    t_val = ts_data[i]
+    if f_val is not None and t_val is not None:
+      f_len = len(f_val) if np.ndim(f_val) else 1
+      t_len = len(t_val) if np.ndim(t_val) else 1
+      if f_len != t_len:
+        yield Issue.error(
+            f"The feature {feature_name!r} in {source} has a variable-length"
+            f" timeseries at index {i} of length {f_len}, which does not match"
+            f" the creation time sequence {ts_name!r} of length {t_len}."
+        )
+
+
+def _timeseries_group_creation_time_issues(
+    ts_group: str,
+    fnames: Sequence[str],
+    ct_feats: Sequence[str],
     featureset_data: in_memory_graph.Features,
     featureset_schema: schema_lib.FeatureSetSchema,
     source: str,
-) -> Sequence[validate_lib.Issue]:
-  """Lists the issues of a feature."""
-  items = []
-  for feature_name, feature_schema in featureset_schema.items():
-    if feature_name not in featureset_data:
-      items.append(
-          Issue.error(f"Missing feature {feature_name!r} in {source}.")
-      )
+) -> Iterator[validate_lib.Issue]:
+  """Yields creation-time sequence alignment issues for one timeseries group."""
+  if len(ct_feats) > 1:
+    yield Issue.error(
+        "Multiple creation time sequence features found for group"
+        f" {ts_group!r} in {source}: {ct_feats}. At most one creation"
+        " time feature is allowed per sequence group."
+    )
+    return
+  if not ct_feats:
+    return
+  ts_name = ct_feats[0]
+  ts_schema = featureset_schema[ts_name]
+  ts_shape = ts_schema.shape or ()
+  if len(ts_shape) != 1:
+    yield Issue.error(
+        f"The creation time feature {ts_name!r} in {source} must have"
+        " exactly 1 sequence dimension in schema shape."
+    )
+  for feature_name in fnames:
+    if feature_name == ts_name:
       continue
-    feature_data = featureset_data[feature_name]
-    if not isinstance(feature_data, np.ndarray):
-      items.append(
-          Issue.error(
-              f"The feature {feature_name!r} in {source} is"
-              f" not a numpy array, but {type(feature_data).__name__!r}"
-          )
+    feat_schema = featureset_schema[feature_name]
+    feat_shape = feat_schema.shape or ()
+    if len(feat_shape) < 1:
+      yield Issue.error(
+          f"The feature {feature_name!r} in {source} belongs to group"
+          f" {ts_group!r}, but must have at least 1 sequence dimension"
+          " in schema shape."
       )
-      continue
-    expected_dtype = feature_format.FEATURE_FORMAT_TO_NP_DTYPE[
-        feature_schema.format
-    ]
-    expected_shape = feature_schema.shape or ()
-    if feature_data.dtype == np.object_:
-      if len(expected_shape) < 1 or expected_shape[0] is not None:
-        items.append(
-            Issue.error(
-                f"The feature {feature_name!r} in {source} is stored as an"
-                " object (`dtype=object`), which is only permitted for"
-                " variable-length features. However, the schema defines a"
-                f" fixed shape of {expected_shape}. If your feature is a"
-                " string, make sure to cast it as a np.bytes_."
-            )
-        )
-    else:
-      if feature_data.dtype.type != expected_dtype:
-        if expected_dtype in (
-            np.int64,
-            np.longlong,
-        ) and feature_data.dtype.type in (np.int64, np.longlong):
-          pass
-        else:
-          items.append(
-              Issue.error(
-                  f"The feature {feature_name!r} in {source} has dtype"
-                  f" {feature_data.dtype} (i.e., {feature_data.dtype.type}),"
-                  f" but the schema expects format {feature_schema.format!r},"
-                  f" which corresponds to dtype {expected_dtype}"
-              )
-          )
-      if len(expected_shape) + 1 != len(feature_data.shape):
-        items.append(
-            Issue.error(
-                f"The feature {feature_name!r} in {source} has shape"
-                f" {feature_data.shape}, but the schema expects a shape"
-                f" compatible with {expected_shape} (i.e., one more dimension)."
-            )
-        )
-        continue
-      for dim_idx in range(len(expected_shape)):
-        expected_dim = expected_shape[dim_idx]
-        observed_dim = feature_data.shape[dim_idx + 1]
-        if expected_dim is None:
-          continue
-        if expected_dim != observed_dim:
-          items.append(
-              Issue.error(
-                  f"The feature {feature_name!r} in {source} has shape"
-                  f" {feature_data.shape}, but the schema expects dimension"
-                  f" {dim_idx} to be {expected_dim}."
-              )
-          )
-    if feature_name != KEY_ID:
-      if (
-          feature_schema.semantic is None
-          or feature_schema.semantic == schema_lib.FeatureSemantic.UNKNOWN
-      ):
-        items.append(
-            Issue.warning(
-                f"The feature {feature_name!r} in {source} has no semantic type"
-                " defined in the schema. This will make the feature harder to"
-                " consume by some tools."
-            )
-        )
-      elif feature_schema.semantic == schema_lib.FeatureSemantic.MASK:
-        if feature_schema.format != schema_lib.FeatureFormat.BOOL:
-          items.append(
-              Issue.error(
-                  f"The mask feature {feature_name!r} in {source} must have"
-                  f" format BOOL, but has format {feature_schema.format!r}."
-              )
-          )
-    else:
-      if feature_schema.semantic != schema_lib.FeatureSemantic.PRIMARY_ID:
-        items.append(
-            Issue.warning(
-                f"The semantic of feature {feature_name!r} in {source} is"
-                f" not PRIMARY_ID. Instead, it is {feature_schema.semantic!r}"
-            )
-        )
-
-    if feature_schema.is_creation_time:
-      if feature_schema.semantic != schema_lib.FeatureSemantic.TIMESTAMP:
-        items.append(
-            Issue.error(
-                f"The feature {feature_name!r} in {source} has"
-                " is_creation_time=True, but its semantic is"
-                f" {feature_schema.semantic!r}. Features with"
-                " is_creation_time=True must have semantic=TIMESTAMP."
-            )
-        )
-
-    if feature_schema.semantic == schema_lib.FeatureSemantic.TIMESTAMP:
-      if feature_schema.format != schema_lib.FeatureFormat.INTEGER_64:
-        items.append(
-            Issue.error(
-                f"The feature {feature_name!r} in {source} has"
-                " semantic=TIMESTAMP, but its format is"
-                f" {feature_schema.format!r}. Features with semantic=TIMESTAMP"
-                " must have format=INTEGER_64."
-            )
-        )
-
-    if feature_schema.group is not None and not feature_schema.is_timeseries:
-      items.append(
-          Issue.error(
-              f"The feature {feature_name!r} in {source} has"
-              f" group={feature_schema.group!r}, but is_timeseries=False."
-              " Non-timeseries features cannot have a group."
-          )
+    if (
+        len(ts_shape) == 1
+        and len(feat_shape) >= 1
+        and ts_shape[0] != feat_shape[0]
+    ):
+      yield Issue.error(
+          f"The feature {feature_name!r} in {source} has schema shape"
+          f" {feat_shape} whose 0th dimension ({feat_shape[0]}) does"
+          f" not match creation time feature {ts_name!r} schema shape"
+          f" 0th dimension ({ts_shape[0]})."
       )
+    yield from _timeseries_group_varlen_length_issues(
+        feature_name, feat_shape, ts_name, featureset_data, source
+    )
 
+
+def _timeseries_group_mask_issues(
+    ts_group: str,
+    masks_in_group: Sequence[str],
+    featureset_data: in_memory_graph.Features,
+    source: str,
+) -> Iterator[validate_lib.Issue]:
+  """Yields duplicate-mask issues for one timeseries group."""
+  if len(masks_in_group) <= 1:
+    return
+  all_identical = True
+  first_data = featureset_data.get(masks_in_group[0])
+  for m_name in masks_in_group[1:]:
+    m_data = featureset_data.get(m_name)
+    if (
+        first_data is None
+        or m_data is None
+        or not np.array_equal(first_data, m_data)
+    ):
+      all_identical = False
+      break
+  if all_identical:
+    yield Issue.warning(
+        "Multiple features with semantic=MASK found for timeseries"
+        f" group {ts_group!r} in {source}: {masks_in_group}. Since they"
+        " are identical, consider consolidating them into a single"
+        " mask."
+    )
+  else:
+    yield Issue.error(
+        "Multiple features with semantic=MASK found for timeseries"
+        f" group {ts_group!r} in {source} with differing or unavailable"
+        f" values: {masks_in_group}."
+    )
+
+
+def _cross_feature_issues(
+    featureset_data: in_memory_graph.Features,
+    featureset_schema: schema_lib.FeatureSetSchema,
+    source: str,
+) -> Iterator[validate_lib.Issue]:
+  """Yields cross-feature entity creation-time and timeseries group issues."""
   entity_creation_time_feats = []
   group_to_creation_time = collections.defaultdict(list)
   group_to_masks = collections.defaultdict(list)
@@ -185,123 +307,48 @@ def feature_set_issues(
 
     if feature_schema.semantic == schema_lib.FeatureSemantic.MASK:
       if feature_schema.group is None:
-        items.append(
-            Issue.error(
-                f"The mask feature {feature_name!r} in {source} must have a"
-                " group to associate it with the features it masks."
-            )
+        yield Issue.error(
+            f"The mask feature {feature_name!r} in {source} must have a"
+            " group to associate it with the features it masks."
         )
       else:
         group_to_masks[feature_schema.group].append(feature_name)
 
   if len(entity_creation_time_feats) > 1:
-    items.append(
-        Issue.error(
-            f"Multiple entity creation time features found in {source}:"
-            f" {entity_creation_time_feats}. At most one feature can have"
-            " is_creation_time=True for a node or edge set."
-        )
+    yield Issue.error(
+        f"Multiple entity creation time features found in {source}:"
+        f" {entity_creation_time_feats}. At most one feature can have"
+        " is_creation_time=True for a node or edge set."
     )
 
   for ts_group, fnames in group_to_features.items():
     ct_feats = group_to_creation_time.get(ts_group, [])
-    if len(ct_feats) > 1:
-      items.append(
-          Issue.error(
-              "Multiple creation time sequence features found for group"
-              f" {ts_group!r} in {source}: {ct_feats}. At most one creation"
-              " time feature is allowed per sequence group."
-          )
-      )
-    elif len(ct_feats) == 1:
-      ts_name = ct_feats[0]
-      ts_schema = featureset_schema[ts_name]
-      ts_shape = ts_schema.shape or ()
-      if len(ts_shape) != 1:
-        items.append(
-            Issue.error(
-                f"The creation time feature {ts_name!r} in {source} must have"
-                " exactly 1 sequence dimension in schema shape."
-            )
-        )
-      for feature_name in fnames:
-        if feature_name == ts_name:
-          continue
-        feat_schema = featureset_schema[feature_name]
-        feat_shape = feat_schema.shape or ()
-        if len(feat_shape) < 1:
-          items.append(
-              Issue.error(
-                  f"The feature {feature_name!r} in {source} belongs to group"
-                  f" {ts_group!r}, but must have at least 1 sequence dimension"
-                  " in schema shape."
-              )
-          )
-        if (
-            len(ts_shape) == 1
-            and len(feat_shape) >= 1
-            and ts_shape[0] != feat_shape[0]
-        ):
-          items.append(
-              Issue.error(
-                  f"The feature {feature_name!r} in {source} has schema shape"
-                  f" {feat_shape} whose 0th dimension ({feat_shape[0]}) does"
-                  f" not match creation time feature {ts_name!r} schema shape"
-                  f" 0th dimension ({ts_shape[0]})."
-              )
-          )
-        if feature_name in featureset_data and ts_name in featureset_data:
-          if feat_shape and feat_shape[0] is None:
-            feature_data = featureset_data[feature_name]
-            ts_data = featureset_data[ts_name]
-            if len(feature_data) == len(ts_data):
-              for i in range(len(feature_data)):
-                f_val = feature_data[i]
-                t_val = ts_data[i]
-                if f_val is not None and t_val is not None:
-                  f_len = len(f_val) if hasattr(f_val, "__len__") else 1
-                  t_len = len(t_val) if hasattr(t_val, "__len__") else 1
-                  if f_len != t_len:
-                    items.append(
-                        Issue.error(
-                            f"The feature {feature_name!r} in {source} has a"
-                            f" variable-length timeseries at index {i} of"
-                            f" length {f_len}, which does not match the"
-                            f" creation time sequence {ts_name!r} of length"
-                            f" {t_len}."
-                        )
-                    )
+    yield from _timeseries_group_creation_time_issues(
+        ts_group, fnames, ct_feats, featureset_data, featureset_schema, source
+    )
 
   for ts_group, masks_in_group in group_to_masks.items():
-    if len(masks_in_group) > 1:
-      all_identical = True
-      first_data = featureset_data.get(masks_in_group[0])
-      for m_name in masks_in_group[1:]:
-        m_data = featureset_data.get(m_name)
-        if (
-            first_data is None
-            or m_data is None
-            or not np.array_equal(first_data, m_data)
-        ):
-          all_identical = False
-          break
-      if all_identical:
-        items.append(
-            Issue.warning(
-                "Multiple features with semantic=MASK found for timeseries"
-                f" group {ts_group!r} in {source}: {masks_in_group}. Since they"
-                " are identical, consider consolidating them into a single"
-                " mask."
-            )
+    yield from _timeseries_group_mask_issues(
+        ts_group, masks_in_group, featureset_data, source
+    )
+
+
+def feature_set_issues(
+    featureset_data: in_memory_graph.Features,
+    featureset_schema: schema_lib.FeatureSetSchema,
+    source: str,
+) -> Sequence[validate_lib.Issue]:
+  """Lists the issues of a feature."""
+  items: list[validate_lib.Issue] = []
+  for feature_name, feature_schema in featureset_schema.items():
+    items.extend(
+        _single_feature_issues(
+            feature_name, featureset_data, feature_schema, source
         )
-      else:
-        items.append(
-            Issue.error(
-                "Multiple features with semantic=MASK found for timeseries"
-                f" group {ts_group!r} in {source} with differing or unavailable"
-                f" values: {masks_in_group}."
-            )
-        )
+    )
+  items.extend(
+      _cross_feature_issues(featureset_data, featureset_schema, source)
+  )
   return items
 
 

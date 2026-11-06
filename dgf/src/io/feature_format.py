@@ -78,6 +78,36 @@ FEATURE_FORMAT_TO_NP_DTYPE: dict[schema_lib.FeatureFormat, Any] = {
     schema_lib.FeatureFormat.BOOL: np.bool_,
 }
 
+
+_SUPPORTED_NP_DTYPES = frozenset(FEATURE_FORMAT_TO_NP_DTYPE.values())
+
+
+def np_dtype_matches(
+    actual_dtype: np.dtype[Any], expected_dtype: type[np.generic]
+) -> bool:
+  """Returns whether `actual_dtype` matches `expected_dtype`.
+
+  Args:
+    actual_dtype: The dtype of the array.
+    expected_dtype: The scalar type from `FEATURE_FORMAT_TO_NP_DTYPE`.
+
+  Raises:
+    ValueError: If `expected_dtype` is not in `FEATURE_FORMAT_TO_NP_DTYPE`.
+  """
+  if expected_dtype not in _SUPPORTED_NP_DTYPES:
+    raise ValueError(
+        f"Unsupported expected_dtype {expected_dtype!r}; expected one of"
+        f" {sorted(_SUPPORTED_NP_DTYPES, key=str)}."
+    )
+  if not isinstance(actual_dtype, np.dtype) or not actual_dtype.isnative:
+    return False
+  if expected_dtype is np.bytes_:
+    return actual_dtype.type is np.bytes_ and actual_dtype.itemsize > 0
+  if issubclass(expected_dtype, np.integer):
+    return actual_dtype == np.dtype(expected_dtype)
+  return actual_dtype.type is expected_dtype
+
+
 # Mapping from FeatureFormat to Avro types.
 FEATURE_FORMAT_TO_AVRO_DTYPE: dict[schema_lib.FeatureFormat, str] = {
     schema_lib.FeatureFormat.INTEGER_32: "int",
