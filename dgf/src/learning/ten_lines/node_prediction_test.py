@@ -1113,6 +1113,29 @@ class NodePredictionGraphSamplesWithoutSamplingPlanTest(parameterized.TestCase):
     predictions = model.predict(graph=self.graph, seed_node_idxs=[0, 1, 2])
     self.assertEqual(predictions.shape, (3, model.num_label_classes()))
 
+  def test_with_explicit_simple_sampling_config(self):
+    sampling_config = sampling_config_lib.SimpleSamplingConfig(
+        seed_nodeset="client", num_hops=1, hop_width=2
+    )
+    model = node_prediction_lib.train_node_model(
+        graph=self.samples_path,
+        valid_graph=self.samples_path,
+        schema=self.schema,
+        target_nodeset="client",
+        target_column="categorical_label",
+        sampling_plan=sampling_config,
+        **RAPID_TRAINING_KWARGS,
+    )
+    test_util.assert_are_equal(
+        self,
+        model.data().sampling_plan,
+        sampling_config_lib.simple_sampling_config_to_sampling_plan(
+            sampling_config, self.schema
+        ),
+    )
+    predictions = model.predict(graph=self.graph, seed_node_idxs=[0, 1, 2])
+    self.assertEqual(predictions.shape, (3, model.num_label_classes()))
+
 
 class NodePredictionRealLookingStandaloneTest(parameterized.TestCase):
 

@@ -33,6 +33,7 @@ from dgf.src.learning.jax.layers import preprocess
 from dgf.src.learning.jax.layers import timeseries_cnn
 from dgf.src.learning.jax.layers import timeseries_transformer
 from dgf.src.learning.ten_lines import dataset
+from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.util import filesystem as fs
 from dgf.src.util import log
@@ -46,6 +47,11 @@ Graph = dataset.Graph
 
 # The type of seed node idxs supported in high-level APIs.
 SeedNodeIdxs: TypeAlias = list[int] | np.ndarray
+
+# The type of sampling plans supported in high-level APIs.
+SamplingPlanOrConfig: TypeAlias = (
+    sampling_config_lib.SamplingPlan | sampling_config_lib.SimpleSamplingConfig
+)
 
 # Filename in the model saved on disk.
 FILENAME_DONE = "DONE"
@@ -87,6 +93,17 @@ DEFAULT_ARCHITECTURE = Architecture.HETEROGENEOUS_MESSAGE_PASSING
 DEFAULT_NODE_PREDICTION_ARCHITECTURE = Architecture.MT_ALBIS
 # Default architecture of `train_node_embedding_model`.
 DEFAULT_NODE_EMBEDDING_ARCHITECTURE = Architecture.MT_ALBIS
+
+
+def resolve_sampling_plan(
+    plan: SamplingPlanOrConfig | None, schema: schema_lib.GraphSchema
+) -> sampling_config_lib.SamplingPlan | None:
+  """Converts `plan` into a `SamplingPlan` if it is a `SimpleSamplingConfig`."""
+  if isinstance(plan, sampling_config_lib.SimpleSamplingConfig):
+    return sampling_config_lib.simple_sampling_config_to_sampling_plan(
+        plan, schema
+    )
+  return plan
 
 
 def parse_architecture(architecture: Architecture | str) -> Architecture:
