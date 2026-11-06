@@ -456,9 +456,9 @@ class TenLines(parameterized.TestCase):
 
     props = signature["properties"]
     self.assertNotIn("nodes_n1_id", props)
-    self.assertNotIn("nodes_unvisited_node_reserved_size", props)
-    self.assertNotIn("nodes_unvisited_node_f_unvisited", props)
-    self.assertNotIn("edges_unvisited_edge_reserved_adjacency", props)
+    self.assertNotIn("nodes_unvisited__node_reserved_size", props)
+    self.assertNotIn("nodes_unvisited__node_f__unvisited", props)
+    self.assertNotIn("edges_unvisited__edge_reserved_adjacency", props)
     self.assertEqual(signature["required"], list(props.keys()))
 
     self.assertEqual(
@@ -481,7 +481,7 @@ class TenLines(parameterized.TestCase):
         },
     )
 
-    f_none = props["nodes_n1_f_none"]
+    f_none = props["nodes_n1_f__none"]
     self.assertEqual(
         f_none,
         {
@@ -494,7 +494,7 @@ class TenLines(parameterized.TestCase):
         },
     )
 
-    f_23 = props["nodes_n1_f_23"]
+    f_23 = props["nodes_n1_f__23"]
     self.assertEqual(
         f_23,
         {
@@ -512,7 +512,7 @@ class TenLines(parameterized.TestCase):
         },
     )
 
-    f_utf8 = props["nodes_n1_f_utf8"]
+    f_utf8 = props["nodes_n1_f__utf8"]
     self.assertEqual(
         f_utf8,
         {
@@ -525,7 +525,7 @@ class TenLines(parameterized.TestCase):
         },
     )
 
-    f_none_23 = props["nodes_n1_f_none_23"]
+    f_none_23 = props["nodes_n1_f__none__23"]
     self.assertEqual(
         f_none_23,
         {
@@ -546,7 +546,7 @@ class TenLines(parameterized.TestCase):
         },
     )
 
-    f_none_1 = props["nodes_n1_f_none_1"]
+    f_none_1 = props["nodes_n1_f__none__1"]
     self.assertEqual(
         f_none_1,
         {
@@ -611,10 +611,10 @@ class TenLines(parameterized.TestCase):
     )
     props = signature["properties"]
     self.assertEqual(signature["required"], list(props.keys()))
-    self.assertNotIn("source_nodes_unvisited_node_reserved_size", props)
-    self.assertNotIn("source_edges_unvisited_edge_reserved_size", props)
-    self.assertNotIn("target_nodes_unvisited_node_reserved_size", props)
-    self.assertNotIn("target_edges_unvisited_edge_reserved_size", props)
+    self.assertNotIn("source_nodes_unvisited__node_reserved_size", props)
+    self.assertNotIn("source_edges_unvisited__edge_reserved_adjacency", props)
+    self.assertNotIn("target_nodes_unvisited__node_reserved_size", props)
+    self.assertNotIn("target_edges_unvisited__edge_reserved_adjacency", props)
     self.assertEqual(
         props["source_seed_node_idxs"],
         {
@@ -650,7 +650,7 @@ class TenLines(parameterized.TestCase):
             "field_kind": "adjacency",
         },
     )
-    f_none = props["source_edges_e1_f_none"]
+    f_none = props["source_edges_e1_f__none"]
     self.assertEqual(
         f_none,
         {

@@ -833,33 +833,30 @@ class LinkPredictionToyTest(parameterized.TestCase):
       input_names = [t.name for t in signature.inputs]
 
       if consume_tf_graph_dict:
-        h = f"{tf_io.BEGIN_CODE}23{tf_io.END_CODE}"
-        u = f"{tf_io.BEGIN_CODE}5f{tf_io.END_CODE}"
-
         if encoder in ("source", "target"):
           expected_keys_and_shapes = [
               ("nodes_A_reserved_size", ()),
-              (f"nodes_A_{h}id", [None]),
+              ("nodes_A__id", [None]),
               ("nodes_A_f1", [None]),
               ("nodes_A_f2", [None]),
               ("nodes_B_reserved_size", ()),
-              (f"nodes_B_{h}id", [None]),
+              ("nodes_B__id", [None]),
               ("nodes_B_f1", [None]),
               ("nodes_B_f2", [None]),
-              (f"edges_A{u}to{u}B_reserved_adjacency", [2, None]),
+              ("edges_A__to__B_reserved_adjacency", [2, None]),
           ]
           seed_node_idxs_key = "seed_node_idxs"
         elif encoder == "both":
           single_graph_expected = [
               ("nodes_A_reserved_size", ()),
-              (f"nodes_A_{h}id", [None]),
+              ("nodes_A__id", [None]),
               ("nodes_A_f1", [None]),
               ("nodes_A_f2", [None]),
               ("nodes_B_reserved_size", ()),
-              (f"nodes_B_{h}id", [None]),
+              ("nodes_B__id", [None]),
               ("nodes_B_f1", [None]),
               ("nodes_B_f2", [None]),
-              (f"edges_A{u}to{u}B_reserved_adjacency", [2, None]),
+              ("edges_A__to__B_reserved_adjacency", [2, None]),
           ]
           expected_keys_and_shapes = []
           for key, shape in single_graph_expected:
