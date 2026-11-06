@@ -44,6 +44,8 @@ from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 from dgf.src.util import util_ext
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
+from dgf.src.validate import conform as conform_lib
+from dgf.src.validate import in_memory_graph as in_memory_graph_validate_lib
 import jax
 
 if getattr(tf, "is_available", lambda: True)():
@@ -694,6 +696,10 @@ class LinkPredictionModel(common.Model):
 
     assert (source_sampler is None) == (target_sampler is None)
     if source_sampler is None:
+      graph = conform_lib.conform_graph(graph, self._data.schema)
+      in_memory_graph_validate_lib.validate_graph(
+          graph, self._data.schema, raise_on_warning=False
+      )
       source_sampler, target_sampler = self._build_samplers(graph)
     assert source_sampler is not None
     assert target_sampler is not None
@@ -872,6 +878,10 @@ class LinkPredictionModel(common.Model):
     """
     live = self._get_live()
     np_node_idxs = np.asarray(node_idxs)
+    graph = conform_lib.conform_graph(graph, self._data.schema)
+    in_memory_graph_validate_lib.validate_graph(
+        graph, self._data.schema, raise_on_warning=False
+    )
 
     if encoder == "source":
       sampler = in_memory_sampler_lib.create_sampler(
@@ -1414,6 +1424,10 @@ class LinkPredictionModel(common.Model):
       An `evaluation.Evaluation` object containing the evaluation results.
     """
 
+    graph = conform_lib.conform_graph(graph, self._data.schema)
+    in_memory_graph_validate_lib.validate_graph(
+        graph, self._data.schema, raise_on_warning=False
+    )
     target_edgeset = self._data.task.target_edgeset
     num_edges = graph.edge_sets[target_edgeset].num_edges()
 
