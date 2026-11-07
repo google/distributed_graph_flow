@@ -3,10 +3,7 @@ load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
     
-    default_visibility = [
-        "//:internal_users",
-        "//dgf/src:__subpackages__",
-    ],
+    default_visibility = ["//dgf/src:__subpackages__"],
 )
 
 # Libraries
