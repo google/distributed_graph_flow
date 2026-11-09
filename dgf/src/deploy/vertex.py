@@ -70,7 +70,7 @@ def _create_batched_serving_model(tf_model: Any) -> Any:
   for k, spec in unbatched_spec.items():
     batched_shape = [None] + spec.shape.as_list()
     batched_spec[k] = tf.TensorSpec(
-        shape=batched_shape, dtype=spec.dtype, name=k
+        shape=batched_shape, dtype=spec.dtype, name=spec.name
     )
 
   batched_model.__call__ = batched_model.__call__.get_concrete_function(

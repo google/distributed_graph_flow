@@ -708,10 +708,12 @@ class VertexDeployTest(absltest.TestCase):
 
     raw_model = DummyRawModel()
     raw_model.__call__ = raw_model.__call__.get_concrete_function(
-        x=tf.TensorSpec(shape=[3], dtype=tf.float32, name="x")
+        x=tf.TensorSpec(shape=[3], dtype=tf.float32, name="custom_x_name")
     )
 
     batched_model = self._real_create_batched_serving_model(raw_model)
+    input_specs = batched_model.__call__.structured_input_signature[1]
+    self.assertEqual(input_specs["x"].name, "custom_x_name")
     out = batched_model.__call__(
         x=tf.constant([[1.0, 2.0, 3.0]], dtype=tf.float32)
     )

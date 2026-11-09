@@ -26,9 +26,6 @@ from dgf.src.data import tf_in_memory_graph as tf_in_memory_graph_lib
 from dgf.src.io import feature_format as feature_format_lib
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 
-BEGIN_CODE = "begincode"
-END_CODE = "endcode"
-
 # Key naming of the "TF GNN Graph Sample" format.
 #
 # A TF GNN Graph Sample is a `tf.train.Example` proto (or an equivalent
@@ -73,8 +70,7 @@ TFGNN_TARGET_KEY = "#target"
 #
 # Contrary to the TF GNN Graph Sample format, values are not flattened, they use
 # the dtype of the schema, and variable-length features are represented with
-# ragged tensors. Nodeset, edgeset and feature names are encoded (see
-# `_encode_name`) since keys only support alphanumerical characters.
+# ragged tensors.
 
 TF_GRAPH_DICT_NODES_PREFIX = "nodes_"
 TF_GRAPH_DICT_EDGES_PREFIX = "edges_"
@@ -117,37 +113,53 @@ def tfgnn_ragged_dim_key(feature_key: str, dim_idx: int) -> str:
   return f"{feature_key}.d{dim_idx}"
 
 
-def tf_graph_dict_node_key(encoded_nodeset_name: str, suffix: str) -> str:
+_RESERVED_GRAPH_DICT_SUFFIXES = frozenset({
+    TF_GRAPH_DICT_SIZE_KEY,
+    TF_GRAPH_DICT_ADJACENCY_KEY,
+})
+
+# Matches a valid escaped entity name: non-empty, all '_' escaped as '__', and
+# not ending with '_' (so entity/feature '_' boundaries remain unambiguous).
+_ESCAPED_ENTITY_RE = re.compile(r"^(?:(?:__)*[^_])+$")
+_ESCAPED_SEGMENT_RE = re.compile(r"^(?:[^_]|__)+$")
+_SINGLE_UNDERSCORE_SPLIT_RE = re.compile(r"^((?:(?:__)*[^_])+)_((?:[^_]|__)+)$")
+
+
+def _validate_graph_dict_entity_name(name: str, kind: str) -> None:
+  if not name:
+    raise ValueError(f"{kind} name cannot be empty.")
+  if name.endswith("_"):
+    raise ValueError(
+        f"{kind} name {name!r} cannot end with '_' in TF Graph Dict keys."
+    )
+
+
+def _escape_graph_dict_key_part(name: str, is_reserved: bool = False) -> str:
+  # Escape '_' as '__' so a single '_' unambiguously separates key segments
+  # (e.g., ('a_b', 'c') -> 'a__b_c' vs. ('a', 'b_c') -> 'a_b__c').
+  if not name:
+    raise ValueError("TF Graph Dict key segment cannot be empty.")
+  return name if is_reserved else name.replace("_", "__")
+
+
+def tf_graph_dict_node_key(nodeset_name: str, suffix: str) -> str:
   """Key of a node feature (or of the size) in a TF Graph Dict."""
-  return f"{TF_GRAPH_DICT_NODES_PREFIX}{encoded_nodeset_name}_{suffix}"
+  _validate_graph_dict_entity_name(nodeset_name, "Node set")
+  escaped_nodeset = _escape_graph_dict_key_part(nodeset_name)
+  escaped_suffix = _escape_graph_dict_key_part(
+      suffix, is_reserved=suffix in _RESERVED_GRAPH_DICT_SUFFIXES
+  )
+  return f"{TF_GRAPH_DICT_NODES_PREFIX}{escaped_nodeset}_{escaped_suffix}"
 
 
-def tf_graph_dict_edge_key(encoded_edgeset_name: str, suffix: str) -> str:
+def tf_graph_dict_edge_key(edgeset_name: str, suffix: str) -> str:
   """Key of an edge feature (or of the adjacency) in a TF Graph Dict."""
-  return f"{TF_GRAPH_DICT_EDGES_PREFIX}{encoded_edgeset_name}_{suffix}"
-
-
-def _encode_name(name: str) -> str:
-  """Encodes a nodeset, edgeset, or feature name."""
-  encoded = []
-  for char in name:
-    if char.isalnum():
-      encoded.append(char)
-    else:
-      encoded.append(f"{BEGIN_CODE}{ord(char):02x}{END_CODE}")
-  return "".join(encoded)
-
-
-def _decode_name(name: str) -> str:
-  """Decodes a nodeset, edgeset, or feature name."""
-  pattern = rf"{BEGIN_CODE}([0-9a-f]{{2}}){END_CODE}"
-  return re.sub(pattern, lambda match: chr(int(match.group(1), 16)), name)
-
-
-def _has_encoded_pattern(name: str) -> bool:
-  """Checks if a name contains the encoding pattern."""
-  pattern = rf"{BEGIN_CODE}[0-9a-f]{{2}}{END_CODE}"
-  return re.search(pattern, name) is not None
+  _validate_graph_dict_entity_name(edgeset_name, "Edge set")
+  escaped_edgeset = _escape_graph_dict_key_part(edgeset_name)
+  escaped_suffix = _escape_graph_dict_key_part(
+      suffix, is_reserved=suffix in _RESERVED_GRAPH_DICT_SUFFIXES
+  )
+  return f"{TF_GRAPH_DICT_EDGES_PREFIX}{escaped_edgeset}_{escaped_suffix}"
 
 
 def _feature_to_spec(
@@ -185,18 +197,8 @@ def schema_to_spec(
   """Converts a GraphSchema to a TFInMemoryGraph.Spec for tf serialization."""
   node_sets = {}
   for node_set_name, node_schema in schema_.node_sets.items():
-    if _has_encoded_pattern(node_set_name):
-      raise ValueError(
-          f"Node set name '{node_set_name}' contains invalid substring"
-          " matching encoding pattern"
-      )
     features = {}
     for feat_name, feat_schema in node_schema.features.items():
-      if _has_encoded_pattern(feat_name):
-        raise ValueError(
-            f"Feature name '{feat_name}' in node set '{node_set_name}' contains"
-            " invalid substring matching encoding pattern"
-        )
       features[feat_name] = _feature_to_spec(feat_schema)
     node_sets[node_set_name] = tf_in_memory_graph_lib.TFInMemoryNodeSet.Spec(
         num_nodes=tf.TensorSpec(shape=(), dtype=tf.int32),
@@ -205,18 +207,8 @@ def schema_to_spec(
 
   edge_sets = {}
   for edge_set_name, edge_schema in schema_.edge_sets.items():
-    if _has_encoded_pattern(edge_set_name):
-      raise ValueError(
-          f"Edge set name '{edge_set_name}' contains invalid substring"
-          " matching encoding pattern"
-      )
     features = {}
     for feat_name, feat_schema in edge_schema.features.items():
-      if _has_encoded_pattern(feat_name):
-        raise ValueError(
-            f"Feature name '{feat_name}' in edge set '{edge_set_name}' contains"
-            " invalid substring matching encoding pattern"
-        )
       features[feat_name] = _feature_to_spec(feat_schema)
     edge_sets[edge_set_name] = tf_in_memory_graph_lib.TFInMemoryEdgeSet.Spec(
         adjacency=tf.TensorSpec(shape=[2, None], dtype=tf.int64),
@@ -240,25 +232,17 @@ def schema_to_dict_spec(
   """
   result = {}
   for node_set_name, node_schema in schema_.node_sets.items():
-    encoded_node_set_name = _encode_name(node_set_name)
-    key = tf_graph_dict_node_key(encoded_node_set_name, TF_GRAPH_DICT_SIZE_KEY)
-    result[key] = tf.TensorSpec(shape=(), dtype=tf.int32, name=key)
+    key = tf_graph_dict_node_key(node_set_name, TF_GRAPH_DICT_SIZE_KEY)
+    result[key] = tf.TensorSpec(shape=(), dtype=tf.int32)
     for feat_name, feat_schema in node_schema.features.items():
-      key = tf_graph_dict_node_key(
-          encoded_node_set_name, _encode_name(feat_name)
-      )
+      key = tf_graph_dict_node_key(node_set_name, feat_name)
       result[key] = _feature_to_spec(feat_schema)
 
   for edge_set_name, edge_schema in schema_.edge_sets.items():
-    encoded_edge_set_name = _encode_name(edge_set_name)
-    key = tf_graph_dict_edge_key(
-        encoded_edge_set_name, TF_GRAPH_DICT_ADJACENCY_KEY
-    )
-    result[key] = tf.TensorSpec(shape=[2, None], dtype=tf.int64, name=key)
+    key = tf_graph_dict_edge_key(edge_set_name, TF_GRAPH_DICT_ADJACENCY_KEY)
+    result[key] = tf.TensorSpec(shape=[2, None], dtype=tf.int64)
     for feat_name, feat_schema in edge_schema.features.items():
-      key = tf_graph_dict_edge_key(
-          encoded_edge_set_name, _encode_name(feat_name)
-      )
+      key = tf_graph_dict_edge_key(edge_set_name, feat_name)
       result[key] = _feature_to_spec(feat_schema)
   return result
 
@@ -372,27 +356,109 @@ def tf_graph_to_tf_graph_dict(
 
   result = {}
   for node_set_name, node_set in src.node_sets.items():
-    encoded_node_set_name = _encode_name(node_set_name)
-    result[
-        tf_graph_dict_node_key(encoded_node_set_name, TF_GRAPH_DICT_SIZE_KEY)
-    ] = tf.convert_to_tensor(node_set.num_nodes)
+    result[tf_graph_dict_node_key(node_set_name, TF_GRAPH_DICT_SIZE_KEY)] = (
+        tf.convert_to_tensor(node_set.num_nodes)
+    )
     for feat_name, feat_val in node_set.features.items():
-      result[
-          tf_graph_dict_node_key(encoded_node_set_name, _encode_name(feat_name))
-      ] = feat_val
+      result[tf_graph_dict_node_key(node_set_name, feat_name)] = feat_val
 
   for edge_set_name, edge_set in src.edge_sets.items():
-    encoded_edge_set_name = _encode_name(edge_set_name)
     result[
-        tf_graph_dict_edge_key(
-            encoded_edge_set_name, TF_GRAPH_DICT_ADJACENCY_KEY
-        )
+        tf_graph_dict_edge_key(edge_set_name, TF_GRAPH_DICT_ADJACENCY_KEY)
     ] = edge_set.adjacency
     for feat_name, feat_val in edge_set.features.items():
-      result[
-          tf_graph_dict_edge_key(encoded_edge_set_name, _encode_name(feat_name))
-      ] = feat_val
+      result[tf_graph_dict_edge_key(edge_set_name, feat_name)] = feat_val
   return result
+
+
+def _unescape_graph_dict_key_part(name: str) -> str:
+  return name.replace("__", "_")
+
+
+def _declared_escaped_entities(
+    src: tf_in_memory_graph_lib.TFInMemoryGraphDict,
+    prefix: str,
+    reserved_suffix: str,
+) -> set[str]:
+  """Returns the escaped entity names of the size / adjacency keys of `src`."""
+  suffix = f"_{reserved_suffix}"
+  entities = set()
+  for key in src:
+    if key.startswith(prefix) and key.endswith(suffix):
+      escaped_name = key[len(prefix) : -len(suffix)]
+      if _ESCAPED_ENTITY_RE.match(escaped_name) is not None:
+        entities.add(escaped_name)
+  return entities
+
+
+def _split_graph_dict_key(
+    rest: str,
+    prefix: str,
+    src: tf_in_memory_graph_lib.TFInMemoryGraphDict,
+    declared_escaped_entities: set[str],
+) -> tuple[str, str]:
+  """Splits a TF Graph Dict key body into (entity_name, attribute_name).
+
+  Args:
+    rest: The key without its "nodes_" / "edges_" prefix.
+    prefix: The "nodes_" / "edges_" prefix of the key (for error messages and
+      lookups in `src`).
+    src: The TF Graph Dict the key belongs to.
+    declared_escaped_entities: The escaped entity names declared by the size /
+      adjacency keys of `src` (see `_declared_escaped_entities`).
+
+  Returns:
+    The unescaped entity (node set / edge set) name and attribute (feature or
+    reserved) name.
+  """
+  for reserved_key in (TF_GRAPH_DICT_SIZE_KEY, TF_GRAPH_DICT_ADJACENCY_KEY):
+    if rest.endswith(f"_{reserved_key}"):
+      escaped_name = rest[: -len(reserved_key) - 1]
+      if _ESCAPED_ENTITY_RE.match(escaped_name) is None:
+        raise ValueError(
+            f"Invalid entity name in key '{prefix}{rest}' in"
+            " TFInMemoryGraphDict."
+        )
+      return _unescape_graph_dict_key_part(escaped_name), reserved_key
+
+  match = _SINGLE_UNDERSCORE_SPLIT_RE.match(rest)
+  if match is not None:
+    return (
+        _unescape_graph_dict_key_part(match.group(1)),
+        _unescape_graph_dict_key_part(match.group(2)),
+    )
+
+  # `@tf.function` sanitizes '#' to '_' in parameter names, so the key of a
+  # '#'-prefixed feature (e.g. '#id', '#idx') is received as
+  # '{entity}__{feature}' instead of '{entity}_#{feature}'. Recover it by
+  # splitting on the '__' that separates a declared entity name from the
+  # feature name.
+  candidates = []
+  for sep_match in re.finditer("__", rest):
+    escaped_entity = rest[: sep_match.start()]
+    escaped_feat = rest[sep_match.end() :]
+    if (
+        _ESCAPED_ENTITY_RE.match(escaped_entity) is not None
+        and _ESCAPED_SEGMENT_RE.match(escaped_feat) is not None
+        and (
+            not declared_escaped_entities
+            or escaped_entity in declared_escaped_entities
+        )
+        # The un-sanitized key must not already be present.
+        and f"{prefix}{escaped_entity}_#{escaped_feat}" not in src
+    ):
+      candidates.append((escaped_entity, escaped_feat))
+  if len(candidates) > 1:
+    raise ValueError(
+        f"Ambiguous sanitized key '{prefix}{rest}' in TFInMemoryGraphDict."
+    )
+  if candidates:
+    escaped_entity, escaped_feat = candidates[0]
+    return (
+        _unescape_graph_dict_key_part(escaped_entity),
+        f"#{_unescape_graph_dict_key_part(escaped_feat)}",
+    )
+  raise ValueError(f"Unrecognized key '{prefix}{rest}' in TFInMemoryGraphDict.")
 
 
 def tf_graph_dict_to_tf_graph(
@@ -427,29 +493,45 @@ def tf_graph_dict_to_tf_graph(
   edgeset_features = {}
   edgeset_adjacency = {}
 
+  known_escaped_nodesets = _declared_escaped_entities(
+      src, TF_GRAPH_DICT_NODES_PREFIX, TF_GRAPH_DICT_SIZE_KEY
+  )
+  known_escaped_edgesets = _declared_escaped_entities(
+      src, TF_GRAPH_DICT_EDGES_PREFIX, TF_GRAPH_DICT_ADJACENCY_KEY
+  )
+
   for key, val in src.items():
     if key.startswith(TF_GRAPH_DICT_NODES_PREFIX):
-      parts = key[len(TF_GRAPH_DICT_NODES_PREFIX) :].split("_", 1)
-      nodeset_name = _decode_name(parts[0])
-      attr = parts[1]
+      nodeset_name, attr = _split_graph_dict_key(
+          key[len(TF_GRAPH_DICT_NODES_PREFIX) :],
+          TF_GRAPH_DICT_NODES_PREFIX,
+          src,
+          known_escaped_nodesets,
+      )
       if attr == TF_GRAPH_DICT_SIZE_KEY:
         nodeset_num_nodes[nodeset_name] = val
       else:
-        attr = _decode_name(attr)
         if nodeset_name not in nodeset_features:
           nodeset_features[nodeset_name] = {}
         nodeset_features[nodeset_name][attr] = val
     elif key.startswith(TF_GRAPH_DICT_EDGES_PREFIX):
-      parts = key[len(TF_GRAPH_DICT_EDGES_PREFIX) :].split("_", 1)
-      edgeset_name = _decode_name(parts[0])
-      attr = parts[1]
+      edgeset_name, attr = _split_graph_dict_key(
+          key[len(TF_GRAPH_DICT_EDGES_PREFIX) :],
+          TF_GRAPH_DICT_EDGES_PREFIX,
+          src,
+          known_escaped_edgesets,
+      )
       if attr == TF_GRAPH_DICT_ADJACENCY_KEY:
         edgeset_adjacency[edgeset_name] = val
       else:
-        attr = _decode_name(attr)
         if edgeset_name not in edgeset_features:
           edgeset_features[edgeset_name] = {}
         edgeset_features[edgeset_name][attr] = val
+    else:
+      raise ValueError(
+          f"Unrecognized key {key!r} in TFInMemoryGraphDict; expected prefix"
+          f" {TF_GRAPH_DICT_NODES_PREFIX!r} or {TF_GRAPH_DICT_EDGES_PREFIX!r}."
+      )
 
   tf_node_sets = {}
   for name in set(nodeset_num_nodes).union(nodeset_features):
