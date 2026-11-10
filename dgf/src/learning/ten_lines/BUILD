@@ -649,7 +649,7 @@ py_test(
     name = "node_embedding_test",
     timeout = "long",
     srcs = ["node_embedding_test.py"],
-    shard_count = 4,
+    shard_count = 8,
     deps = [
         ":common",
         ":dataset",
