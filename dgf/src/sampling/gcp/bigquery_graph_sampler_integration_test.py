@@ -132,6 +132,7 @@ class BigQueryGraphSamplerIntegrationTest(parameterized.TestCase):
         seed_nodeset=_SEED_NODESET,
         num_hops=num_hops,
         hop_width=hop_width,
+        multi_visit=False,
     )
     bq_sampler = bigquery_graph_sampler_lib.create_bigquery_graph_sampler(
         project=_PROJECT,
@@ -247,7 +248,7 @@ class CornerCaseGraphsTest(parameterized.TestCase):
     )
     graph, schema = graph_in_memory_lib.read_graph(export_path)
     plan = sampling_config_lib.SimpleSamplingConfig(
-        seed_nodeset=seed_nodeset, num_hops=2, hop_width=10
+        seed_nodeset=seed_nodeset, num_hops=2, hop_width=10, multi_visit=False
     )
     bq_sampler = bigquery_graph_sampler_lib.create_bigquery_graph_sampler(
         project=_PROJECT,
@@ -276,7 +277,9 @@ class CornerCaseGraphsTest(parameterized.TestCase):
           project=_PROJECT,
           dataset=_TEST_GRAPHS_DATASET,
           graph=graph_name,
-          plan=sampling_config_lib.SimpleSamplingConfig(seed_nodeset="node"),
+          plan=sampling_config_lib.SimpleSamplingConfig(
+              seed_nodeset="node", multi_visit=False
+          ),
           schema=schema,
       )
 

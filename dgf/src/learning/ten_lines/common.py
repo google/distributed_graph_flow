@@ -1090,6 +1090,16 @@ def schema_to_serving_signature_dict(
     raise ValueError(
         "target_nodeset and target_edgeset are mutually exclusive."
     )
+  for plan in (source_sampling_plan, target_sampling_plan):
+    if plan is not None:
+      sampling_config_lib.check_supported_options(
+          plan,
+          None,
+          "Spanner TRAVERSE_GRAPH serving signature",
+          support_non_with_replacement=True,
+          support_multi_visit=True,
+          support_non_multi_visit=True,
+      )
 
   target_name = target_nodeset if target_nodeset else target_edgeset
   signature: dict[str, Any] = {

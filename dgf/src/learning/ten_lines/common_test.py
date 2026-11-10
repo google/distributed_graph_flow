@@ -567,6 +567,28 @@ class TenLines(parameterized.TestCase):
         },
     )
 
+  def test_schema_to_serving_signature_dict_unsupported_plan_raises(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={"n1": schema_lib.NodeSchema()},
+        edge_sets={"e1": schema_lib.EdgeSchema(source="n1", target="n1")},
+    )
+    plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
+        sampling_config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1", with_replacement=True, temporal_sampling=True
+        ),
+        schema,
+    )
+    with self.assertRaisesRegex(
+        NotImplementedError, "with_replacement=True, temporal_sampling=True"
+    ):
+      common.schema_to_serving_signature_dict(
+          schema_=schema,
+          target_nodeset="n1",
+          model_name="test_model",
+          model_uuid="test_uuid",
+          source_sampling_plan=plan,
+      )
+
   def test_schema_to_serving_signature_dict_link_prediction(self):
     schema = schema_lib.GraphSchema(
         node_sets={
