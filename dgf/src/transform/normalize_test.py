@@ -1920,6 +1920,88 @@ Edge Sets:
     )
 
 
+def _missing_value_schema_and_stats(
+    **feature_stats_kwargs,
+) -> tuple[schema_lib.GraphSchema, statistics_lib.GraphFeatureStatistics]:
+  schema = schema_lib.GraphSchema(
+      node_sets={
+          "nodes": schema_lib.NodeSchema(
+              features={
+                  "f": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.FLOAT_32,
+                      semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                      shape=(),
+                  )
+              }
+          )
+      },
+      edge_sets={},
+  )
+  stats = statistics_lib.GraphFeatureStatistics(
+      node_sets={
+          "nodes": statistics_lib.FeatureSetStatistics(
+              features={
+                  "f": statistics_lib.FeatureStatistics(
+                      count=10,
+                      minimum=0.0,
+                      maximum=1.0,
+                      mean=0.5,
+                      quantiles=[0.0, 0.25, 0.5, 0.75, 1.0],
+                      **feature_stats_kwargs,
+                  )
+              }
+          )
+      }
+  )
+  return schema, stats
+
+
+class NumericalMissingValuePolicyTest(parameterized.TestCase):
+
+  def test_default_is_error(self):
+    self.assertEqual(
+        normalize_lib.AutoNormalizeConfig().numerical_missing_value_policy,
+        normalize_lib.NumericalMissingValuePolicy.ERROR,
+    )
+
+  def test_clean_stats_build(self):
+    schema, stats = _missing_value_schema_and_stats()
+    normalizer = normalize_lib.auto_normalize(schema, stats)
+    self.assertIn(
+        "f_SOFT_QUANTILE",
+        normalizer.output_schema().node_sets["nodes"].features,
+    )
+
+  @parameterized.parameters(
+      dict(num_nan=1), dict(num_posinf=2), dict(num_neginf=3)
+  )
+  def test_non_finite_stats_raise(self, **kwargs):
+    schema, stats = _missing_value_schema_and_stats(**kwargs)
+    with self.assertRaisesRegex(
+        ValueError,
+        r"Feature 'f' in node set 'nodes' has .*"
+        r"numerical_missing_value_policy='error'",
+    ):
+      normalize_lib.auto_normalize(schema, stats)
+
+  def test_kept_raw_feature_is_checked(self):
+    schema, stats = _missing_value_schema_and_stats(num_nan=1)
+    config = normalize_lib.AutoNormalizeConfig(
+        keep_raw_features={("nodes", "f")}
+    )
+    with self.assertRaisesRegex(ValueError, "numerical_missing_value_policy"):
+      normalize_lib.auto_normalize(schema, stats, config)
+
+  def test_config_json_round_trip(self):
+    config = normalize_lib.AutoNormalizeConfig.from_json(  # pyrefly: ignore[missing-attribute]
+        normalize_lib.AutoNormalizeConfig().to_json()  # pyrefly: ignore[missing-attribute]
+    )
+    self.assertIs(
+        config.numerical_missing_value_policy,
+        normalize_lib.NumericalMissingValuePolicy.ERROR,
+    )
+
+
 class TimedeltaNormalizerTest(parameterized.TestCase):
 
   def test_output_schema(self):

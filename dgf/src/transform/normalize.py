@@ -42,6 +42,17 @@ AbstractFeatureNormalizer = normalize_base.AbstractFeatureNormalizer
 TextEmbeddingNormalizer = normalize_text.TextEmbeddingNormalizer
 
 
+class NumericalMissingValuePolicy(enum.StrEnum):
+  """What `auto_normalize` does when float features have NaN/±inf values.
+
+  Checked once on the feature statistics, when the normalizer is created.
+  """
+
+  # Missing values are an error (no fallback).
+  ERROR = "error"
+  # TODO(dtl): Add other policies, like FILL, INDICATOR, and FILL_LEARNED.
+
+
 @normalizer_registry.register
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass(kw_only=True)
@@ -1155,6 +1166,9 @@ class AutoNormalizeConfig:
       be normalized into dense embeddings using `TextEmbeddingNormalizer`.
     text_embedder: Name of a built-in text embedder, a model handle/path, or a
       `TextEmbedderConfig` used when `text_normalize` is True.
+    numerical_missing_value_policy: What to do when the statistics of a float
+      feature report NaN or ±inf values. Checked once, when the normalizer is
+      created; values at normalization time are not checked.
   """
 
   categorical_bytes_to_index: bool = True
@@ -1180,6 +1194,39 @@ class AutoNormalizeConfig:
   calendar_features: tuple[CalendarFeature, ...] = DEFAULT_CALENDAR_FEATURES
   text_normalize: bool = True
   text_embedder: str | normalize_text.TextEmbedderConfig = "nnlm-en-dim128"
+  numerical_missing_value_policy: NumericalMissingValuePolicy = (
+      dataclasses.field(
+          default=NumericalMissingValuePolicy.ERROR,
+          metadata=dataclasses_json.config(
+              decoder=NumericalMissingValuePolicy
+          ),
+      )
+  )
+
+
+def _check_numerical_missing_values(
+    nodeset_name: str,
+    feature_name: str,
+    feature_stats: statistics_lib.FeatureStatistics,
+    policy: NumericalMissingValuePolicy,
+) -> None:
+  """Applies `policy` to the NaN/±inf counts of a numerical float feature."""
+  if policy == NumericalMissingValuePolicy.ERROR:
+    num_missing = (
+        feature_stats.num_nan
+        + feature_stats.num_posinf
+        + feature_stats.num_neginf
+    )
+    if num_missing:
+      raise ValueError(
+          f"Feature '{feature_name}' in node set '{nodeset_name}' has"
+          f" {feature_stats.num_nan} NaN, {feature_stats.num_posinf} +inf and"
+          f" {feature_stats.num_neginf} -inf values in its statistics, which"
+          " conflicts with numerical_missing_value_policy='error'. Please"
+          " clean or impute these values."
+      )
+  else:
+    raise ValueError(f"Unsupported numerical missing value policy: {policy!r}")
 
 
 def auto_normalize(
@@ -1271,6 +1318,20 @@ def auto_normalize(
     nodeset_normalizers = []
     nodeset_stats = stats.node_sets[nodeset_name]
     for feature_name, feature_schema in nodeset_schema.features.items():
+      # Only checks the statistics for NaN/±inf here; the normalizers are
+      # created below. This runs first so that raw (kept) features, e.g. a
+      # regression label, are checked too.
+      if (
+          feature_schema.semantic == schema_lib.FeatureSemantic.NUMERICAL
+          and feature_schema.format.is_float()
+          and feature_name in nodeset_stats.features
+      ):
+        _check_numerical_missing_values(
+            nodeset_name,
+            feature_name,
+            nodeset_stats.features[feature_name],
+            config.numerical_missing_value_policy,
+        )
       if (
           (nodeset_name, feature_name) in config.keep_raw_features
           # Mask features should be preserved.
