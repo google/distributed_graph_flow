@@ -1,4 +1,4 @@
-load("@rules_python//python:py_library.bzl", "py_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
@@ -11,11 +11,13 @@ package(
 py_library(
     name = "weak_dep_base",
     srcs = ["base.py"],
+    type_checking = True,
 )
 
 py_library(
     name = "weak_dep_tensorflow",
     srcs = ["weak_dep_tensorflow.py"],
+    type_checking = True,
     deps = [
         ":weak_dep_base",
         # tensorflow dep,  # build_cleaner: keep
@@ -25,6 +27,7 @@ py_library(
 py_library(
     name = "weak_dep_apache_beam",
     srcs = ["weak_dep_apache_beam.py"],
+    type_checking = True,
     deps = [
         ":weak_dep_base",
         # apache_beam dep,  # build_cleaner: keep
@@ -34,6 +37,7 @@ py_library(
 py_library(
     name = "weak_dep_tensorflow_gnn",
     srcs = ["weak_dep_tensorflow_gnn.py"],
+    type_checking = True,
     deps = [
         ":weak_dep_base",
         # tensorflow_gnn dep,  # build_cleaner: keep
@@ -43,6 +47,7 @@ py_library(
 py_library(
     name = "weak_dep_clu",
     srcs = ["weak_dep_clu.py"],
+    type_checking = True,
     deps = [
         ":weak_dep_base",
         # clu/metric_writers dep,  # build_cleaner: keep
@@ -52,12 +57,14 @@ py_library(
 py_library(
     name = "weak_dep_ogb",
     srcs = ["weak_dep_ogb.py"],
+    type_checking = True,
     deps = [":weak_dep_base"],
 )
 
 py_library(
     name = "weak_dep_bagz",
     srcs = ["weak_dep_bagz.py"],
+    type_checking = True,
     deps = [
         ":weak_dep_base",
     ],
@@ -66,6 +73,7 @@ py_library(
 py_library(
     name = "weak_dep_aiplatform",
     srcs = ["weak_dep_aiplatform.py"],
+    type_checking = True,
     deps = [
         ":weak_dep_base",
     ],
@@ -74,6 +82,7 @@ py_library(
 py_library(
     name = "weak_dep_tensorflow_hub",
     srcs = ["weak_dep_tensorflow_hub.py"],
+    type_checking = True,
     deps = [
         ":weak_dep_base",
         # tensorflow_hub dep,  # build_cleaner: keep
@@ -83,6 +92,7 @@ py_library(
 py_library(
     name = "weak_dep_tensorflow_text",
     srcs = ["weak_dep_tensorflow_text.py"],
+    type_checking = True,
     deps = [
         ":weak_dep_base",
         # tensorflow_text dep,  # build_cleaner: keep
@@ -92,6 +102,7 @@ py_library(
 py_library(
     name = "weak_dep_keras_hub",
     srcs = ["weak_dep_keras_hub.py"],
+    type_checking = True,
     deps = [
         ":weak_dep_base",
         # keras_hub dep,  # build_cleaner: keep
@@ -101,11 +112,13 @@ py_library(
 py_library(
     name = "weak_dep",
     srcs = ["__init__.py"],
+    type_checking = True,
 )
 
 py_test(
     name = "weak_dep_test",
     srcs = ["weak_dep_test.py"],
+    type_checking = True,
     deps = [
         ":weak_dep_base",
         # absl/testing:absltest dep,

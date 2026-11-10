@@ -1,4 +1,4 @@
-load("@rules_python//python:py_library.bzl", "py_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
@@ -15,12 +15,14 @@ package(
 py_library(
     name = "validate",
     srcs = ["validate.py"],
+    type_checking = True,
     deps = ["//dgf/src/util:log"],
 )
 
 py_library(
     name = "in_memory_graph",
     srcs = ["in_memory_graph.py"],
+    type_checking = True,
     deps = [
         ":validate",
         "//dgf/src/analyse:schema",
@@ -34,6 +36,7 @@ py_library(
 py_library(
     name = "graph_snapshots",
     srcs = ["graph_snapshots.py"],
+    type_checking = True,
     deps = [
         ":in_memory_graph",
         ":validate",
@@ -51,6 +54,7 @@ py_library(
 py_test(
     name = "validate_test",
     srcs = ["validate_test.py"],
+    type_checking = True,
     deps = [
         ":validate",
         # absl/testing:absltest dep,
@@ -61,6 +65,7 @@ py_test(
 py_test(
     name = "graph_snapshots_test",
     srcs = ["graph_snapshots_test.py"],
+    type_checking = True,
     deps = [
         ":graph_snapshots",
         ":validate",
@@ -79,6 +84,7 @@ py_test(
 py_test(
     name = "in_memory_graph_test",
     srcs = ["in_memory_graph_test.py"],
+    type_checking = True,
     deps = [
         ":in_memory_graph",
         ":validate",

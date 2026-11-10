@@ -1,7 +1,7 @@
-load("@rules_python//python:py_library.bzl", "py_library")
-load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
 load("@nanobind_bazel//:build_defs.bzl", "nanobind_extension")
 load("@nanobind_bazel//:build_defs.bzl", "nanobind_library")
 
@@ -47,6 +47,7 @@ py_library(
 py_library(
     name = "proto",
     srcs = ["proto.py"],
+    type_checking = True,
     deps = [
         ":filesystem",
     ],
@@ -55,6 +56,7 @@ py_library(
 py_library(
     name = "filesystem",
     srcs = ["filesystem.py"],
+    type_checking = True,
     deps = [
         # absl/logging dep,
         # etils/epath dep,
@@ -65,6 +67,7 @@ py_library(
 py_library(
     name = "shard",
     srcs = ["shard.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/util/weak_dep:weak_dep_tensorflow",
     ],
@@ -73,6 +76,7 @@ py_library(
 py_library(
     name = "test_util",
     srcs = ["test_util.py"],
+    type_checking = True,
     deps = [
         # absl/flags dep,
         # absl/testing:absltest dep,
@@ -87,6 +91,7 @@ py_library(
 py_library(
     name = "json",
     srcs = ["json.py"],
+    type_checking = True,
     deps = [
         ":filesystem",
     ],
@@ -162,6 +167,7 @@ cc_library(
 py_library(
     name = "util_py",
     srcs = ["util.py"],
+    type_checking = True,
     deps = [
         ":log",
         # numpy dep,
@@ -171,11 +177,13 @@ py_library(
 py_library(
     name = "html_util",
     srcs = ["html_util.py"],
+    type_checking = True,
 )
 
 py_library(
     name = "log",
     srcs = ["log.py"],
+    type_checking = True,
     deps = [
         # absl/logging dep,
     ],
@@ -184,6 +192,7 @@ py_library(
 py_library(
     name = "temporal",
     srcs = ["temporal.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
@@ -236,6 +245,7 @@ bzl_library(
 py_library(
     name = "dataclass_registry",
     srcs = ["dataclass_registry.py"],
+    type_checking = True,
     deps = [
         # dataclasses_json dep,
     ],
@@ -247,6 +257,7 @@ py_library(
 py_test(
     name = "gen_test_graph_test",
     srcs = ["gen_test_graph_test.py"],
+    type_checking = True,
     deps = [
         ":gen_test_graph",
         ":test_util",
@@ -261,6 +272,7 @@ py_test(
 py_test(
     name = "shard_test",
     srcs = ["shard_test.py"],
+    type_checking = True,
     deps = [
         ":shard",
         # absl/testing:absltest dep,
@@ -272,6 +284,7 @@ py_test(
     name = "test_util_test",
     srcs = ["test_util_test.py"],
     data = ["//test_data"],
+    type_checking = True,
     deps = [
         ":test_util",
         # absl/testing:absltest dep,
@@ -282,6 +295,7 @@ py_test(
 py_test(
     name = "json_test",
     srcs = ["json_test.py"],
+    type_checking = True,
     deps = [
         ":json",
         # absl/testing:absltest dep,
@@ -295,6 +309,7 @@ py_test(
         "manual",
         "notap",
     ],
+    type_checking = True,
     deps = [
         ":filesystem",
         # absl/flags dep,
@@ -318,6 +333,7 @@ cc_test(
 py_test(
     name = "nanobind_util_test",
     srcs = ["nanobind_util_test.py"],
+    type_checking = True,
     deps = [
         ":nanobind_util_test_ext",
         ":test_util",
@@ -348,6 +364,7 @@ cc_test(
 py_test(
     name = "filesystem_test",
     srcs = ["filesystem_test.py"],
+    type_checking = True,
     deps = [
         ":filesystem",
         # absl/testing:absltest dep,
@@ -358,6 +375,7 @@ py_test(
     name = "util_py_test",
     srcs = ["util_test.py"],
     main = "util_test.py",
+    type_checking = True,
     deps = [
         ":util_py",
         # absl/testing:absltest dep,
@@ -369,6 +387,7 @@ py_test(
 py_test(
     name = "dataclass_registry_test",
     srcs = ["dataclass_registry_test.py"],
+    type_checking = True,
     deps = [
         ":dataclass_registry",
         ":test_util",
@@ -381,6 +400,7 @@ py_test(
 py_test(
     name = "util_ext_test",
     srcs = ["util_ext_test.py"],
+    type_checking = True,
     deps = [
         ":util_ext",
         # absl/testing:absltest dep,
@@ -392,6 +412,7 @@ py_test(
 py_test(
     name = "log_test",
     srcs = ["log_test.py"],
+    type_checking = True,
     deps = [
         ":log",
         # absl/testing:absltest dep,
@@ -401,6 +422,7 @@ py_test(
 py_test(
     name = "temporal_test",
     srcs = ["temporal_test.py"],
+    type_checking = True,
     deps = [
         ":temporal",
         # absl/testing:absltest dep,
@@ -413,11 +435,13 @@ py_test(
 py_library(
     name = "options",
     srcs = ["options.py"],
+    type_checking = True,
 )
 
 py_test(
     name = "options_test",
     srcs = ["options_test.py"],
+    type_checking = True,
     deps = [
         ":options",
         # absl/testing:absltest dep,
