@@ -1303,6 +1303,103 @@ Node(nodeset_idx=0, children=[
         debug_sampling=True,
     )
 
+  @parameterized.named_parameters(
+      # Node 0 has "e1" edges to node 1 (ts=15) and node 2 (ts=25).
+      dict(testcase_name="both_valid", seed_timestamp=30, expected=[0, 2]),
+      dict(testcase_name="one_valid", seed_timestamp=20, expected=[0, 1]),
+      dict(testcase_name="none_valid", seed_timestamp=10, expected=[0]),
+  )
+  def test_temporal_sampling_last(
+      self, seed_timestamp: int, expected: list[int]
+  ):
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
+        include_e2=False
+    )
+    sampler = in_memory_sampler_lib.create_sampler(
+        graph,
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1",
+            num_hops=1,
+            hop_width=1,
+            reverse=False,
+            temporal_sampling=True,
+            temporal_strategy=config_lib.TemporalStrategy.LAST,
+        ),
+        schema,
+        return_features=False,
+        return_node_idxs=True,
+        batch_size=5,
+    )
+    for _ in range(5):
+      sample = sampler.sample([0], seed_timestamps=[seed_timestamp])[0]
+      np.testing.assert_array_equal(
+          sample.node_sets["n1"].features["#idx"], expected
+      )
+      np.testing.assert_array_equal(
+          sample.edge_sets["e1"].adjacency,
+          [[0], [1]] if len(expected) == 2 else np.zeros((2, 0)),
+      )
+
+  def test_temporal_sampling_last_ignored_by_subgraph(self):
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
+        include_e2=False
+    )
+    sampler = in_memory_sampler_lib.create_sampler(
+        graph,
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1",
+            num_hops=1,
+            hop_width=1,
+            reverse=False,
+            temporal_sampling=True,
+            temporal_strategy=config_lib.TemporalStrategy.LAST,
+        ),
+        schema,
+        return_features=False,
+        return_node_idxs=True,
+        batch_size=5,
+        debug_sampling=True,
+    )
+    # Like the seed timestamps, the temporal strategy is ignored: the first
+    # neighbor (in debug mode) is returned instead of the most recent one.
+    np.testing.assert_array_equal(
+        sampler.subgraph([0]).node_sets["n1"].features["#idx"], [0, 1]
+    )
+
+  def test_temporal_sampling_last_requires_temporal_sampling(self):
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
+        include_e2=False
+    )
+    with self.assertRaisesRegex(ValueError, "requires temporal_sampling=True"):
+      in_memory_sampler_lib.create_sampler(
+          graph,
+          config_lib.SimpleSamplingConfig(
+              seed_nodeset="n1",
+              temporal_strategy=config_lib.TemporalStrategy.LAST,
+          ),
+          schema,
+          batch_size=5,
+      )
+
+  def test_temporal_sampling_last_edgeset_without_creation_time(self):
+    graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
+        include_e2=True
+    )
+    with self.assertRaisesRegex(
+        ValueError, "edgeset 'e2' which does not have a creation time"
+    ):
+      in_memory_sampler_lib.create_sampler(
+          graph,
+          config_lib.SimpleSamplingConfig(
+              seed_nodeset="n1",
+              temporal_sampling=True,
+              propagate_timestamp_to_edges=False,
+              temporal_strategy=config_lib.TemporalStrategy.LAST,
+          ),
+          schema,
+          batch_size=5,
+      )
+
   def test_temporal_sampling_missing_seed_timestamp(self):
     graph, schema = gen_test_graph.generate_temporal_in_memory_graph(
         include_e2=True

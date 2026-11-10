@@ -65,7 +65,10 @@ def _append_plan_node_str(
     edge_desc = f"{edge.edgeset}"
     if edge.reversed:
       edge_desc += " (reversed)"
-    edge_desc += f" [width={edge.hop_width}] ➔ {edge.node.nodeset}"
+    edge_desc += f" [width={edge.hop_width}"
+    if edge.temporal_strategy != config_lib.TemporalStrategy.UNIFORM:
+      edge_desc += f", {edge.temporal_strategy.value}"
+    edge_desc += f"] ➔ {edge.node.nodeset}"
 
     lines.append(f"{prefix}{marker}{edge_desc}")
 

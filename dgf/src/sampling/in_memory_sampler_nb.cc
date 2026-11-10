@@ -67,6 +67,13 @@ absl::StatusOr<SamplingPlan> CreateSamplingPlan(
       DGF_GET_ATTR_OR_RETURN(int, hop_width, py_child, "hop_width");
       planedge.hop_width = hop_width;
 
+      DGF_GET_ATTR_OR_RETURN(nb::object, py_temporal_strategy, py_child,
+                             "temporal_strategy");
+      DGF_GET_ATTR_OR_RETURN(std::string, temporal_strategy_name,
+                             py_temporal_strategy, "value");
+      DGF_ASSIGN_OR_RETURN(planedge.temporal_strategy,
+                           ParseTemporalStrategy(temporal_strategy_name));
+
       DGF_GET_ATTR_OR_RETURN(nb::object, py_node, py_child, "node");
       DGF_ASSIGN_OR_RETURN(planedge.node, parse_plan(py_node));
 

@@ -89,7 +89,49 @@ void SampleDistinct(std::vector<InputIdx>::const_iterator first,
   }
 }
 
+// Samples the neighbors of source_node anterior to seed_timestamp with the
+// given temporal strategy.
+absl::Status SampleWithTimestamp(const AdjacencyIndex& edges,
+                                 const TemporalStrategy strategy,
+                                 const bool debug_sampling,
+                                 const InputIdx source_node,
+                                 const Timestamp seed_timestamp,
+                                 const std::size_t num_samples,
+                                 std::vector<InputIdx>* result, Rng* rng) {
+  switch (strategy) {
+    case TemporalStrategy::kUniform:
+      if (debug_sampling) {
+        return edges.SampleFirstWithTimestamp(source_node, seed_timestamp,
+                                              num_samples, result);
+      }
+      return edges.SampleRandomUniformWithTimestamp(source_node, seed_timestamp,
+                                                    num_samples, result, rng);
+    case TemporalStrategy::kLast:
+      return edges.SampleLastWithTimestamp(source_node, seed_timestamp,
+                                           num_samples, result);
+  }
+  return absl::UnimplementedError(absl::StrCat("Temporal strategy ",
+                                               TemporalStrategyName(strategy),
+                                               " not implemented"));
+}
+
 }  // namespace
+
+std::string_view TemporalStrategyName(const TemporalStrategy strategy) {
+  for (const auto& [value, name] : kTemporalStrategyNames) {
+    if (value == strategy) return name;
+  }
+  return "UNKNOWN";
+}
+
+absl::StatusOr<TemporalStrategy> ParseTemporalStrategy(
+    const std::string_view name) {
+  for (const auto& [value, value_name] : kTemporalStrategyNames) {
+    if (value_name == name) return value;
+  }
+  return absl::InvalidArgumentError(
+      absl::StrCat("Unknown temporal strategy \"", name, "\""));
+}
 
 absl::Status AdjacencyIndex::SampleRandomUniform(
     const InputIdx source_node, const std::size_t num_samples,
@@ -384,16 +426,18 @@ absl::Status SampleBuilder::RecursiveGrow(
     // Sample target nodes / edges.
     if (seed_timestamp.has_value()) {
       DGF_STATUS_CHECK(index.edgeset_to_mask_idx_ == -1);
-      if (index.debug_sampling_) {
-        DGF_RETURN_IF_ERROR(edges->SampleFirstWithTimestamp(
-            source_node, *seed_timestamp, plan_edge.hop_width,
-            &cache_node_idxs));
-      } else {
-        DGF_RETURN_IF_ERROR(edges->SampleRandomUniformWithTimestamp(
-            source_node, *seed_timestamp, plan_edge.hop_width, &cache_node_idxs,
-            &rng));
-      }
+      DGF_RETURN_IF_ERROR(SampleWithTimestamp(
+          *edges, plan_edge.temporal_strategy, index.debug_sampling_,
+          source_node, *seed_timestamp, plan_edge.hop_width, &cache_node_idxs,
+          &rng));
     } else {
+      if (!ignore_temporal_strategy &&
+          plan_edge.temporal_strategy != TemporalStrategy::kUniform) {
+        return absl::InvalidArgumentError(absl::StrCat(
+            "Temporal strategy ",
+            TemporalStrategyName(plan_edge.temporal_strategy),
+            " requires temporal sampling (i.e., seed timestamps)"));
+      }
       InputIdx current_masked_edge_idx = -1;
       if (plan_edge.edgeset_idx == index.edgeset_to_mask_idx_) {
         current_masked_edge_idx = masked_edge_idx;
@@ -477,6 +521,7 @@ absl::Status SampleBuilder::Grow(const SamplerIndex& index,
   const bool subgraph = mode == GrowMode::kSubGraph;
   with_replacement = !subgraph && index.plan_.with_replacement;
   multi_visit = !subgraph && index.plan_.multi_visit;
+  ignore_temporal_strategy = subgraph;
 
   // Pre-allocate recursion cache to avoid reallocations during recursion.
   if (recursion_cache.size() < index.plan_.num_steps) {
@@ -615,6 +660,33 @@ absl::Status AdjacencyIndex::SampleFirstWithTimestamp(
     auto last = first + count;
     result->insert(result->end(), first, last);
   }
+  return absl::OkStatus();
+}
+
+absl::Status AdjacencyIndex::SampleLastWithTimestamp(
+    InputIdx source_node, Timestamp seed_timestamp, std::size_t num_samples,
+    std::vector<InputIdx>* result) const {
+  if (source_node + 1 >= source_blocks.size()) {
+    return absl::InvalidArgumentError(absl::StrCat(
+        "The source node idx ", source_node,
+        " is out of bounds. Should be lower than ", source_blocks.size() - 1));
+  }
+  if (timestamps.size() != target_node_idxs.size()) {
+    return absl::InvalidArgumentError(
+        "The LAST temporal strategy requires edges with timestamps.");
+  }
+  result->clear();
+
+  const InputIdx start_idx = source_blocks[source_node];
+  const InputIdx end_idx = source_blocks[source_node + 1];
+  const auto first_time = timestamps.begin() + start_idx;
+  const auto end_valid_it = std::upper_bound(
+      first_time, timestamps.begin() + end_idx, seed_timestamp);
+  const std::size_t num_valid = std::distance(first_time, end_valid_it);
+  const std::size_t count = std::min(num_samples, num_valid);
+
+  const auto end_valid = target_node_idxs.begin() + start_idx + num_valid;
+  result->insert(result->end(), end_valid - count, end_valid);
   return absl::OkStatus();
 }
 

@@ -14,6 +14,7 @@
 #include <random>
 #include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -181,7 +182,35 @@ struct AdjacencyIndex {
                                         Timestamp seed_timestamp,
                                         std::size_t num_samples,
                                         std::vector<InputIdx>* result) const;
+
+  // Samples the last (i.e., most recent) num_samples target nodes anterior to
+  // seed_timestamp. Fails if the index has no timestamps.
+  absl::Status SampleLastWithTimestamp(InputIdx source_node,
+                                       Timestamp seed_timestamp,
+                                       std::size_t num_samples,
+                                       std::vector<InputIdx>* result) const;
 };
+
+// How the neighbors are selected among the valid ones during temporal sampling.
+enum class TemporalStrategy {
+  // Selected uniformly at random.
+  kUniform,
+  // The most recent ones are selected.
+  kLast,
+};
+
+// Names of the temporal strategies, as used in the Python API.
+inline constexpr std::pair<TemporalStrategy, std::string_view>
+    kTemporalStrategyNames[] = {
+        {TemporalStrategy::kUniform, "UNIFORM"},
+        {TemporalStrategy::kLast, "LAST"},
+    };
+
+// Returns the name of a temporal strategy.
+std::string_view TemporalStrategyName(TemporalStrategy strategy);
+
+// Returns the temporal strategy with the given name.
+absl::StatusOr<TemporalStrategy> ParseTemporalStrategy(std::string_view name);
 
 // Creates map "m" such that "m[string_list[i]] = i".
 absl::flat_hash_map<std::string, int> IndexStringValues(
@@ -223,13 +252,19 @@ struct SamplingPlan {
     bool reversed;
     std::unique_ptr<Node> node;
     int hop_width;
+    TemporalStrategy temporal_strategy = TemporalStrategy::kUniform;
 
     // Debug string
     std::string to_string(int indent) const {
       std::string prefix(indent * 2, ' ');
-      return absl::StrCat(prefix, "Edge(edgeset_idx=", edgeset_idx,
-                          ", reversed=", reversed, ", hop_width=", hop_width,
-                          ", node=\n", node->to_string(indent + 1), ")");
+      return absl::StrCat(
+          prefix, "Edge(edgeset_idx=", edgeset_idx, ", reversed=", reversed,
+          ", hop_width=", hop_width,
+          temporal_strategy == TemporalStrategy::kUniform
+              ? ""
+              : absl::StrCat(", temporal_strategy=",
+                             TemporalStrategyName(temporal_strategy)),
+          ", node=\n", node->to_string(indent + 1), ")");
     }
   };
 
@@ -353,6 +388,9 @@ struct SampleBuilder {
   // Traversal options of the current `Grow` call.
   bool with_replacement = false;
   bool multi_visit = true;
+  // If true, the temporal strategies of the plan are ignored (sub-graph
+  // extraction).
+  bool ignore_temporal_strategy = false;
 
   // Random number generator. Re-seeded (via `MakeRng`) before each sample.
   Rng rng;

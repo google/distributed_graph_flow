@@ -243,6 +243,57 @@ TEST(InMemorySamplerTest, SampleWithTimestamp_FiltersFutureEdges) {
   EXPECT_THAT(result, ElementsAre(1));
 }
 
+TEST(InMemorySamplerTest, SampleLastWithTimestamp) {
+  std::vector<Edge<true, false>> edges = {
+      {.source = 0, .target = 1, .timestamp = 15},
+      {.source = 0, .target = 2, .timestamp = 25},
+      {.source = 0, .target = 3, .timestamp = 35},
+      {.source = 1, .target = 3, .timestamp = 5}};
+  ASSERT_OK_AND_ASSIGN(AdjacencyIndex index,
+                       (AdjacencyIndex::CreateFromEdgeList<true, false>(
+                           std::move(edges), 4, 4)));
+  std::vector<std::size_t> result;
+  EXPECT_OK(index.SampleLastWithTimestamp(
+      /*source_node=*/0, /*seed_timestamp=*/30, /*num_samples=*/1, &result));
+  EXPECT_THAT(result, ElementsAre(2));
+  EXPECT_OK(index.SampleLastWithTimestamp(
+      /*source_node=*/0, /*seed_timestamp=*/35, /*num_samples=*/2, &result));
+  EXPECT_THAT(result, ElementsAre(2, 3));
+  EXPECT_OK(index.SampleLastWithTimestamp(
+      /*source_node=*/0, /*seed_timestamp=*/30, /*num_samples=*/5, &result));
+  EXPECT_THAT(result, ElementsAre(1, 2));
+  EXPECT_OK(index.SampleLastWithTimestamp(
+      /*source_node=*/0, /*seed_timestamp=*/10, /*num_samples=*/2, &result));
+  EXPECT_THAT(result, IsEmpty());
+  EXPECT_OK(index.SampleLastWithTimestamp(
+      /*source_node=*/2, /*seed_timestamp=*/100, /*num_samples=*/2, &result));
+  EXPECT_THAT(result, IsEmpty());
+}
+
+TEST(InMemorySamplerTest, SampleLastWithTimestamp_NoEdges) {
+  ASSERT_OK_AND_ASSIGN(AdjacencyIndex index,
+                       (AdjacencyIndex::CreateFromEdgeList<true, false>(
+                           /*edges=*/{}, 2, 2)));
+  std::vector<std::size_t> result;
+  EXPECT_OK(index.SampleLastWithTimestamp(
+      /*source_node=*/0, /*seed_timestamp=*/30, /*num_samples=*/1, &result));
+  EXPECT_THAT(result, IsEmpty());
+}
+
+TEST(InMemorySamplerTest, SampleLastWithTimestamp_NoTimestamps) {
+  std::vector<Edge<false, false>> edges = {{.source = 0, .target = 1}};
+  ASSERT_OK_AND_ASSIGN(AdjacencyIndex index,
+                       (AdjacencyIndex::CreateFromEdgeList<false, false>(
+                           std::move(edges), 2, 2)));
+  std::vector<std::size_t> result;
+  EXPECT_EQ(index
+                .SampleLastWithTimestamp(
+                    /*source_node=*/0, /*seed_timestamp=*/30,
+                    /*num_samples=*/1, &result)
+                .code(),
+            absl::StatusCode::kInvalidArgument);
+}
+
 // New tests for edge masking
 
 TEST(InMemorySamplerTest, SampleFirst_WithMasking) {

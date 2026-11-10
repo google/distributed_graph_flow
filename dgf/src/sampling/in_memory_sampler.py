@@ -17,7 +17,8 @@
 This file defines three graph sampling methods. All of them traverse the
 sampling plan from the seed nodes. At each expanded node, they pick up to
 `hop_width` random edges per edgeset and direction (all the edges if the node
-has fewer).
+has fewer). With temporal sampling and temporal_strategy=TemporalStrategy.LAST,
+the hop_width most recent valid edges are picked instead.
 
 - `sample`: Builds an independent graph sample for each seed node. A node can be
   reached several times through different paths.
@@ -1049,6 +1050,8 @@ def create_sampler(
     )
   else:
     sampling_graph = graph
+
+  config_lib.check_temporal_strategies(plan, edgeset_timestamp_features.keys())
 
   if seed is None:
     seed = -1

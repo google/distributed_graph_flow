@@ -574,12 +574,16 @@ class TenLines(parameterized.TestCase):
     )
     plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
         sampling_config_lib.SimpleSamplingConfig(
-            seed_nodeset="n1", with_replacement=True, temporal_sampling=True
+            seed_nodeset="n1",
+            with_replacement=True,
+            temporal_sampling=True,
+            temporal_strategy=sampling_config_lib.TemporalStrategy.LAST,
         ),
         schema,
     )
     with self.assertRaisesRegex(
-        NotImplementedError, "with_replacement=True, temporal_sampling=True"
+        NotImplementedError,
+        "with_replacement=True, temporal_sampling=True, temporal_strategy=LAST",
     ):
       common.schema_to_serving_signature_dict(
           schema_=schema,

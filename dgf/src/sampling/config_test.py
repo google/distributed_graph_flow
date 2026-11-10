@@ -199,6 +199,48 @@ class ConfigTest(parameterized.TestCase):
         schema,
     )
 
+  def test_temporal_strategy_propagated_and_serialized(self):
+    plan = self._two_hop_plan(
+        temporal_sampling=True,
+        temporal_strategy=config_lib.TemporalStrategy.LAST,
+    )
+    edge = plan.root.children[0]
+    self.assertEqual(edge.temporal_strategy, config_lib.TemporalStrategy.LAST)
+    self.assertEqual(
+        edge.node.children[0].temporal_strategy,
+        config_lib.TemporalStrategy.LAST,
+    )
+    self.assertIn('"temporal_strategy": "LAST"', plan.to_json())  # pyrefly: ignore[missing-attribute]
+    self.assertEqual(
+        config_lib.SamplingPlan.from_json(plan.to_json()),  # pyrefly: ignore[missing-attribute]
+        plan,
+    )
+
+  def test_check_temporal_strategies(self):
+    config_lib.check_temporal_strategies(self._two_hop_plan(), set())
+    config_lib.check_temporal_strategies(
+        self._two_hop_plan(
+            temporal_sampling=True,
+            temporal_strategy=config_lib.TemporalStrategy.LAST,
+        ),
+        {"e1"},
+    )
+    with self.assertRaisesRegex(ValueError, "requires temporal_sampling=True"):
+      config_lib.check_temporal_strategies(
+          self._two_hop_plan(
+              temporal_strategy=config_lib.TemporalStrategy.LAST
+          ),
+          {"e1"},
+      )
+    with self.assertRaisesRegex(ValueError, "does not have a creation time"):
+      config_lib.check_temporal_strategies(
+          self._two_hop_plan(
+              temporal_sampling=True,
+              temporal_strategy=config_lib.TemporalStrategy.LAST,
+          ),
+          set(),
+      )
+
   def test_check_supported_options(self):
     config_lib.check_supported_options(
         self._two_hop_plan(multi_visit=False),
@@ -210,10 +252,15 @@ class ConfigTest(parameterized.TestCase):
     with self.assertRaisesRegex(
         NotImplementedError,
         "The my sampler does not support the following options:"
-        " with_replacement=True, temporal_sampling=True",
+        " with_replacement=True, temporal_sampling=True,"
+        " temporal_strategy=LAST",
     ):
       config_lib.check_supported_options(
-          self._two_hop_plan(with_replacement=True, temporal_sampling=True),
+          self._two_hop_plan(
+              with_replacement=True,
+              temporal_sampling=True,
+              temporal_strategy=config_lib.TemporalStrategy.LAST,
+          ),
           None,
           "my sampler",
           support_non_with_replacement=True,

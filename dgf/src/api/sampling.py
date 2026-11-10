@@ -22,6 +22,7 @@ from dgf.src.sampling.in_memory_sampler import Sampler
 
 from dgf.src.sampling.config import SimpleSamplingConfig
 from dgf.src.sampling.config import SamplingPlan
+from dgf.src.sampling.config import TemporalStrategy
 from dgf.src.sampling.config import simple_sampling_config_to_sampling_plan
 
 # TODO: Use third_party/py/dgf/src/api/beam/sampling.py instead.

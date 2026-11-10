@@ -26,10 +26,21 @@ This file defines the following important objects:
 """
 
 import collections
+from collections.abc import Collection
 import dataclasses
+import enum
 import dataclasses_json
 from dgf.src.data import schema as schema_lib
 from dgf.src.util import temporal as temporal_util
+
+
+class TemporalStrategy(enum.Enum):
+  """How the valid neighbors are selected during temporal sampling."""
+
+  # Selected uniformly at random.
+  UNIFORM = "UNIFORM"
+  # The most recent ones are selected.
+  LAST = "LAST"
 
 
 @dataclasses_json.dataclass_json
@@ -77,6 +88,7 @@ class SimpleSamplingConfig:
       `dgf.transform.propagate_timestamp_to_edges` on the graph, except that the
       propagation is done by the sampler and is not visible in the graph, the
       schema, or the samples.
+    temporal_strategy: How the neighbors are selected among the valid ones.
   """
 
   seed_nodeset: str
@@ -88,6 +100,7 @@ class SimpleSamplingConfig:
   multi_visit: bool = True
   max_timeseries_len: int = 32
   propagate_timestamp_to_edges: bool = True
+  temporal_strategy: TemporalStrategy = TemporalStrategy.UNIFORM
 
 
 @dataclasses.dataclass
@@ -109,12 +122,14 @@ class PlanEdge:
     reversed: Whether the edge is traversed in the reverse direction.
     node: The `PlanNode` reached by this step.
     hop_width: The number of neighbors to sample using this edgeset.
+    temporal_strategy: How the neighbors are selected during temporal sampling.
   """
 
   edgeset: str
   reversed: bool
   node: PlanNode
   hop_width: int
+  temporal_strategy: TemporalStrategy = TemporalStrategy.UNIFORM
 
 
 @dataclasses_json.dataclass_json
@@ -191,6 +206,7 @@ def simple_sampling_config_to_sampling_plan(
                 reversed=is_reversed,
                 node=rec_build(dst_nodeset, depth=depth + 1),
                 hop_width=src.hop_width,
+                temporal_strategy=src.temporal_strategy,
             )
         )
     return PlanNode(nodeset, children_list)
@@ -218,6 +234,50 @@ def edgesets_in_plan(plan: SamplingPlan) -> set[str]:
   return edgesets
 
 
+def _plan_edges(plan: SamplingPlan) -> list[PlanEdge]:
+  """Lists the edges of a sampling plan."""
+  edges = []
+
+  def rec_scan(node: PlanNode):
+    for child in node.children:
+      edges.append(child)
+      rec_scan(child.node)
+
+  rec_scan(plan.root)
+  return edges
+
+
+def check_temporal_strategies(
+    plan: SamplingPlan, timestamped_edgesets: Collection[str]
+) -> None:
+  """Checks the temporal strategies of the edges of a sampling plan.
+
+  Args:
+    plan: The sampling plan.
+    timestamped_edgesets: The edgesets with a creation time (possibly propagated
+      from their nodes).
+
+  Raises:
+    ValueError: If LAST is used without temporal sampling or on an edgeset
+      without creation time.
+  """
+  for edge in _plan_edges(plan):
+    if edge.temporal_strategy != TemporalStrategy.LAST:
+      continue
+    if not plan.temporal_sampling:
+      raise ValueError(
+          f"temporal_strategy=LAST (edgeset {edge.edgeset!r}) requires"
+          " temporal_sampling=True."
+      )
+    if edge.edgeset not in timestamped_edgesets:
+      raise ValueError(
+          f"temporal_strategy=LAST is used on edgeset {edge.edgeset!r} which"
+          " does not have a creation time. Add a creation time to the edgeset"
+          " or to its nodesets (with propagate_timestamp_to_edges=True), or use"
+          " temporal_strategy=UNIFORM."
+      )
+
+
 def check_supported_options(
     plan: SamplingPlan,
     schema: schema_lib.GraphSchema | None,
@@ -228,13 +288,14 @@ def check_supported_options(
     support_multi_visit: bool = False,
     support_non_multi_visit: bool = False,
     support_temporal_sampling: bool = False,
+    support_last_temporal_strategy: bool = False,
     support_timeseries: bool = False,
 ) -> None:
-  """Raises a NotImplementedError if `plan` uses options a sampler lacks.
+  """Raises a NotImplementedError if the plan uses options a sampler lacks.
 
-  Each `support_<option>` argument tells if the sampler implements an option
-  value (e.g., `support_non_multi_visit` for `multi_visit=False`, or
-  `support_timeseries` for timeseries features in `schema`). By default, the
+  Each support_<option> argument tells if the sampler implements an option
+  value (e.g., support_non_multi_visit for multi_visit=False, or
+  support_timeseries for timeseries features in the schema). By default, the
   options are not supported.
   """
   issues = []
@@ -252,6 +313,17 @@ def check_supported_options(
       issues.append("multi_visit=False")
   if plan.temporal_sampling and not support_temporal_sampling:
     issues.append("temporal_sampling=True")
+  supported_strategies = [TemporalStrategy.UNIFORM]
+  if support_last_temporal_strategy:
+    supported_strategies.append(TemporalStrategy.LAST)
+  unsupported_strategies = {
+      edge.temporal_strategy.value
+      for edge in _plan_edges(plan)
+      if edge.temporal_strategy not in supported_strategies
+  }
+  issues.extend(
+      f"temporal_strategy={name}" for name in sorted(unsupported_strategies)
+  )
   if (
       not support_timeseries
       and schema is not None
