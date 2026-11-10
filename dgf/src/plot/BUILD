@@ -1,4 +1,4 @@
-load("@rules_python//python:py_library.bzl", "py_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
@@ -15,6 +15,7 @@ package(
 py_library(
     name = "network",
     srcs = ["network.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
@@ -25,6 +26,7 @@ py_library(
 py_library(
     name = "pyvis",
     srcs = ["pyvis.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/data:schema",
         "//dgf/src/util:options",
@@ -35,6 +37,7 @@ py_library(
 py_library(
     name = "nx",
     srcs = ["nx.py"],
+    type_checking = True,
     deps = [
         # matplotlib dep,
         # networkx dep,
@@ -47,6 +50,7 @@ py_library(
 py_test(
     name = "network_test",
     srcs = ["network_test.py"],
+    type_checking = True,
     deps = [
         ":network",
         # absl/testing:absltest dep,
@@ -58,6 +62,7 @@ py_test(
 py_test(
     name = "pyvis_test",
     srcs = ["pyvis_test.py"],
+    type_checking = True,
     deps = [
         ":pyvis",
         # absl/testing:absltest dep,

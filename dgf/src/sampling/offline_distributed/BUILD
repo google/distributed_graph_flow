@@ -1,6 +1,6 @@
-load("@rules_python//python:py_library.bzl", "py_library")
-load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_python//python:py_binary.bzl", "py_binary")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
     
@@ -16,6 +16,7 @@ package(
 py_library(
     name = "common",
     srcs = ["common.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/data:schema",
         "//dgf/src/io:schema",
@@ -28,6 +29,7 @@ py_library(
 py_library(
     name = "offline_distributed_gcp",
     srcs = ["offline_distributed_gcp.py"],
+    type_checking = True,
     deps = [
         ":common",
         # dataclasses_json dep,
@@ -43,6 +45,7 @@ py_library(
 py_library(
     name = "__init__",
     srcs = ["__init__.py"],
+    type_checking = True,
     deps = [":offline_distributed_gcp"],
 )
 
@@ -52,6 +55,7 @@ py_library(
 py_test(
     name = "offline_distributed_gcp_test",
     srcs = ["offline_distributed_gcp_test.py"],
+    type_checking = True,
     deps = [
         ":common",
         ":offline_distributed_gcp",
@@ -74,6 +78,7 @@ py_binary(
         "manual",
         "notap",
     ],
+    type_checking = True,
     deps = [
         ":offline_distributed_gcp",
         # absl/flags dep,

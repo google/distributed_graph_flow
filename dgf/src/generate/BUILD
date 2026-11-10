@@ -1,4 +1,4 @@
-load("@rules_python//python:py_library.bzl", "py_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
@@ -15,6 +15,7 @@ package(
 py_library(
     name = "graphs",
     srcs = ["graphs.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
@@ -30,6 +31,7 @@ py_library(
 py_library(
     name = "signals",
     srcs = ["signals.py"],
+    type_checking = True,
     deps = [
         # numpy dep,
     ],
@@ -38,6 +40,7 @@ py_library(
 py_library(
     name = "gen_temporal_alert_graph",
     srcs = ["gen_temporal_alert_graph.py"],
+    type_checking = True,
     visibility = ["//dgf:__subpackages__"],
     deps = [
         "//dgf/src/data:in_memory_graph",
@@ -54,6 +57,7 @@ py_library(
 py_test(
     name = "graphs_test",
     srcs = ["graphs_test.py"],
+    type_checking = True,
     deps = [
         ":graphs",
         # absl/testing:absltest dep,
@@ -69,6 +73,7 @@ py_test(
 py_library(
     name = "edge_neighbor_generator",
     srcs = ["edge_neighbor_generator.py"],
+    type_checking = True,
     deps = [
         # dataclasses_json dep,
         "//dgf/src/data:in_memory_graph",
@@ -82,11 +87,13 @@ py_library(
 py_library(
     name = "gen_temporal_alert_graph_main",
     srcs = ["gen_temporal_alert_graph_main.py"],
+    type_checking = True,
 )
 
 py_test(
     name = "edge_neighbor_generator_test",
     srcs = ["edge_neighbor_generator_test.py"],
+    type_checking = True,
     deps = [
         ":edge_neighbor_generator",
         # absl/testing:absltest dep,
@@ -100,6 +107,7 @@ py_test(
 py_test(
     name = "signals_test",
     srcs = ["signals_test.py"],
+    type_checking = True,
     deps = [
         ":signals",
         # absl/testing:absltest dep,
@@ -110,6 +118,7 @@ py_test(
 py_test(
     name = "gen_temporal_alert_graph_test",
     srcs = ["gen_temporal_alert_graph_test.py"],
+    type_checking = True,
     deps = [
         ":gen_temporal_alert_graph",
         # absl/testing:absltest dep,

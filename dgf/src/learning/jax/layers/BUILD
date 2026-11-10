@@ -1,4 +1,5 @@
 load("@rules_python//python:py_library.bzl", "py_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
@@ -15,6 +16,7 @@ package(
 py_library(
     name = "all",
     srcs = ["all.py"],
+    type_checking = True,
     deps = [
         ":classification",
         ":graph_attention",

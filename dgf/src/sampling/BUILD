@@ -1,7 +1,7 @@
-load("@rules_python//python:py_library.bzl", "py_library")
-load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
 load("@rules_cc//cc:cc_test.bzl", "cc_test")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
 load("@nanobind_bazel//:build_defs.bzl", "nanobind_extension")
 load("@nanobind_bazel//:build_defs.bzl", "nanobind_library")
 
@@ -19,6 +19,7 @@ package(
 py_library(
     name = "config",
     srcs = ["config.py"],
+    type_checking = True,
     deps = [
         # dataclasses_json dep,
         "//dgf/src/data:schema",
@@ -29,6 +30,7 @@ py_library(
 py_library(
     name = "temporal",
     srcs = ["temporal.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
@@ -41,6 +43,7 @@ py_library(
 py_library(
     name = "in_memory_sampler",
     srcs = ["in_memory_sampler.py"],
+    type_checking = True,
     deps = [
         ":_in_memory_sampler_ext",
         ":config",
@@ -77,6 +80,7 @@ cc_library(
 py_library(
     name = "beam_semi_distributed_sampler",
     srcs = ["beam_semi_distributed_sampler.py"],
+    type_checking = True,
     deps = [
         # apache_beam dep,
         "//dgf/src/data:distributed_graph",
@@ -87,6 +91,7 @@ py_library(
 py_library(
     name = "beam_semi_distributed_sampler_v1",
     srcs = ["beam_semi_distributed_sampler_v1.py"],
+    type_checking = True,
     deps = [
         ":config",
         ":in_memory_sampler",
@@ -102,6 +107,7 @@ py_library(
 py_library(
     name = "beam_semi_distributed_sampler_v2",
     srcs = ["beam_semi_distributed_sampler_v2.py"],
+    type_checking = True,
     deps = [
         ":config",
         ":in_memory_sampler",
@@ -172,6 +178,7 @@ nanobind_extension(
 py_test(
     name = "config_test",
     srcs = ["config_test.py"],
+    type_checking = True,
     deps = [
         ":config",
         # absl/testing:absltest dep,
@@ -183,6 +190,7 @@ py_test(
 py_test(
     name = "in_memory_sampler_test",
     srcs = ["in_memory_sampler_test.py"],
+    type_checking = True,
     deps = [
         ":_in_memory_sampler_ext",
         ":config",
@@ -204,6 +212,7 @@ py_test(
 py_test(
     name = "temporal_test",
     srcs = ["temporal_test.py"],
+    type_checking = True,
     deps = [
         ":temporal",
         # absl/testing:absltest dep,
@@ -231,6 +240,7 @@ cc_test(
 py_test(
     name = "beam_semi_distributed_sampler_test",
     srcs = ["beam_semi_distributed_sampler_test.py"],
+    type_checking = True,
     deps = [
         ":beam_semi_distributed_sampler",
         # absl/testing:absltest dep,
@@ -244,6 +254,7 @@ py_test(
 py_test(
     name = "beam_semi_distributed_sampler_v1_test",
     srcs = ["beam_semi_distributed_sampler_v1_test.py"],
+    type_checking = True,
     deps = [
         ":beam_semi_distributed_sampler",
         ":beam_semi_distributed_sampler_v1",
@@ -261,6 +272,7 @@ py_test(
 py_test(
     name = "beam_semi_distributed_sampler_v2_test",
     srcs = ["beam_semi_distributed_sampler_v2_test.py"],
+    type_checking = True,
     deps = [
         ":beam_semi_distributed_sampler",
         ":beam_semi_distributed_sampler_v2",

@@ -1,4 +1,4 @@
-load("@rules_python//python:py_library.bzl", "py_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
@@ -15,6 +15,7 @@ package(
 py_library(
     name = "training_configuration",
     srcs = ["training_configuration.py"],
+    type_checking = True,
     deps = [
         # dataclasses_json dep,
     ],
@@ -23,6 +24,7 @@ py_library(
 py_library(
     name = "feature",
     srcs = ["feature.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/data:jax_in_memory_graph",
         "//dgf/src/data:schema",
@@ -34,6 +36,7 @@ py_library(
 py_library(
     name = "config",
     srcs = ["config.py"],
+    type_checking = True,
     deps = [
         # absl/logging dep,
         "//dgf/src/util:filesystem",
@@ -46,6 +49,7 @@ py_library(
 py_test(
     name = "feature_test",
     srcs = ["feature_test.py"],
+    type_checking = True,
     deps = [
         ":feature",
         # absl/testing:absltest dep,
@@ -59,6 +63,7 @@ py_test(
 py_test(
     name = "config_test",
     srcs = ["config_test.py"],
+    type_checking = True,
     deps = [
         ":config",
         # absl/testing:absltest dep,
@@ -68,11 +73,13 @@ py_test(
 py_library(
     name = "early_stopping_monitor",
     srcs = ["early_stopping_monitor.py"],
+    type_checking = True,
 )
 
 py_test(
     name = "early_stopping_monitor_test",
     srcs = ["early_stopping_monitor_test.py"],
+    type_checking = True,
     deps = [
         ":early_stopping_monitor",
         # absl/testing:absltest dep,

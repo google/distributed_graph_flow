@@ -1,6 +1,6 @@
-load("@rules_python//python:py_library.bzl", "py_library")
-load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_python//python:py_binary.bzl", "py_binary")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
     
@@ -16,6 +16,7 @@ package(
 py_binary(
     name = "bigquery_graph_sampler_integration_test",
     srcs = ["bigquery_graph_sampler_integration_test.py"],
+    type_checking = True,
     deps = [
         ":bigquery_graph_sampler",
         # absl/testing:absltest dep,
@@ -39,6 +40,7 @@ py_binary(
 py_binary(
     name = "spanner_graph_sampler_integration_test",
     srcs = ["spanner_graph_sampler_integration_test.py"],
+    type_checking = True,
     deps = [
         ":spanner_graph_sampler",
         # absl/testing:absltest dep,
@@ -61,6 +63,7 @@ py_binary(
 py_library(
     name = "bigquery_graph_sampler",
     srcs = ["bigquery_graph_sampler.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/analyse:schema",
         "//dgf/src/data:in_memory_graph",
@@ -79,6 +82,7 @@ py_library(
 py_library(
     name = "spanner_graph_sampler",
     srcs = ["spanner_graph_sampler.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/analyse:schema",
         "//dgf/src/data:in_memory_graph",
@@ -97,6 +101,7 @@ py_test(
     name = "bigquery_graph_sampler_test",
     srcs = ["bigquery_graph_sampler_test.py"],
     data = ["//test_data"],
+    type_checking = True,
     deps = [
         ":bigquery_graph_sampler",
         # absl/testing:absltest dep,
@@ -114,6 +119,7 @@ py_test(
     name = "spanner_graph_sampler_test",
     srcs = ["spanner_graph_sampler_test.py"],
     data = ["//test_data"],
+    type_checking = True,
     deps = [
         ":spanner_graph_sampler",
         # absl/testing:absltest dep,

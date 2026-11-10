@@ -1,4 +1,4 @@
-load("@rules_python//python:py_library.bzl", "py_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 load("@nanobind_bazel//:build_defs.bzl", "nanobind_extension")
 
@@ -16,6 +16,7 @@ package(
 py_library(
     name = "common",
     srcs = ["common.py"],
+    type_checking = True,
     deps = [
         ":dataset",
         # dataclasses_json dep,
@@ -43,6 +44,7 @@ py_library(
 py_library(
     name = "inference",
     srcs = ["inference.py"],
+    type_checking = True,
     deps = [
         ":common",
         "//dgf/src/data:in_memory_graph",
@@ -70,6 +72,7 @@ py_library(
         "node_prediction_model.py",
         "node_prediction_train.py",
     ],
+    type_checking = True,
     deps = [
         ":common",
         ":dataset",
@@ -136,6 +139,7 @@ nanobind_extension(
 py_library(
     name = "evaluation",
     srcs = ["evaluation.py"],
+    type_checking = True,
     deps = [
         ":evaluation_ext",
         "//dgf/src/data:evaluation",
@@ -147,6 +151,7 @@ py_library(
 py_library(
     name = "dataset",
     srcs = ["dataset.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:padding",
@@ -164,6 +169,7 @@ py_library(
 py_library(
     name = "report",
     srcs = ["report.py"],
+    type_checking = True,
     deps = [
         ":common",
         # altair dep,
@@ -186,6 +192,7 @@ py_library(
 py_library(
     name = "link_prediction_train",
     srcs = ["link_prediction_train.py"],
+    type_checking = True,
     deps = [
         ":common",
         ":evaluation",
@@ -222,6 +229,7 @@ py_library(
 py_library(
     name = "training",
     srcs = ["training.py"],
+    type_checking = True,
     deps = [
         ":common",
         "//dgf/src/learning/jax:flax_train",
@@ -237,6 +245,7 @@ py_library(
 py_library(
     name = "link_prediction_core_model",
     srcs = ["link_prediction_core_model.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/data:jax_in_memory_graph",
         "//dgf/src/data:schema",
@@ -254,6 +263,7 @@ py_library(
 py_library(
     name = "link_prediction_model",
     srcs = ["link_prediction_model.py"],
+    type_checking = True,
     deps = [
         ":common",
         ":evaluation",
@@ -287,6 +297,7 @@ py_library(
 py_library(
     name = "link_prediction_dataset",
     srcs = ["link_prediction_dataset.py"],
+    type_checking = True,
     deps = [
         ":node_prediction_dataset",
         "//dgf/src/analyse:in_process_feature_statistics",
@@ -314,6 +325,7 @@ py_library(
 py_library(
     name = "node_prediction_dataset",
     srcs = ["node_prediction_dataset.py"],
+    type_checking = True,
     deps = [
         ":common",
         ":dataset",
@@ -343,6 +355,7 @@ py_library(
 py_library(
     name = "node_embedding_core_model",
     srcs = ["node_embedding_core_model.py"],
+    type_checking = True,
     deps = [
         # dataclasses_json dep,
         "//dgf/src/data:jax_in_memory_graph",
@@ -360,6 +373,7 @@ py_library(
 py_library(
     name = "node_embedding_model",
     srcs = ["node_embedding_model.py"],
+    type_checking = True,
     deps = [
         ":common",
         ":evaluation",
@@ -393,6 +407,7 @@ py_library(
 py_library(
     name = "node_embedding_train",
     srcs = ["node_embedding_train.py"],
+    type_checking = True,
     deps = [
         ":common",
         ":dataset",
@@ -429,6 +444,7 @@ py_library(
 py_test(
     name = "inference_test",
     srcs = ["inference_test.py"],
+    type_checking = True,
     deps = [
         ":inference",
         # absl/testing:absltest dep,
@@ -446,6 +462,7 @@ py_test(
 py_test(
     name = "common_test",
     srcs = ["common_test.py"],
+    type_checking = True,
     deps = [
         ":common",
         # absl/testing:absltest dep,
@@ -472,6 +489,7 @@ py_test(
     tags = [
         #"requires-gpu-nvidia",
     ],
+    type_checking = True,
     deps = [
         ":common",
         ":node_prediction",
@@ -504,6 +522,7 @@ py_test(
 py_test(
     name = "evaluation_test",
     srcs = ["evaluation_test.py"],
+    type_checking = True,
     deps = [
         ":evaluation",
         # absl/testing:absltest dep,
@@ -516,6 +535,7 @@ py_test(
 py_test(
     name = "dataset_test",
     srcs = ["dataset_test.py"],
+    type_checking = True,
     deps = [
         ":dataset",
         # absl/testing:absltest dep,
@@ -533,6 +553,7 @@ py_test(
 py_test(
     name = "report_test",
     srcs = ["report_test.py"],
+    type_checking = True,
     deps = [
         ":common",
         ":report",
@@ -551,6 +572,7 @@ py_test(
     srcs = ["link_prediction_test.py"],
     data = ["//test_data"],
     shard_count = 4,
+    type_checking = True,
     deps = [
         ":common",
         ":evaluation",
@@ -578,6 +600,7 @@ py_test(
 py_test(
     name = "link_prediction_dataset_test",
     srcs = ["link_prediction_dataset_test.py"],
+    type_checking = True,
     deps = [
         ":link_prediction_dataset",
         # absl/logging dep,
@@ -598,6 +621,7 @@ py_test(
 py_test(
     name = "node_prediction_dataset_test",
     srcs = ["node_prediction_dataset_test.py"],
+    type_checking = True,
     deps = [
         ":node_prediction_dataset",
         # absl/testing:absltest dep,
@@ -619,6 +643,7 @@ py_test(
     timeout = "moderate",
     srcs = ["analyze_test.py"],
     data = ["//test_data"],
+    type_checking = True,
     deps = [
         ":node_prediction",
         # absl/testing:absltest dep,
@@ -634,6 +659,7 @@ py_test(
 py_test(
     name = "training_test",
     srcs = ["training_test.py"],
+    type_checking = True,
     deps = [
         ":common",
         ":training",
@@ -651,6 +677,7 @@ py_test(
     timeout = "long",
     srcs = ["node_embedding_test.py"],
     shard_count = 8,
+    type_checking = True,
     deps = [
         ":common",
         ":dataset",

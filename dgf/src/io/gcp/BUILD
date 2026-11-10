@@ -1,6 +1,6 @@
-load("@rules_python//python:py_library.bzl", "py_library")
-load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_python//python:py_binary.bzl", "py_binary")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
     
@@ -16,6 +16,7 @@ package(
 py_binary(
     name = "bigquery_graph_integration_test",
     srcs = ["bigquery_graph_integration_test.py"],
+    type_checking = True,
     deps = [
         ":bigquery_graph",
         # absl/testing:absltest dep,
@@ -33,6 +34,7 @@ py_binary(
 py_binary(
     name = "spanner_graph_integration_test",
     srcs = ["spanner_graph_integration_test.py"],
+    type_checking = True,
     deps = [
         ":spanner_graph",
         # absl/testing:absltest dep,
@@ -48,6 +50,7 @@ py_binary(
 py_library(
     name = "bigquery_graph",
     srcs = ["bigquery_graph.py"],
+    type_checking = True,
     deps = [
         ":bigquery_graph_metadata",
         ":common",
@@ -69,6 +72,7 @@ py_library(
 py_library(
     name = "bigquery_graph_beam",
     srcs = ["bigquery_graph_beam.py"],
+    type_checking = True,
     deps = [
         ":bigquery_graph",
         ":common",
@@ -84,6 +88,7 @@ py_library(
 py_library(
     name = "bigquery_graph_metadata",
     srcs = ["bigquery_graph_metadata.py"],
+    type_checking = True,
     deps = [
         # dataclasses_json dep,
     ],
@@ -92,6 +97,7 @@ py_library(
 py_library(
     name = "common",
     srcs = ["common.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/analyse:schema",
         "//dgf/src/data:in_memory_graph",
@@ -108,6 +114,7 @@ py_library(
 py_library(
     name = "common_beam",
     srcs = ["common_beam.py"],
+    type_checking = True,
     deps = [
         ":common",
         "//dgf/src/analyse:schema",
@@ -120,6 +127,7 @@ py_library(
 py_library(
     name = "parquet_export",
     srcs = ["parquet_export.py"],
+    type_checking = True,
     deps = [
         ":bigquery_graph_metadata",
         "//dgf/src/io:graph_in_beam",
@@ -130,6 +138,7 @@ py_library(
 py_library(
     name = "spanner_graph",
     srcs = ["spanner_graph.py"],
+    type_checking = True,
     deps = [
         ":common",
         ":spanner_graph_metadata",
@@ -148,6 +157,7 @@ py_library(
 py_library(
     name = "spanner_graph_beam",
     srcs = ["spanner_graph_beam.py"],
+    type_checking = True,
     deps = [
         ":common",
         ":common_beam",
@@ -164,6 +174,7 @@ py_library(
 py_library(
     name = "spanner_graph_metadata",
     srcs = ["spanner_graph_metadata.py"],
+    type_checking = True,
     deps = [
         # dataclasses_json dep,
     ],
@@ -175,6 +186,7 @@ py_library(
 py_test(
     name = "bigquery_graph_beam_test",
     srcs = ["bigquery_graph_beam_test.py"],
+    type_checking = True,
     deps = [
         ":bigquery_graph_beam",
         ":bigquery_graph_metadata",
@@ -187,6 +199,7 @@ py_test(
 py_test(
     name = "bigquery_graph_test",
     srcs = ["bigquery_graph_test.py"],
+    type_checking = True,
     deps = [
         ":bigquery_graph",
         ":bigquery_graph_metadata",
@@ -198,6 +211,7 @@ py_test(
 py_test(
     name = "common_beam_test",
     srcs = ["common_beam_test.py"],
+    type_checking = True,
     deps = [
         ":common_beam",
         # absl/testing:absltest dep,
@@ -210,6 +224,7 @@ py_test(
 py_test(
     name = "common_test",
     srcs = ["common_test.py"],
+    type_checking = True,
     deps = [
         ":common",
         # absl/testing:absltest dep,
@@ -224,6 +239,7 @@ py_test(
 py_test(
     name = "parquet_export_test",
     srcs = ["parquet_export_test.py"],
+    type_checking = True,
     deps = [
         ":bigquery_graph_metadata",
         ":common",
@@ -236,6 +252,7 @@ py_test(
 py_test(
     name = "spanner_graph_beam_test",
     srcs = ["spanner_graph_beam_test.py"],
+    type_checking = True,
     deps = [
         ":spanner_graph_beam",
         ":spanner_graph_metadata",
@@ -249,6 +266,7 @@ py_test(
     name = "spanner_graph_test",
     srcs = ["spanner_graph_test.py"],
     data = ["//test_data"],
+    type_checking = True,
     deps = [
         ":spanner_graph",
         ":spanner_graph_metadata",
