@@ -1034,6 +1034,60 @@ class NodePredictionModel(common.Model):
 
     return wrapper
 
+  def to_tensorflow_saved_model(
+      self,
+      path: str,
+      *,
+      input_format: common.TFFunctionInputFormat | str = (
+          common.TFFunctionInputFormat.SERIALIZED_TFGNN_GRAPHS
+      ),
+      output_name: str = common.DEFAULT_TF_SAVED_MODEL_OUTPUT_NAME,
+  ) -> None:
+    """Exports the model as a TensorFlow SavedModel without the sampling step.
+
+    The SavedModel has a single signature, "serving_default", returning a
+    dictionary with a single item named `output_name` containing the
+    predictions. The inputs of the signature are the ones of the function
+    returned by `to_tensorflow_function`.
+
+    With the default `SERIALIZED_TFGNN_GRAPHS` input format, the signature has
+    the same interface as the TF-GNN exported models: It consumes a 1D string
+    tensor named `examples` of serialized TF GNN Graph Samples, and generates
+    one prediction per graph sample, on the first node of the target nodeset.
+    Such a SavedModel can be used with TFX BulkInferrer, TF Serving, or
+    Uniserve.
+
+    With the `TF_GRAPH_DICT` input format, TensorFlow lowercases the input names
+    of the signature. With the `TF_GRAPH` input format, the inputs of the
+    signature are flattened and anonymous: Instead, call the loaded SavedModel
+    directly, i.e., `loaded(graph=..., seed_node_idxs=...)`.
+
+    Usage example:
+
+    ```python
+    model = dgf.learning.train_node_model(...)
+    model.to_tensorflow_saved_model("/tmp/saved_model")
+
+    loaded = tf.saved_model.load("/tmp/saved_model")
+    examples = tf.constant(
+        [dgf.convert.graph_to_tfgnn_graph(sample, schema).SerializeToString()]
+    )
+    predictions = loaded.signatures["serving_default"](examples=examples)[
+        "predictions"
+    ]
+    ```
+
+    Args:
+      path: Directory where the SavedModel is written.
+      input_format: Format of the inputs of the signature. See
+        `dgf.learning.TFFunctionInputFormat` and `to_tensorflow_function`.
+        Defaults to `SERIALIZED_TFGNN_GRAPHS`.
+      output_name: Name of the output of the signature.
+    """
+    super().to_tensorflow_saved_model(
+        path, input_format=input_format, output_name=output_name
+    )
+
 
 def normalized_schema_to_normalized_input_feature_schema(
     schema: schema_lib.GraphSchema,

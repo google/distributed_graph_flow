@@ -33,6 +33,7 @@ py_library(
         "//dgf/src/util:filesystem",
         "//dgf/src/util:log",
         "//dgf/src/util:util_py",
+        "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # jax dep,
         # numpy dep,
         # orbax/checkpoint dep,

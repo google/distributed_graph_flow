@@ -38,6 +38,7 @@ from dgf.src.transform import merge as merge_lib
 from dgf.src.util import filesystem as fs
 from dgf.src.util import log
 from dgf.src.util import util
+from dgf.src.util.weak_dep.weak_dep_tensorflow import tf
 import jax
 import numpy as np
 import orbax.checkpoint as ocp
@@ -74,6 +75,13 @@ _DEFAULT_CONVERGENCE_PATIENCE = 5
 # selected automatically. Not reached on large datasets, where the maximum batch
 # size cannot cover it within `num_train_steps`. See `select_batch_size`.
 _AUTO_BATCH_SIZE_MIN_EPOCHS = 10
+
+# Name of the output of the signature of the models exported with
+# `to_tensorflow_saved_model`. Same as the TF-GNN exported models.
+DEFAULT_TF_SAVED_MODEL_OUTPUT_NAME = "predictions"
+
+# Name of the signature of the models exported with `to_tensorflow_saved_model`.
+TF_SAVED_MODEL_SIGNATURE_NAME = "serving_default"
 
 
 class Architecture(enum.Enum):
@@ -255,6 +263,34 @@ def resolve_tf_function_input_format(
   if consume_tf_graph_dict:
     return TFFunctionInputFormat.TF_GRAPH_DICT
   return TFFunctionInputFormat.TF_GRAPH
+
+
+def save_tf_module_as_saved_model(
+    tf_module: "tf.Module", path: str, output_name: str
+) -> None:
+  """Saves a `to_tensorflow_function` module as a single-signature SavedModel."""
+  call = tf_module.__call__
+  if not isinstance(call, tf.types.experimental.ConcreteFunction):
+    # Uses the `input_signature` of the tf.function.
+    try:
+      call = call.get_concrete_function()
+    except (TypeError, ValueError) as e:
+      raise ValueError(
+          "Cannot trace the `__call__` method of this TensorFlow module. "
+          "The method should be a concrete function or a tf.function"
+          " with an input_signature."
+      ) from e
+  args_spec, kwargs_spec = call.structured_input_signature
+
+  @tf.function(autograph=False)
+  def serving_fn(*args, **kwargs):
+    return {output_name: call(*args, **kwargs)}
+
+  signature = serving_fn.get_concrete_function(*args_spec, **kwargs_spec)
+  tf.saved_model.save(
+      tf_module, path, signatures={TF_SAVED_MODEL_SIGNATURE_NAME: signature}
+  )
+  log.info("TensorFlow SavedModel exported to %s", path)
 
 
 LogItem = jax_common.LogItem
@@ -472,6 +508,19 @@ class Model(abc.ABC):
         f"Model of type {type(self).__name__} does not support TensorFlow"
         " export."
     )
+
+  def to_tensorflow_saved_model(
+      self,
+      path: str,
+      *,
+      input_format: TFFunctionInputFormat | str = (
+          TFFunctionInputFormat.SERIALIZED_TFGNN_GRAPHS
+      ),
+      output_name: str = DEFAULT_TF_SAVED_MODEL_OUTPUT_NAME,
+  ) -> None:
+    """Exports the model as a single-signature TensorFlow SavedModel."""
+    tf_module = self.to_tensorflow_function(input_format=input_format)
+    save_tf_module_as_saved_model(tf_module, path, output_name)
 
   def _extract_serving_schemata(
       self,

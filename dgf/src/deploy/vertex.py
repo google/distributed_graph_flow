@@ -112,6 +112,8 @@ def _save_model_to_gcs(
       model.save(tmp_dir)
 
       # Export to TF SavedModel for Vertex AI
+      # TODO(gbm): Use `model.to_tensorflow_saved_model` (requires support for
+      # Vertex's batched instances).
       tf_model = model.to_tensorflow_function(consume_tf_graph_dict=True)
 
       batched_model = _create_batched_serving_model(tf_model)

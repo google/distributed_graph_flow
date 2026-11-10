@@ -835,6 +835,92 @@ class NodePredictionRealLooking(parameterized.TestCase):
           input_format="TF_GRAPH", consume_tf_graph_dict=True
       )
 
+  def test_to_tensorflow_saved_model(self):
+    schema = self.model.data().schema
+    sampler = in_memory_sampler_lib.create_sampler(
+        graph=self.graph,
+        plan=_sampling_plan(self.model),
+        schema=schema,
+        batch_size=5,
+    )
+    samples = [sampler.sample(0), sampler.sample(1)]
+    serialized_samples = tf.constant([
+        tf_graph_sample_lib.graph_to_tfgnn_graph(
+            sample, schema=schema
+        ).SerializeToString()
+        for sample in samples
+    ])
+    expected_predictions = np.concatenate(
+        [self.model.predict(sample, [0]) for sample in samples], axis=0
+    )
+
+    path = self.create_tempdir().full_path
+    self.model.to_tensorflow_saved_model(path)
+    loaded = tf.saved_model.load(path)
+
+    self.assertEqual(list(loaded.signatures.keys()), ["serving_default"])
+    signature = loaded.signatures["serving_default"]
+    self.assertEqual(
+        signature.structured_input_signature,
+        ((), {"examples": tf.TensorSpec([None], tf.string, name="examples")}),
+    )
+    self.assertEqual(list(signature.structured_outputs), ["predictions"])
+    predictions = signature(examples=serialized_samples)["predictions"]
+    np.testing.assert_allclose(
+        predictions.numpy(), expected_predictions, atol=1e-5
+    )
+
+  def test_to_tensorflow_saved_model_tf_graph_dict(self):
+    schema = self.model.data().schema
+    sample = in_memory_sampler_lib.create_sampler(
+        graph=self.graph,
+        plan=_sampling_plan(self.model),
+        schema=schema,
+        batch_size=5,
+    ).sample(0)
+    tf_sample = tf_io.graph_to_tf_graph(sample, schema=schema)
+    expected_prediction = self.model.predict(sample, [0])
+
+    path = self.create_tempdir().full_path
+    self.model.to_tensorflow_saved_model(
+        path, input_format="TF_GRAPH_DICT", output_name="probabilities"
+    )
+    loaded = tf.saved_model.load(path)
+
+    self.assertEqual(list(loaded.signatures.keys()), ["serving_default"])
+    signature = loaded.signatures["serving_default"]
+    self.assertEqual(list(signature.structured_outputs), ["probabilities"])
+    prediction = signature(
+        **tf_io.tf_graph_to_tf_graph_dict(tf_sample),
+        seed_node_idxs=tf.constant([0]),
+    )["probabilities"]
+    np.testing.assert_allclose(
+        prediction.numpy(), expected_prediction, atol=1e-5
+    )
+
+  def test_to_tensorflow_saved_model_tf_graph(self):
+    schema = self.model.data().schema
+    sample = in_memory_sampler_lib.create_sampler(
+        graph=self.graph,
+        plan=_sampling_plan(self.model),
+        schema=schema,
+        batch_size=5,
+    ).sample(0)
+    tf_sample = tf_io.graph_to_tf_graph(sample, schema=schema)
+    expected_prediction = self.model.predict(sample, [0])
+
+    path = self.create_tempdir().full_path
+    self.model.to_tensorflow_saved_model(path, input_format="TF_GRAPH")
+    loaded = tf.saved_model.load(path)
+
+    self.assertEqual(list(loaded.signatures.keys()), ["serving_default"])
+    # The inputs of the signature are flattened. Instead, the restored module
+    # is called directly.
+    prediction = loaded(graph=tf_sample, seed_node_idxs=tf.constant([0]))
+    np.testing.assert_allclose(
+        prediction.numpy(), expected_prediction, atol=1e-5
+    )
+
   def test_evaluate(self):
 
     evaluation = self.model.evaluate(self.graph)
