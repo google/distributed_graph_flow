@@ -383,8 +383,8 @@ def train_link_model(
         common.DEFAULT_TIMESERIES_ENCODER
     ),
     timeseries_embedding_dim: int = 64,
-    source_sampling_plan: sampling_config_lib.SamplingPlan | None = None,
-    target_sampling_plan: sampling_config_lib.SamplingPlan | None = None,
+    source_sampling_plan: common.SamplingPlanOrConfig | None = None,
+    target_sampling_plan: common.SamplingPlanOrConfig | None = None,
     early_stopping: bool | int = True,
     fast_compile: bool = False,
     text_embedder: str | normalize_text_lib.TextEmbedderConfig = "nnlm-en-dim128",
@@ -481,11 +481,13 @@ def train_link_model(
     timeseries_embedding_dim: The dimension of the embedding computed by
       `timeseries_encoder` for each timeseries feature group of a node.
     source_sampling_plan: An advanced option to provide a custom plan for the
-      sampler of the source node. When you use this option, the sampler ignores
+      sampler of the source node, as a `SamplingPlan` or a
+      `SimpleSamplingConfig`. When you use this option, the sampler ignores
       standard graph sampling arguments and validation checks e.g.,
       num_sampling_hops, sampling_width.
     target_sampling_plan: An advanced option to provide a custom plan for the
-      sampler of the target node. When you use this option, the sampler ignores
+      sampler of the target node, as a `SamplingPlan` or a
+      `SimpleSamplingConfig`. When you use this option, the sampler ignores
       standard graph sampling arguments and validation checks e.g.,
       num_sampling_hops, sampling_width.
     early_stopping: If True, use early stopping with default parameters
@@ -528,6 +530,18 @@ def train_link_model(
             "`target_edgeset` must be specified when the schema contains more"
             " than one edgeset."
         )
+
+    sampling_schema = link_prediction_dataset.sampling_schema(
+        schema,
+        target_edgeset,
+        mask_target_edgeset=not message_passing_on_target_edgeset,
+    )
+    source_sampling_plan = common.resolve_sampling_plan(
+        source_sampling_plan, sampling_schema
+    )
+    target_sampling_plan = common.resolve_sampling_plan(
+        target_sampling_plan, sampling_schema
+    )
 
     if time_aware:
       nodeset_ts_features = temporal_util.nodeset_timestamp_features(schema)

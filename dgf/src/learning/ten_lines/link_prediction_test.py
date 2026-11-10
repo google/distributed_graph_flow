@@ -30,6 +30,7 @@ from dgf.src.learning.ten_lines import common as common_lib
 from dgf.src.learning.ten_lines import evaluation
 from dgf.src.learning.ten_lines import link_prediction_model
 from dgf.src.learning.ten_lines import link_prediction_train
+from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import normalize_text_test_util
 from dgf.src.util import filesystem as fs
@@ -943,6 +944,41 @@ class LinkPredictionToyStandaloneTest(absltest.TestCase):
         "positive_target_graph_0.png",
     ]:
       self.assertTrue(fs.exists(os.path.join(diagnostic_dir, filename)))
+
+  def test_simple_sampling_config_as_sampling_plans(self):
+    graph, schema = gen_toy_graph()
+    source_config = sampling_config_lib.SimpleSamplingConfig(
+        seed_nodeset="A", num_hops=1, hop_width=2, reverse=True
+    )
+    target_config = sampling_config_lib.SimpleSamplingConfig(
+        seed_nodeset="B", num_hops=1, hop_width=3, reverse=True
+    )
+    model = link_prediction_train.train_link_model(
+        graph=graph,
+        schema=schema,
+        target_edgeset="A_to_B",
+        source_sampling_plan=source_config,
+        target_sampling_plan=target_config,
+        **RAPID_TRAINING_KWARGS,
+    )
+    test_util.assert_are_equal(
+        self,
+        model.data().source_sampling_plan,
+        sampling_config_lib.simple_sampling_config_to_sampling_plan(
+            source_config, schema
+        ),
+    )
+    test_util.assert_are_equal(
+        self,
+        model.data().target_sampling_plan,
+        sampling_config_lib.simple_sampling_config_to_sampling_plan(
+            target_config, schema
+        ),
+    )
+    predictions = model.predict(
+        graph, source_node_idxs=[0, 1], target_node_idxs=[0, 1]
+    )
+    self.assertEqual(predictions.shape, (2,))
 
 
 class LinkPredictionGraphAttentionNetworkToyTest(absltest.TestCase):

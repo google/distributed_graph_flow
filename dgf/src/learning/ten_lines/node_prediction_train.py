@@ -42,7 +42,6 @@ from dgf.src.learning.ten_lines import node_prediction_dataset
 from dgf.src.learning.ten_lines import node_prediction_model
 from dgf.src.learning.ten_lines import training
 from dgf.src.plot import network as network_lib
-from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
 from dgf.src.transform import normalize_text as normalize_text_lib
@@ -211,7 +210,7 @@ def train_node_model(
         common.DEFAULT_TIMESERIES_ENCODER
     ),
     timeseries_embedding_dim: int = 64,
-    sampling_plan: sampling_config_lib.SamplingPlan | None = None,
+    sampling_plan: common.SamplingPlanOrConfig | None = None,
     diagnostic_dir: str | None = None,
     early_stopping: bool | int = True,
     evaluate_final_model: bool = True,
@@ -312,9 +311,10 @@ def train_node_model(
       its name as a string (e.g. "cnn", "transformer").
     timeseries_embedding_dim: The dimension of the embedding computed by
       `timeseries_encoder` for each timeseries feature group of a node.
-    sampling_plan: An advanced option to provide a custom plan for the sampler.
-      When you use this option, the sampler ignores standard graph sampling
-      arguments and validation checks e.g., num_sampling_hops, sampling_width.
+    sampling_plan: An advanced option to provide a custom plan for the sampler,
+      as a `SamplingPlan` or a `SimpleSamplingConfig`. When you use this
+      option, the sampler ignores standard graph sampling arguments and
+      validation checks e.g., num_sampling_hops, sampling_width.
       If `graph` contains already sampled graph samples (instead of a full
       graph) and `sampling_plan` is not provided, the sampling plan used to
       generate those samples is unknown: the model does not contain any sampling
@@ -359,6 +359,7 @@ def train_node_model(
 
     architecture = common.parse_architecture(architecture)
     timeseries_encoder = common.parse_timeseries_encoder(timeseries_encoder)
+    sampling_plan = common.resolve_sampling_plan(sampling_plan, schema)
     begin_train_time = time.time()
 
     if diagnostic_dir is not None:
