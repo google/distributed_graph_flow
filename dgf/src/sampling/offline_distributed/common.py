@@ -96,6 +96,7 @@ def write_sampling_plan(
       support_non_with_replacement=True,
       support_multi_visit=True,
       support_temporal_sampling=True,
+      support_last_temporal_strategy=True,
   )
 
   if not filesystem.is_gcs_path(output_path):
