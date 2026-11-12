@@ -28,6 +28,42 @@ Issue = validate_lib.Issue
 KEY_ID = "#id"
 
 
+def _single_feature_varlen_row_issues(
+    feature_name: str,
+    feature_data: np.ndarray,
+    feature_schema: schema_lib.FeatureSchema,
+    expected_dtype: type[np.generic],
+    source: str,
+) -> Iterator[validate_lib.Issue]:
+  """Yields the first issue among the rows of a variable-length feature."""
+  for row_idx, row in enumerate(feature_data.flat):
+    if not isinstance(row, np.ndarray):
+      yield Issue.error(
+          f"The variable-length feature {feature_name!r} in {source} has a"
+          f" non-ndarray row at index {row_idx} (found"
+          f" {type(row).__name__!r}). Use `dgf.transform.conform_graph` to"
+          " convert features to their schema dtypes."
+      )
+      return
+    if row.ndim == 0:
+      yield Issue.error(
+          f"The variable-length feature {feature_name!r} in {source} has a"
+          f" scalar (0-D) row at index {row_idx}; each row must have at"
+          " least one dimension."
+      )
+      return
+    if not feature_format.np_dtype_matches(row.dtype, expected_dtype):
+      yield Issue.error(
+          f"The variable-length feature {feature_name!r} in {source} has row"
+          f" {row_idx} with dtype {row.dtype} (i.e., {row.dtype.type}), but"
+          f" the schema expects format {feature_schema.format!r}, which"
+          f" corresponds to dtype {expected_dtype}. Use"
+          " `dgf.transform.conform_graph` to convert features to their schema"
+          " dtypes."
+      )
+      return
+
+
 def _single_feature_schema_only_issues(
     feature_name: str,
     feature_schema: schema_lib.FeatureSchema,
@@ -132,6 +168,10 @@ def _single_feature_issues(
           " features. However, the schema defines a fixed shape of"
           f" {expected_shape}. If your feature is a string, make sure to cast"
           " it as a np.bytes_."
+      )
+    else:
+      yield from _single_feature_varlen_row_issues(
+          feature_name, feature_data, feature_schema, expected_dtype, source
       )
   else:
     if not feature_format.np_dtype_matches(feature_data.dtype, expected_dtype):
@@ -396,7 +436,10 @@ def issues(
       )
     else:
       for feature_name, feature_value in nodeset_data.features.items():
-        if feature_value.shape[0] != nodeset_data.num_nodes:
+        if (
+            isinstance(feature_value, np.ndarray)
+            and feature_value.shape[0] != nodeset_data.num_nodes
+        ):
           items.append(
               Issue.error(
                   f"The nodeset {nodeset_name!r} has feature"

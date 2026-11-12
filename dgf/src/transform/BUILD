@@ -13,6 +13,20 @@ package(
 # =========
 
 py_library(
+    name = "conform",
+    srcs = ["conform.py"],
+    type_checking = True,
+    deps = [
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/io:feature_format",
+        "//dgf/src/util:log",
+        # numpy dep,
+        # pandas dep,
+    ],
+)
+
+py_library(
     name = "table_2_graph",
     srcs = ["table_2_graph.py"],
     type_checking = True,
@@ -439,5 +453,23 @@ py_test(
         "//dgf/src/util:gen_test_graph",
         "//dgf/src/util:test_util",
         # numpy dep,
+    ],
+)
+
+py_test(
+    name = "conform_test",
+    srcs = ["conform_test.py"],
+    type_checking = True,
+    deps = [
+        ":conform",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/util:gen_test_graph",
+        "//dgf/src/util:test_util",
+        "//dgf/src/validate:in_memory_graph",
+        # numpy dep,
+        # pandas dep,
     ],
 )

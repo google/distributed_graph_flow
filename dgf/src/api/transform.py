@@ -17,6 +17,8 @@
 # pylint: disable=unused-import,g-importing-member,g-import-not-at-top,g-bad-import-order,reimported,disable=attribute-error
 
 
+from dgf.src.transform.conform import conform_graph
+
 from dgf.src.transform.merge import GraphMerger
 from dgf.src.transform.merge import remove_padding_sentinels
 

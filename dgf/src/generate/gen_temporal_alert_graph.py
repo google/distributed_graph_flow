@@ -220,8 +220,12 @@ def generate_signal_regression_in_memory_graph(
   hw_creation_time_array = np.full(
       config.num_hardware, config.start_time, dtype=np.int64
   )
-  hw_time_array = np.array(hw_times_list, dtype=np.object_)
-  hw_signal_array = np.array(hw_signals_list, dtype=np.object_)
+  # Use `np.empty` + slice assignment so numpy does not collapse equal-length
+  # rows into a 2-D array.
+  hw_time_array = np.empty(len(hw_times_list), dtype=np.object_)
+  hw_time_array[:] = hw_times_list
+  hw_signal_array = np.empty(len(hw_signals_list), dtype=np.object_)
+  hw_signal_array[:] = hw_signals_list
 
   alert_ids = [f"alert_{i}".encode("utf-8") for i in range(config.num_alerts)]
   alert_creation_times = config.start_time + rng.randint(

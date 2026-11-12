@@ -294,10 +294,14 @@ class InMemoryGraphTest(absltest.TestCase):
         group="time",
     )
     graph.node_sets["n1"].features["time"] = np.array(
-        [[10, 20]] + [[10]] * (num_nodes - 1), dtype=object  # pyrefly: ignore[unsupported-operation]
+        [np.array([10, 20], dtype=np.int64)]
+        + [np.array([10], dtype=np.int64)] * (num_nodes - 1),  # pyrefly: ignore[unsupported-operation]
+        dtype=object,
     )
-    graph.node_sets["n1"].features["val"] = np.array(
-        [[1.5]] + [[2.5]] * (num_nodes - 1), dtype=object  # pyrefly: ignore[unsupported-operation]
+    graph.node_sets["n1"].features["val"] = np.fromiter(
+        [np.array([1.5], dtype=np.float32)]
+        + [np.array([2.5], dtype=np.float32)] * (num_nodes - 1),  # pyrefly: ignore[unsupported-operation]
+        dtype=object,
     )
     issues = in_memory_graph_validate_lib.issues(graph, schema)
     self.assertEqual(
@@ -330,10 +334,14 @@ class InMemoryGraphTest(absltest.TestCase):
         group="time",
     )
     graph.node_sets["n1"].features["time"] = np.array(
-        [[10, 20]] + [[30]] * (num_nodes - 1), dtype=object  # pyrefly: ignore[unsupported-operation]
+        [np.array([10, 20], dtype=np.int64)]
+        + [np.array([30], dtype=np.int64)] * (num_nodes - 1),  # pyrefly: ignore[unsupported-operation]
+        dtype=object,
     )
     graph.node_sets["n1"].features["val"] = np.array(
-        [[1.5, 2.5]] + [[3.5]] * (num_nodes - 1), dtype=object  # pyrefly: ignore[unsupported-operation]
+        [np.array([1.5, 2.5], dtype=np.float32)]
+        + [np.array([3.5], dtype=np.float32)] * (num_nodes - 1),  # pyrefly: ignore[unsupported-operation]
+        dtype=object,
     )
     issues = in_memory_graph_validate_lib.issues(graph, schema)
     self.assertEqual(issues, [])
@@ -620,6 +628,84 @@ class InMemoryGraphTest(absltest.TestCase):
         ],
     )
 
+  def test_varlen_non_ndarray_row(self):
+    graph, schema = valid_graph()
+    bad_rows = np.empty(2, dtype=object)
+    bad_rows[0] = [11, 12]
+    bad_rows[1] = np.array([12, 13, 14], dtype=np.int64)
+    graph.node_sets["n2"].features["f5"] = bad_rows
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertEqual(
+        issues,
+        [
+            Issue.error(
+                "The variable-length feature 'f5' in nodeset 'n2' has a"
+                " non-ndarray row at index 0 (found 'list'). Use"
+                " `dgf.transform.conform_graph` to convert features to their"
+                " schema dtypes."
+            )
+        ],
+    )
+
+  def test_varlen_scalar_row(self):
+    graph, schema = valid_graph()
+    bad_rows = np.empty(2, dtype=object)
+    bad_rows[0] = np.array(11, dtype=np.int64)
+    bad_rows[1] = np.array([12, 13, 14], dtype=np.int64)
+    graph.node_sets["n2"].features["f5"] = bad_rows
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertEqual(
+        issues,
+        [
+            Issue.error(
+                "The variable-length feature 'f5' in nodeset 'n2' has a"
+                " scalar (0-D) row at index 0; each row must have at least"
+                " one dimension."
+            )
+        ],
+    )
+
+  def test_varlen_object_dtype_row(self):
+    graph, schema = valid_graph()
+    bad_rows = np.empty(2, dtype=object)
+    bad_rows[0] = np.array([11, None], dtype=object)
+    bad_rows[1] = np.array([12, 13, 14], dtype=np.int64)
+    graph.node_sets["n2"].features["f5"] = bad_rows
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertEqual(
+        issues,
+        [
+            Issue.error(
+                "The variable-length feature 'f5' in nodeset 'n2' has row 0"
+                " with dtype object (i.e., <class 'numpy.object_'>), but the"
+                " schema expects format <FeatureFormat.INTEGER_64:"
+                " 'INTEGER_64'>, which corresponds to dtype <class"
+                " 'numpy.int64'>. Use `dgf.transform.conform_graph` to convert"
+                " features to their schema dtypes."
+            )
+        ],
+    )
+
+  def test_varlen_wrong_dtype_row(self):
+    graph, schema = valid_graph()
+    bad_rows = np.empty(2, dtype=object)
+    bad_rows[0] = np.array([11, 12], dtype=np.int64)
+    bad_rows[1] = np.array([12.0, 13.0, 14.0], dtype=np.float32)
+    graph.node_sets["n2"].features["f5"] = bad_rows
+    issues = in_memory_graph_validate_lib.issues(graph, schema)
+    self.assertEqual(
+        issues,
+        [
+            Issue.error(
+                "The variable-length feature 'f5' in nodeset 'n2' has row 1"
+                " with dtype float32 (i.e., <class 'numpy.float32'>), but the"
+                " schema expects format <FeatureFormat.INTEGER_64:"
+                " 'INTEGER_64'>, which corresponds to dtype <class"
+                " 'numpy.int64'>. Use `dgf.transform.conform_graph` to convert"
+                " features to their schema dtypes."
+            )
+        ],
+    )
 
 if __name__ == "__main__":
   absltest.main()

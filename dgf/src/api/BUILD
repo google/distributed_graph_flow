@@ -104,6 +104,7 @@ py_library(
         "//dgf/src/learning/ten_lines:node_prediction_dataset",
         "//dgf/src/transform:canonicalize",
         "//dgf/src/transform:combine_graph_snapshots",
+        "//dgf/src/transform:conform",
         "//dgf/src/transform:extract",
         "//dgf/src/transform:homogenize",
         "//dgf/src/transform:in_memory_graph_filter",
