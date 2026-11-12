@@ -18,19 +18,16 @@ This module contains the client-independent part of the Spanner Graph samplers.
 """
 
 import abc
-import base64
 import collections
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 import dataclasses
 import enum
 import os
-from typing import Any, TypeVar
+from typing import Any
 
-from dgf.src.analyse import schema as schema_analyse_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
-from dgf.src.io import feature_format as feature_format_lib
-from dgf.src.io.gcp import common as gcp_common_lib
+from dgf.src.io import spanner_graph as spanner_graph_io_lib
 from dgf.src.io.gcp import spanner_graph_metadata as spanner_graph_metadata_lib
 from dgf.src.sampling import config as config_lib
 import numpy as np
@@ -41,37 +38,28 @@ ID_COLUMN_INDICES = (0, 1, 4, 5)
 SEED_IDS_PARAMETER = "seed_ids"
 SAMPLING_SEED_PARAMETER = "sampling_seed"
 
+# Types of the query parameters holding the seed keys.
+PARAM_TYPE_BOOL = "BOOL"
+PARAM_TYPE_BYTES = "BYTES"
+PARAM_TYPE_INT64 = "INT64"
+PARAM_TYPE_STRING = "STRING"
+
 # The CTEs are prefixed to not shadow the tables of the database.
 _SOURCE_NODE_CTE = "_dgf_source_node"
 
 _ELEMENT_TYPE_NODE = "node"
 _ELEMENT_TYPE_EDGE = "edge"
 
-_TYPE_BYTES = "BYTES"
-_TYPE_STRING = "STRING"
-_TYPE_TIMESTAMP = "TIMESTAMP"
-_BYTES_DTYPE = np.dtype(
-    feature_format_lib.FEATURE_FORMAT_TO_NP_DTYPE[
-        schema_lib.FeatureFormat.BYTES
-    ]
-)
-
-_ElementTableT = TypeVar(
-    "_ElementTableT",
-    spanner_graph_metadata_lib.NodeTable,
-    spanner_graph_metadata_lib.EdgeTable,
-)
-
-_COMPATIBLE_TYPES: dict[schema_lib.FeatureFormat, frozenset[str]] = {
-    schema_lib.FeatureFormat.BOOL: frozenset({"BOOL"}),
-    schema_lib.FeatureFormat.BYTES: frozenset({_TYPE_STRING, _TYPE_BYTES}),
-    schema_lib.FeatureFormat.FLOAT_32: frozenset({"FLOAT32", "FLOAT64"}),
-    schema_lib.FeatureFormat.FLOAT_64: frozenset({"FLOAT32", "FLOAT64"}),
-    schema_lib.FeatureFormat.INTEGER_32: frozenset({"INT32", "INT64"}),
-    schema_lib.FeatureFormat.INTEGER_64: frozenset(
-        {"INT32", "INT64", _TYPE_TIMESTAMP}
-    ),
+# Key column types whose values are bound as query parameters of another type.
+_SEED_PARAMETER_CASTS: dict[str, str] = {
+    spanner_graph_io_lib.TYPE_TIMESTAMP: "TIMESTAMP_MICROS({})",
+    spanner_graph_io_lib.TYPE_DATE: "CAST({} AS DATE)",
+    spanner_graph_io_lib.TYPE_INT32: "CAST({} AS INT32)",
 }
+
+Column = spanner_graph_io_lib.Column
+FeatureSpec = spanner_graph_io_lib.FeatureSpec
+GraphTables = spanner_graph_io_lib.GraphTables
 
 
 class QueryEngine(enum.Enum):
@@ -82,472 +70,126 @@ class QueryEngine(enum.Enum):
   GQL = "GQL"
 
 
-@dataclasses.dataclass(frozen=True)
-class _Column:
-  """Spanner column backing a DGF feature or key."""
-
-  name: str
-  type_kind: str
-  is_array: bool = False
-
-  def __post_init__(self) -> None:
-    gcp_common_lib.validate_identifier(self.name)
-
-  def sql(self, table_alias: str) -> str:
-    """Gets the SQL reference to this column in table_alias."""
-    return f"{table_alias}.`{self.name}`"
-
-  def to_json_sql(self, expression: str) -> str:
-    """Gets the SQL expression storing expression in a JSON object."""
-    if self.type_kind == _TYPE_TIMESTAMP:
-      if self.is_array:
-        return (
-            f"IF({expression} IS NULL, NULL, ARRAY(SELECT UNIX_MICROS(t) FROM"
-            f" UNNEST({expression}) AS t WITH OFFSET off ORDER BY off))"
-        )
-      return f"UNIX_MICROS({expression})"
-    return expression
-
-  def to_bytes_sql(self, expression: str) -> str:
-    """Gets the SQL expression casting expression to BYTES."""
-    if self.type_kind == _TYPE_STRING:
-      return f"CAST({expression} AS BYTES)"
-    return expression
-
-
-@dataclasses.dataclass(frozen=True)
-class _Feature:
-  """Spanner column and precomputed parser/array spec of a DGF feature."""
-
-  column: _Column
-  dtype: np.dtype
-  is_ragged: bool
-  empty_array: np.ndarray
-  parse_value: Callable[[Any], Any]
-
-
-@dataclasses.dataclass(frozen=True)
-class _NodeTable:
-  """Spanner table of a nodeset."""
-
-  table: str
-  label: str
-  # Whether other node tables have this label.
-  label_is_shared: bool
-  key: _Column
-  key_property: str
-  # Non-key features (the primary key feature is populated from node_id).
-  features: dict[str, _Feature]
-
-  def __post_init__(self) -> None:
-    gcp_common_lib.validate_identifier(self.table)
-    gcp_common_lib.validate_identifier(self.label)
-    gcp_common_lib.validate_identifier(self.key_property)
-    for feature_name in self.features:
-      gcp_common_lib.validate_identifier(feature_name)
-
-
-@dataclasses.dataclass(frozen=True)
-class _EdgeTable:
-  """Spanner table of an edgeset."""
-
-  table: str
-  label: str
-  # Whether other edge tables have this label.
-  label_is_shared: bool
-  source: _Column
-  target: _Column
-  features: dict[str, _Feature]
-
-  def __post_init__(self) -> None:
-    gcp_common_lib.validate_identifier(self.table)
-    gcp_common_lib.validate_identifier(self.label)
-    for feature_name in self.features:
-      gcp_common_lib.validate_identifier(feature_name)
-
-
-@dataclasses.dataclass(frozen=True)
-class GraphTables:
-  """Spanner tables of all the nodesets and edgesets of a DGF schema."""
-
-  node_tables: dict[str, _NodeTable]
-  edge_tables: dict[str, _EdgeTable]
-
-  def __post_init__(self) -> None:
-    for nodeset_name in self.node_tables:
-      gcp_common_lib.validate_identifier(nodeset_name)
-    for edgeset_name in self.edge_tables:
-      gcp_common_lib.validate_identifier(edgeset_name)
-
-
-def _parse_type(type_name: str) -> tuple[str, bool]:
-  """Parses a Spanner type into (element_type_kind, is_array)."""
-  if type_name.startswith("ARRAY<") and type_name.endswith(">"):
-    return type_name[len("ARRAY<") : -1], True
-  return type_name, False
-
-
-def _element_table(
-    element_name: str, element_tables: Sequence[_ElementTableT]
-) -> tuple[_ElementTableT, str, bool]:
-  """Finds the element table of a nodeset or edgeset.
-
-  A nodeset or edgeset is named after a label defined on a single element
-  table, or after an element table with a single label.
-
-  Args:
-    element_name: Name of the nodeset or edgeset.
-    element_tables: The node tables or the edge tables of the property graph.
-
-  Returns:
-    The element table, its label, and whether other element tables have this
-    label.
-  """
-  labeled_tables = [
-      table for table in element_tables if element_name in table.label_names
-  ]
-  if len(labeled_tables) == 1:
-    return labeled_tables[0], element_name, False
-  if labeled_tables:
-    raise ValueError(
-        f"The label {element_name!r} is defined on {len(labeled_tables)}"
-        " element tables of the Spanner Graph:"
-        f" {sorted(table.name for table in labeled_tables)}. Name the nodeset"
-        " or edgeset after one of these element tables instead."
-    )
-  named_tables = [
-      table for table in element_tables if table.name == element_name
-  ]
-  if len(named_tables) != 1:
-    labels = {label for table in element_tables for label in table.label_names}
-    raise ValueError(
-        f"{element_name!r} is neither a label nor an element table of the"
-        f" Spanner Graph. Available labels: {sorted(labels)}. Available"
-        f" element tables: {sorted(table.name for table in element_tables)}."
-    )
-  table = named_tables[0]
-  if len(table.label_names) != 1:
-    raise ValueError(
-        f"The element table {element_name!r} has {len(table.label_names)}"
-        f" labels: {table.label_names}. Name the nodeset or edgeset after one"
-        " of them instead."
-    )
-  label = table.label_names[0]
-  num_tables_with_label = sum(
-      label in other_table.label_names for other_table in element_tables
-  )
-  return table, label, num_tables_with_label > 1
-
-
-def _default_scalar(feature_format: schema_lib.FeatureFormat) -> Any:
-  """Gets the DGF default value for a NULL scalar."""
-  if feature_format == schema_lib.FeatureFormat.BYTES:
-    return b""
-  if feature_format == schema_lib.FeatureFormat.BOOL:
-    return False
-  if feature_format.is_float():
-    return 0.0
-  if feature_format.is_integer():
-    return 0
-  raise NotImplementedError(f"Unsupported feature format: {feature_format}.")
-
-
-def _make_value_parser(
-    element_name: str,
-    feature_name: str,
-    column: _Column,
-    dtype: np.dtype,
-    default_scalar: Any,
-    expected_len: int | None,
-) -> Callable[[Any], Any]:
-  """Builds the per-row JSON value parser for a feature."""
-  if column.type_kind == _TYPE_BYTES:
-    parse_scalar = lambda v: b"" if v is None else base64.b64decode(v)
-  elif column.type_kind == _TYPE_STRING:
-    parse_scalar = lambda v: b"" if v is None else v.encode("utf-8")
-  else:
-    parse_scalar = None
-
-  if not column.is_array:
-    if parse_scalar is not None:
-      return parse_scalar
-    return lambda v: default_scalar if v is None else v
-
-  if expected_len is None:
-    empty_element = np.empty(0, dtype=dtype)
-
-    def parse_ragged(value: Any) -> np.ndarray:
-      if value is None:
-        return empty_element
-      if parse_scalar is not None:
-        value = [parse_scalar(item) for item in value]
-      elif None in value:
-        value = [default_scalar if item is None else item for item in value]
-      return np.asarray(value, dtype=dtype)
-
-    return parse_ragged
-
-  default_list = [default_scalar] * expected_len
-
-  def parse_static_array(value: Any) -> list[Any]:
-    if value is None:
-      return default_list
-    if len(value) != expected_len:
-      raise ValueError(
-          f"Feature {feature_name!r} of {element_name!r} has length"
-          f" {len(value)}, expected {expected_len}."
-      )
-    if parse_scalar is not None:
-      return [parse_scalar(item) for item in value]
-    if None in value:
-      return [default_scalar if item is None else item for item in value]
-    return value
-
-  return parse_static_array
-
-
-def _resolve_feature(
-    element_name: str,
-    feature_name: str,
-    feature_schema: schema_lib.FeatureSchema,
-    expressions: Mapping[str, str],
-    property_types: Mapping[str, str],
-) -> _Feature:
-  """Resolves and validates the column and parser of a feature."""
-  gcp_common_lib.validate_identifier(feature_name)
-  if feature_name not in expressions:
-    raise ValueError(
-        f"Feature {feature_name!r} of {element_name!r} is not a property of"
-        f" the Spanner Graph. Available properties: {sorted(expressions)}"
-    )
-  column_name = expressions[feature_name]
-  if not gcp_common_lib.IDENTIFIER_REGEX.match(column_name):
-    raise NotImplementedError(
-        f"Feature {feature_name!r} of {element_name!r} is defined by the"
-        f" expression {column_name!r} in the Spanner Graph. Only properties"
-        " defined by a plain column are supported."
-    )
-  type_kind, is_array = _parse_type(property_types[feature_name])
-
-  shape = feature_schema.shape or ()
-  if len(shape) > 1:
-    raise NotImplementedError(
-        f"Feature {feature_name!r} of {element_name!r} has shape {shape}."
-        " Only scalar and 1D features are supported."
-    )
-  compatible_types = _COMPATIBLE_TYPES.get(feature_schema.format)
-  if compatible_types is None:
-    raise NotImplementedError(
-        f"Unsupported format {feature_schema.format} on feature"
-        f" {feature_name!r} of {element_name!r}."
-    )
-  if type_kind not in compatible_types or is_array != bool(shape):
-    raise ValueError(
-        f"Feature {feature_name!r} of {element_name!r} (format"
-        f" {feature_schema.format}, shape {shape}) is not compatible with the"
-        f" Spanner type {property_types[feature_name]}."
-    )
-
-  column = _Column(name=column_name, type_kind=type_kind, is_array=is_array)
-  dtype = np.dtype(
-      feature_format_lib.FEATURE_FORMAT_TO_NP_DTYPE[feature_schema.format]
-  )
-  expected_len = shape[0] if shape else None
-  is_ragged = bool(shape) and expected_len is None
-  if is_ragged:
-    empty_array = np.empty(0, dtype=np.object_)
-  elif expected_len is not None:
-    empty_array = np.empty((0, expected_len), dtype=dtype)
-  else:
-    empty_array = np.empty(0, dtype=dtype)
-  default_scalar = _default_scalar(feature_schema.format)
-  return _Feature(
-      column=column,
-      dtype=dtype,
-      is_ragged=is_ragged,
-      empty_array=empty_array,
-      parse_value=_make_value_parser(
-          element_name,
-          feature_name,
-          column,
-          dtype,
-          default_scalar,
-          expected_len,
-      ),
-  )
-
-
-def _property_expressions(
-    element_table: (
-        spanner_graph_metadata_lib.NodeTable
-        | spanner_graph_metadata_lib.EdgeTable
-    ),
-) -> dict[str, str]:
-  """Gets the {property_name: sql_expression} map of an element table."""
-  return {
-      definition.property_declaration_name: definition.value_expression_sql
-      for definition in element_table.property_definitions or ()
-  }
-
-
-def _resolve_node_table(
-    nodeset_name: str,
-    nodeset_schema: schema_lib.NodeSchema,
-    node_table: spanner_graph_metadata_lib.NodeTable,
-    label: str,
-    label_is_shared: bool,
-    property_types: Mapping[str, str],
-) -> _NodeTable:
-  """Resolves the Spanner table, key, and features of a nodeset."""
-  if len(node_table.key_columns) != 1:
-    raise NotImplementedError(
-        f"Nodeset {nodeset_name!r} has a composite key"
-        f" {node_table.key_columns}. Only single-column keys are supported."
-    )
-  expressions = _property_expressions(node_table)
-  features = {
-      feature_name: _resolve_feature(
-          nodeset_name,
-          feature_name,
-          feature_schema,
-          expressions,
-          property_types,
-      )
-      for feature_name, feature_schema in nodeset_schema.features.items()
-  }
-  primary_key = schema_analyse_lib.primary_feature(nodeset_name, nodeset_schema)
-  key = features.pop(primary_key).column
-  if key.name != node_table.key_columns[0]:
-    raise ValueError(
-        f"The primary key feature {primary_key!r} of {nodeset_name!r} is"
-        f" stored in column {key.name!r}, but the key of the Spanner node"
-        f" table is {node_table.key_columns[0]!r}."
-    )
-  if key.type_kind not in (_TYPE_STRING, _TYPE_BYTES) or key.is_array:
-    raise ValueError(
-        f"The primary key {primary_key!r} of {nodeset_name!r} has type"
-        f" {key.type_kind}. Only STRING and BYTES primary keys are supported."
-    )
-  return _NodeTable(
-      table=node_table.base_table_name,
-      label=label,
-      label_is_shared=label_is_shared,
-      key=key,
-      key_property=primary_key,
-      features=features,
-  )
-
-
-def _resolve_endpoint(
-    edgeset_name: str,
-    expected_nodeset: str,
-    reference: spanner_graph_metadata_lib.NodeTableRef,
-    node_table_names: Mapping[str, str],
-    node_tables: Mapping[str, _NodeTable],
-) -> _Column:
-  """Resolves the edge table column referencing the key of expected_nodeset."""
-  if reference.node_table_name != node_table_names[expected_nodeset]:
-    raise ValueError(
-        f"Edgeset {edgeset_name!r} references the node table"
-        f" {reference.node_table_name!r} in the Spanner Graph, but the"
-        f" nodeset {expected_nodeset!r} in the schema is the node table"
-        f" {node_table_names[expected_nodeset]!r}."
-    )
-  node_key = node_tables[expected_nodeset].key
-  if reference.node_table_columns != [node_key.name]:
-    raise ValueError(
-        f"Edgeset {edgeset_name!r} references columns"
-        f" {reference.node_table_columns} of {expected_nodeset!r} instead of"
-        f" its key {node_key.name!r}."
-    )
-  if len(reference.edge_table_columns) != 1:
-    raise NotImplementedError(
-        f"Edgeset {edgeset_name!r} has composite endpoint columns"
-        f" {reference.edge_table_columns}."
-    )
-  return _Column(
-      name=reference.edge_table_columns[0], type_kind=node_key.type_kind
-  )
-
-
 def resolve_graph_tables(
     metadata: spanner_graph_metadata_lib.SpannerGraphMetadata,
     schema: schema_lib.GraphSchema,
+    column_spanner_types: Mapping[tuple[str, str], str] | None = None,
 ) -> GraphTables:
-  """Resolves the Spanner tables and columns of all the schema elements."""
-  property_types = metadata.property_types or {}
-  node_tables = {}
-  node_table_names = {}
-  for nodeset_name, nodeset_schema in schema.node_sets.items():
-    gcp_common_lib.validate_identifier(nodeset_name)
-    node_table, label, label_is_shared = _element_table(
-        nodeset_name, metadata.node_tables
-    )
-    node_table_names[nodeset_name] = node_table.name
-    node_tables[nodeset_name] = _resolve_node_table(
-        nodeset_name,
-        nodeset_schema,
-        node_table,
-        label,
-        label_is_shared,
-        property_types,
-    )
+  """Resolves the Spanner tables and columns of all the schema elements.
 
-  edge_tables = {}
-  for edgeset_name, edgeset_schema in schema.edge_sets.items():
-    gcp_common_lib.validate_identifier(edgeset_name)
-    edge_table, label, label_is_shared = _element_table(
-        edgeset_name, metadata.edge_tables
-    )
-    expressions = _property_expressions(edge_table)
-    edge_tables[edgeset_name] = _EdgeTable(
-        table=edge_table.base_table_name,
-        label=label,
-        label_is_shared=label_is_shared,
-        source=_resolve_endpoint(
-            edgeset_name,
-            edgeset_schema.source,
-            edge_table.source_node_table,
-            node_table_names,
-            node_tables,
-        ),
-        target=_resolve_endpoint(
-            edgeset_name,
-            edgeset_schema.target,
-            edge_table.destination_node_table,
-            node_table_names,
-            node_tables,
-        ),
-        features={
-            feature_name: _resolve_feature(
-                edgeset_name,
-                feature_name,
-                feature_schema,
-                expressions,
-                property_types,
-            )
-            for feature_name, feature_schema in edgeset_schema.features.items()
-        },
-    )
-  return GraphTables(node_tables=node_tables, edge_tables=edge_tables)
+  Args:
+    metadata: The definition of the property graph.
+    schema: The DGF schema.
+    column_spanner_types: Spanner type of each (table_name, column_name), used
+      for the key columns that are not properties.
+
+  Returns:
+    The Spanner tables of the nodesets and edgesets of the schema.
+  """
+  tables = spanner_graph_io_lib.resolve_graph_tables(
+      metadata, schema, column_spanner_types, bytes_are_base64=True
+  )
+  for element_name, element_table in (
+      *tables.node_tables.items(),
+      *tables.edge_tables.items(),
+  ):
+    if element_table.label is None:
+      raise ValueError(
+          f"The element table {element_name!r} has several labels. Name the"
+          " nodeset or edgeset after one of them instead."
+      )
+  # The nodes are identified by their encoded key in the sampling query.
+  for nodeset_name, node_table in tables.node_tables.items():
+    if node_table.primary_key is None:
+      raise ValueError(
+          f"Nodeset {nodeset_name!r} must have a BYTES primary key feature"
+          " stored in the key of its Spanner node table."
+      )
+  return tables
+
+
+def _key_columns(prefix: str, keys: Sequence[Column]) -> list[str]:
+  """Gets the query columns of a key: <prefix>_id, or one per key column."""
+  if len(keys) == 1:
+    return [f"{prefix}_id"]
+  return [f"{prefix}_k{index}" for index in range(len(keys))]
+
+
+def _select_sql(
+    alias: str, columns: Sequence[str], names: Sequence[str] | None = None
+) -> str:
+  """Gets the SELECT list of the columns of alias, optionally renamed."""
+  if names is None:
+    return ", ".join(f"{alias}.{column}" for column in columns)
+  return ", ".join(
+      f"{alias}.{column} AS {name}" for column, name in zip(columns, names)
+  )
+
+
+def _key_bytes_sql(keys: Sequence[Column], alias: str, prefix: str) -> str:
+  """Gets the SQL BYTES id of the key stored in the prefix columns of alias."""
+  return spanner_graph_io_lib.key_bytes_sql(
+      keys, [f"{alias}.{column}" for column in _key_columns(prefix, keys)]
+  )
+
+
+def _seed_parameter_type(key: Column) -> str:
+  """Gets the type of the query parameter holding the seed values of key."""
+  if key.type_kind in (
+      spanner_graph_io_lib.TYPE_STRING,
+      spanner_graph_io_lib.TYPE_DATE,
+  ):
+    return PARAM_TYPE_STRING
+  if key.type_kind == spanner_graph_io_lib.TYPE_BYTES:
+    return PARAM_TYPE_BYTES
+  if key.type_kind == spanner_graph_io_lib.TYPE_BOOL:
+    return PARAM_TYPE_BOOL
+  return PARAM_TYPE_INT64
+
+
+def _seed_value_sql(key: Column, parameter: str) -> str:
+  """Gets the SQL value of key read from its seed query parameter."""
+  return _SEED_PARAMETER_CASTS.get(key.type_kind, "{}").format(parameter)
+
+
+def seed_parameter_types(keys: Sequence[Column]) -> dict[str, str]:
+  """Gets the name and type of the query parameter of each seed key column."""
+  if len(keys) == 1:
+    return {SEED_IDS_PARAMETER: _seed_parameter_type(keys[0])}
+  return {
+      f"{SEED_IDS_PARAMETER}_{index}": _seed_parameter_type(key)
+      for index, key in enumerate(keys)
+  }
+
+
+def seed_parameter_values(
+    keys: Sequence[Column], seed_ids: Sequence[bytes]
+) -> dict[str, list[Any]]:
+  """Decodes the seed ids into the values of the seed query parameters."""
+  column_types = [key.type_kind for key in keys]
+  components = [
+      spanner_graph_io_lib.decode_key(seed_id, column_types)
+      for seed_id in seed_ids
+  ]
+  return {
+      name: [component[index] for component in components]
+      for index, name in enumerate(seed_parameter_types(keys))
+  }
 
 
 def _features_json_sql(
-    table_alias: str, features: Mapping[str, _Feature]
+    table_alias: str, features: Mapping[str, FeatureSpec]
 ) -> str:
   """Builds a SQL JSON_OBJECT expression for a row's features."""
   if not features:
     return "CAST(NULL AS JSON)"
-  fields = ", ".join(
-      f"'{feature_name}',"
-      f" {feature.column.to_json_sql(feature.column.sql(table_alias))}"
-      for feature_name, feature in features.items()
+  return spanner_graph_io_lib.json_object_sql(
+      {name: feature.column for name, feature in features.items()}, table_alias
   )
-  return f"JSON_OBJECT({fields})"
 
 
 def _gql_features_json_sql(
-    variable: str, features: Mapping[str, _Feature]
+    variable: str, features: Mapping[str, FeatureSpec]
 ) -> str:
   """Builds a GQL JSON_OBJECT expression for an element's properties."""
   if not features:
@@ -565,6 +207,10 @@ class _QueryGenerator:
 
   Spanner production databases enforce strict name resolution: all columns are
   qualified with a table alias.
+
+  A key is carried through the CTEs in its native columns (<prefix>_id, or
+  <prefix>_k<i> for a composite key), so that joins use the keys of the tables.
+  Keys are encoded into BYTES ids in the final result only.
   """
 
   def __init__(
@@ -577,13 +223,14 @@ class _QueryGenerator:
   ):
     if engine == QueryEngine.AUTO:
       raise ValueError("The engine must be resolved before generating a query.")
-    gcp_common_lib.validate_identifier(graph_name)
+    spanner_graph_io_lib.validate_identifier(graph_name)
     self._tables = tables
     self._plan = plan
     self._engine = engine
     self._graph_name = graph_name
     self._debug_sampling = debug_sampling
-    self._seed_key = tables.node_tables[plan.root.nodeset].key
+    self._seed_keys = tables.node_tables[plan.root.nodeset].keys
+    self._seed_columns = _key_columns("seed", self._seed_keys)
     self._num_hops = 0
     self._ctes: list[str] = []
     self._node_queries: dict[str, list[str]] = collections.defaultdict(list)
@@ -592,20 +239,18 @@ class _QueryGenerator:
   def generate(self) -> str:
     """Builds the parameterized sampling query."""
     root_nodeset = self._plan.root.nodeset
-    root_table = self._tables.node_tables[root_nodeset]
-    root_key = root_table.key.sql("n")
-    self._ctes.append(
-        f"  {_SOURCE_NODE_CTE} AS (\n"
-        f"    SELECT {root_key} AS seed_id, {root_key} AS n0_id\n"
-        f"    FROM `{root_table.table}` AS n\n"
-        f"    WHERE {root_key} IN UNNEST(@{SEED_IDS_PARAMETER})\n"
-        "  )"
-    )
+    root_columns = _key_columns("n0", self._seed_keys)
+    node_columns = _key_columns("node", self._seed_keys)
+    self._ctes.append(self._source_node_cte())
     self._node_queries[root_nodeset].append(
-        f"SELECT s.seed_id, s.n0_id AS node_id FROM {_SOURCE_NODE_CTE} AS s"
+        f"SELECT {_select_sql('s', self._seed_columns)},"
+        f" {_select_sql('s', root_columns, node_columns)} FROM"
+        f" {_SOURCE_NODE_CTE} AS s"
     )
     self._visit(
-        self._plan.root, parent_cte=_SOURCE_NODE_CTE, parent_column="n0_id"
+        self._plan.root,
+        parent_cte=_SOURCE_NODE_CTE,
+        parent_columns=root_columns,
     )
 
     results = [
@@ -619,11 +264,57 @@ class _QueryGenerator:
         "WITH\n" + ",\n".join(self._ctes) + "\n" + "\nUNION ALL\n".join(results)
     )
 
+  def _source_node_cte(self) -> str:
+    """Builds the CTE of the seed nodes found in their node table."""
+    root_table = self._tables.node_tables[self._plan.root.nodeset]
+    root_keys = [key.sql("n") for key in self._seed_keys]
+    select = ", ".join(
+        f"{root_key} AS {column}"
+        for root_key, column in zip(
+            root_keys * 2,
+            self._seed_columns + _key_columns("n0", self._seed_keys),
+        )
+    )
+    parameters = list(seed_parameter_types(self._seed_keys))
+    has_cast = any(
+        key.type_kind in _SEED_PARAMETER_CASTS for key in self._seed_keys
+    )
+    if len(parameters) == 1 and not has_cast:
+      return (
+          f"  {_SOURCE_NODE_CTE} AS (\n"
+          f"    SELECT {select}\n"
+          f"    FROM `{root_table.table}` AS n\n"
+          f"    WHERE {root_keys[0]} IN UNNEST(@{parameters[0]})\n"
+          "  )"
+      )
+    # The seed parameters are parallel arrays, with one array per key column.
+    unnests = " INNER JOIN ".join(
+        f"UNNEST(@{parameter}) AS k{index} WITH OFFSET AS o{index}"
+        + (f" ON o{index} = o0" if index else "")
+        for index, parameter in enumerate(parameters)
+    )
+    seed_columns = ", ".join(f"k{index}" for index in range(len(parameters)))
+    join = " AND ".join(
+        f"{root_key} = {_seed_value_sql(key, f's.k{index}')}"
+        for index, (root_key, key) in enumerate(zip(root_keys, self._seed_keys))
+    )
+    return (
+        f"  {_SOURCE_NODE_CTE} AS (\n"
+        f"    SELECT {select}\n"
+        f"    FROM (SELECT DISTINCT {seed_columns} FROM {unnests}) AS s\n"
+        f"    INNER JOIN `{root_table.table}` AS n ON {join}\n"
+        "  )"
+    )
+
   def _visit(
-      self, node: config_lib.PlanNode, parent_cte: str, parent_column: str
+      self,
+      node: config_lib.PlanNode,
+      parent_cte: str,
+      parent_columns: Sequence[str],
   ) -> None:
     """Appends one hop CTE per child of node, recursively."""
     parent_table = self._tables.node_tables[node.nodeset]
+    hop_parent_columns = _key_columns("parent", parent_table.keys)
     for edge in node.children:
       if edge.hop_width < 0:
         raise ValueError(
@@ -634,33 +325,38 @@ class _QueryGenerator:
         continue
       self._num_hops += 1
       cte_name = f"_dgf_hop_{self._num_hops}"
-      child_column = f"n{self._num_hops}_id"
+      child_keys = self._tables.node_tables[edge.node.nodeset].keys
+      child_columns = _key_columns(f"n{self._num_hops}", child_keys)
       if self._engine == QueryEngine.SQL:
-        neighbors, child_id = self._sql_neighbors(edge, parent_column)
+        neighbors, child_ids = self._sql_neighbors(edge, parent_columns)
       else:
-        neighbors, child_id = self._gql_neighbors(node, edge, parent_column)
-      child_key = self._tables.node_tables[edge.node.nodeset].key.to_bytes_sql(
-          child_id
-      )
+        neighbors, child_ids = self._gql_neighbors(node, edge, parent_columns)
+      child_key = spanner_graph_io_lib.key_bytes_sql(child_keys, child_ids)
       if self._debug_sampling:
         order = child_key
       else:
         # Hash with @sampling_seed instead of GENERATE_UUID() so every reference
         # to a CTE sees the same sampled neighbors. The hop makes a node
         # reached by several hops sample different neighbors in each of them.
+        seed_key = _key_bytes_sql(self._seed_keys, "p", "seed")
+        parent_key = spanner_graph_io_lib.key_bytes_sql(
+            parent_table.keys, [f"p.{column}" for column in parent_columns]
+        )
         order = (
             f"FARM_FINGERPRINT(CONCAT(@{SAMPLING_SEED_PARAMETER},"
-            f" b'{self._num_hops}:',"
-            f" {self._seed_key.to_bytes_sql('p.seed_id')},"
-            f" {parent_table.key.to_bytes_sql(f'p.{parent_column}')},"
-            f" {child_key}))"
+            f" b'{self._num_hops}:', {seed_key}, {parent_key}, {child_key}))"
         )
+      parents = _select_sql("q", self._seed_columns + list(parent_columns))
+      select = ", ".join([
+          _select_sql("p", self._seed_columns),
+          _select_sql("p", parent_columns, hop_parent_columns),
+          _select_sql("c", _key_columns("child", child_keys), child_columns),
+          "c.edge_json",
+      ])
       self._ctes.append(
           f"  {cte_name} AS (\n"
-          f"    SELECT p.seed_id, p.{parent_column} AS parent_id,"
-          f" c.child_id AS {child_column}, c.edge_json\n"
-          f"    FROM (SELECT DISTINCT q.seed_id, q.{parent_column} FROM"
-          f" {parent_cte} AS q) AS p,\n"
+          f"    SELECT {select}\n"
+          f"    FROM (SELECT DISTINCT {parents} FROM {parent_cte} AS q) AS p,\n"
           "    UNNEST(ARRAY(\n"
           f"{neighbors}\n"
           # The d format rejects non-integer values.
@@ -669,50 +365,64 @@ class _QueryGenerator:
           "  )"
       )
 
+      seeds = _select_sql("h", self._seed_columns)
+      nodes = _select_sql("h", child_columns, _key_columns("node", child_keys))
       self._node_queries[edge.node.nodeset].append(
-          f"SELECT h.seed_id, h.{child_column} AS node_id FROM {cte_name} AS h"
+          f"SELECT {seeds}, {nodes} FROM {cte_name} AS h"
       )
       if edge.reversed:
-        source_column, target_column = child_column, "parent_id"
+        source_keys, source_columns = child_keys, child_columns
+        target_keys, target_columns = parent_table.keys, hop_parent_columns
       else:
-        source_column, target_column = "parent_id", child_column
-      self._edge_queries[edge.edgeset].append(
-          f"SELECT h.seed_id, h.{source_column} AS source_id,"
-          f" h.{target_column} AS target_id, h.edge_json FROM {cte_name} AS h"
+        source_keys, source_columns = parent_table.keys, hop_parent_columns
+        target_keys, target_columns = child_keys, child_columns
+      sources = _select_sql(
+          "h", source_columns, _key_columns("source", source_keys)
       )
-      self._visit(edge.node, parent_cte=cte_name, parent_column=child_column)
+      targets = _select_sql(
+          "h", target_columns, _key_columns("target", target_keys)
+      )
+      self._edge_queries[edge.edgeset].append(
+          f"SELECT {seeds}, {sources}, {targets}, h.edge_json FROM"
+          f" {cte_name} AS h"
+      )
+      self._visit(edge.node, parent_cte=cte_name, parent_columns=child_columns)
 
   def _sql_neighbors(
-      self, edge: config_lib.PlanEdge, parent_column: str
-  ) -> tuple[str, str]:
-    """Gets the SQL query of the neighbors of a parent, and their id column."""
+      self, edge: config_lib.PlanEdge, parent_columns: Sequence[str]
+  ) -> tuple[str, list[str]]:
+    """Gets the SQL query of the neighbors of a parent and their key columns."""
     edge_table = self._tables.edge_tables[edge.edgeset]
     if edge.reversed:
-      join_column, child_column = edge_table.target, edge_table.source
+      join_columns, child_columns = edge_table.target, edge_table.source
     else:
-      join_column, child_column = edge_table.source, edge_table.target
-    child_id = child_column.sql("e")
+      join_columns, child_columns = edge_table.source, edge_table.target
+    child_ids = [column.sql("e") for column in child_columns]
+    children = ", ".join(
+        f"{child_id} AS {name}"
+        for child_id, name in zip(
+            child_ids, _key_columns("child", child_columns)
+        )
+    )
     edge_json = _features_json_sql("e", edge_table.features)
+    conditions = [
+        f"{join_column.sql('e')} = p.{parent_column}"
+        for join_column, parent_column in zip(join_columns, parent_columns)
+    ] + [f"{child_id} IS NOT NULL" for child_id in child_ids]
     query = "\n".join([
-        (
-            f"      SELECT AS STRUCT {child_id} AS child_id, {edge_json} AS"
-            " edge_json"
-        ),
+        f"      SELECT AS STRUCT {children}, {edge_json} AS edge_json",
         f"      FROM `{edge_table.table}` AS e",
-        (
-            f"      WHERE {join_column.sql('e')} = p.{parent_column}"
-            f" AND {child_id} IS NOT NULL"
-        ),
+        f"      WHERE {' AND '.join(conditions)}",
     ])
-    return query, child_id
+    return query, child_ids
 
   def _gql_neighbors(
       self,
       node: config_lib.PlanNode,
       edge: config_lib.PlanEdge,
-      parent_column: str,
-  ) -> tuple[str, str]:
-    """Gets the GQL query of the neighbors of a parent, and their id column."""
+      parent_columns: Sequence[str],
+  ) -> tuple[str, list[str]]:
+    """Gets the GQL query of the neighbors of a parent and their key columns."""
     edge_table = self._tables.edge_tables[edge.edgeset]
     parent_table = self._tables.node_tables[node.nodeset]
     child_table = self._tables.node_tables[edge.node.nodeset]
@@ -723,49 +433,78 @@ class _QueryGenerator:
             " tables of the Spanner Graph, and a GQL query would match all of"
             " them. Use query_engine SQL instead."
         )
+    for nodeset_name, node_table in (
+        (node.nodeset, parent_table),
+        (edge.node.nodeset, child_table),
+    ):
+      if None in node_table.key_properties:
+        raise NotImplementedError(
+            f"Some key columns of {nodeset_name!r} are not properties of the"
+            " Spanner Graph, and a GQL query cannot read them. Use"
+            " query_engine SQL instead."
+        )
     parent = f"(gp:`{parent_table.label}`)"
     child = f"(gc:`{child_table.label}`)"
     if edge.reversed:
       pattern = f"{parent}<-[ge:`{edge_table.label}`]-{child}"
     else:
       pattern = f"{parent}-[ge:`{edge_table.label}`]->{child}"
-    child_key = f"gc.`{child_table.key_property}`"
+    child_columns = _key_columns("child", child_table.keys)
+    conditions = " AND ".join(
+        f"gp.`{key_property}` = p.{parent_column}"
+        for key_property, parent_column in zip(
+            parent_table.key_properties, parent_columns
+        )
+    )
+    children = ", ".join(
+        f"gc.`{key_property}` AS {child_column}"
+        for key_property, child_column in zip(
+            child_table.key_properties, child_columns
+        )
+    )
     edge_json = _gql_features_json_sql("ge", edge_table.features)
+    child_ids = [f"g.{child_column}" for child_column in child_columns]
     query = "\n".join([
-        "      SELECT AS STRUCT g.child_id, g.edge_json",
+        f"      SELECT AS STRUCT {', '.join(child_ids)}, g.edge_json",
         f"      FROM GRAPH_TABLE(`{self._graph_name}`",
         f"        MATCH {pattern}",
-        f"        WHERE gp.`{parent_table.key_property}` = p.{parent_column}",
-        f"        RETURN {child_key} AS child_id, {edge_json} AS edge_json",
+        f"        WHERE {conditions}",
+        f"        RETURN {children}, {edge_json} AS edge_json",
         "      ) AS g",
     ])
-    return query, "g.child_id"
+    return query, child_ids
 
   def _nodes_query(self, nodeset_name: str, queries: list[str]) -> str:
     """Builds the SELECT query returning the sampled nodes of nodeset_name."""
     node_table = self._tables.node_tables[nodeset_name]
+    node_columns = _key_columns("node", node_table.keys)
     cte_name = f"_dgf_nodes_{nodeset_name}"
     union = "\n      UNION ALL\n      ".join(queries)
+    columns = _select_sql("a", self._seed_columns + node_columns)
     self._ctes.append(
         f"  {cte_name} AS (\n"
-        "    SELECT DISTINCT a.seed_id, a.node_id FROM (\n"
+        f"    SELECT DISTINCT {columns} FROM (\n"
         f"      {union}\n"
         "    ) AS a\n"
         "  )"
+    )
+    join = " AND ".join(
+        f"u.{node_column} = {key.sql('n')}"
+        for node_column, key in zip(node_columns, node_table.keys)
     )
     # The node table is joined even without features to read: An edge to a node
     # missing from its node table is then reported instead of creating a node.
     return f"""\
 SELECT
-  {self._seed_key.to_bytes_sql('u.seed_id')} AS seed_id,
-  {node_table.key.to_bytes_sql('u.node_id')} AS node_id,
+  {_key_bytes_sql(self._seed_keys, 'u', 'seed')} AS seed_id,
+  {_key_bytes_sql(node_table.keys, 'u', 'node')} AS node_id,
   '{_ELEMENT_TYPE_NODE}' AS element_type,
   '{nodeset_name}' AS element_class,
   CAST(NULL AS BYTES) AS source_id,
   CAST(NULL AS BYTES) AS target_id,
   {_features_json_sql('n', node_table.features)} AS properties_json
 FROM {cte_name} AS u
-INNER JOIN `{node_table.table}` AS n ON u.node_id = {node_table.key.sql('n')}"""
+INNER JOIN `{node_table.table}` AS n ON {join}"""
 
   def _edges_query(self, edgeset_name: str, queries: list[str]) -> str:
     """Builds the SELECT query returning the sampled edges of edgeset_name."""
@@ -773,12 +512,12 @@ INNER JOIN `{node_table.table}` AS n ON u.node_id = {node_table.key.sql('n')}"""
     union = "\n  UNION ALL\n  ".join(queries)
     return f"""\
 SELECT
-  {self._seed_key.to_bytes_sql('e.seed_id')} AS seed_id,
+  {_key_bytes_sql(self._seed_keys, 'e', 'seed')} AS seed_id,
   CAST(NULL AS BYTES) AS node_id,
   '{_ELEMENT_TYPE_EDGE}' AS element_type,
   '{edgeset_name}' AS element_class,
-  {edge_table.source.to_bytes_sql('e.source_id')} AS source_id,
-  {edge_table.target.to_bytes_sql('e.target_id')} AS target_id,
+  {_key_bytes_sql(edge_table.source, 'e', 'source')} AS source_id,
+  {_key_bytes_sql(edge_table.target, 'e', 'target')} AS target_id,
   e.edge_json AS properties_json
 FROM (
   {union}
@@ -813,7 +552,7 @@ def generate_query(
 
 def _append_parsed_features(
     properties: Mapping[str, Any] | None,
-    features: Mapping[str, _Feature],
+    features: Mapping[str, FeatureSpec],
     output: dict[str, list[Any]],
 ) -> None:
   """Parses the properties of an element and appends them to output."""
@@ -823,18 +562,6 @@ def _append_parsed_features(
     raise ValueError("Expected JSON properties object, got None.")
   for feature_name, feature in features.items():
     output[feature_name].append(feature.parse_value(properties[feature_name]))
-
-
-def _pack_feature(feature: _Feature, values: list[Any]) -> np.ndarray:
-  """Packs parsed per-element values into a single feature array."""
-  if not values:
-    return feature.empty_array
-  if feature.is_ragged:
-    stacked = np.empty(len(values), dtype=np.object_)
-    for index, item in enumerate(values):
-      stacked[index] = item
-    return stacked
-  return np.array(values, dtype=feature.dtype)
 
 
 @dataclasses.dataclass
@@ -930,13 +657,13 @@ class _SubgraphBuilder:
     for nodeset_name, nodeset_schema in self._schema.node_sets.items():
       nodeset = self._node_sets[nodeset_name]
       node_table = self._tables.node_tables[nodeset_name]
-      key_array = np.array(list(nodeset.node_index), dtype=_BYTES_DTYPE)
+      key_array = spanner_graph_io_lib.pack_bytes_ids(list(nodeset.node_index))
       features = {}
       for feature_name in nodeset_schema.features:
-        if feature_name == node_table.key_property:
+        if feature_name == node_table.primary_key:
           features[feature_name] = key_array
         else:
-          features[feature_name] = _pack_feature(
+          features[feature_name] = spanner_graph_io_lib.pack_feature(
               node_table.features[feature_name], nodeset.features[feature_name]
           )
       node_sets[nodeset_name] = in_memory_graph_lib.InMemoryNodeSet(
@@ -952,7 +679,7 @@ class _SubgraphBuilder:
               [edgeset.sources, edgeset.targets], dtype=np.int64
           ).reshape(2, -1),
           features={
-              feature_name: _pack_feature(
+              feature_name: spanner_graph_io_lib.pack_feature(
                   edge_table.features[feature_name],
                   edgeset.features[feature_name],
               )
@@ -1041,6 +768,7 @@ class SpannerGraphSampler(abc.ABC):
   def __init__(
       self,
       metadata: spanner_graph_metadata_lib.SpannerGraphMetadata,
+      column_spanner_types: Mapping[tuple[str, str], str],
       graph: str,
       plan: config_lib.SimpleSamplingConfig | config_lib.SamplingPlan,
       schema: schema_lib.GraphSchema,
@@ -1064,14 +792,13 @@ class SpannerGraphSampler(abc.ABC):
     self._schema = schema
     self._debug_sampling = debug_sampling
     self._query_engine = query_engine
-    self._tables = resolve_graph_tables(metadata, schema)
+    self._tables = resolve_graph_tables(metadata, schema, column_spanner_types)
     self._query = generate_query(
         self._tables, plan, query_engine, graph, debug_sampling
     )
-    self._root_key_is_string = (
-        self._tables.node_tables[plan.root.nodeset].key.type_kind
-        == _TYPE_STRING
-    )
+    self._seed_keys = self._tables.node_tables[plan.root.nodeset].keys
+    # Type (PARAM_TYPE_*) of the elements of each seed query parameter.
+    self._seed_parameter_types = seed_parameter_types(self._seed_keys)
 
   @property
   def query_engine(self) -> QueryEngine:
@@ -1101,12 +828,8 @@ class SpannerGraphSampler(abc.ABC):
     ]
     if not seed_bytes:
       return []
-    if self._root_key_is_string:
-      seed_values = [seed_id.decode("utf-8") for seed_id in seed_bytes]
-    else:
-      seed_values = seed_bytes
     rows = self._execute(
-        seed_values=seed_values,
+        seed_parameters=seed_parameter_values(self._seed_keys, seed_bytes),
         sampling_seed=None if self._debug_sampling else os.urandom(8),
     )
     return rows_to_in_memory_graphs(
@@ -1120,14 +843,14 @@ class SpannerGraphSampler(abc.ABC):
   @abc.abstractmethod
   def _execute(
       self,
-      seed_values: list[bytes] | list[str],
+      seed_parameters: Mapping[str, list[Any]],
       sampling_seed: bytes | None,
   ) -> Iterable[Sequence[Any]]:
     """Runs the sampling query and returns its rows.
 
     Args:
-      seed_values: Value of the @seed_ids parameter (an ARRAY<STRING> if the
-        values are str, an ARRAY<BYTES> otherwise).
+      seed_parameters: Values of the seed query parameters, which are arrays of
+        the types in self._seed_parameter_types.
       sampling_seed: Value of the @sampling_seed BYTES parameter, or None when
         debug_sampling is enabled.
 
