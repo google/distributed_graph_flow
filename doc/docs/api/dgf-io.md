@@ -56,8 +56,14 @@ hide:
 ## dgf.io.read_spanner_graph  # {: #section-read-spanner-graph}
 ::: dgf.io.read_spanner_graph
 
+## dgf.io.read_spanner_graph_gcp  # {: #section-read-spanner-graph-gcp}
+::: dgf.io.read_spanner_graph_gcp
+
 ## dgf.io.read_spanner_graph_schema  # {: #section-read-spanner-graph-schema}
 ::: dgf.io.read_spanner_graph_schema
+
+## dgf.io.read_spanner_graph_schema_gcp  # {: #section-read-spanner-graph-schema-gcp}
+::: dgf.io.read_spanner_graph_schema_gcp
 
 ## dgf.io.read_text_proto  # {: #section-read-text-proto}
 ::: dgf.io.read_text_proto
