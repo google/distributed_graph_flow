@@ -100,8 +100,10 @@ class _FakeSnapshot:
       self, sql: str, params: dict[str, Any], param_types: dict[str, Any]
   ) -> list[list[Any]]:
     self._database.calls.append((sql, params, param_types))
-    if "INFORMATION_SCHEMA.PROPERTY_GRAPHS" in sql:
+    if "information_schema.property_graphs" in sql:
       return self._database.metadata_rows
+    if "INFORMATION_SCHEMA.COLUMNS" in sql:
+      return []
     return self._database.sample_rows
 
 
@@ -192,16 +194,17 @@ class SpannerGraphSamplerGcpTest(parameterized.TestCase):
         debug_sampling=True,
         query_engine="SQL",
     )
-    self.assertLen(fake_db.calls, 1)
+    # The graph definition and the column types are read at construction.
+    self.assertLen(fake_db.calls, 2)
     self.assertEqual(sampler.sample([]), [])
-    self.assertLen(fake_db.calls, 1)
+    self.assertLen(fake_db.calls, 2)
 
     (sample,) = sampler.sample(["n0"])
     np.testing.assert_array_equal(
         sample.node_sets["nodes"].features["id"], [b"n0"]
     )
-    self.assertLen(fake_db.calls, 2)
-    _, params, param_types = fake_db.calls[1]
+    self.assertLen(fake_db.calls, 3)
+    _, params, param_types = fake_db.calls[-1]
     self.assertEqual(params, {"seed_ids": [base64.b64encode(b"n0")]})
     self.assertEqual(
         param_types,
@@ -236,7 +239,7 @@ class SpannerGraphSamplerGcpTest(parameterized.TestCase):
     np.testing.assert_array_equal(
         sample.node_sets["nodes"].features["id"], [b"n0"]
     )
-    _, params, param_types = fake_db.calls[1]
+    _, params, param_types = fake_db.calls[-1]
     self.assertEqual(params["seed_ids"], ["n0"])
     # The Cloud client expects the BYTES parameters in base64.
     self.assertLen(base64.b64decode(params["sampling_seed"], validate=True), 8)

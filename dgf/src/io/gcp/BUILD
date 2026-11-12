@@ -142,15 +142,12 @@ py_library(
     deps = [
         ":common",
         ":spanner_graph_metadata",
-        "//dgf/src/analyse:print_schema",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
-        "//dgf/src/io:io_ext",
+        "//dgf/src/io:spanner_graph",
         "//dgf/src/util:log",
-        "//dgf/src/util:util_py",
         # google/cloud/spanner dep,
         # google/cloud/spanner_v1 dep,
-        # numpy dep,
     ],
 )
 
@@ -265,15 +262,16 @@ py_test(
 py_test(
     name = "spanner_graph_test",
     srcs = ["spanner_graph_test.py"],
-    data = ["//test_data"],
     type_checking = True,
     deps = [
         ":spanner_graph",
         ":spanner_graph_metadata",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
-        "//dgf/src/io:io_ext",
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
         "//dgf/src/util:test_util",
+        # google/cloud/spanner_v1 dep,
         # numpy dep,
     ],
 )

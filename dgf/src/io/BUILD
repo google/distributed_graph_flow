@@ -278,7 +278,38 @@ py_library(
 
 py_library(
     name = "spanner_graph",
+    srcs = ["spanner_graph.py"],
     type_checking = True,
+    deps = [
+        ":feature_format",
+        ":io_ext",
+        "//dgf/src/analyse:print_schema",
+        "//dgf/src/analyse:schema",
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/io/gcp:spanner_graph_metadata",
+        "//dgf/src/util:log",
+        "//dgf/src/util:util_py",
+        # numpy dep,
+        # tqdm dep,
+    ],
+)
+
+py_test(
+    name = "spanner_graph_test",
+    srcs = ["spanner_graph_test.py"],
+    type_checking = True,
+    deps = [
+        ":spanner_graph",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        "//dgf/src/data:in_memory_graph",
+        "//dgf/src/data:schema",
+        "//dgf/src/io/gcp:spanner_graph_metadata",
+        "//dgf/src/util:test_util",
+        "//dgf/src/validate:in_memory_graph",
+        # numpy dep,
+    ],
 )
 
 py_library(
