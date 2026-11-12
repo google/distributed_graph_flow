@@ -329,32 +329,28 @@ class GNNDatasetPreparator:
         yield sample
 
     def gen_raw_samples_for_stats():
-      # The statistics of the target/label column are only computed on the
-      # target nodes i.e., the nodes where the target/label column are actually
-      # used.
+      # The statistics of the target/label column are computed only on
+      # the target nodes i.e., where they are actually used.
       for sample, merge_offsets in sample_generator.batch_iterator():
-        if (
-            self.target_column is not None
-            and target_nodeset in sample.node_sets
-            and self.target_column in sample.node_sets[target_nodeset].features
-        ):
-          seed_node_idxs = merge_offsets[target_nodeset][:-1]
-          target_ns = sample.node_sets[target_nodeset]
-          target_features = dict(target_ns.features)
-          target_features[self.target_column] = target_features[
-              self.target_column
-          ][seed_node_idxs]
-          node_sets = dict(sample.node_sets)
-          node_sets[target_nodeset] = in_memory_graph_lib.InMemoryNodeSet(
-              num_nodes=target_ns.num_nodes,
-              features=target_features,
-          )
-          sample = in_memory_graph_lib.InMemoryGraph(
-              node_sets=node_sets,
-              edge_sets=sample.edge_sets,
-              timestamp=sample.timestamp,
-          )
-        yield sample
+        # We slice every feature (not just the target column), so that
+        # validation and test target nodes reached through hops do not leak
+        # into the normalizer statistics.
+        seed_node_idxs = merge_offsets[target_nodeset][:-1]
+        target_ns = sample.node_sets[target_nodeset]
+        target_features = {
+            column: features[seed_node_idxs]
+            for column, features in target_ns.features.items()
+        }
+        node_sets = dict(sample.node_sets)
+        node_sets[target_nodeset] = in_memory_graph_lib.InMemoryNodeSet(
+            num_nodes=len(seed_node_idxs),
+            features=target_features,
+        )
+        yield in_memory_graph_lib.InMemoryGraph(
+            node_sets=node_sets,
+            edge_sets=sample.edge_sets,
+            timestamp=sample.timestamp,
+        )
 
     gen_raw_samples_iter = gen_raw_samples_for_stats()
     if self.num_samples_for_stats is not None:
