@@ -46,6 +46,7 @@ from dgf.src.learning.ten_lines import report
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
+from dgf.src.transform import schema as schema_transform_lib
 from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
@@ -231,7 +232,9 @@ class NodePredictionModel(common.Model):
       raise ValueError("Model UUID is not set.")
     model_uuid = self.metadata.uuid
     instance_schema = common.schema_to_serving_signature_dict(
-        schema_=self.data().schema,
+        schema_=schema_to_input_feature_schema(
+            self.data().schema, self.data().task
+        ),
         target_nodeset=self.data().task.target_nodeset,
         model_name=self.name(),
         model_uuid=model_uuid,
@@ -854,11 +857,12 @@ class NodePredictionModel(common.Model):
         integers named `seed_node_idxs` specifying the indices of the nodes
         within the target nodeset for which to generate predictions.
       - TF_GRAPH_DICT: The items of a `dgf.data.TFInMemoryGraphDict` as keyword
-        arguments, and `seed_node_idxs`.
+        arguments, and `seed_node_idxs`. The label (i.e., target column) and
+        the primary ID features are not inputs.
       - SERIALIZED_TFGNN_GRAPHS: A 1D string tensor named `examples` containing
         serialized TF GNN Graph Samples. One prediction is generated for each
         graph sample, on the first node of the target nodeset (which is the
-        seed node of the DGF graph samplers).
+        seed node of the DGF graph samplers). The label is not required.
 
     Usage example:
 
@@ -886,12 +890,21 @@ class NodePredictionModel(common.Model):
     )
 
     live = self._get_live()
+    # Inputs are padded to static shapes to avoid jax2tf shape assertions.
     tf_apply_core_model = jax2tf.convert(
         live.apply_core_model,
-        polymorphic_shapes=[(None, "(b,)")],
         native_serialization_platforms=["cpu", "cuda"],
     )
     schema = self.data().schema
+    if input_format != common.TFFunctionInputFormat.TF_GRAPH:
+      # The serving formats only consume the model inputs.
+      schema = schema_transform_lib.drop_primary_id_features_from_schema(
+          schema_to_input_feature_schema(schema, self.data().task)
+      )
+    max_num_seed_nodes = (
+        self.data().padding.node_sets[self.data().task.target_nodeset].num_nodes
+    )
+    assert max_num_seed_nodes is not None
 
     graph_spec = io_tf_lib.schema_to_spec(schema)
     graph_dict_spec = io_tf_lib.schema_to_dict_spec(schema)
@@ -929,7 +942,11 @@ class NodePredictionModel(common.Model):
         jax_graph = jax_lib.graph_to_jax_graph(
             normalized_graph, cast_arrays=False
         )
-        return self._tf_apply_core_model((jax_graph, seed_node_idxs))
+        predictions = self._tf_apply_core_model((
+            jax_graph,
+            common.pad_seed_idxs_tensorflow(seed_node_idxs, max_num_seed_nodes),
+        ))
+        return predictions[: tf.shape(seed_node_idxs)[0]]
 
     class TfPredictWrapperTFGraph(TfPredictWrapperBase):
 
@@ -1023,7 +1040,7 @@ class NodePredictionModel(common.Model):
     wrapper = wrapper_class(
         tf_apply_core_model,
         live.normalizer,
-        self.data().schema,
+        schema,
         self.data().padding,
     )
 

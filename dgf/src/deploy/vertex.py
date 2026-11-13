@@ -14,68 +14,80 @@
 
 """Vertex AI deployment utilities for GraphFlow models."""
 
+import concurrent.futures
 import tempfile
-from typing import Any, Optional
+import time
+from typing import Any, Literal, Optional
 
 from dgf.src.learning.ten_lines import common
 from dgf.src.util import filesystem
 from dgf.src.util import log
 from dgf.src.util.weak_dep.weak_dep_aiplatform import aiplatform  # pylint: disable=g-importing-member
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf  # pylint: disable=g-importing-member
+import jax
 import yaml
 
 
-DEFAULT_SERVING_CONTAINER_URI = (
-    "us-docker.pkg.dev/vertex-ai/prediction/tf2-cpu.2-12:latest"
-)
+# Optimized TF runtimes, required by the jax2tf XlaCallModule ops.
+_SERVING_CONTAINER_URIS = {
+    "cpu": (
+        "us-docker.pkg.dev/vertex-ai-restricted/prediction/tf_opt-cpu.nightly:latest"
+    ),
+    "gpu": (
+        "us-docker.pkg.dev/vertex-ai-restricted/prediction/tf_opt-gpu.nightly:latest"
+    ),
+}
+_GPU_ACCELERATOR_TYPE = "NVIDIA_TESLA_T4"
+_MAX_UPLOAD_WAIT_SECONDS = 2 * 60 * 60
+_UPLOAD_POLL_INTERVAL_SECONDS = 30
 
 
-def _create_batched_serving_model(tf_model: Any) -> Any:
-  """Wraps a GraphFlow TF model to handle Vertex AI's batched JSON instances.
-
-  Vertex AI sends prediction requests as a JSON list of instances, which the
-  container parses into a batched tensor (e.g. adding a [None] outermost
-  dimension). GraphFlow models natively expect unbatched 1D arrays. This wrapper
-  strips the batch dimension on the input, passes it to the model, and adds a
-  batch dimension to the output to satisfy Vertex AI's response contract.
+def _create_batched_serving_model(tf_model: Any, input_names: set[str]) -> Any:
+  """Wraps a GraphFlow TF model to run on each batched Vertex AI instance.
 
   Args:
-    tf_model: The raw TensorFlow callable exported from a GraphFlow model.
+    tf_model: TF function consuming a single TF graph dict.
+    input_names: Inputs of the instance schema. The other inputs of tf_model
+      (i.e., the nodesets and edgesets not visited by the sampling plan) are fed
+      with empty values.
 
   Returns:
-    A wrapped `tf.Module` with a concrete `__call__` signature accepting batched
-    inputs.
+    A TF module consuming a batch of instances.
   """
+  unbatched_spec = tf_model.__call__.structured_input_signature[1]
 
   class BatchedServingWrapper(tf.Module):
-    """Module wrapper stripping outer batch dimension."""
+    """Module wrapper running the model on each instance of the batch."""
 
     def __init__(self, raw_model):
       super().__init__()
       self.raw_model = raw_model
 
-    @tf.function
+    @tf.function(autograph=False)
     def __call__(self, **kwargs):
-      # Vertex AI wraps instances in a batch dimension. We strip it here (v[0])
-      unbatched_kwargs = {k: v[0] for k, v in kwargs.items()}
-      out = self.raw_model(**unbatched_kwargs)
-      # Re-add the batch dimension to the predictions
-      return {"predictions": tf.expand_dims(out, axis=0)}
+      def predict_instance(idx):
+        instance = {k: v[idx] for k, v in kwargs.items()}
+        for k, spec in unbatched_spec.items():
+          if k not in instance:
+            instance[k] = tf.zeros([d or 0 for d in spec.shape], spec.dtype)
+        return self.raw_model(**instance)
+
+      predictions = tf.map_fn(
+          predict_instance,
+          tf.range(tf.shape(next(iter(kwargs.values())))[0]),
+          fn_output_signature=tf.TensorSpec(shape=None, dtype=tf.float32),
+      )
+      return {"predictions": predictions}
 
   batched_model = BatchedServingWrapper(tf_model)
-
-  # Dynamically trace tf.function using TensorSpecs to avoid needing dummy data
-  unbatched_spec = tf_model.__call__.structured_input_signature[1]
-  batched_spec = {}
-  for k, spec in unbatched_spec.items():
-    batched_shape = [None] + spec.shape.as_list()
-    batched_spec[k] = tf.TensorSpec(
-        shape=batched_shape, dtype=spec.dtype, name=spec.name
-    )
-
-  batched_model.__call__ = batched_model.__call__.get_concrete_function(
-      **batched_spec
-  )
+  batched_model.__call__ = batched_model.__call__.get_concrete_function(**{
+      k: tf.TensorSpec(
+          shape=[None] + unbatched_spec[k].shape.as_list(),
+          dtype=unbatched_spec[k].dtype,
+          name=unbatched_spec[k].name,
+      )
+      for k in sorted(input_names)
+  })
   return batched_model
 
 
@@ -114,10 +126,18 @@ def _save_model_to_gcs(
       # Export to TF SavedModel for Vertex AI
       # TODO(gbm): Use `model.to_tensorflow_saved_model` (requires support for
       # Vertex's batched instances).
-      tf_model = model.to_tensorflow_function(consume_tf_graph_dict=True)
-
-      batched_model = _create_batched_serving_model(tf_model)
-      tf.saved_model.save(batched_model, tmp_dir)
+      previous_version = jax.config.jax_export_calling_convention_version
+      jax.config.update("jax_export_calling_convention_version", 9)
+      try:
+        tf_model = model.to_tensorflow_function(input_format="TF_GRAPH_DICT")
+        batched_model = _create_batched_serving_model(
+            tf_model, set(instance_schema["properties"])
+        )
+        tf.saved_model.save(batched_model, tmp_dir)
+      finally:
+        jax.config.update(
+            "jax_export_calling_convention_version", previous_version
+        )
 
       # Upload all files from tmp_dir to GCS via filesystem utility
       filesystem.copy_local_dir(tmp_dir, target_gcs_dir, project=project)
@@ -140,6 +160,32 @@ def _save_model_to_gcs(
     log.info("Model saved to %s", target_gcs_dir)
 
 
+def _find_uploaded_model(
+    display_name: str,
+    model_uuid: str | None,
+    target_gcs_dir: str,
+    serving_container_image_uri: str,
+) -> tuple[Any, str | None]:
+  """Finds an uploaded model matching the UUID, GCS URI, and serving container."""
+  existing_models = aiplatform.Model.list(
+      filter=f'display_name="{display_name}"', order_by="create_time desc"
+  )
+  if not existing_models:
+    return None, None
+  for existing_model in existing_models:
+    existing_uri = (existing_model.uri or "").rstrip("/")
+    container_spec = existing_model.container_spec
+    if (
+        existing_model.labels
+        and existing_model.labels.get("uuid") == model_uuid
+        and existing_uri == target_gcs_dir.rstrip("/")
+        and container_spec is not None
+        and container_spec.image_uri == serving_container_image_uri
+    ):
+      return existing_model, existing_models[0].resource_name
+  return None, existing_models[0].resource_name
+
+
 def _upload_to_vertex_ai(
     model: common.Model,
     target_gcs_dir: str,
@@ -149,56 +195,59 @@ def _upload_to_vertex_ai(
   """Uploads the model to Vertex AI Model Registry or reuses an existing version."""
   model_uuid = model.metadata.uuid
   log.info("Step 2 (Upload to Vertex): Checking existing models...")
-  existing_models = aiplatform.Model.list(
-      filter=f'display_name="{display_name}"', order_by="create_time desc"
+  vertex_model, parent_model_name = _find_uploaded_model(
+      display_name, model_uuid, target_gcs_dir, serving_container_image_uri
+  )
+  if vertex_model:
+    log.info(
+        "Step 2 (Upload to Vertex): SKIP - Model UUID (%s), GCS URI and"
+        " serving container match.",
+        model_uuid,
+    )
+    return vertex_model
+
+  log.info(
+      "Step 2 (Upload to Vertex): EXECUTE - Uploading new model version..."
+  )
+  upload_kwargs = {
+      "display_name": display_name,
+      "artifact_uri": target_gcs_dir,
+      "serving_container_image_uri": serving_container_image_uri,
+      "labels": {"uuid": model_uuid},
+      "sync": True,
+  }
+  if parent_model_name:
+    upload_kwargs["parent_model"] = parent_model_name
+    upload_kwargs["is_default_version"] = True
+
+  # Attach predict schemata
+  upload_kwargs["instance_schema_uri"] = (
+      f"{target_gcs_dir}/instance_schema.yaml"
+  )
+  upload_kwargs["prediction_schema_uri"] = (
+      f"{target_gcs_dir}/prediction_schema.yaml"
   )
 
-  vertex_model = None
-  parent_model_name = None
-  if existing_models:
-    parent_model_name = existing_models[0].resource_name
-    for existing_model in existing_models:
-      # Verify both the custom uuid label and GCS artifact URI match
-      existing_uri = (existing_model.uri or "").rstrip("/")
-      if (
-          existing_model.labels
-          and existing_model.labels.get("uuid") == model_uuid
-          and existing_uri == target_gcs_dir.rstrip("/")
-      ):
-        log.info(
-            "Step 2 (Upload to Vertex): SKIP - Model UUID (%s) and GCS URI"
-            " match.",
-            model_uuid,
-        )
-        vertex_model = existing_model
-        break
-
-  if not vertex_model:
+  try:
+    return aiplatform.Model.upload(**upload_kwargs)
+  except concurrent.futures.TimeoutError:
+    # Model.upload times out after 15 minutes; poll until the upload finishes.
     log.info(
-        "Step 2 (Upload to Vertex): EXECUTE - Uploading new model version..."
+        "Step 2 (Upload to Vertex): The upload is taking longer than"
+        " expected. Waiting for the model to appear in the Model Registry..."
     )
-    upload_kwargs = {
-        "display_name": display_name,
-        "artifact_uri": target_gcs_dir,
-        "serving_container_image_uri": serving_container_image_uri,
-        "labels": {"uuid": model_uuid},
-        "sync": True,
-    }
-    if parent_model_name:
-      upload_kwargs["parent_model"] = parent_model_name
-      upload_kwargs["is_default_version"] = True
-
-    # Attach predict schemata
-    upload_kwargs["instance_schema_uri"] = (
-        f"{target_gcs_dir}/instance_schema.yaml"
+  deadline = time.time() + _MAX_UPLOAD_WAIT_SECONDS
+  while time.time() < deadline:
+    time.sleep(_UPLOAD_POLL_INTERVAL_SECONDS)
+    vertex_model, _ = _find_uploaded_model(
+        display_name, model_uuid, target_gcs_dir, serving_container_image_uri
     )
-    upload_kwargs["prediction_schema_uri"] = (
-        f"{target_gcs_dir}/prediction_schema.yaml"
-    )
-
-    vertex_model = aiplatform.Model.upload(**upload_kwargs)
-
-  return vertex_model
+    if vertex_model:
+      return vertex_model
+  raise TimeoutError(
+      f"The model {model_uuid} was not uploaded to the Vertex AI Model"
+      f" Registry within {_MAX_UPLOAD_WAIT_SECONDS} seconds."
+  )
 
 
 def _get_or_create_endpoint(
@@ -261,6 +310,7 @@ def _deploy_model_to_endpoint(
     endpoint: Any,
     vertex_model: Any,
     machine_type: str,
+    target: Literal["cpu", "gpu"],
     blocking: bool,
 ) -> None:
   """Deploys the target model version to the endpoint and cleans up old versions."""
@@ -309,6 +359,8 @@ def _deploy_model_to_endpoint(
     endpoint.deploy(
         model=vertex_model,
         machine_type=machine_type,
+        accelerator_type=_GPU_ACCELERATOR_TYPE if target == "gpu" else None,
+        accelerator_count=1 if target == "gpu" else None,
         traffic_percentage=100,
         sync=blocking,
     )
@@ -349,8 +401,9 @@ def to_vertex_ai(
     location: str,
     project: Optional[str] = None,
     machine_type: str = "n1-standard-4",
+    target: Literal["cpu", "gpu"] = "cpu",
     use_dedicated_endpoint: bool = True,
-    serving_container_image_uri: str = DEFAULT_SERVING_CONTAINER_URI,
+    serving_container_image_uri: Optional[str] = None,
     endpoint_id: Optional[str] = None,
     blocking: bool = True,
 ) -> Any:
@@ -384,8 +437,11 @@ def to_vertex_ai(
     location: GCP Region.
     project: GCP Project ID.
     machine_type: Machine type for the Vertex AI Endpoint.
+    target: Hardware running the model. With "gpu", a NVIDIA T4 GPU is attached
+      to the machine (`machine_type` should be a N1 machine).
     use_dedicated_endpoint: Whether to use dedicated resources.
     serving_container_image_uri: Docker image URI for Vertex AI prediction.
+      Defaults to the optimized TensorFlow runtime for `target`.
     endpoint_id: If provided, deploy to this existing endpoint ID.
     blocking: If True, waits for endpoint creation and model deployment to
       finish.
@@ -401,6 +457,8 @@ def to_vertex_ai(
   """
 
   aiplatform.init(project=project, location=location)
+  if serving_container_image_uri is None:
+    serving_container_image_uri = _SERVING_CONTAINER_URIS[target]
 
   # Pre-flight Checks
   if not model.metadata or not model.metadata.uuid:
@@ -443,7 +501,8 @@ def to_vertex_ai(
   )
 
   # Step 4: Deploy Model
-  _deploy_model_to_endpoint(endpoint, vertex_model, machine_type, blocking)
+  _deploy_model_to_endpoint(
+      endpoint, vertex_model, machine_type, target, blocking
+  )
 
   return endpoint
-

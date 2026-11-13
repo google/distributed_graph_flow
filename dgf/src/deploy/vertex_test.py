@@ -14,6 +14,7 @@
 
 """Hermetic unit tests for dgf.src.deploy.vertex covering all 6 Design Doc cases."""
 
+import concurrent.futures
 import types
 from typing import Any, Optional
 from unittest import mock
@@ -147,6 +148,9 @@ class StatefulGCPMock:
         uri=artifact_uri,
         labels=dict(labels or {}),
         display_name=display_name,
+        container_spec=types.SimpleNamespace(
+            image_uri=serving_container_image_uri
+        ),
     )
     # Insert at front so existing[0] is latest version
     existing.insert(0, mock_model)
@@ -169,7 +173,12 @@ class StatefulGCPMock:
       return list(ep._deployed_models)
 
     def deploy(
-        model, machine_type="n1-standard-4", traffic_percentage=100, sync=True
+        model,
+        machine_type="n1-standard-4",
+        accelerator_type=None,
+        accelerator_count=None,
+        traffic_percentage=100,
+        sync=True,
     ):
       dep_id = f"dep-{self._next_id()}"
       self.deploy_calls.append({
@@ -177,6 +186,8 @@ class StatefulGCPMock:
           "model": model.resource_name,
           "version_id": model.version_id,
           "machine_type": machine_type,
+          "accelerator_type": accelerator_type,
+          "accelerator_count": accelerator_count,
           "traffic_percentage": traffic_percentage,
           "sync": sync,
       })
@@ -697,8 +708,65 @@ class VertexDeployTest(absltest.TestCase):
     )
     self.mock_model_upload.assert_not_called()
 
+  def test_serving_container_changes(self):
+    """Verifies that a new model version is uploaded if the container changes."""
+    model, _ = self._deploy_baseline()
+
+    vertex.to_vertex_ai(
+        model=model,
+        model_dir_on_gcs="gs://test-bucket/dir1",
+        display_name="gnn-model-v1",
+        location="us-central1",
+        machine_type="n2-standard-4",
+        serving_container_image_uri="my-image",
+    )
+    self.mock_model_upload.assert_called_once()
+    self.assertEqual(
+        self.gcp.model_upload_calls[-1]["serving_container_image_uri"],
+        "my-image",
+    )
+
+  def test_gpu_target(self):
+    """Verifies that the GPU target uses a GPU container and accelerator."""
+    vertex.to_vertex_ai(
+        model=FakeGNNModel("uuid-gpu"),
+        model_dir_on_gcs="gs://test-bucket/dir1",
+        display_name="gnn-model-gpu",
+        location="us-central1",
+        target="gpu",
+    )
+    self.assertIn(
+        "tf_opt-gpu",
+        self.gcp.model_upload_calls[-1]["serving_container_image_uri"],
+    )
+    self.assertEqual(
+        self.gcp.deploy_calls[-1]["accelerator_type"], "NVIDIA_TESLA_T4"
+    )
+    self.assertEqual(self.gcp.deploy_calls[-1]["accelerator_count"], 1)
+
+  def test_upload_timeout_waits_for_model(self):
+    """Verifies that a Model.upload timeout waits for the uploaded model."""
+
+    def upload_with_timeout(**kwargs):
+      # The upload succeeds in the backend, but the client times out.
+      self.gcp.model_upload(**kwargs)
+      raise concurrent.futures.TimeoutError()
+
+    self.mock_model_upload.side_effect = upload_with_timeout
+    self.enter_context(
+        mock.patch.object(vertex, "_UPLOAD_POLL_INTERVAL_SECONDS", 0)
+    )
+    vertex.to_vertex_ai(
+        model=FakeGNNModel("uuid-timeout"),
+        model_dir_on_gcs="gs://test-bucket/dir1",
+        display_name="gnn-model-timeout",
+        location="us-central1",
+    )
+    self.mock_model_upload.assert_called_once()
+    self.assertLen(self.gcp.deploy_calls, 1)
+
   def test_create_batched_serving_model(self):
-    """Verifies _create_batched_serving_model strips input batch dim and adds output batch dim."""
+    """Verifies _create_batched_serving_model predicts on each instance."""
 
     class DummyRawModel(tf.Module):
 
@@ -711,7 +779,7 @@ class VertexDeployTest(absltest.TestCase):
         x=tf.TensorSpec(shape=[3], dtype=tf.float32, name="custom_x_name")
     )
 
-    batched_model = self._real_create_batched_serving_model(raw_model)
+    batched_model = self._real_create_batched_serving_model(raw_model, {"x"})
     input_specs = batched_model.__call__.structured_input_signature[1]
     self.assertEqual(input_specs["x"].name, "custom_x_name")
     out = batched_model.__call__(
@@ -721,6 +789,53 @@ class VertexDeployTest(absltest.TestCase):
     self.assertEqual(out["predictions"].shape.as_list(), [1, 3])
     self.assertSequenceAlmostEqual(
         out["predictions"].numpy().tolist()[0], [2.0, 4.0, 6.0]
+    )
+
+    out = batched_model.__call__(
+        x=tf.constant([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=tf.float32)
+    )
+    self.assertEqual(out["predictions"].shape.as_list(), [2, 3])
+    self.assertSequenceAlmostEqual(
+        out["predictions"].numpy().tolist()[1], [8.0, 10.0, 12.0]
+    )
+
+  def test_create_batched_serving_model_unvisited_entities(self):
+    """Verifies the entities not in the instance schema are fed empty."""
+
+    class RawGraphModel(tf.Module):
+
+      @tf.function
+      def __call__(self, **kwargs):
+        tf.debugging.assert_equal(kwargs["nodes_b_reserved_size"], 0)
+        tf.debugging.assert_equal(tf.shape(kwargs["nodes_b_f"]), [0, 2])
+        tf.debugging.assert_equal(
+            tf.shape(kwargs["edges_e_reserved_adjacency"]), [2, 0]
+        )
+        return tf.gather(kwargs["nodes_a_f"], kwargs["seed_node_idxs"])
+
+    raw_model = RawGraphModel()
+    raw_model.__call__ = raw_model.__call__.get_concrete_function(
+        seed_node_idxs=tf.TensorSpec([None], tf.int32),
+        nodes_a_reserved_size=tf.TensorSpec([], tf.int32),
+        nodes_a_f=tf.TensorSpec([None], tf.float32),
+        nodes_b_reserved_size=tf.TensorSpec([], tf.int32),
+        nodes_b_f=tf.TensorSpec([None, 2], tf.string),
+        edges_e_reserved_adjacency=tf.TensorSpec([2, None], tf.int64),
+    )
+    input_names = {"seed_node_idxs", "nodes_a_reserved_size", "nodes_a_f"}
+    batched_model = self._real_create_batched_serving_model(
+        raw_model, input_names
+    )
+    self.assertEqual(
+        set(batched_model.__call__.structured_input_signature[1]), input_names
+    )
+    out = batched_model.__call__(
+        seed_node_idxs=tf.constant([[1]], dtype=tf.int32),
+        nodes_a_reserved_size=tf.constant([2], dtype=tf.int32),
+        nodes_a_f=tf.constant([[3.0, 7.0]], dtype=tf.float32),
+    )
+    self.assertSequenceAlmostEqual(
+        out["predictions"].numpy().tolist()[0], [7.0]
     )
 
 
