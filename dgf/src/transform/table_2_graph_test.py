@@ -113,6 +113,58 @@ class Table2GraphTest(absltest.TestCase):
         schema_lib.FeatureSemantic.NUMERICAL,
     )
 
+  def test_dataframe_nullable_numeric_columns(self):
+    df = pd.DataFrame({
+        "nullable_float": pd.array([1.5, None, 3.0], dtype="Float64"),
+        "nullable_int_missing": pd.array([1, None, 3], dtype="Int64"),
+        "nullable_int_full": pd.array([1, 2, 3], dtype="Int64"),
+        "object_float": np.array([1.0, None, 2.0], dtype=np.object_),
+        "timestamp": np.array(
+            [1_760_000_060, None, 1_760_000_001], dtype=np.object_
+        ),
+    })
+    graph, schema = table_2_graph_lib.table2graph(df)
+    features = graph.node_sets["nodes"].features
+    nodeset_schema = schema.node_sets["nodes"]
+
+    for name in (
+        "nullable_float",
+        "nullable_int_missing",
+        "object_float",
+        "timestamp",
+    ):
+      self.assertEqual(features[name].dtype, np.float64, name)
+      self.assertTrue(np.isnan(features[name][1]), name)
+      self.assertEqual(
+          nodeset_schema.features[name].format,
+          schema_lib.FeatureFormat.FLOAT_64,
+          name,
+      )
+      self.assertEqual(
+          nodeset_schema.features[name].semantic,
+          schema_lib.FeatureSemantic.NUMERICAL,
+          name,
+      )
+    # Timestamps must stay exact (float32 would quantize them to 128 s).
+    self.assertEqual(features["timestamp"][0], 1_760_000_060.0)
+
+    self.assertEqual(features["nullable_int_full"].dtype, np.int64)
+    self.assertEqual(
+        nodeset_schema.features["nullable_int_full"].format,
+        schema_lib.FeatureFormat.INTEGER_64,
+    )
+
+  def test_dict_object_numeric_column_with_none(self):
+    table = {"a": np.array([1.0, None, 2.0], dtype=np.object_)}
+    graph, schema = table_2_graph_lib.table2graph(table)
+    values = graph.node_sets["nodes"].features["a"]
+    self.assertEqual(values.dtype, np.float64)
+    np.testing.assert_array_equal(values, [1.0, np.nan, 2.0])
+    self.assertEqual(
+        schema.node_sets["nodes"].features["a"].format,
+        schema_lib.FeatureFormat.FLOAT_64,
+    )
+
   def test_detect_semantic_false(self):
     table = {
         "feature_a": np.array([1, 2, 3]),
@@ -217,6 +269,18 @@ class Table2GraphTest(absltest.TestCase):
         ValueError, "All columns must have the same length"
     ):
       table_2_graph_lib.table2graph(table)
+
+  def test_missing_strings_become_empty_bytes(self):
+    table = pd.DataFrame({"s": pd.Series(["a", None, "c"], dtype="string")})
+    graph, schema = table_2_graph_lib.table2graph(table)
+    self.assertEqual(
+        schema.node_sets["nodes"].features["s"].format,
+        schema_lib.FeatureFormat.BYTES,
+    )
+    np.testing.assert_array_equal(
+        graph.node_sets["nodes"].features["s"],
+        np.array([b"a", b"", b"c"], dtype=np.bytes_),
+    )
 
 
 if __name__ == "__main__":

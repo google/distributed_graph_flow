@@ -14,21 +14,43 @@
 
 """Utility to convert tables to In-Memory Graphs and their schemas."""
 
+from typing import Any
+
 from dgf.src.analyse import text_detection
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import feature_format
+from dgf.src.transform import conform as conform_lib
 import numpy as np
 import pandas as pd
+
+
+# `pd.api.types.infer_dtype` results (missing values skipped) of object
+# columns that hold only numbers and missing values.
+_NULLABLE_NUMERIC_INFERRED_TYPES = (
+    "integer",
+    "floating",
+    "mixed-integer-float",
+)
 
 
 def _infer_feature_schema(
     name: str, arr: np.ndarray, detect_semantic: bool = True
 ) -> schema_lib.FeatureSchema:
   """Infers the FeatureSchema from a numpy array."""
-  fmt = feature_format.NP_DTYPE_TO_FEATURE_FORMAT.get(
-      arr.dtype.type, schema_lib.FeatureFormat.BYTES
-  )
+  if (
+      arr.dtype == np.object_
+      and pd.api.types.infer_dtype(arr, skipna=True)
+      in _NULLABLE_NUMERIC_INFERRED_TYPES
+  ):
+    # Numbers with missing values: integers cannot hold NaN, so use a float
+    # format. FLOAT_64 keeps integers exact up to 2**53 (FLOAT_32 only up to
+    # 2**24, which would corrupt e.g. IDs, counts or timestamps).
+    fmt = schema_lib.FeatureFormat.FLOAT_64
+  else:
+    fmt = feature_format.NP_DTYPE_TO_FEATURE_FORMAT.get(
+        arr.dtype.type, schema_lib.FeatureFormat.BYTES
+    )
   shape = arr.shape[1:] if arr.ndim > 1 else ()
 
   semantic = schema_lib.FeatureSemantic.UNKNOWN
@@ -57,6 +79,19 @@ def _infer_feature_schema(
   )
 
 
+def _column_to_numpy(values: Any) -> np.ndarray:
+  """Converts a table column to a numpy array, without choosing a format."""
+  if isinstance(values, pd.Series):
+    # Nullable pandas columns (e.g. Int64, Float64, string) hold pd.NA, which
+    # numpy cannot store; they become object arrays with None.
+    if values.hasnans and isinstance(
+        values.dtype, pd.api.extensions.ExtensionDtype
+    ):
+      return values.to_numpy(dtype=object, na_value=None)
+    return values.to_numpy()
+  return np.asarray(values)
+
+
 def table2graph(
     table: dict[str, np.ndarray] | pd.DataFrame,
     nodeset_name: str = "nodes",
@@ -83,6 +118,10 @@ def table2graph(
     detect_semantic: Whether to automatically infer the semantic of the
       features.
 
+  Missing values: numeric columns with missing values (None, pd.NA, NaN) get
+  the FLOAT_64 format and NaN for missing. Missing values in string/bytes
+  columns are replaced with `b""`.
+
   Returns:
     A tuple of (InMemoryGraph, GraphSchema).
 
@@ -97,9 +136,9 @@ def table2graph(
     )
 
   if isinstance(table, pd.DataFrame):
-    features = {col: table[col].to_numpy() for col in table.columns}
+    features = {col: _column_to_numpy(table[col]) for col in table.columns}
   else:
-    features = {k: np.asarray(v) for k, v in table.items()}
+    features = {k: _column_to_numpy(v) for k, v in table.items()}
 
   if not features:
     raise ValueError("Input table is empty")
@@ -135,4 +174,8 @@ def table2graph(
       edge_sets={},
   )
 
+  # Convert the columns to the inferred formats (e.g. missing -> NaN).
+  graph = conform_lib.conform_graph(
+      graph, schema, replace_none_bytes=b"", verbose=False
+  )
   return graph, schema

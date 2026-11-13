@@ -31,6 +31,7 @@ py_library(
     srcs = ["table_2_graph.py"],
     type_checking = True,
     deps = [
+        ":conform",
         "//dgf/src/analyse:text_detection",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
