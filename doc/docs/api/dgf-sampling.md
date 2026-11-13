@@ -17,8 +17,8 @@ hide:
 ## dgf.sampling.SimpleSamplingConfig  # {: #section-simplesamplingconfig}
 ::: dgf.sampling.SimpleSamplingConfig
 
-## dgf.sampling.SpannerGraphSampler  # {: #section-spannergraphsampler}
-::: dgf.sampling.SpannerGraphSampler
+## dgf.sampling.SpannerGraphSamplerGcp  # {: #section-spannergraphsamplergcp}
+::: dgf.sampling.SpannerGraphSamplerGcp
 
 ## dgf.sampling.create_bigquery_graph_sampler  # {: #section-create-bigquery-graph-sampler}
 ::: dgf.sampling.create_bigquery_graph_sampler
@@ -28,6 +28,9 @@ hide:
 
 ## dgf.sampling.create_sampler  # {: #section-create-sampler}
 ::: dgf.sampling.create_sampler
+
+## dgf.sampling.create_spanner_graph_sampler_gcp  # {: #section-create-spanner-graph-sampler-gcp}
+::: dgf.sampling.create_spanner_graph_sampler_gcp
 
 ## dgf.sampling.extract_beam_nodes_ids  # {: #section-extract-beam-nodes-ids}
 ::: dgf.sampling.extract_beam_nodes_ids

@@ -278,10 +278,11 @@ Functions and classes to extract subsets of graphs for GNN training.
 *   [`dgf.sampling.Sampler`](api/dgf-sampling.md#section-sampler): Sampler for generating subgraphs from an in-memory graph.
 *   [`dgf.sampling.SamplingPlan`](api/dgf-sampling.md#section-samplingplan): Defines a complex sampling config.
 *   [`dgf.sampling.SimpleSamplingConfig`](api/dgf-sampling.md#section-simplesamplingconfig): Configuration for simple neighborhood sampling.
-*   [`dgf.sampling.SpannerGraphSampler`](api/dgf-sampling.md#section-spannergraphsampler): Sampler that executes queries on Spanner directly to fetch subgraphs.
+*   [`dgf.sampling.SpannerGraphSamplerGcp`](api/dgf-sampling.md#section-spannergraphsamplergcp): Samples subgraphs from a Cloud Spanner Graph, with one query per batch.
 *   [`dgf.sampling.create_bigquery_graph_sampler`](api/dgf-sampling.md#section-create-bigquery-graph-sampler): Creates a `BigQueryGraphSampler` instance to sample subgraphs from BigQuery.
-*   [`dgf.sampling.create_graph_spanner_sampler`](api/dgf-sampling.md#section-create-graph-spanner-sampler): Creates a SpannerGraphSampler instance.
+*   [`dgf.sampling.create_graph_spanner_sampler`](api/dgf-sampling.md#section-create-graph-spanner-sampler): Creates a Cloud Spanner Graph sampler (deprecated).
 *   [`dgf.sampling.create_sampler`](api/dgf-sampling.md#section-create-sampler): Creates an in-memory sampler.
+*   [`dgf.sampling.create_spanner_graph_sampler_gcp`](api/dgf-sampling.md#section-create-spanner-graph-sampler-gcp): Creates a sampler of subgraphs from a Cloud Spanner Graph.
 *   [`dgf.sampling.extract_beam_nodes_ids`](api/dgf-sampling.md#section-extract-beam-nodes-ids): Extracts all the node ids of a given nodeset.
 *   [`dgf.sampling.offline_distributed_sampler_gcp`](api/dgf-sampling.md#section-offline-distributed-sampler-gcp): Runs the offline distributed graph sampler on GCP.
 *   [`dgf.sampling.sample_with_beam_semi_distributed_sampler`](api/dgf-sampling.md#section-sample-with-beam-semi-distributed-sampler): Samples subgraphs from a distributed graph using a semi-distributed algo.

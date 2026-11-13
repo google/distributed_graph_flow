@@ -35,5 +35,6 @@ from dgf.src.sampling.beam_semi_distributed_sampler_v2 import sample_with_beam_s
 from dgf.src.sampling.gcp.bigquery_graph_sampler import BigQueryGraphSampler
 from dgf.src.sampling.gcp.bigquery_graph_sampler import create_bigquery_graph_sampler
 from dgf.src.sampling.gcp.spanner_graph_sampler import create_graph_spanner_sampler
-from dgf.src.sampling.gcp.spanner_graph_sampler import SpannerGraphSampler
+from dgf.src.sampling.gcp.spanner_graph_sampler import create_spanner_graph_sampler_gcp
+from dgf.src.sampling.gcp.spanner_graph_sampler import SpannerGraphSamplerGcp
 from dgf.src.sampling.offline_distributed.offline_distributed_gcp import offline_distributed_sampler_gcp

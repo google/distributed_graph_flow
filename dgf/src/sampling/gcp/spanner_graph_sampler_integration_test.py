@@ -89,7 +89,7 @@ class E2EArxivTest(parameterized.TestCase):
     )
 
     # CTE Sampler
-    cte_sampler = spanner_graph_sampler_lib.create_graph_spanner_sampler(
+    cte_sampler = spanner_graph_sampler_lib.create_spanner_graph_sampler_gcp(
         schema=self.schema,
         plan=plan,
         **self.spanner_graph_config,
@@ -192,7 +192,7 @@ class E2EMagTest(parameterized.TestCase):
     spanner_schema = spanner_graph_io_lib.read_spanner_graph_schema(
         **self.spanner_graph_config
     )
-    cte_sampler = spanner_graph_sampler_lib.create_graph_spanner_sampler(
+    cte_sampler = spanner_graph_sampler_lib.create_spanner_graph_sampler_gcp(
         schema=spanner_schema,
         plan=plan,
         **self.spanner_graph_config,

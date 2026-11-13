@@ -12,140 +12,128 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import json
-import os
+import base64
+from typing import Any
+from unittest import mock
+
 from absl.testing import absltest
 from absl.testing import parameterized
-from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.sampling import config as config_lib
 from dgf.src.sampling.gcp import spanner_graph_sampler as spanner_graph_sampler_lib
-from dgf.src.util import test_util
+from google.cloud import spanner
 import numpy as np
 
-InMemoryGraph = in_memory_graph_lib.InMemoryGraph
-InMemoryNodeSet = in_memory_graph_lib.InMemoryNodeSet
-InMemoryEdgeSet = in_memory_graph_lib.InMemoryEdgeSet
 
-
-def _toy_schema(has_feat: bool = False):
-  features = {
-      "id": schema_lib.FeatureSchema(
-          format=schema_lib.FeatureFormat.BYTES,
-          semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
-      ),
-      "labels": schema_lib.FeatureSchema(
-          format=schema_lib.FeatureFormat.INTEGER_64,
-          semantic=schema_lib.FeatureSemantic.CATEGORICAL,
-      ),
-      "year": schema_lib.FeatureSchema(
-          format=schema_lib.FeatureFormat.INTEGER_64,
-          semantic=schema_lib.FeatureSemantic.NUMERICAL,
-      ),
-  }
-  if has_feat:
-    features["feat"] = schema_lib.FeatureSchema(
-        format=schema_lib.FeatureFormat.FLOAT_32,
-        semantic=schema_lib.FeatureSemantic.EMBEDDING,
-        shape=(128,),
-    )
+def _toy_schema() -> schema_lib.GraphSchema:
   return schema_lib.GraphSchema(
-      node_sets={"nodes": schema_lib.NodeSchema(features=features)},
+      node_sets={
+          "nodes": schema_lib.NodeSchema(
+              features={
+                  "id": schema_lib.FeatureSchema(
+                      format=schema_lib.FeatureFormat.BYTES,
+                      semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+                  ),
+              }
+          )
+      },
       edge_sets={
           "edges": schema_lib.EdgeSchema(source="nodes", target="nodes")
       },
   )
 
 
-class SpannerGraphSamplerTest(parameterized.TestCase):
+def _metadata_dict(key_type: str) -> dict[str, Any]:
+  return {
+      "catalog": "",
+      "schema": "",
+      "name": "g",
+      "nodeTables": [{
+          "name": "Nodes",
+          "kind": "NODE",
+          "baseCatalogName": "",
+          "baseSchemaName": "",
+          "baseTableName": "Nodes",
+          "keyColumns": ["NodeId"],
+          "labelNames": ["nodes"],
+          "propertyDefinitions": [{
+              "propertyDeclarationName": "id",
+              "valueExpressionSql": "NodeId",
+          }],
+      }],
+      "edgeTables": [{
+          "name": "Edges",
+          "kind": "EDGE",
+          "baseCatalogName": "",
+          "baseSchemaName": "",
+          "baseTableName": "Edges",
+          "keyColumns": ["Src", "Dst"],
+          "labelNames": ["edges"],
+          "sourceNodeTable": {
+              "nodeTableName": "Nodes",
+              "edgeTableColumns": ["Src"],
+              "nodeTableColumns": ["NodeId"],
+          },
+          "destinationNodeTable": {
+              "nodeTableName": "Nodes",
+              "edgeTableColumns": ["Dst"],
+              "nodeTableColumns": ["NodeId"],
+          },
+      }],
+      "labels": [],
+      "propertyDeclarations": [{"name": "id", "type": key_type}],
+  }
 
-  def test_generate_cte_query(self):
-    schema = schema_lib.GraphSchema(
-        node_sets={
-            "N1": schema_lib.NodeSchema(
-                features={
-                    "id": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.BYTES,
-                        semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
-                    )
-                }
-            ),
-            "N2": schema_lib.NodeSchema(
-                features={
-                    "id": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.BYTES,
-                        semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
-                    )
-                }
-            ),
-        },
-        edge_sets={
-            "E1": schema_lib.EdgeSchema(source="N1", target="N1"),
-            "E2": schema_lib.EdgeSchema(source="N1", target="N2"),
-        },
-    )
-    plan = config_lib.SimpleSamplingConfig(
-        seed_nodeset="N1", num_hops=2, hop_width=2, reverse=True
-    )
-    plan_tree = config_lib.simple_sampling_config_to_sampling_plan(plan, schema)
 
-    query = spanner_graph_sampler_lib.CteQueryGenerator(
-        graph_name="my_graph",
-        schema=schema,
-        plan=plan_tree,
-        debug_sampling=False,
-    ).generate()
+class _FakeSnapshot:
 
-    test_util.assert_golden_string(
-        self,
-        query,
-        "spanner_graph_sampler_test_generate_cte_query.txt",
-        strip=True,
-    )
+  def __init__(self, database: "_FakeDatabase"):
+    self._database = database
 
-  def test_generate_cte_query_directed(self):
-    schema = schema_lib.GraphSchema(
-        node_sets={
-            "N1": schema_lib.NodeSchema(
-                features={
-                    "id": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.BYTES,
-                        semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
-                    )
-                }
-            ),
-            "N2": schema_lib.NodeSchema(
-                features={
-                    "id": schema_lib.FeatureSchema(
-                        format=schema_lib.FeatureFormat.BYTES,
-                        semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
-                    )
-                }
-            ),
-        },
-        edge_sets={
-            "E1": schema_lib.EdgeSchema(source="N1", target="N1"),
-            "E2": schema_lib.EdgeSchema(source="N1", target="N2"),
-        },
-    )
-    plan = config_lib.SimpleSamplingConfig(
-        seed_nodeset="N1", num_hops=2, hop_width=2, reverse=False
-    )
-    plan_tree = config_lib.simple_sampling_config_to_sampling_plan(plan, schema)
+  def __enter__(self) -> "_FakeSnapshot":
+    return self
 
-    query = spanner_graph_sampler_lib.CteQueryGenerator(
-        graph_name="my_graph",
-        schema=schema,
-        plan=plan_tree,
-        debug_sampling=False,
-    ).generate()
+  def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+    pass
 
-    test_util.assert_golden_string(
-        self,
-        query,
-        "spanner_graph_sampler_test_generate_cte_query_directed.txt",
-        strip=True,
-    )
+  def execute_sql(
+      self, sql: str, params: dict[str, Any], param_types: dict[str, Any]
+  ) -> list[list[Any]]:
+    self._database.calls.append((sql, params, param_types))
+    if "INFORMATION_SCHEMA.PROPERTY_GRAPHS" in sql:
+      return self._database.metadata_rows
+    return self._database.sample_rows
+
+
+class _FakeDatabase:
+
+  def __init__(
+      self, metadata_rows: list[list[Any]], sample_rows: list[list[Any]]
+  ):
+    self.metadata_rows = metadata_rows
+    self.sample_rows = sample_rows
+    self.calls: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+
+  def snapshot(self) -> _FakeSnapshot:
+    return _FakeSnapshot(self)
+
+
+class _FakeClient:
+  """Fake of spanner.Client returning the same database for all the names."""
+
+  def __init__(self, database: _FakeDatabase):
+    self._database = database
+
+  def instance(self, instance: str) -> "_FakeClient":
+    del instance
+    return self
+
+  def database(self, database: str) -> _FakeDatabase:
+    del database
+    return self._database
+
+
+class SpannerGraphSamplerGcpTest(parameterized.TestCase):
 
   @parameterized.parameters(
       (dict(), "multi_visit=True"),
@@ -153,114 +141,184 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
       (dict(multi_visit=False, temporal_sampling=True), "temporal_sampling"),
   )
   def test_unsupported_options_raise(self, options, message):
-    schema = _toy_schema()
+    fake_db = _FakeDatabase(
+        metadata_rows=[[_metadata_dict("BYTES")]], sample_rows=[]
+    )
     with self.assertRaisesRegex(NotImplementedError, message):
-      spanner_graph_sampler_lib.create_graph_spanner_sampler(
+      spanner_graph_sampler_lib.SpannerGraphSamplerGcp(
+          database=fake_db,
+          graph="g",
+          plan=config_lib.SimpleSamplingConfig(seed_nodeset="nodes", **options),
+          schema=_toy_schema(),
+          debug_sampling=False,
+          query_engine="AUTO",
+      )
+
+  def test_decode_ids(self):
+    row = [
+        base64.b64encode(b"seed"),
+        None,
+        "edge",
+        "edges",
+        base64.b64encode(b"\x00\xff"),
+        base64.b64encode(b"dst"),
+        {"weight": 1},
+    ]
+    self.assertEqual(
+        spanner_graph_sampler_lib._decode_ids(row),
+        [b"seed", None, "edge", "edges", b"\x00\xff", b"dst", {"weight": 1}],
+    )
+
+  def test_sample_bytes_key_debug_omits_sampling_seed(self):
+    fake_db = _FakeDatabase(
+        metadata_rows=[[_metadata_dict("BYTES")]],
+        sample_rows=[[
+            base64.b64encode(b"n0"),
+            base64.b64encode(b"n0"),
+            "node",
+            "nodes",
+            None,
+            None,
+            None,
+        ]],
+    )
+    sampler = spanner_graph_sampler_lib.SpannerGraphSamplerGcp(
+        database=fake_db,
+        graph="g",
+        plan=config_lib.SimpleSamplingConfig(
+            seed_nodeset="nodes", num_hops=1, hop_width=2, multi_visit=False
+        ),
+        schema=_toy_schema(),
+        debug_sampling=True,
+        query_engine="SQL",
+    )
+    self.assertLen(fake_db.calls, 1)
+    self.assertEqual(sampler.sample([]), [])
+    self.assertLen(fake_db.calls, 1)
+
+    (sample,) = sampler.sample(["n0"])
+    np.testing.assert_array_equal(
+        sample.node_sets["nodes"].features["id"], [b"n0"]
+    )
+    self.assertLen(fake_db.calls, 2)
+    _, params, param_types = fake_db.calls[1]
+    self.assertEqual(params, {"seed_ids": [base64.b64encode(b"n0")]})
+    self.assertEqual(
+        param_types,
+        {"seed_ids": spanner.param_types.Array(spanner.param_types.BYTES)},
+    )
+
+  def test_sample_string_key_uses_spanner_column_type(self):
+    # FeatureSchema omits is_utf8_string=True, but Spanner column is STRING.
+    fake_db = _FakeDatabase(
+        metadata_rows=[[_metadata_dict("STRING")]],
+        sample_rows=[[
+            base64.b64encode(b"n0"),
+            base64.b64encode(b"n0"),
+            "node",
+            "nodes",
+            None,
+            None,
+            None,
+        ]],
+    )
+    sampler = spanner_graph_sampler_lib.SpannerGraphSamplerGcp(
+        database=fake_db,
+        graph="g",
+        plan=config_lib.SimpleSamplingConfig(
+            seed_nodeset="nodes", num_hops=1, hop_width=2, multi_visit=False
+        ),
+        schema=_toy_schema(),
+        debug_sampling=False,
+        query_engine="SQL",
+    )
+    (sample,) = sampler.sample([b"n0"])
+    np.testing.assert_array_equal(
+        sample.node_sets["nodes"].features["id"], [b"n0"]
+    )
+    _, params, param_types = fake_db.calls[1]
+    self.assertEqual(params["seed_ids"], ["n0"])
+    # The Cloud client expects the BYTES parameters in base64.
+    self.assertLen(base64.b64decode(params["sampling_seed"], validate=True), 8)
+    self.assertEqual(
+        param_types,
+        {
+            "seed_ids": spanner.param_types.Array(spanner.param_types.STRING),
+            "sampling_seed": spanner.param_types.BYTES,
+        },
+    )
+
+  def test_missing_graph_raises(self):
+    fake_db = _FakeDatabase(metadata_rows=[], sample_rows=[])
+    with self.assertRaisesRegex(ValueError, "Expected one property graph"):
+      spanner_graph_sampler_lib.SpannerGraphSamplerGcp(
+          database=fake_db,
+          graph="missing",
+          plan=config_lib.SimpleSamplingConfig(
+              seed_nodeset="nodes", num_hops=0, multi_visit=False
+          ),
+          schema=_toy_schema(),
+          debug_sampling=True,
+          query_engine="SQL",
+      )
+
+  @parameterized.parameters(
+      spanner_graph_sampler_lib.create_spanner_graph_sampler_gcp,
+      spanner_graph_sampler_lib.create_graph_spanner_sampler,
+  )
+  def test_factories(self, factory):
+    fake_db = _FakeDatabase(
+        metadata_rows=[[_metadata_dict("BYTES")]],
+        sample_rows=[[
+            base64.b64encode(b"n0"),
+            base64.b64encode(b"n0"),
+            "node",
+            "nodes",
+            None,
+            None,
+            None,
+        ]],
+    )
+    with mock.patch.object(
+        spanner, "Client", return_value=_FakeClient(fake_db)
+    ) as client:
+      sampler = factory(
           project="p",
           instance="i",
           database="d",
           graph="g",
           plan=config_lib.SimpleSamplingConfig(
-              seed_nodeset=next(iter(schema.node_sets)), **options
+              seed_nodeset="nodes", num_hops=1, hop_width=2, multi_visit=False
           ),
-          schema=schema,
+          schema=_toy_schema(),
+          debug_sampling=True,
       )
-
-  def test_cte_result_to_in_memory_graphs(self):
-    # Mock CTE flat rows.
-    # Columns: [seed_id, node_id, element_type, element_class, source_id, target_id, properties_json]
-    # IDs are base64 encoded bytes as returned by Spanner for BYTES columns.
-    # '10' -> b'MTA='
-    # '11' -> b'MTE='
-    # '10090' -> b'MTAwOTA='
-    # '92331' -> b'OTIzMzE='
-    query_results = [
-        # Seed 10
-        [
-            b"MTA=",
-            b"MTA=",
-            "node",
-            "nodes",
-            None,
-            None,
-            '{"labels": 24, "year": 2012}',
-        ],
-        [b"MTA=", None, "edge", "edges", b"MTA=", b"MTAwOTA=", "{}"],
-        [
-            b"MTA=",
-            b"MTAwOTA=",
-            "node",
-            "nodes",
-            None,
-            None,
-            '{"labels": 34, "year": 2007}',
-        ],
-        [b"MTA=", None, "edge", "edges", b"MTA=", b"OTIzMzE=", "{}"],
-        [
-            b"MTA=",
-            b"OTIzMzE=",
-            "node",
-            "nodes",
-            None,
-            None,
-            '{"labels": 8, "year": 2013}',
-        ],
-        # Seed 11
-        [
-            b"MTE=",
-            b"MTE=",
-            "node",
-            "nodes",
-            None,
-            None,
-            '{"labels": 36, "year": 2015}',
-        ],
-    ]
-    schema = _toy_schema()
-    graphs = spanner_graph_sampler_lib._cte_result_to_in_memory_graphs(
-        query_results, schema, [b"10", b"11"], "nodes"
+    client.assert_called_once_with(project="p")
+    (sample,) = sampler.sample([b"n0"])
+    np.testing.assert_array_equal(
+        sample.node_sets["nodes"].features["id"], [b"n0"]
     )
 
-    test_util.assert_are_equal(
-        self,
-        graphs,
-        [
-            InMemoryGraph(
-                node_sets={
-                    "nodes": InMemoryNodeSet(
-                        num_nodes=3,
-                        features={
-                            "id": np.array([b"10", b"10090", b"92331"]),
-                            "labels": np.array([24, 34, 8]),
-                            "year": np.array([2012, 2007, 2013]),
-                        },
-                    )
-                },
-                edge_sets={
-                    "edges": InMemoryEdgeSet(
-                        adjacency=np.array([[0, 0], [1, 2]])
-                    )
-                },
-            ),
-            InMemoryGraph(
-                node_sets={
-                    "nodes": InMemoryNodeSet(
-                        num_nodes=1,
-                        features={
-                            "id": np.array([b"11"]),
-                            "labels": np.array([36]),
-                            "year": np.array([2015]),
-                        },
-                    )
-                },
-                edge_sets={
-                    "edges": InMemoryEdgeSet(
-                        adjacency=np.zeros((2, 0), dtype=np.int64)
-                    )
-                },
-            ),
-        ],
+  def test_deprecated_create_graph_spanner_sampler_warns(self):
+    fake_db = _FakeDatabase(
+        metadata_rows=[[_metadata_dict("BYTES")]], sample_rows=[]
     )
+    with mock.patch.object(
+        spanner, "Client", return_value=_FakeClient(fake_db)
+    ):
+      with self.assertWarnsRegex(
+          DeprecationWarning, "use create_spanner_graph_sampler_gcp"
+      ):
+        spanner_graph_sampler_lib.create_graph_spanner_sampler(
+            project="p",
+            instance="i",
+            database="d",
+            graph="g",
+            plan=config_lib.SimpleSamplingConfig(
+                seed_nodeset="nodes", num_hops=1, multi_visit=False
+            ),
+            schema=_toy_schema(),
+        )
 
 
 if __name__ == "__main__":

@@ -120,6 +120,35 @@ py_binary(
     ],
 )
 
+py_library(
+    name = "spanner_graph_sampling",
+    srcs = ["spanner_graph_sampling.py"],
+    type_checking = True,
+    deps = [
+        ":utils",
+        "//dgf",
+        "//dgf/src/data:schema",
+        "//dgf/src/io/gcp:common",
+        "//dgf/src/io/gcp:spanner_graph_metadata",
+        "//dgf/src/sampling:spanner_graph_sampler",
+    ],
+)
+
+py_binary(
+    name = "spanner_graph_sampling_main",
+    srcs = ["spanner_graph_sampling_main.py"],
+    type_checking = True,
+    deps = [
+        ":spanner_graph_sampling",
+        # absl:app dep,
+        # absl/flags dep,
+        "//dgf",
+        "//dgf/src/sampling:spanner_graph_sampler",
+        "//dgf/src/sampling/gcp:spanner_graph_sampler",
+        # google/cloud/spanner dep,
+    ],
+)
+
 py_binary(
     name = "in_process_sampling_main",
     srcs = ["in_process_sampling_main.py"],
