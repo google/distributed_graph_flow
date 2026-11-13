@@ -561,11 +561,133 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
     with self.assertRaisesRegex(NotImplementedError, "Only scalar and 1D"):
       spanner_graph_sampler_lib.resolve_graph_tables(_toy_metadata(), schema)
 
-  def test_composite_key_raises(self):
+  def test_composite_key_with_property_as_primary_key_raises(self):
     metadata = _toy_metadata()
     metadata.node_tables[0].key_columns = ["PaperId", "Year"]
-    with self.assertRaisesRegex(NotImplementedError, "composite key"):
+    with self.assertRaisesRegex(ValueError, "composite key"):
       spanner_graph_sampler_lib.resolve_graph_tables(metadata, _toy_schema())
+
+  def test_primary_key_not_stored_in_table_key_raises(self):
+    metadata = _toy_metadata()
+    metadata.node_tables[0].property_definitions = [
+        spanner_graph_metadata_lib.PropertyDefinition("id", "Tag"),
+    ]
+    schema = _table_name_schema()
+    with self.assertRaisesRegex(
+        ValueError, "'Papers' must have a BYTES primary key"
+    ):
+      spanner_graph_sampler_lib.resolve_graph_tables(
+          metadata, schema, {("Papers", "PaperId"): "BYTES"}
+      )
+
+  @parameterized.parameters(QueryEngine.SQL, QueryEngine.GQL)
+  def test_composite_key(self, engine):
+    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict({  # pyrefly: ignore[missing-attribute]
+        "catalog": "",
+        "schema": "",
+        "name": "g",
+        "nodeTables": [{
+            "name": "Cells",
+            "kind": "NODE",
+            "baseCatalogName": "",
+            "baseSchemaName": "",
+            "baseTableName": "Cells",
+            "keyColumns": ["cell_id", "snapshot_ts"],
+            "labelNames": ["Cell"],
+            "propertyDefinitions": [
+                _property("cell_id", "cell_id"),
+                _property("snapshot_ts", "snapshot_ts"),
+            ],
+        }],
+        "edgeTables": [{
+            "name": "Links",
+            "kind": "EDGE",
+            "baseCatalogName": "",
+            "baseSchemaName": "",
+            "baseTableName": "Links",
+            "keyColumns": ["src_cell", "dst_cell", "snapshot_ts"],
+            "labelNames": ["LINKS"],
+            "propertyDefinitions": [],
+            "sourceNodeTable": {
+                "nodeTableName": "Cells",
+                "edgeTableColumns": ["src_cell", "snapshot_ts"],
+                "nodeTableColumns": ["cell_id", "snapshot_ts"],
+            },
+            # The columns are not in the order of the key of Cells.
+            "destinationNodeTable": {
+                "nodeTableName": "Cells",
+                "edgeTableColumns": ["snapshot_ts", "dst_cell"],
+                "nodeTableColumns": ["snapshot_ts", "cell_id"],
+            },
+        }],
+        "labels": [],
+        "propertyDeclarations": [
+            {"name": "cell_id", "type": "STRING"},
+            {"name": "snapshot_ts", "type": "TIMESTAMP"},
+        ],
+    })
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "Cell": schema_lib.NodeSchema(
+                features={
+                    "#id": FeatureSchema(
+                        format=FeatureFormat.BYTES,
+                        semantic=FeatureSemantic.PRIMARY_ID,
+                    ),
+                    "snapshot_ts": FeatureSchema(
+                        format=FeatureFormat.INTEGER_64,
+                        semantic=FeatureSemantic.TIMESTAMP,
+                    ),
+                }
+            )
+        },
+        edge_sets={
+            "LINKS": schema_lib.EdgeSchema(source="Cell", target="Cell")
+        },
+    )
+    tables = spanner_graph_sampler_lib.resolve_graph_tables(metadata, schema)
+    keys = tables.node_tables["Cell"].keys
+    self.assertEqual(
+        spanner_graph_sampler_lib.seed_parameter_types(keys),
+        {"seed_ids_0": "STRING", "seed_ids_1": "INT64"},
+    )
+    # The "/" of the cell id "bc/1" is escaped in the seed id.
+    self.assertEqual(
+        spanner_graph_sampler_lib.seed_parameter_values(
+            keys, [rb"bc\/1/1794398700000000", b"dz/5"]
+        ),
+        {"seed_ids_0": ["bc/1", "dz"], "seed_ids_1": [1794398700000000, 5]},
+    )
+
+    plan = config_lib.simple_sampling_config_to_sampling_plan(
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="Cell", num_hops=1, hop_width=2, multi_visit=False
+        ),
+        schema,
+    )
+    query = spanner_graph_sampler_lib.generate_query(
+        tables=tables, plan=plan, engine=engine, graph_name="g"
+    )
+    test_util.assert_golden_string(
+        self,
+        query,
+        f"spanner_graph_sampler_test_query_composite_key_{engine.name.lower()}.sql",
+    )
+
+    rows = [
+        [b"bc/1", b"bc/1", "node", "Cell", None, None, {"snapshot_ts": 1}],
+        [b"bc/1", b"dz/1", "node", "Cell", None, None, {"snapshot_ts": 1}],
+        [b"bc/1", None, "edge", "LINKS", b"bc/1", b"dz/1", None],
+    ]
+    (graph,) = spanner_graph_sampler_lib.rows_to_in_memory_graphs(
+        rows, schema, tables, "Cell", [b"bc/1"]
+    )
+    np.testing.assert_array_equal(
+        graph.node_sets["Cell"].features["#id"], [b"bc/1", b"dz/1"]
+    )
+    np.testing.assert_array_equal(
+        graph.edge_sets["LINKS"].adjacency, [[0], [1]]
+    )
 
   @parameterized.named_parameters(
       ("duplicate_node", [_PAPER_ROW, _PAPER_ROW], "Duplicate node"),
@@ -662,7 +784,7 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
     metadata = _toy_metadata()
     metadata.node_tables[0].label_names = ["paper", "publication"]
     with self.assertRaisesRegex(
-        ValueError, "element table 'Papers' has 2 labels"
+        ValueError, "element table 'Papers' has several labels"
     ):
       spanner_graph_sampler_lib.resolve_graph_tables(
           metadata, _table_name_schema()
