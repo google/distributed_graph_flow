@@ -14,9 +14,15 @@
 
 """Tests for the message passing operations."""
 
+import functools
+
 from absl.testing import absltest
 from absl.testing import parameterized
+from dgf.src.data import in_memory_graph
+from dgf.src.data import padding as padding_lib
 from dgf.src.learning.jax.layers import message_passing_ops
+from dgf.src.transform import merge as merge_lib
+from dgf.src.util import gen_test_graph
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
@@ -32,6 +38,58 @@ def random_edges(
       jax.random.randint(k1, (num_edges,), 0, num_src_nodes, dtype=jnp.int32),
       jax.random.randint(k2, (num_edges,), 0, num_dst_nodes, dtype=jnp.int32),
   )
+
+
+def reference_set_statistics_pool(
+    source_values: np.ndarray,
+    source_idxs: np.ndarray,
+    target_idxs: np.ndarray,
+    num_dst_nodes: int,
+) -> np.ndarray:
+  """Dense reference: explicit statistics over the sources of each node."""
+  dims = source_values.shape[1]
+  mean = np.zeros((num_dst_nodes, dims))
+  variance = np.zeros((num_dst_nodes, dims))
+  count = np.zeros((num_dst_nodes, 1))
+  for node in range(num_dst_nodes):
+    sources = source_values[source_idxs[target_idxs == node]]
+    count[node] = sources.shape[0]
+    if sources.shape[0] > 0:
+      mean[node] = sources.mean(axis=0)
+      variance[node] = sources.var(axis=0)
+  std = np.sqrt(variance + message_passing_ops.SET_STATISTICS_EPSILON)
+  return np.concatenate([mean, std, np.log1p(count)], axis=-1)
+
+
+def toy_graph_and_padded_graph() -> (
+    tuple[in_memory_graph.InMemoryGraph, in_memory_graph.InMemoryGraph]
+):
+  """Returns a graph with "N1_to_N2" edges, and the same graph with padding."""
+  graph, schema = gen_test_graph.gen_toy_regression_dataset(
+      num_n1_nodes=12, num_n2_nodes=7, max_num_edges_per_n1_nodes=5
+  )
+  num_edges = graph.edge_sets["N1_to_N2"].adjacency.shape[1]
+  padding = padding_lib.Padding(
+      node_sets={
+          "N1": padding_lib.NodeSetPadding(num_nodes=16),
+          "N2": padding_lib.NodeSetPadding(num_nodes=10),
+      },
+      edge_sets={
+          "N1_to_N2": padding_lib.EdgeSetPadding(num_edges=num_edges + 9)
+      },
+  )
+  padded_graph, _ = merge_lib.GraphMerger(schema, padding)([graph])
+  return graph, padded_graph
+
+
+def n1_to_n2_edges(
+    graph: in_memory_graph.InMemoryGraph,
+) -> tuple[jax.Array, jax.Array]:
+  """Returns the (source_idxs, target_idxs) of the "N1_to_N2" edges."""
+  adjacency = jnp.asarray(
+      graph.edge_sets["N1_to_N2"].adjacency, dtype=jnp.int32
+  )
+  return adjacency[0], adjacency[1]
 
 
 class MessagePassingOpsTest(parameterized.TestCase):
@@ -212,6 +270,128 @@ class MessagePassingOpsTest(parameterized.TestCase):
         rtol=1e-6,
         atol=1e-6,
     )
+
+  def test_set_statistics_pool_small_example(self):
+    # Node 0 has the sources 0 and 1, node 1 has the source 2, node 2 none.
+    pooled = message_passing_ops.set_statistics_pool(
+        jnp.array([[1.0, 2.0], [3.0, 2.0], [5.0, 6.0]]),
+        source_idxs=jnp.array([0, 1, 2]),
+        target_idxs=jnp.array([0, 0, 1]),
+        num_dst_nodes=3,
+    )
+    np.testing.assert_allclose(
+        pooled,
+        [
+            # mean, mean, std, std, log(1 + count). The std of identical values
+            # is sqrt(SET_STATISTICS_EPSILON) = 1e-3.
+            [2.0, 2.0, 1.0, 1e-3, np.log(3.0)],
+            [5.0, 6.0, 1e-3, 1e-3, np.log(2.0)],
+            [0.0, 0.0, 1e-3, 1e-3, 0.0],
+        ],
+        rtol=1e-5,
+    )
+
+  @parameterized.parameters(False, True)
+  def test_set_statistics_pool_matches_reference(
+      self, indices_are_sorted: bool
+  ):
+    num_src_nodes, num_dst_nodes = 9, 6
+    source_values = jax.random.normal(jax.random.PRNGKey(6), (num_src_nodes, 3))
+    # The last node has no incoming edges.
+    source_idxs, target_idxs = random_edges(
+        40, num_src_nodes, num_dst_nodes - 1
+    )
+    if indices_are_sorted:
+      source_idxs, target_idxs = message_passing_ops.sort_edges_by_dst(
+          source_idxs, target_idxs, num_src_nodes, num_dst_nodes
+      )
+
+    pool = jax.jit(
+        functools.partial(
+            message_passing_ops.set_statistics_pool,
+            num_dst_nodes=num_dst_nodes,
+            indices_are_sorted=indices_are_sorted,
+        )
+    )
+    pooled = pool(source_values, source_idxs, target_idxs)
+
+    self.assertEqual(pooled.shape, (num_dst_nodes, 7))
+    self.assertEqual(pooled.dtype, jnp.float32)
+    np.testing.assert_allclose(
+        pooled,
+        reference_set_statistics_pool(
+            np.asarray(source_values),
+            np.asarray(source_idxs),
+            np.asarray(target_idxs),
+            num_dst_nodes,
+        ),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+
+  def test_set_statistics_pool_no_edges(self):
+    no_idxs = jnp.zeros((0,), dtype=jnp.int32)
+    pooled = message_passing_ops.set_statistics_pool(
+        jnp.ones((4, 2)), no_idxs, no_idxs, num_dst_nodes=3
+    )
+    np.testing.assert_allclose(
+        pooled, [[0.0, 0.0, 1e-3, 1e-3, 0.0]] * 3, rtol=1e-6
+    )
+
+  def test_set_statistics_pool_gradient_of_identical_sources_is_finite(self):
+    # Without SET_STATISTICS_EPSILON, the gradient of the std is not finite at
+    # zero variance.
+    idxs = jnp.array([0, 1, 2])
+
+    def sum_of_statistics(source_values: jax.Array) -> jax.Array:
+      return jnp.sum(
+          message_passing_ops.set_statistics_pool(
+              source_values, idxs, jnp.zeros_like(idxs), num_dst_nodes=1
+          )
+      )
+
+    gradient = jax.grad(sum_of_statistics)(jnp.ones((3, 2)))
+    self.assertTrue(np.all(np.isfinite(gradient)))
+
+  def test_set_statistics_pool_bfloat16(self):
+    # The statistics are computed in full precision: bfloat16 cannot count
+    # above 256, as a sum of ones saturates there.
+    num_edges = 300
+    pooled = message_passing_ops.set_statistics_pool(
+        jnp.ones((num_edges, 1), dtype=jnp.bfloat16),
+        source_idxs=jnp.arange(num_edges),
+        target_idxs=jnp.zeros((num_edges,), dtype=jnp.int32),
+        num_dst_nodes=1,
+    )
+    self.assertEqual(pooled.dtype, jnp.bfloat16)
+    # log(1 + 256) = 5.55 and log(1 + 300) = 5.71.
+    np.testing.assert_allclose(
+        pooled.astype(jnp.float32),
+        [[1.0, 1e-3, np.log1p(num_edges)]],
+        rtol=1e-2,
+    )
+
+  def test_set_statistics_pool_ignores_padding(self):
+    graph, padded_graph = toy_graph_and_padded_graph()
+    num_n1_nodes = graph.node_sets["N1"].num_nodes
+    num_n2_nodes = graph.node_sets["N2"].num_nodes
+    n1_values = jax.random.normal(
+        jax.random.PRNGKey(8), (padded_graph.node_sets["N1"].num_nodes, 3)
+    )
+    expected = message_passing_ops.set_statistics_pool(
+        n1_values[:num_n1_nodes],
+        *n1_to_n2_edges(graph),
+        num_dst_nodes=num_n2_nodes,
+    )
+
+    # The value of the padding nodes does not matter.
+    for padding_value in (0.0, 1e6):
+      pooled = message_passing_ops.set_statistics_pool(
+          n1_values.at[num_n1_nodes:].set(padding_value),
+          *n1_to_n2_edges(padded_graph),
+          num_dst_nodes=padded_graph.node_sets["N2"].num_nodes,
+      )
+      np.testing.assert_allclose(pooled[:num_n2_nodes], expected, rtol=1e-6)
 
 
 if __name__ == "__main__":
