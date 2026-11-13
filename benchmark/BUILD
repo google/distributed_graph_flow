@@ -1,6 +1,6 @@
-load("@rules_python//python:py_library.bzl", "py_library")
-load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_python//python:py_binary.bzl", "py_binary")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
     
@@ -13,6 +13,7 @@ package(
 py_library(
     name = "in_process_io",
     srcs = ["in_process_io.py"],
+    type_checking = True,
     deps = [
         ":utils",
         "//dgf",
@@ -25,6 +26,7 @@ py_library(
 py_library(
     name = "bq_parquet_io",
     srcs = ["bq_parquet_io.py"],
+    type_checking = True,
     deps = [
         ":utils",
         "//dgf",
@@ -34,12 +36,14 @@ py_library(
 py_library(
     name = "utils",
     srcs = ["utils.py"],
+    type_checking = True,
     deps = [],
 )
 
 py_library(
     name = "in_process_sampling",
     srcs = ["in_process_sampling.py"],
+    type_checking = True,
     deps = [
         ":utils",
         "//dgf",
@@ -53,6 +57,7 @@ py_library(
 py_library(
     name = "mpnn",
     srcs = ["mpnn.py"],
+    type_checking = True,
     deps = [
         ":utils",
         "//dgf",
@@ -70,6 +75,7 @@ py_library(
 py_binary(
     name = "in_process_io_main",
     srcs = ["in_process_io_main.py"],
+    type_checking = True,
     deps = [
         ":in_process_io",
         ":utils",
@@ -83,6 +89,7 @@ py_binary(
 py_binary(
     name = "bq_parquet_io_main",
     srcs = ["bq_parquet_io_main.py"],
+    type_checking = True,
     deps = [
         ":bq_parquet_io",
         # absl:app dep,
@@ -93,6 +100,7 @@ py_binary(
 py_library(
     name = "bq_sampling",
     srcs = ["bq_sampling.py"],
+    type_checking = True,
     deps = [
         ":utils",
         "//dgf",
@@ -104,6 +112,7 @@ py_library(
 py_binary(
     name = "bq_sampling_main",
     srcs = ["bq_sampling_main.py"],
+    type_checking = True,
     deps = [
         ":bq_sampling",
         # absl:app dep,
@@ -114,6 +123,7 @@ py_binary(
 py_binary(
     name = "in_process_sampling_main",
     srcs = ["in_process_sampling_main.py"],
+    type_checking = True,
     deps = [
         ":in_process_sampling",
         #  "//learning/brain/research/jax:gpu_support",
@@ -125,6 +135,7 @@ py_binary(
 py_binary(
     name = "mpnn_main",
     srcs = ["mpnn_main.py"],
+    type_checking = True,
     deps = [
         ":mpnn",
         # absl:app dep,
@@ -138,6 +149,7 @@ py_binary(
 py_test(
     name = "in_process_io_test",
     srcs = ["in_process_io_test.py"],
+    type_checking = True,
     deps = [
         ":in_process_io",
         ":utils",
@@ -150,6 +162,7 @@ py_test(
 py_test(
     name = "in_process_sampling_test",
     srcs = ["in_process_sampling_test.py"],
+    type_checking = True,
     deps = [
         ":in_process_sampling",
         # absl/testing:absltest dep,
@@ -160,6 +173,7 @@ py_test(
 py_test(
     name = "mpnn_test",
     srcs = ["mpnn_test.py"],
+    type_checking = True,
     deps = [
         ":mpnn",
         # absl/testing:absltest dep,

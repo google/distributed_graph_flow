@@ -1,4 +1,4 @@
-load("@rules_python//python:py_library.bzl", "py_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
@@ -9,6 +9,7 @@ package(
 py_library(
     name = "vertex",
     srcs = ["vertex.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/learning/ten_lines:common",
         "//dgf/src/util:filesystem",
@@ -23,6 +24,7 @@ py_test(
     name = "vertex_test",
     srcs = ["vertex_test.py"],
     shard_count = 5,
+    type_checking = True,
     deps = [
         ":vertex",
         # absl/testing:absltest dep,
@@ -40,6 +42,7 @@ py_test(
         "manual",
         "notap",
     ],
+    type_checking = True,
     deps = [
         ":vertex",
         # absl/testing:absltest dep,

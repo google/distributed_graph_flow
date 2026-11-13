@@ -1,6 +1,6 @@
-load("@rules_python//python:py_library.bzl", "py_library")
-load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_cc//cc:cc_library.bzl", "cc_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
 load("@nanobind_bazel//:build_defs.bzl", "nanobind_extension")
 load("@nanobind_bazel//:build_defs.bzl", "nanobind_library")
 
@@ -20,6 +20,7 @@ package(
 py_library(
     name = "distributed_graph",
     srcs = ["distributed_graph.py"],
+    type_checking = True,
     deps = [
         ":beam_coders",
         ":in_memory_graph",
@@ -33,6 +34,7 @@ py_library(
 py_library(
     name = "schema",
     srcs = ["schema.py"],
+    type_checking = True,
     deps = [
         # dataclasses_json dep,
     ],
@@ -41,6 +43,7 @@ py_library(
 py_library(
     name = "numpy_coder",
     srcs = ["numpy_coder.py"],
+    type_checking = True,
     deps = [
         # apache_beam dep,
         "//dgf/src/util/weak_dep:weak_dep_apache_beam",
@@ -51,11 +54,13 @@ py_library(
 py_library(
     name = "histogram",
     srcs = ["histogram.py"],
+    type_checking = True,
 )
 
 py_library(
     name = "statistics",
     srcs = ["statistics.py"],
+    type_checking = True,
     deps = [
         ":histogram",
         # dataclasses_json dep,
@@ -67,6 +72,7 @@ py_library(
 py_library(
     name = "evaluation",
     srcs = ["evaluation.py"],
+    type_checking = True,
     deps = [
         # altair dep,
         # dataclasses_json dep,
@@ -79,6 +85,7 @@ py_library(
 py_library(
     name = "in_memory_graph",
     srcs = ["in_memory_graph.py"],
+    type_checking = True,
     deps = [
         # numpy dep,
     ],
@@ -97,6 +104,7 @@ cc_library(
 py_library(
     name = "jax_in_memory_graph",
     srcs = ["jax_in_memory_graph.py"],
+    type_checking = True,
     deps = [
         # jax dep,
     ],
@@ -105,6 +113,7 @@ py_library(
 py_library(
     name = "tf_in_memory_graph",
     srcs = ["tf_in_memory_graph.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/util/weak_dep:weak_dep_tensorflow",
     ],
@@ -113,11 +122,13 @@ py_library(
 py_library(
     name = "padding",
     srcs = ["padding.py"],
+    type_checking = True,
 )
 
 py_library(
     name = "evaluation_metrics",
     srcs = ["evaluation_metrics.py"],
+    type_checking = True,
     deps = [
         # dataclasses_json dep,
         "//dgf/src/learning:training_configuration",
@@ -127,6 +138,7 @@ py_library(
 py_library(
     name = "gf_metadata",
     srcs = ["gf_metadata.py"],
+    type_checking = True,
     deps = [
         # dataclasses_json dep,
     ],
@@ -135,6 +147,7 @@ py_library(
 py_library(
     name = "graph_snapshots_metadata",
     srcs = ["graph_snapshots_metadata.py"],
+    type_checking = True,
     deps = [
         # dataclasses_json dep,
         "//dgf/src/io:graph_constants",
@@ -144,6 +157,7 @@ py_library(
 py_library(
     name = "graph_snapshots",
     srcs = ["graph_snapshots.py"],
+    type_checking = True,
     deps = [
         ":in_memory_graph",
         ":schema",
@@ -154,6 +168,7 @@ py_library(
 py_library(
     name = "beam_coders",
     srcs = ["beam_coders.py"],
+    type_checking = True,
     deps = [
         # apache_beam dep,
     ],
@@ -247,6 +262,7 @@ all_proto_library(
 py_test(
     name = "numpy_coder_test",
     srcs = ["numpy_coder_test.py"],
+    type_checking = True,
     deps = [
         ":numpy_coder",
         # absl/testing:absltest dep,
@@ -260,6 +276,7 @@ py_test(
 py_test(
     name = "beam_coders_test",
     srcs = ["beam_coders_test.py"],
+    type_checking = True,
     deps = [
         ":statistics",
         # absl/logging dep,
@@ -275,6 +292,7 @@ py_test(
 py_test(
     name = "statistics_test",
     srcs = ["statistics_test.py"],
+    type_checking = True,
     deps = [
         ":histogram",
         ":statistics",
@@ -287,6 +305,7 @@ py_test(
 py_test(
     name = "evaluation_test",
     srcs = ["evaluation_test.py"],
+    type_checking = True,
     deps = [
         ":evaluation",
         # absl/testing:absltest dep,
@@ -297,6 +316,7 @@ py_test(
 py_test(
     name = "in_memory_graph_nb_test",
     srcs = ["in_memory_graph_nb_test.py"],
+    type_checking = True,
     deps = [
         ":in_memory_graph_nb_test_ext",
         # absl/testing:absltest dep,
@@ -308,6 +328,7 @@ py_test(
 py_test(
     name = "schema_cc_test",
     srcs = ["schema_cc_test.py"],
+    type_checking = True,
     deps = [
         ":schema",
         ":schema_ext",
@@ -319,6 +340,7 @@ py_test(
 py_test(
     name = "histogram_test",
     srcs = ["histogram_test.py"],
+    type_checking = True,
     deps = [
         ":histogram",
         # absl/testing:absltest dep,

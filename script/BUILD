@@ -8,6 +8,7 @@ package(
 py_binary(
     name = "gen_api",
     srcs = ["gen_api.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,

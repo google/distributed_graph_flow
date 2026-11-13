@@ -8,6 +8,7 @@ package(
 py_binary(
     name = "train_model_with_tf_gnn",
     srcs = ["train_model_with_tf_gnn.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,
@@ -20,6 +21,7 @@ py_binary(
 py_binary(
     name = "create_graph_samples_semi_distributed_v1",
     srcs = ["create_graph_samples_semi_distributed_v1.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,
@@ -32,6 +34,7 @@ py_binary(
 py_binary(
     name = "create_in_memory_graph_reports",
     srcs = ["create_in_memory_graph_reports.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,
@@ -44,6 +47,7 @@ py_binary(
 py_binary(
     name = "link_model",
     srcs = ["link_model.py"],
+    type_checking = True,
     deps = [
         "//learning/brain/research/jax:gpu_support",
         # absl:app dep,
@@ -55,6 +59,7 @@ py_binary(
 py_binary(
     name = "ten_lines_arxiv",
     srcs = ["ten_lines_arxiv.py"],
+    type_checking = True,
     deps = [
         "//learning/brain/research/jax:gpu_support",
         # absl:app dep,

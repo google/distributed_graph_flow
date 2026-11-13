@@ -1,4 +1,4 @@
-load("@rules_python//python:py_library.bzl", "py_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
@@ -15,6 +15,7 @@ package(
 py_library(
     name = "runners",
     srcs = ["runners.py"],
+    type_checking = True,
     deps = [
         # apache_beam dep,
         "//dgf/src/util/weak_dep:weak_dep_apache_beam",
@@ -24,6 +25,7 @@ py_library(
 py_library(
     name = "convert_edge_types",
     srcs = ["convert_edge_types.py"],
+    type_checking = True,
     deps = [
         # absl/logging dep,
         # apache_beam dep,
@@ -35,6 +37,7 @@ py_library(
 py_library(
     name = "reverse_edges",
     srcs = ["reverse_edges.py"],
+    type_checking = True,
     deps = [
         # apache_beam dep,
         "//dgf/src/data:distributed_graph",
@@ -49,6 +52,7 @@ py_library(
 py_test(
     name = "convert_edge_types_test",
     srcs = ["convert_edge_types_test.py"],
+    type_checking = True,
     deps = [
         # absl/testing:absltest dep,
         # apache_beam dep,
@@ -60,6 +64,7 @@ py_test(
 py_test(
     name = "reverse_edges_test",
     srcs = ["reverse_edges_test.py"],
+    type_checking = True,
     deps = [
         ":reverse_edges",
         # absl/testing:absltest dep,

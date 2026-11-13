@@ -1,6 +1,6 @@
-load("@rules_python//python:py_library.bzl", "py_library")
-load("@rules_python//python:py_test.bzl", "py_test")
 load("@rules_python//python:py_binary.bzl", "py_binary")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
+load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
     
@@ -13,6 +13,7 @@ package(
 py_library(
     name = "validate_graph_lib",
     srcs = ["validate_graph.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,
@@ -24,6 +25,7 @@ py_library(
 py_binary(
     name = "validate_graph",
     srcs = ["validate_graph.py"],
+    type_checking = True,
     deps = [
         ":validate_graph_lib",
     ],
@@ -32,6 +34,7 @@ py_binary(
 py_binary(
     name = "create_graph_sampling_plan",
     srcs = ["create_graph_sampling_plan.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,
@@ -42,6 +45,7 @@ py_binary(
 py_binary(
     name = "import_graph_ai_graph",
     srcs = ["import_graph_ai_graph.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,
@@ -56,6 +60,7 @@ py_binary(
 py_test(
     name = "validate_graph_test",
     srcs = ["validate_graph_test.py"],
+    type_checking = True,
     deps = [
         ":validate_graph_lib",
         # absl/flags dep,

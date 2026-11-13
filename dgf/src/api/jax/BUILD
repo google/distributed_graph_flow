@@ -1,4 +1,4 @@
-load("@rules_python//python:py_library.bzl", "py_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 
 package(
     
@@ -11,6 +11,7 @@ package(
 py_library(
     name = "jax",
     srcs = ["__init__.py"],
+    type_checking = True,
     deps = [
         ":layers",
         "//dgf/src/learning/jax:flax_train",
@@ -20,6 +21,7 @@ py_library(
 py_library(
     name = "layers",
     srcs = ["layers.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/learning/jax/layers:classification",
         "//dgf/src/learning/jax/layers:graph_attention",

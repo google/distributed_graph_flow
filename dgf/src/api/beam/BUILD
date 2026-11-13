@@ -1,4 +1,4 @@
-load("@rules_python//python:py_library.bzl", "py_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 
 package(
     
@@ -11,6 +11,7 @@ package(
 py_library(
     name = "beam",
     srcs = ["__init__.py"],
+    type_checking = True,
     deps = [
         ":analyse",
         ":data",
@@ -25,6 +26,7 @@ py_library(
 py_library(
     name = "io",
     srcs = ["io.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/io:graph_in_beam",
         "//dgf/src/io:hgraph_in_beam",
@@ -39,6 +41,7 @@ py_library(
 py_library(
     name = "data",
     srcs = ["data.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/data:distributed_graph",
     ],
@@ -47,6 +50,7 @@ py_library(
 py_library(
     name = "transform",
     srcs = ["transform.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/beam:reverse_edges",
     ],
@@ -55,6 +59,7 @@ py_library(
 py_library(
     name = "analyse",
     srcs = ["analyse.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/analyse:feature_statistics",
         "//dgf/src/analyse:in_memory_feature_statistics",
@@ -64,6 +69,7 @@ py_library(
 py_library(
     name = "sampling",
     srcs = ["sampling.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/sampling:beam_semi_distributed_sampler",
         "//dgf/src/sampling:beam_semi_distributed_sampler_v1",

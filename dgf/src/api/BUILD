@@ -1,4 +1,4 @@
-load("@rules_python//python:py_library.bzl", "py_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
@@ -12,6 +12,7 @@ package(
 py_library(
     name = "api",
     srcs = ["__init__.py"],
+    type_checking = True,
     deps = [
         ":analyse",
         ":convert",
@@ -36,6 +37,7 @@ py_library(
 py_library(
     name = "io",
     srcs = ["io.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/io:cache",
         "//dgf/src/io:dataset_loader",
@@ -59,6 +61,7 @@ py_library(
 py_library(
     name = "data",
     srcs = ["data.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/data:graph_snapshots",
         "//dgf/src/data:graph_snapshots_metadata",
@@ -75,6 +78,7 @@ py_library(
 py_library(
     name = "validate",
     srcs = ["validate.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/analyse:schema",
         "//dgf/src/validate:graph_snapshots",
@@ -85,6 +89,7 @@ py_library(
 py_library(
     name = "convert",
     srcs = ["convert.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/io:hgraph_in_memory",
         "//dgf/src/io:jax",
@@ -100,6 +105,7 @@ py_library(
 py_library(
     name = "transform",
     srcs = ["transform.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/learning/ten_lines:node_prediction_dataset",
         "//dgf/src/transform:canonicalize",
@@ -121,6 +127,7 @@ py_library(
 py_library(
     name = "analyse",
     srcs = ["analyse.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/analyse:histogram",
         "//dgf/src/analyse:in_process_feature_statistics",
@@ -138,6 +145,7 @@ py_library(
 py_library(
     name = "plot",
     srcs = ["plot.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/plot:network",
         "//dgf/src/plot:nx",
@@ -147,6 +155,7 @@ py_library(
 py_library(
     name = "sampling",
     srcs = ["sampling.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/sampling:beam_semi_distributed_sampler",
         "//dgf/src/sampling:beam_semi_distributed_sampler_v1",
@@ -163,6 +172,7 @@ py_library(
 py_library(
     name = "exception",
     srcs = ["exception.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/transform:merge",
     ],
@@ -171,6 +181,7 @@ py_library(
 py_library(
     name = "train",
     srcs = ["train.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/learning:feature",
     ],
@@ -179,6 +190,7 @@ py_library(
 py_library(
     name = "generate",
     srcs = ["generate.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/generate:edge_neighbor_generator",
         "//dgf/src/generate:graphs",
@@ -188,12 +200,14 @@ py_library(
 py_library(
     name = "filesystem",
     srcs = ["filesystem.py"],
+    type_checking = True,
     deps = ["//dgf/src/util:filesystem"],
 )
 
 py_library(
     name = "learning",
     srcs = ["learning.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/learning/ten_lines:common",
         "//dgf/src/learning/ten_lines:link_prediction_train",
@@ -204,6 +218,7 @@ py_library(
 py_library(
     name = "print",
     srcs = ["print.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/analyse:padding",
         "//dgf/src/analyse:print_schema",
@@ -214,6 +229,7 @@ py_library(
 py_library(
     name = "deploy",
     srcs = ["deploy.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/deploy:vertex",
     ],

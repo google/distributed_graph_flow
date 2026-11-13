@@ -11,6 +11,7 @@ package(
 py_binary(
     name = "node_classification_model",
     srcs = ["node_classification_model.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,
@@ -22,6 +23,7 @@ py_binary(
 py_binary(
     name = "node_classification_model_advanced",
     srcs = ["node_classification_model_advanced.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,
@@ -38,6 +40,7 @@ py_binary(
 py_binary(
     name = "count_nodes",
     srcs = ["count_nodes.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,
@@ -49,6 +52,7 @@ py_binary(
 py_binary(
     name = "feature_statistics_on_hgraph",
     srcs = ["feature_statistics_on_hgraph.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,
@@ -60,6 +64,7 @@ py_binary(
 py_binary(
     name = "feature_statistics_on_graph_samples",
     srcs = ["feature_statistics_on_graph_samples.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,
@@ -72,6 +77,7 @@ py_binary(
 py_binary(
     name = "create_graph_samples_in_process",
     srcs = ["create_graph_samples_in_process.py"],
+    type_checking = True,
     deps = [
         "//file/colossus/public:cns",
         # absl:app dep,
@@ -85,6 +91,7 @@ py_binary(
 py_binary(
     name = "create_graph_samples_semi_distributed_v2",
     srcs = ["create_graph_samples_semi_distributed_v2.py"],
+    type_checking = True,
     deps = [
         "//file/colossus/public:cns",
         # absl:app dep,
@@ -97,6 +104,7 @@ py_binary(
 py_binary(
     name = "create_graph_samples_distributed",
     srcs = ["create_graph_samples_distributed.py"],
+    type_checking = True,
     deps = [
         "//file/colossus/public:cns",
         # absl:app dep,
@@ -109,6 +117,7 @@ py_binary(
 py_binary(
     name = "node_classification_pyg",
     srcs = ["node_classification_pyg.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,
@@ -126,6 +135,7 @@ py_binary(
 py_binary(
     name = "create_graph_samples_offline_distributed_gcp",
     srcs = ["create_graph_samples_offline_distributed_gcp.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,

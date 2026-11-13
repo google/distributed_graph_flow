@@ -1,4 +1,4 @@
-load("@rules_python//python:py_library.bzl", "py_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 
 package(
     
@@ -11,6 +11,7 @@ package(
 py_library(
     name = "node_degree",
     srcs = ["node_degree.py"],
+    type_checking = True,
     deps = [
         # numpy dep,
     ],
@@ -19,6 +20,7 @@ py_library(
 py_library(
     name = "global_graph_topology",
     srcs = ["global_graph_topology.py"],
+    type_checking = True,
     deps = [
         ":node_degree",
         "//dgf/src/data:in_memory_graph",

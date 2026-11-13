@@ -1,4 +1,4 @@
-load("@rules_python//python:py_library.bzl", "py_library")
+load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 
 package(
@@ -15,6 +15,7 @@ package(
 py_library(
     name = "feature_statistics",
     srcs = ["feature_statistics.py"],
+    type_checking = True,
     deps = [
         ":reservoir_sampling",
         # apache_beam dep,
@@ -29,6 +30,7 @@ py_library(
 py_library(
     name = "reservoir_sampling",
     srcs = ["reservoir_sampling.py"],
+    type_checking = True,
     deps = [
         # apache_beam dep,
         "//dgf/src/util/weak_dep:weak_dep_apache_beam",
@@ -39,6 +41,7 @@ py_library(
 py_library(
     name = "in_memory_feature_statistics",
     srcs = ["in_memory_feature_statistics.py"],
+    type_checking = True,
     deps = [
         ":feature_statistics",
         # apache_beam dep,
@@ -53,6 +56,7 @@ py_library(
 py_library(
     name = "padding",
     srcs = ["padding.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:padding",
@@ -64,6 +68,7 @@ py_library(
 py_library(
     name = "sampling",
     srcs = ["sampling.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/sampling:config",
     ],
@@ -72,6 +77,7 @@ py_library(
 py_library(
     name = "in_process_feature_statistics",
     srcs = ["in_process_feature_statistics.py"],
+    type_checking = True,
     deps = [
         ":feature_statistics",
         # apache_beam dep,
@@ -84,6 +90,7 @@ py_library(
 py_library(
     name = "histogram",
     srcs = ["histogram.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/data:histogram",
         # numpy dep,
@@ -93,6 +100,7 @@ py_library(
 py_test(
     name = "histogram_test",
     srcs = ["histogram_test.py"],
+    type_checking = True,
     deps = [
         ":histogram",
         # absl/testing:absltest dep,
@@ -105,6 +113,7 @@ py_test(
 py_library(
     name = "topology_statistics",
     srcs = ["topology_statistics.py"],
+    type_checking = True,
     deps = [
         ":histogram",
         "//dgf/src/data:in_memory_graph",
@@ -117,6 +126,7 @@ py_library(
 py_library(
     name = "print_schema",
     srcs = ["print_schema.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/data:schema",
         # tabulate dep,
@@ -126,6 +136,7 @@ py_library(
 py_library(
     name = "text_detection",
     srcs = ["text_detection.py"],
+    type_checking = True,
     deps = [
         # numpy dep,
     ],
@@ -134,6 +145,7 @@ py_library(
 py_library(
     name = "schema",
     srcs = ["schema.py"],
+    type_checking = True,
     deps = [
         ":text_detection",
         "//dgf/src/data:in_memory_graph",
@@ -148,6 +160,7 @@ py_library(
 py_test(
     name = "feature_statistics_test",
     srcs = ["feature_statistics_test.py"],
+    type_checking = True,
     deps = [
         ":feature_statistics",
         # absl/testing:absltest dep,
@@ -166,6 +179,7 @@ py_test(
 py_test(
     name = "reservoir_sampling_test",
     srcs = ["reservoir_sampling_test.py"],
+    type_checking = True,
     deps = [
         ":reservoir_sampling",
         # absl/testing:absltest dep,
@@ -178,6 +192,7 @@ py_test(
 py_test(
     name = "in_memory_feature_statistics_test",
     srcs = ["in_memory_feature_statistics_test.py"],
+    type_checking = True,
     deps = [
         ":in_memory_feature_statistics",
         # absl/testing:absltest dep,
@@ -193,6 +208,7 @@ py_test(
 py_test(
     name = "padding_test",
     srcs = ["padding_test.py"],
+    type_checking = True,
     deps = [
         ":padding",
         # absl/testing:absltest dep,
@@ -208,6 +224,7 @@ py_test(
 py_test(
     name = "sampling_test",
     srcs = ["sampling_test.py"],
+    type_checking = True,
     deps = [
         ":sampling",
         # absl/testing:absltest dep,
@@ -219,6 +236,7 @@ py_test(
 py_test(
     name = "in_process_feature_statistics_test",
     srcs = ["in_process_feature_statistics_test.py"],
+    type_checking = True,
     deps = [
         ":feature_statistics",
         ":in_process_feature_statistics",
@@ -238,6 +256,7 @@ py_test(
 py_test(
     name = "topology_statistics_test",
     srcs = ["topology_statistics_test.py"],
+    type_checking = True,
     deps = [
         ":topology_statistics",
         # absl/testing:absltest dep,
@@ -251,6 +270,7 @@ py_test(
 py_test(
     name = "print_schema_test",
     srcs = ["print_schema_test.py"],
+    type_checking = True,
     deps = [
         ":print_schema",
         # absl/testing:absltest dep,
@@ -263,6 +283,7 @@ py_test(
 py_test(
     name = "schema_test",
     srcs = ["schema_test.py"],
+    type_checking = True,
     deps = [
         ":schema",
         # absl/testing:absltest dep,
@@ -275,6 +296,7 @@ py_test(
 py_test(
     name = "text_detection_test",
     srcs = ["text_detection_test.py"],
+    type_checking = True,
     deps = [
         ":text_detection",
         # absl/testing:absltest dep,

@@ -11,6 +11,7 @@ package(
 py_binary(
     name = "gen_temporal_alert_graph_main",
     srcs = ["gen_temporal_alert_graph_main.py"],
+    type_checking = True,
     deps = [
         # absl:app dep,
         # absl/flags dep,
