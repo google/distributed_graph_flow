@@ -1121,4 +1121,3 @@ def schema_to_input_feature_schema(
   schema = copy.deepcopy(schema)
   del schema.node_sets[task.target_nodeset].features[task.target_column]
   return schema
-

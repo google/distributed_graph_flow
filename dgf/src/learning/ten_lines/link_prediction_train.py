@@ -19,6 +19,7 @@ import itertools
 import os
 import time
 from typing import Literal
+
 from dgf.src.analyse import print_schema as print_schema_lib
 from dgf.src.data import in_memory_graph
 from dgf.src.data import jax_in_memory_graph
@@ -46,6 +47,7 @@ from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 
+from dgf.src.validate import in_memory_graph as in_memory_graph_validate_lib
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -351,6 +353,7 @@ def train_link_model(
     work_dir: str | None = None,
     checkpoint_every_n_minutes: float | None = 10.0,
     verbose: int = 2,
+    check_graph: bool = True,
     validation_ratio: float = 0.1,
     train_seed_edges: list[int] | None = None,
     valid_seed_edges: list[int] | None = None,
@@ -387,7 +390,9 @@ def train_link_model(
     target_sampling_plan: common.SamplingPlanOrConfig | None = None,
     early_stopping: bool | int = True,
     fast_compile: bool = False,
-    text_embedder: str | normalize_text_lib.TextEmbedderConfig = "nnlm-en-dim128",
+    text_embedder: (
+        str | normalize_text_lib.TextEmbedderConfig
+    ) = "nnlm-en-dim128",
 ) -> LinkPredictionModel:
   """Trains a supervised Graph Neural Network model for edge prediction.
 
@@ -419,6 +424,8 @@ def train_link_model(
       None, only the final checkpoint is written at the end of training. Ignored
       if `work_dir` is not set.
     verbose: Verbosity level. From 0 (no logs) to 2 (lots of logs).
+    check_graph: If True (default), validates the input graph and
+      the validation graph, if any, against the schema before training.
     validation_ratio: Ratio of edges to use for validation. Only used if the
       "valid_graph" and "valid_seed_edges" arguments are not provided.
     train_seed_edges: List of edge indices to use for training. If not provided,
@@ -498,8 +505,8 @@ def train_link_model(
       and unit tests. Specifically, this disables expensive XLA GEMM autotuning
       (--xla_gpu_autotune_level=0).
     text_embedder: Pre-trained frozen text embedding model used to normalize
-      `TEXT` features. Can be a built-in name (e.g. `"nnlm-en-dim128"`), a
-      model handle/path, or a `TextEmbedderConfig`.
+      `TEXT` features. Can be a built-in name (e.g. `"nnlm-en-dim128"`), a model
+      handle/path, or a `TextEmbedderConfig`.
 
   Returns:
     A LinkPredictionModel instance.
@@ -564,6 +571,15 @@ def train_link_model(
               schema, return_output=True, header=False
           ),
       )
+    if check_graph:
+      with util.print_timer("Validating graph", verbose >= 1):
+        in_memory_graph_validate_lib.validate_graph(
+            graph, schema, raise_on_warning=False
+        )
+        if valid_graph is not None:
+          in_memory_graph_validate_lib.validate_graph(
+              valid_graph, schema, raise_on_warning=False
+          )
 
     batch_size, learning_rate = common.resolve_batch_size_and_learning_rate(
         batch_size,

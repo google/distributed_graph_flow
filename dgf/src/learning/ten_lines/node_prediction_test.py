@@ -36,6 +36,7 @@ from dgf.src.learning.ten_lines import node_prediction_model
 from dgf.src.learning.ten_lines import node_prediction_train as node_prediction_lib
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
+from dgf.src.transform import conform as conform_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize_text_test_util
 from dgf.src.util import filesystem as fs
@@ -45,6 +46,7 @@ from dgf.src.util import test_util
 import jax
 import jax.numpy as jnp
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 
 # Arguments to speed up the train method. Model quality will be poor,
@@ -2229,6 +2231,108 @@ class NodePredictionTimeseriesTest(absltest.TestCase):
         graph=tf_sample, seed_node_idxs=tf.constant([0], dtype=tf.int32)
     ).numpy()
     np.testing.assert_allclose(tf_pred, expected_pred, atol=1e-5)
+
+  def test_entry_points_validate_input_graph(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "A": schema_lib.NodeSchema(
+                features={
+                    "#id": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_32,
+                        semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+                    ),
+                    "f": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                    ),
+                    "cat": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                    ),
+                    "label": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                    ),
+                }
+            ),
+        },
+        edge_sets={},
+    )
+
+    def make_graph(f, cat):
+      return in_memory_graph_lib.InMemoryGraph(
+          node_sets={
+              "A": in_memory_graph_lib.InMemoryNodeSet(
+                  features={
+                      "#id": np.array([0, 1, 2, 3], dtype=np.int32),
+                      "f": f,
+                      "cat": cat,
+                      "label": np.array([1.0, -1.0, 2.0, 0.5], dtype=np.float32),
+                  },
+                  num_nodes=4,
+              ),
+          },
+          edge_sets={},
+      )
+
+    train_kwargs = dict(
+        schema=schema,
+        target_nodeset="A",
+        target_column="label",
+        num_train_steps=2,
+        batch_size=2,
+        num_sampling_hops=1,
+        evaluate_final_model=False,
+        verbose=0,
+        fast_compile=True,
+    )
+    clean_cat = np.array([b"x", b"", b"", b"y"])
+
+    # Not conformed (object column with None / pd.NA): rejected by validation
+    # at the entry point, before any data processing.
+    graph_object = make_graph(
+        np.array([1.0, None, pd.NA, 2.0], dtype=object),
+        np.array([b"x", None, pd.NA, "y"], dtype=object),
+    )
+    # validate_graph reports each error via dgf's log and raises a summary
+    # ("N errors found").
+    with self.assertRaisesRegex(ValueError, "errors found"):
+      node_prediction_lib.train_node_model(graph=graph_object, **train_kwargs)
+
+    # The user can conform the graph explicitly; missing floats then become NaN
+    # and are rejected by the numerical missing-value policy (ERROR) when the
+    # normalizer is built from the statistics.
+    graph_conformed = conform_lib.conform_graph(
+        graph_object, schema, replace_none_bytes=b""
+    )
+    with self.assertRaisesRegex(
+        ValueError,
+        r"Feature 'f' in node set 'A' has [1-9]\d* NaN.*"
+        r"numerical_missing_value_policy='error'",
+    ):
+      node_prediction_lib.train_node_model(
+          graph=graph_conformed, **train_kwargs
+      )
+
+    # Clean graph: trains and predicts. Prediction does not validate or scan
+    # values (too expensive at inference).
+    graph_clean = make_graph(
+        np.array([1.0, -1.0, 2.0, 0.5], dtype=np.float32), clean_cat
+    )
+    model = node_prediction_lib.train_node_model(
+        graph=graph_clean, **train_kwargs
+    )
+    preds = model.predict(graph_clean, [0, 1], verbose=0)
+    self.assertEqual(preds.shape, (2,))
+
+    # `check_graph=False` skips the validation.
+    with mock.patch.object(
+        node_prediction_lib.in_memory_graph_validate_lib, "validate_graph"
+    ) as mock_validate:
+      node_prediction_lib.train_node_model(
+          graph=graph_clean, check_graph=False, **train_kwargs
+      )
+      mock_validate.assert_not_called()
 
 
 if __name__ == "__main__":

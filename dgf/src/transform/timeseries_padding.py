@@ -32,6 +32,7 @@ def _pad_and_cap_single_feature(
     padding_value: Any,
     dtype: Any,
     is_static_shape: bool,
+    feature_name: str = "",
 ) -> tuple[np.ndarray, np.ndarray]:
   """Pads and caps a single sequence feature into (padded_matrix, mask_matrix)."""
   num_entities = raw_series.shape[0]
@@ -88,6 +89,18 @@ def _pad_and_cap_single_feature(
     raw_arr = raw_series[idx]
     if not isinstance(raw_arr, np.ndarray):
       raw_arr = np.asarray(raw_arr)
+    if np.issubdtype(dtype, np.number) and raw_arr.dtype == np.object_:
+      try:
+        # The cast below happens implicitly below in the assignment into
+        # `padded_matrix`. Doing it explicitly here lets a bad row
+        # (e.g. holding strings or pd.NA) fail with the feature name and
+        # a `conform_graph` hint, instead of a bare numpy error.
+        raw_arr = raw_arr.astype(dtype)
+      except (TypeError, ValueError) as e:
+        raise ValueError(
+            f"Feature {feature_name!r}: variable-length rows must be"
+            " numeric arrays, perhaps call `dgf.transform.conform_graph`."
+        ) from e
 
     num_steps = len(raw_arr)
     if num_steps >= seq_len:
@@ -292,6 +305,7 @@ def pad_timeseries_feature_set(
         padding_value=feature_padding_val,
         dtype=dtype,
         is_static_shape=feature_schema.is_static_shape(),
+        feature_name=feature_name,
     )
 
     new_values[feature_name] = padded_matrix

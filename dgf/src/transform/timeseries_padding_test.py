@@ -161,7 +161,9 @@ class TimeseriesPaddingTest(parameterized.TestCase):
             "clicks": in_memory_graph.InMemoryEdgeSet(
                 adjacency=np.array([[0], [0]], dtype=np.int64),
                 features={
-                    "time": np.array([np.array([100, 200])], dtype=np.object_)
+                    "time": np.fromiter(
+                        [np.array([100, 200], dtype=np.int64)], dtype=np.object_
+                    )
                 },
             ),
             "static_edge": in_memory_graph.InMemoryEdgeSet(
@@ -236,7 +238,7 @@ class TimeseriesPaddingTest(parameterized.TestCase):
   def test_multidimensional_sequence(self):
     graph, schema = _make_graph_and_schema(
         values={
-            "emb": np.array(
+            "emb": np.fromiter(
                 [np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)],
                 dtype=np.object_,
             )
@@ -378,7 +380,6 @@ class TimeseriesPaddingTest(parameterized.TestCase):
           schema, padding=conflicting_padding
       )
 
-
   def test_bytes_timeseries_padding(self):
     graph, schema = _make_graph_and_schema(
         values={
@@ -447,6 +448,41 @@ class TimeseriesPaddingTest(parameterized.TestCase):
     hw_val = new_graph.node_sets["hardware"]
     self.assertEqual(hw_val.features["sig"].shape, (0, 3))
     self.assertEqual(hw_val.features["sig_mask"].shape, (0, 3))
+
+  def test_object_dtype_row_in_numeric_timeseries_raises(self):
+    graph, schema = _make_graph_and_schema(
+        values={
+            "sig": np.fromiter(
+                # A string cannot be cast to float. (None would be cast to NaN
+                # by numpy, which matches the missing-value contract.)
+                [np.array([1.0, "abc"], dtype=np.object_)], dtype=np.object_
+            ),
+        },
+        schemas={
+            "sig": _ts_schema(
+                fmt=schema_lib.FeatureFormat.FLOAT_32,
+                group="sig",
+            ),
+        },
+        num_nodes=1,
+    )
+    padding = padding_lib.Padding(
+        node_sets={
+            "hardware": padding_lib.NodeSetPadding(
+                num_nodes=1,
+                features={
+                    "sig": padding_lib.FeaturePadding(max_timeseries_len=3)
+                },
+            )
+        },
+        edge_sets={},
+    )
+    with self.assertRaisesRegex(
+        ValueError, ".*'sig'.*dgf.transform.conform_graph.*"
+    ):
+      timeseries_padding.pad_timeseries_graph(
+          graph=graph, schema=schema, padding=padding
+      )
 
 
 if __name__ == "__main__":
