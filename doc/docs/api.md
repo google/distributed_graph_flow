@@ -167,8 +167,10 @@ Functions to read and write graphs, schemas, and related data.
 *   [`dgf.io.read_graphai_hgraph`](api/dgf-io.md#section-read-graphai-hgraph): Reads an on-disk HGraph into an in-memory representation.
 *   [`dgf.io.read_schema`](api/dgf-io.md#section-read-schema): Loads graph schema from disk in a json format.
 *   [`dgf.io.read_snapshot_metadata`](api/dgf-io.md#section-read-snapshot-metadata): Reads and parses GraphSnapshotsMetadata from a JSON file.
-*   [`dgf.io.read_spanner_graph`](api/dgf-io.md#section-read-spanner-graph): Reads a Spanner Graph sequentially in-process using direct SQL queries on base tables.
-*   [`dgf.io.read_spanner_graph_schema`](api/dgf-io.md#section-read-spanner-graph-schema): Reads the schema of a Spanner Graph.
+*   [`dgf.io.read_spanner_graph`](api/dgf-io.md#section-read-spanner-graph): Reads a Google Cloud Spanner Property Graph into an in-memory DGF graph.
+*   [`dgf.io.read_spanner_graph_gcp`](api/dgf-io.md#section-read-spanner-graph-gcp): Reads a Google Cloud Spanner Property Graph into an in-memory DGF graph.
+*   [`dgf.io.read_spanner_graph_schema`](api/dgf-io.md#section-read-spanner-graph-schema): Reads the DGF GraphSchema of a Google Cloud Spanner Property Graph.
+*   [`dgf.io.read_spanner_graph_schema_gcp`](api/dgf-io.md#section-read-spanner-graph-schema-gcp): Reads the DGF GraphSchema of a Google Cloud Spanner Property Graph.
 *   [`dgf.io.read_text_proto`](api/dgf-io.md#section-read-text-proto): Read a proto from disk in text format.
 *   [`dgf.io.read_tfgnn_graphs`](api/dgf-io.md#section-read-tfgnn-graphs): Reads a set of in-memory graphs from disk stored as TF Examples.
 *   [`dgf.io.read_topology_statistics`](api/dgf-io.md#section-read-topology-statistics): Reads topology statistics from disk in a JSON format.

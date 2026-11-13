@@ -298,11 +298,9 @@ py_library(
     type_checking = True,
     deps = [
         ":config",
-        "//dgf/src/analyse:schema",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
-        "//dgf/src/io:feature_format",
-        "//dgf/src/io/gcp:common",
+        "//dgf/src/io:spanner_graph",
         "//dgf/src/io/gcp:spanner_graph_metadata",
         # numpy dep,
     ],
