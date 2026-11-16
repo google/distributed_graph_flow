@@ -14,9 +14,15 @@
 
 """Tests for the message passing operations."""
 
+import functools
+
 from absl.testing import absltest
 from absl.testing import parameterized
+from dgf.src.data import in_memory_graph
+from dgf.src.data import padding as padding_lib
 from dgf.src.learning.jax.layers import message_passing_ops
+from dgf.src.transform import merge as merge_lib
+from dgf.src.util import gen_test_graph
 from flax import linen as nn
 import jax
 import jax.numpy as jnp
@@ -32,6 +38,93 @@ def random_edges(
       jax.random.randint(k1, (num_edges,), 0, num_src_nodes, dtype=jnp.int32),
       jax.random.randint(k2, (num_edges,), 0, num_dst_nodes, dtype=jnp.int32),
   )
+
+
+def reference_set_statistics_pool(
+    source_values: np.ndarray,
+    source_idxs: np.ndarray,
+    target_idxs: np.ndarray,
+    num_dst_nodes: int,
+    epsilon: float,
+) -> np.ndarray:
+  """Dense reference: explicit statistics over the sources of each node."""
+  dims = source_values.shape[1]
+  mean = np.zeros((num_dst_nodes, dims))
+  variance = np.zeros((num_dst_nodes, dims))
+  count = np.zeros((num_dst_nodes, 1))
+  for node in range(num_dst_nodes):
+    sources = source_values[source_idxs[target_idxs == node]]
+    count[node] = sources.shape[0]
+    if sources.shape[0] > 0:
+      mean[node] = sources.mean(axis=0)
+      variance[node] = sources.var(axis=0)
+  return np.concatenate(
+      [mean, np.sqrt(variance + epsilon), np.log1p(count)], axis=-1
+  )
+
+
+def toy_graph_and_padded_graph() -> (
+    tuple[in_memory_graph.InMemoryGraph, in_memory_graph.InMemoryGraph]
+):
+  """Returns a graph with "N1_to_N2" edges, and the same graph with padding."""
+  graph, schema = gen_test_graph.gen_toy_regression_dataset(
+      num_n1_nodes=12, num_n2_nodes=7, max_num_edges_per_n1_nodes=5
+  )
+  num_edges = graph.edge_sets["N1_to_N2"].adjacency.shape[1]
+  padding = padding_lib.Padding(
+      node_sets={
+          "N1": padding_lib.NodeSetPadding(num_nodes=16),
+          "N2": padding_lib.NodeSetPadding(num_nodes=10),
+      },
+      edge_sets={
+          "N1_to_N2": padding_lib.EdgeSetPadding(num_edges=num_edges + 9)
+      },
+  )
+  padded_graph, _ = merge_lib.GraphMerger(schema, padding)([graph])
+  return graph, padded_graph
+
+
+def n1_to_n2_edges(
+    graph: in_memory_graph.InMemoryGraph,
+) -> tuple[jax.Array, jax.Array]:
+  """Returns the (source_idxs, target_idxs) of the "N1_to_N2" edges."""
+  adjacency = jnp.asarray(
+      graph.edge_sets["N1_to_N2"].adjacency, dtype=jnp.int32
+  )
+  return adjacency[0], adjacency[1]
+
+
+def random_queries_keys_values(
+    num_src_nodes: int, num_dst_nodes: int
+) -> tuple[jax.Array, jax.Array, jax.Array]:
+  """Returns random (queries, keys, values) with 2 heads of 3 dims."""
+  k1, k2, k3 = jax.random.split(jax.random.PRNGKey(7), 3)
+  return (
+      3.0 * jax.random.normal(k1, (num_dst_nodes, 2, 3)),
+      jax.random.normal(k2, (num_src_nodes, 2, 3)),
+      jax.random.normal(k3, (num_src_nodes, 2, 3)),
+  )
+
+
+def reference_attention_readout(
+    queries: np.ndarray,
+    keys: np.ndarray,
+    values: np.ndarray,
+    source_idxs: np.ndarray,
+    target_idxs: np.ndarray,
+) -> np.ndarray:
+  """Dense reference: explicit softmax over the incoming edges of each node."""
+  num_dst_nodes, num_heads, head_dims = queries.shape
+  expected = np.zeros(queries.shape)
+  for node in range(num_dst_nodes):
+    sources = source_idxs[target_idxs == node]
+    if sources.size > 0:
+      logits = np.einsum("hd,khd->kh", queries[node], keys[sources])
+      logits /= np.sqrt(head_dims)
+      weights = np.exp(logits - logits.max(axis=0))
+      weights /= weights.sum(axis=0)
+      expected[node] = np.einsum("kh,khd->hd", weights, values[sources])
+  return expected.reshape(num_dst_nodes, num_heads * head_dims)
 
 
 class MessagePassingOpsTest(parameterized.TestCase):
@@ -212,6 +305,263 @@ class MessagePassingOpsTest(parameterized.TestCase):
         rtol=1e-6,
         atol=1e-6,
     )
+
+  def test_set_statistics_pool_small_example(self):
+    # Node 0 has the sources 0 and 1, node 1 has the source 2, node 2 none.
+    pooled = message_passing_ops.set_statistics_pool(
+        jnp.array([[1.0, 2.0], [3.0, 2.0], [5.0, 6.0]]),
+        source_idxs=jnp.array([0, 1, 2]),
+        target_idxs=jnp.array([0, 0, 1]),
+        num_dst_nodes=3,
+    )
+    np.testing.assert_allclose(
+        pooled,
+        [
+            # mean, mean, std, std, log(1 + count). The std of identical values
+            # is sqrt(epsilon) = 1e-3.
+            [2.0, 2.0, 1.0, 1e-3, np.log(3.0)],
+            [5.0, 6.0, 1e-3, 1e-3, np.log(2.0)],
+            [0.0, 0.0, 1e-3, 1e-3, 0.0],
+        ],
+        rtol=1e-5,
+    )
+
+  @parameterized.parameters(False, True)
+  def test_set_statistics_pool_matches_reference(
+      self, indices_are_sorted: bool
+  ):
+    num_src_nodes, num_dst_nodes, epsilon = 9, 6, 1e-4
+    source_values = jax.random.normal(jax.random.PRNGKey(6), (num_src_nodes, 3))
+    # The last node has no incoming edges.
+    source_idxs, target_idxs = random_edges(
+        40, num_src_nodes, num_dst_nodes - 1
+    )
+    if indices_are_sorted:
+      source_idxs, target_idxs = message_passing_ops.sort_edges_by_dst(
+          source_idxs, target_idxs, num_src_nodes, num_dst_nodes
+      )
+
+    pool = jax.jit(
+        functools.partial(
+            message_passing_ops.set_statistics_pool,
+            num_dst_nodes=num_dst_nodes,
+            indices_are_sorted=indices_are_sorted,
+            epsilon=epsilon,
+        )
+    )
+    pooled = pool(source_values, source_idxs, target_idxs)
+
+    self.assertEqual(pooled.shape, (num_dst_nodes, 7))
+    self.assertEqual(pooled.dtype, jnp.float32)
+    np.testing.assert_allclose(
+        pooled,
+        reference_set_statistics_pool(
+            np.asarray(source_values),
+            np.asarray(source_idxs),
+            np.asarray(target_idxs),
+            num_dst_nodes,
+            epsilon,
+        ),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+
+  def test_set_statistics_pool_no_edges(self):
+    no_idxs = jnp.zeros((0,), dtype=jnp.int32)
+    pooled = message_passing_ops.set_statistics_pool(
+        jnp.ones((4, 2)), no_idxs, no_idxs, num_dst_nodes=3
+    )
+    np.testing.assert_allclose(
+        pooled, [[0.0, 0.0, 1e-3, 1e-3, 0.0]] * 3, rtol=1e-6
+    )
+
+  def test_set_statistics_pool_gradient_of_identical_sources_is_finite(self):
+    # Without epsilon, the gradient of the std is not finite at zero variance.
+    idxs = jnp.array([0, 1, 2])
+
+    def sum_of_statistics(source_values: jax.Array) -> jax.Array:
+      return jnp.sum(
+          message_passing_ops.set_statistics_pool(
+              source_values, idxs, jnp.zeros_like(idxs), num_dst_nodes=1
+          )
+      )
+
+    gradient = jax.grad(sum_of_statistics)(jnp.ones((3, 2)))
+    self.assertTrue(np.all(np.isfinite(gradient)))
+
+  def test_set_statistics_pool_bfloat16(self):
+    # The statistics are computed in full precision: bfloat16 cannot count
+    # above 256, as a sum of ones saturates there.
+    num_edges = 300
+    pooled = message_passing_ops.set_statistics_pool(
+        jnp.ones((num_edges, 1), dtype=jnp.bfloat16),
+        source_idxs=jnp.arange(num_edges),
+        target_idxs=jnp.zeros((num_edges,), dtype=jnp.int32),
+        num_dst_nodes=1,
+    )
+    self.assertEqual(pooled.dtype, jnp.bfloat16)
+    # log(1 + 256) = 5.55 and log(1 + 300) = 5.71.
+    np.testing.assert_allclose(
+        pooled.astype(jnp.float32),
+        [[1.0, 1e-3, np.log1p(num_edges)]],
+        rtol=1e-2,
+    )
+
+  def test_set_statistics_pool_ignores_padding(self):
+    graph, padded_graph = toy_graph_and_padded_graph()
+    num_n1_nodes = graph.node_sets["N1"].num_nodes
+    num_n2_nodes = graph.node_sets["N2"].num_nodes
+    n1_values = jax.random.normal(
+        jax.random.PRNGKey(8), (padded_graph.node_sets["N1"].num_nodes, 3)
+    )
+    expected = message_passing_ops.set_statistics_pool(
+        n1_values[:num_n1_nodes],
+        *n1_to_n2_edges(graph),
+        num_dst_nodes=num_n2_nodes,
+    )
+
+    # The value of the padding nodes does not matter.
+    for padding_value in (0.0, 1e6):
+      pooled = message_passing_ops.set_statistics_pool(
+          n1_values.at[num_n1_nodes:].set(padding_value),
+          *n1_to_n2_edges(padded_graph),
+          num_dst_nodes=padded_graph.node_sets["N2"].num_nodes,
+      )
+      np.testing.assert_allclose(pooled[:num_n2_nodes], expected, rtol=1e-6)
+
+  def test_attention_readout_small_example(self):
+    # With equal keys, the readout is the mean of the values of the sources.
+    # Node 0 has the sources 0 and 1, node 1 has the source 2.
+    readout = message_passing_ops.attention_readout(
+        queries=jnp.ones((2, 1, 2)),
+        keys=jnp.ones((3, 1, 2)),
+        values=jnp.array([[[1.0, 2.0]], [[3.0, 6.0]], [[5.0, 7.0]]]),
+        source_idxs=jnp.array([0, 1, 2]),
+        target_idxs=jnp.array([0, 0, 1]),
+    )
+    np.testing.assert_allclose(readout, [[2.0, 4.0], [5.0, 7.0]], rtol=1e-6)
+
+  @parameterized.parameters(False, True)
+  def test_attention_readout_matches_reference(self, indices_are_sorted: bool):
+    num_src_nodes, num_dst_nodes = 9, 6
+    queries, keys, values = random_queries_keys_values(
+        num_src_nodes, num_dst_nodes
+    )
+    # The last node has no incoming edges.
+    source_idxs, target_idxs = random_edges(
+        30, num_src_nodes, num_dst_nodes - 1
+    )
+    if indices_are_sorted:
+      source_idxs, target_idxs = message_passing_ops.sort_edges_by_dst(
+          source_idxs, target_idxs, num_src_nodes, num_dst_nodes
+      )
+
+    read = jax.jit(
+        functools.partial(
+            message_passing_ops.attention_readout,
+            indices_are_sorted=indices_are_sorted,
+        )
+    )
+    readout = read(queries, keys, values, source_idxs, target_idxs)
+
+    self.assertEqual(readout.shape, (num_dst_nodes, 6))
+    np.testing.assert_allclose(
+        readout,
+        reference_attention_readout(
+            np.asarray(queries),
+            np.asarray(keys),
+            np.asarray(values),
+            np.asarray(source_idxs),
+            np.asarray(target_idxs),
+        ),
+        rtol=1e-5,
+        atol=1e-6,
+    )
+    np.testing.assert_array_equal(readout[-1], 0.0)
+
+  def test_attention_readout_matches_masked_dense_attention(self):
+    # A single target node connected to the first `num_real_nodes` sources is
+    # equivalent to a dense attention over all the sources with a mask.
+    num_src_nodes, num_real_nodes = 9, 6
+    queries, keys, values = random_queries_keys_values(
+        num_src_nodes, num_dst_nodes=1
+    )
+
+    readout = message_passing_ops.attention_readout(
+        queries,
+        keys,
+        values,
+        source_idxs=jnp.arange(num_real_nodes),
+        target_idxs=jnp.zeros((num_real_nodes,), dtype=jnp.int32),
+    )
+
+    logits = jnp.einsum("bhd,nhd->nh", queries, keys) / jnp.sqrt(3.0)
+    is_real = jnp.arange(num_src_nodes) < num_real_nodes
+    weights = jax.nn.softmax(jnp.where(is_real[:, None], logits, -1e9), axis=0)
+    expected = jnp.sum(weights[:, :, None] * values, axis=0)
+    np.testing.assert_allclose(
+        readout, expected.reshape(1, 6), rtol=1e-5, atol=1e-6
+    )
+
+  def test_attention_readout_no_edges(self):
+    queries, keys, values = random_queries_keys_values(
+        num_src_nodes=9, num_dst_nodes=6
+    )
+    no_idxs = jnp.zeros((0,), dtype=jnp.int32)
+    readout = message_passing_ops.attention_readout(
+        queries, keys, values, no_idxs, no_idxs
+    )
+    np.testing.assert_array_equal(readout, np.zeros((6, 6)))
+
+  def test_attention_readout_bfloat16_values(self):
+    queries, keys, values = random_queries_keys_values(
+        num_src_nodes=9, num_dst_nodes=6
+    )
+    values = values.astype(jnp.bfloat16)
+    source_idxs, target_idxs = random_edges(30, 9, 6)
+
+    readout = message_passing_ops.attention_readout(
+        queries, keys, values, source_idxs, target_idxs
+    )
+
+    self.assertEqual(readout.dtype, jnp.bfloat16)
+    np.testing.assert_allclose(
+        readout.astype(jnp.float32),
+        reference_attention_readout(
+            np.asarray(queries),
+            np.asarray(keys),
+            np.asarray(values.astype(jnp.float32)),
+            np.asarray(source_idxs),
+            np.asarray(target_idxs),
+        ),
+        rtol=1e-2,
+        atol=1e-2,
+    )
+
+  def test_attention_readout_ignores_padding(self):
+    graph, padded_graph = toy_graph_and_padded_graph()
+    num_n1_nodes = graph.node_sets["N1"].num_nodes
+    num_n2_nodes = graph.node_sets["N2"].num_nodes
+    queries, keys, values = random_queries_keys_values(
+        num_src_nodes=padded_graph.node_sets["N1"].num_nodes,
+        num_dst_nodes=padded_graph.node_sets["N2"].num_nodes,
+    )
+    expected = message_passing_ops.attention_readout(
+        queries[:num_n2_nodes],
+        keys[:num_n1_nodes],
+        values[:num_n1_nodes],
+        *n1_to_n2_edges(graph),
+    )
+
+    # The keys and values of the padding nodes do not matter.
+    for padding_value in (0.0, 1e3):
+      readout = message_passing_ops.attention_readout(
+          queries,
+          keys.at[num_n1_nodes:].set(padding_value),
+          values.at[num_n1_nodes:].set(padding_value),
+          *n1_to_n2_edges(padded_graph),
+      )
+      np.testing.assert_allclose(readout[:num_n2_nodes], expected, rtol=1e-6)
 
 
 if __name__ == "__main__":
