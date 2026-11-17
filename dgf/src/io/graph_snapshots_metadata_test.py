@@ -52,6 +52,27 @@ class GraphSnapshotsMetadataTest(absltest.TestCase):
       )
       self.assertEqual(loaded_meta.format, "graph_snapshots")
       self.assertEqual(loaded_meta.version, 1)
+      self.assertIsNone(loaded_meta.name)
+
+  def test_write_and_read_metadata_with_name(self):
+    meta_path = os.path.join(self.create_tempdir().full_path, "metadata.json")
+    io_snapshot_metadata.write_metadata(
+        data_snapshot_metadata.GraphSnapshotsMetadata(
+            format=data_snapshot_metadata.GraphSnapshotsFormat.GRAPH_SNAPSHOTS,
+            version=0,
+            name="my_graph",
+        ),
+        meta_path,
+    )
+    self.assertEqual(
+        io_snapshot_metadata.read_metadata(meta_path).name, "my_graph"
+    )
+
+  def test_read_metadata_written_without_name(self):
+    meta_path = os.path.join(self.create_tempdir().full_path, "metadata.json")
+    with open(meta_path, "w") as f:
+      f.write('{"format": "graph_snapshots", "version": 0}')
+    self.assertIsNone(io_snapshot_metadata.read_metadata(meta_path).name)
 
 
 if __name__ == "__main__":
