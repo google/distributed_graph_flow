@@ -275,7 +275,8 @@ class TimeseriesTransformerEncoderTest(parameterized.TestCase):
 
     np.testing.assert_allclose(out_zero, out_garbage, atol=1e-5)
 
-  def test_entity_with_no_events(self):
+  @parameterized.parameters("last", "mean")
+  def test_entity_with_no_events(self, pooling):
     """An all-masked row must stay finite and ignore its padded content."""
     seq_len, in_channels = 5, 4
     mask = jnp.array(
@@ -289,7 +290,7 @@ class TimeseriesTransformerEncoderTest(parameterized.TestCase):
     )
 
     config = lib.TimeseriesTransformerEncoderConfig(
-        out_dim=16, max_timeseries_len=seq_len, dims=32
+        out_dim=16, max_timeseries_len=seq_len, dims=32, pooling=pooling
     )
     encoder = config.make(
         self.feature_schema, mask_schema=self._mask_schema(seq_len)
@@ -308,6 +309,17 @@ class TimeseriesTransformerEncoderTest(parameterized.TestCase):
     np.testing.assert_allclose(out_a[0], out_b[0], atol=1e-5)
     # The unmasked row is untouched by the other row's content.
     np.testing.assert_allclose(out_a[1], out_b[1], atol=1e-5)
+
+    # Training must not see NaN gradients from the empty row either.
+    def loss(params):
+      out = encoder.apply(
+          {**variables, "params": params}, x_a, mask=mask, training=False
+      )
+      return jnp.sum(out**2)
+
+    grads = jax.grad(loss)(variables["params"])
+    for leaf in jax.tree_util.tree_leaves(grads):
+      self.assertTrue(jnp.all(jnp.isfinite(leaf)))
 
   def test_rope_makes_the_encoder_order_sensitive(self):
     """Without a position encoding, mean pooling would be order invariant."""
