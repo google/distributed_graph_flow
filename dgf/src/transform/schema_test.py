@@ -104,6 +104,19 @@ class SchemaTest(parameterized.TestCase):
         ),
     )
 
+  def test_drop_primary_id_features(self):
+    schema = schema_filter_lib.drop_primary_id_features_from_schema(_SRC_SCHEMA)
+    for name in ('n1', 'n2'):
+      self.assertEqual(
+          list(schema.node_sets[name].features),
+          [f for f in _SRC_SCHEMA.node_sets[name].features if f != '#id'],
+      )
+    for name in ('e1', 'e2'):
+      self.assertEqual(
+          list(schema.edge_sets[name].features),
+          [f for f in _SRC_SCHEMA.edge_sets[name].features if f != '#id'],
+      )
+
 
 if __name__ == '__main__':
   absltest.main()

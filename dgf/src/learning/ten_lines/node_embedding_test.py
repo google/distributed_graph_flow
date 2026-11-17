@@ -361,6 +361,15 @@ def _untrained_model(
   )
 
 
+def _model_inputs(tf_sample) -> dict[str, tf.Tensor]:
+  """Gets the TF graph dict of a graph sample without the non model inputs."""
+  return {
+      key: value
+      for key, value in tf_io.tf_graph_to_tf_graph_dict(tf_sample).items()
+      if not key.endswith("#id")
+  }
+
+
 def _single_sample_padding(
     model: node_embedding_model.NodeEmbeddingModel,
     graph: in_memory_graph_lib.InMemoryGraph,
@@ -600,11 +609,11 @@ class NodeEmbeddingModelUntrainedTest(parameterized.TestCase):
 
     if consume_tf_graph_dict:
       kwargs_call_1 = {
-          **tf_io.tf_graph_to_tf_graph_dict(tf_sample_1),
+          **_model_inputs(tf_sample_1),
           "seed_node_idxs": tf.constant([0]),
       }
       kwargs_call_2 = {
-          **tf_io.tf_graph_to_tf_graph_dict(tf_sample_2),
+          **_model_inputs(tf_sample_2),
           "seed_node_idxs": tf.constant([0]),
       }
     else:
@@ -729,7 +738,7 @@ class NodeEmbeddingModelUntrainedTest(parameterized.TestCase):
 
     tf_embed_fn = self.model.to_tensorflow_function(consume_tf_graph_dict=True)
     embeddings = tf_embed_fn(
-        **tf_io.tf_graph_to_tf_graph_dict(tf_sample),
+        **_model_inputs(tf_sample),
         seed_node_idxs=tf.constant([0]),
     )
     np.testing.assert_allclose(embeddings.numpy(), expected, atol=1e-5)

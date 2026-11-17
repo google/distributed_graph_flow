@@ -242,6 +242,15 @@ def gen_toy_graph(
   return graph, schema
 
 
+def _model_inputs(tf_sample) -> dict[str, tf.Tensor]:
+  """Gets the TF graph dict of a graph sample without the non model inputs."""
+  return {
+      key: value
+      for key, value in tf_io.tf_graph_to_tf_graph_dict(tf_sample).items()
+      if not key.endswith("#id")
+  }
+
+
 def gen_predictible_model_graph():
   schema = schema_lib.GraphSchema(
       node_sets={
@@ -764,7 +773,7 @@ class LinkPredictionToyTest(parameterized.TestCase):
     if encoder == "source":
       if consume_tf_graph_dict:
         kwargs = {
-            **tf_io.tf_graph_to_tf_graph_dict(tf_source_sample),
+            **_model_inputs(tf_source_sample),
             "seed_node_idxs": tf.constant([0]),
         }
       else:
@@ -781,7 +790,7 @@ class LinkPredictionToyTest(parameterized.TestCase):
     elif encoder == "target":
       if consume_tf_graph_dict:
         kwargs = {
-            **tf_io.tf_graph_to_tf_graph_dict(tf_target_sample),
+            **_model_inputs(tf_target_sample),
             "seed_node_idxs": tf.constant([0]),
         }
       else:
@@ -798,9 +807,9 @@ class LinkPredictionToyTest(parameterized.TestCase):
     elif encoder == "both":
       if consume_tf_graph_dict:
         kwargs = {}
-        for k, v in tf_io.tf_graph_to_tf_graph_dict(tf_source_sample).items():
+        for k, v in _model_inputs(tf_source_sample).items():
           kwargs[f"source_{k}"] = v
-        for k, v in tf_io.tf_graph_to_tf_graph_dict(tf_target_sample).items():
+        for k, v in _model_inputs(tf_target_sample).items():
           kwargs[f"target_{k}"] = v
         kwargs["source_seed_node_idxs"] = tf.constant([0])
         kwargs["target_seed_node_idxs"] = tf.constant([0])
@@ -837,11 +846,9 @@ class LinkPredictionToyTest(parameterized.TestCase):
         if encoder in ("source", "target"):
           expected_keys_and_shapes = [
               ("nodes_A_reserved_size", ()),
-              ("nodes_A__id", [None]),
               ("nodes_A_f1", [None]),
               ("nodes_A_f2", [None]),
               ("nodes_B_reserved_size", ()),
-              ("nodes_B__id", [None]),
               ("nodes_B_f1", [None]),
               ("nodes_B_f2", [None]),
               ("edges_A__to__B_reserved_adjacency", [2, None]),
@@ -850,11 +857,9 @@ class LinkPredictionToyTest(parameterized.TestCase):
         elif encoder == "both":
           single_graph_expected = [
               ("nodes_A_reserved_size", ()),
-              ("nodes_A__id", [None]),
               ("nodes_A_f1", [None]),
               ("nodes_A_f2", [None]),
               ("nodes_B_reserved_size", ()),
-              ("nodes_B__id", [None]),
               ("nodes_B_f1", [None]),
               ("nodes_B_f2", [None]),
               ("edges_A__to__B_reserved_adjacency", [2, None]),
@@ -941,10 +946,10 @@ class LinkPredictionToyTest(parameterized.TestCase):
         schema=schema,
         batch_size=5,
     ).sample(1)
-    source_graph_dict = tf_io.tf_graph_to_tf_graph_dict(
+    source_graph_dict = _model_inputs(
         tf_io.graph_to_tf_graph(source_sample, schema=schema)
     )
-    target_graph_dict = tf_io.tf_graph_to_tf_graph_dict(
+    target_graph_dict = _model_inputs(
         tf_io.graph_to_tf_graph(target_sample, schema=schema)
     )
     if encoder == "source":
@@ -1198,6 +1203,14 @@ class LinkPredictionPredictibleModelTest(absltest.TestCase):
     }
     self.maxDiff = None
     self.assertDictEqual(signature, expected_dict)
+    tf_predict_fn = self.model.to_tensorflow_function(
+        input_format="TF_GRAPH_DICT"
+    )
+    # The entities not visited by the sampling plans are not in the schema.
+    self.assertContainsSubset(
+        expected_dict["properties"],
+        tf_predict_fn.__call__.structured_input_signature[1],
+    )
 
   def test_predict(self):
     predictions = self.model.predict(

@@ -41,6 +41,7 @@ from dgf.src.learning.ten_lines import training
 from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
+from dgf.src.transform import schema as schema_transform_lib
 from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
@@ -790,12 +791,19 @@ class NodeEmbeddingModel(common.Model):
     )
 
     live = self._get_live()
+    # Inputs are padded to static shapes to avoid jax2tf shape assertions.
     tf_apply_core_model = jax2tf.convert(
         live.apply_embed,
-        polymorphic_shapes=[(None, "(b,)")],
         native_serialization_platforms=["cpu", "cuda"],
     )
     schema = self._data.schema
+    if input_format != common.TFFunctionInputFormat.TF_GRAPH:
+      # The serving formats only consume the model inputs.
+      schema = schema_transform_lib.drop_primary_id_features_from_schema(schema)
+    max_num_seed_nodes = self._data.padding.node_sets[
+        self.target_nodeset
+    ].num_nodes
+    assert max_num_seed_nodes is not None
 
     graph_spec = io_tf_lib.schema_to_spec(schema)
     graph_dict_spec = io_tf_lib.schema_to_dict_spec(schema)
@@ -833,7 +841,11 @@ class NodeEmbeddingModel(common.Model):
         jax_graph = jax_lib.graph_to_jax_graph(
             normalized_graph, cast_arrays=False
         )
-        return self._tf_apply_core_model((jax_graph, seed_node_idxs))
+        embeddings = self._tf_apply_core_model((
+            jax_graph,
+            common.pad_seed_idxs_tensorflow(seed_node_idxs, max_num_seed_nodes),
+        ))
+        return embeddings[: tf.shape(seed_node_idxs)[0]]
 
     class TfPredictWrapperTFGraph(TfPredictWrapperBase):
       """Consumes `TFInMemoryGraph` and seed node indices."""
@@ -927,7 +939,7 @@ class NodeEmbeddingModel(common.Model):
     wrapper = wrapper_class(
         tf_apply_core_model,
         live.normalizer,
-        self._data.schema,
+        schema,
         self._data.padding,
     )
 

@@ -206,6 +206,15 @@ def gen_predictible_model_graph():
   return graph, schema
 
 
+def _model_inputs(tf_sample) -> dict[str, tf.Tensor]:
+  """Gets the TF graph dict of a graph sample without the non model inputs."""
+  return {
+      key: value
+      for key, value in tf_io.tf_graph_to_tf_graph_dict(tf_sample).items()
+      if not key.endswith("#id") and key != "nodes_client_categorical__label"
+  }
+
+
 def _single_sample_padding(
     model: node_prediction_lib.NodePredictionModel,
     graph: in_memory_graph_lib.InMemoryGraph,
@@ -298,7 +307,6 @@ class NodePredictionRealLookingGraphAttentionNetwork(parameterized.TestCase):
             "nodes_client_city",
             "nodes_client_age",
             "nodes_client_created__at",
-            "nodes_client_categorical__label",
             "nodes_transaction_reserved_size",
             "nodes_transaction_date",
             "nodes_transaction_amount",
@@ -334,14 +342,6 @@ class NodePredictionRealLookingGraphAttentionNetwork(parameterized.TestCase):
                 "input_node": "client",
                 "node_label": "client",
                 "property": "created_at",
-                "field_kind": "feature",
-            },
-            "nodes_client_categorical__label": {
-                "type": "array",
-                "items": {"type": "string", "format": "byte"},
-                "input_node": "client",
-                "node_label": "client",
-                "property": "categorical_label",
                 "field_kind": "feature",
             },
             "nodes_client_reserved_size": {
@@ -657,11 +657,11 @@ class NodePredictionRealLooking(parameterized.TestCase):
 
     if consume_tf_graph_dict:
       kwargs_call_1 = {
-          **tf_io.tf_graph_to_tf_graph_dict(tf_sample_1),
+          **_model_inputs(tf_sample_1),
           "seed_node_idxs": tf.constant([0]),
       }
       kwargs_call_2 = {
-          **tf_io.tf_graph_to_tf_graph_dict(tf_sample_2),
+          **_model_inputs(tf_sample_2),
           "seed_node_idxs": tf.constant([0]),
       }
     else:
@@ -715,12 +715,9 @@ class NodePredictionRealLooking(parameterized.TestCase):
 
       expected_keys_and_shapes = [
           ("nodes_client_reserved_size", ()),
-          ("nodes_client__id", [None]),
           ("nodes_client_city", [None]),
           ("nodes_client_age", [None]),
-          ("nodes_client_categorical__label", [None]),
           ("nodes_transaction_reserved_size", ()),
-          ("nodes_transaction__id", [None]),
           ("nodes_transaction_date", [None]),
           ("nodes_transaction_amount", [None]),
           (
@@ -746,6 +743,8 @@ class NodePredictionRealLooking(parameterized.TestCase):
           any("seed_node_idxs" in name for name in input_names),
           f"seed_node_idxs not found in signature inputs: {input_names}",
       )
+      for key in ("categorical__label", "__id"):
+        self.assertFalse(any(key in name for name in input_names))
 
     np.testing.assert_allclose(
         loaded_prediction_sample_1.numpy(),
@@ -825,7 +824,7 @@ class NodePredictionRealLooking(parameterized.TestCase):
     )
 
     prediction = tf_predict_fn(
-        **tf_io.tf_graph_to_tf_graph_dict(tf_sample),
+        **_model_inputs(tf_sample),
         seed_node_idxs=tf.constant([0]),
     )
     np.testing.assert_allclose(
@@ -893,7 +892,7 @@ class NodePredictionRealLooking(parameterized.TestCase):
     signature = loaded.signatures["serving_default"]
     self.assertEqual(list(signature.structured_outputs), ["probabilities"])
     prediction = signature(
-        **tf_io.tf_graph_to_tf_graph_dict(tf_sample),
+        **_model_inputs(tf_sample),
         seed_node_idxs=tf.constant([0]),
     )["probabilities"]
     np.testing.assert_allclose(

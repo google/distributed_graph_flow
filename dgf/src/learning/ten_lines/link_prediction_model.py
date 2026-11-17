@@ -40,6 +40,7 @@ from dgf.src.sampling import config as sampling_config_lib
 from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
+from dgf.src.transform import schema as schema_transform_lib
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 from dgf.src.util import util_ext
@@ -985,7 +986,7 @@ class LinkPredictionModel(common.Model):
 
   def to_tensorflow_function(
       self,
-      encoder: Literal["source", "target", "both"],
+      encoder: Literal["source", "target", "both"] = "both",
       *,
       input_format: common.TFFunctionInputFormat | str | None = None,
       consume_tf_graph_dict: bool | None = None,
@@ -1064,6 +1065,9 @@ class LinkPredictionModel(common.Model):
 
     live = self._get_live()
     schema = self.data().schema
+    if consume_tf_graph_dict:
+      # The serving format only consumes the model inputs.
+      schema = schema_transform_lib.drop_primary_id_features_from_schema(schema)
 
     graph_spec = io_tf_lib.schema_to_spec(schema)
     graph_dict_spec = io_tf_lib.schema_to_dict_spec(schema)
@@ -1071,16 +1075,21 @@ class LinkPredictionModel(common.Model):
         shape=[None], dtype=tf.int32, name="seed_node_idxs"
     )
 
+    edgeset_schema = schema.edge_sets[self._data.task.target_edgeset]
+
     def make_single_encoder_wrapper(
         tf_apply_fn,
         normalizer: normalize_lib.GraphNormalizer,
         padding: padding_data_lib.Padding,
+        target_nodeset: str,
     ) -> tf.Module:
+      # Inputs are padded to static shapes to avoid jax2tf shape assertions.
       tf_apply = jax2tf.convert(
           tf_apply_fn,
-          polymorphic_shapes=[None, "(b,)"],
           native_serialization_platforms=["cpu", "cuda"],
       )
+      max_num_seed_nodes = padding.node_sets[target_nodeset].num_nodes
+      assert max_num_seed_nodes is not None
 
       class TfPredictWrapperBase(tf.Module):
 
@@ -1111,7 +1120,13 @@ class LinkPredictionModel(common.Model):
           jax_graph = jax_lib.graph_to_jax_graph(
               normalized_graph, cast_arrays=False
           )
-          return self._tf_apply(jax_graph, seed_node_idxs)
+          embeddings = self._tf_apply(
+              jax_graph,
+              common.pad_seed_idxs_tensorflow(
+                  seed_node_idxs, max_num_seed_nodes
+              ),
+          )
+          return embeddings[: tf.shape(seed_node_idxs)[0]]
 
       class TfPredictWrapperTFGraph(TfPredictWrapperBase):
 
@@ -1170,27 +1185,32 @@ class LinkPredictionModel(common.Model):
           live.apply_encoder_source,
           live.source_normalizer,
           self._data.positive_source_padding,
+          edgeset_schema.source,
       )
     elif encoder == "target":
       return make_single_encoder_wrapper(
           live.apply_encoder_target,
           live.target_normalizer,
           self._data.positive_target_padding,
+          edgeset_schema.target,
       )
     elif encoder == "both":
       source_padding = self._data.positive_source_padding
       target_padding = self._data.positive_target_padding
+      max_source_nodes = source_padding.node_sets[
+          edgeset_schema.source
+      ].num_nodes
+      max_target_nodes = target_padding.node_sets[
+          edgeset_schema.target
+      ].num_nodes
+      assert max_source_nodes is not None and max_target_nodes is not None
+      max_num_seed_edges = max(
+          self._data.hparams.batch_size, max_source_nodes, max_target_nodes
+      )
 
+      # Inputs are padded to static shapes to avoid jax2tf shape assertions.
       tf_apply = jax2tf.convert(
           live.apply_core_model,
-          polymorphic_shapes=[
-              InferenceBatch(
-                  source_graph=None,  # pyrefly: ignore[bad-argument-type]
-                  target_graph=None,  # pyrefly: ignore[bad-argument-type]
-                  source_offset="(b,)",  # pyrefly: ignore[bad-argument-type]
-                  target_offset="(b,)",  # pyrefly: ignore[bad-argument-type]
-              )
-          ],
           native_serialization_platforms=["cpu", "cuda"],
       )
 
@@ -1254,10 +1274,14 @@ class LinkPredictionModel(common.Model):
           batch = InferenceBatch(
               source_graph=jax_source,
               target_graph=jax_target,
-              source_offset=source_seed_idxs,
-              target_offset=target_seed_idxs,
+              source_offset=common.pad_seed_idxs_tensorflow(
+                  source_seed_idxs, max_num_seed_edges
+              ),
+              target_offset=common.pad_seed_idxs_tensorflow(
+                  target_seed_idxs, max_num_seed_edges
+              ),
           )
-          logits = self._tf_apply(batch)
+          logits = self._tf_apply(batch)[: tf.shape(source_seed_idxs)[0]]
           return tf.math.sigmoid(logits)
 
       source_seed_node_idxs_spec = tf.TensorSpec(

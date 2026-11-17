@@ -16,6 +16,7 @@ py_library(
         "//dgf/src/util:log",
         "//dgf/src/util/weak_dep:weak_dep_aiplatform",
         "//dgf/src/util/weak_dep:weak_dep_tensorflow",
+        # jax dep,
         # yaml dep,
     ],
 )
@@ -32,22 +33,5 @@ py_test(
         "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # google/cloud/aiplatform dep,
         # yaml dep,
-    ],
-)
-
-py_test(
-    name = "vertex_integration_test",
-    srcs = ["vertex_integration_test.py"],
-    tags = [
-        "manual",
-        "notap",
-    ],
-    type_checking = True,
-    deps = [
-        ":vertex",
-        # absl/testing:absltest dep,
-        # absl/testing:parameterized dep,
-        "//dgf/src/learning/ten_lines:node_prediction",
-        "//dgf/src/util:gen_test_graph",
     ],
 )
