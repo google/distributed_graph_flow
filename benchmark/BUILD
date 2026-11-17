@@ -143,8 +143,9 @@ py_binary(
         # absl:app dep,
         # absl/flags dep,
         "//dgf",
+        "//dgf/src/io/gcp:spanner_graph",
+        "//dgf/src/io/google:spanner_graph",
         "//dgf/src/sampling:spanner_graph_sampler",
-        "//dgf/src/sampling/gcp:spanner_graph_sampler",
         # google/cloud/spanner dep,
     ],
 )

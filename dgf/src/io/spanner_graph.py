@@ -306,6 +306,17 @@ def _parse_key_component(
   raise ValueError(f"Unsupported key type: {column_type!r}.")
 
 
+def decode_key(encoded: bytes, column_types: Sequence[str]) -> tuple[Any, ...]:
+  """Decodes a key encoded by key_bytes_sql into query parameter values."""
+  if len(column_types) > 1:
+    return decode_composite_key(encoded, column_types)
+  if column_types[0] == TYPE_BYTES:
+    return (encoded,)
+  return (
+      _parse_key_component(encoded.decode("utf-8"), column_types[0], encoded),
+  )
+
+
 @dataclasses.dataclass(frozen=True)
 class Column:
   """Spanner base-table column backing a DGF feature or key."""
@@ -1072,6 +1083,14 @@ def _infer_element_features(
     )
 
   return features
+
+
+def json_object_sql(expressions: Mapping[str, str]) -> str:
+  """Builds the SQL JSON_OBJECT of the named expressions."""
+  fields = ", ".join(
+      f"'{name}', {expression}" for name, expression in expressions.items()
+  )
+  return f"JSON_OBJECT({fields})"
 
 
 @dataclasses.dataclass(frozen=True)

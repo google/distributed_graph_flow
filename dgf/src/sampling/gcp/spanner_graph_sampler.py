@@ -15,56 +15,17 @@
 """Samples subgraphs from a Cloud Spanner Graph."""
 
 import base64
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 import warnings
 
 from dgf.src.data import schema as schema_lib
-from dgf.src.io.gcp import spanner_graph_metadata as spanner_graph_metadata_lib
+from dgf.src.io import spanner_graph as spanner_graph_io_lib
+from dgf.src.io.gcp import spanner_graph as spanner_graph_gcp_lib
 from dgf.src.sampling import config as config_lib
 from dgf.src.sampling import spanner_graph_sampler as spanner_graph_sampler_lib
 from dgf.src.util import log
 from google.cloud import spanner
-
-_METADATA_QUERY = (
-    "SELECT g.PROPERTY_GRAPH_METADATA_JSON FROM"
-    " INFORMATION_SCHEMA.PROPERTY_GRAPHS AS g WHERE g.PROPERTY_GRAPH_NAME ="
-    " @graph_name"
-)
-
-
-def read_metadata(
-    database: Any, graph: str
-) -> spanner_graph_metadata_lib.SpannerGraphMetadata:
-  """Reads the definition of a property graph of a Cloud Spanner database."""
-  with database.snapshot() as snapshot:
-    rows = list(
-        snapshot.execute_sql(
-            _METADATA_QUERY,
-            params={"graph_name": graph},
-            param_types={"graph_name": spanner.param_types.STRING},
-        )
-    )
-  if len(rows) != 1:
-    raise ValueError(
-        f"Expected one property graph named {graph!r}, found {len(rows)}."
-    )
-  return spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict(  # pyrefly: ignore[missing-attribute]
-      rows[0][0]
-  )
-
-
-def _decode_ids(row: Sequence[Any]) -> list[Any]:
-  """Decodes the id columns of a row of the sampling query.
-
-  The query returns all the ids as BYTES (STRING keys are cast to BYTES), and
-  the Cloud client returns BYTES values in base64.
-  """
-  values = list(row)
-  for column in spanner_graph_sampler_lib.ID_COLUMN_INDICES:
-    if values[column] is not None:
-      values[column] = base64.b64decode(values[column])
-  return values
 
 
 class SpannerGraphSamplerGcp(spanner_graph_sampler_lib.SpannerGraphSampler):
@@ -98,24 +59,30 @@ class SpannerGraphSamplerGcp(spanner_graph_sampler_lib.SpannerGraphSampler):
       query_engine: spanner_graph_sampler_lib.QueryEngine | str,
   ):
     """Creates the sampler from a google.cloud.spanner database client."""
+    with database.snapshot(multi_use=True) as snapshot:
+      snapshot.begin()
+      metadata = spanner_graph_gcp_lib.get_metadata(snapshot, graph)
+      column_spanner_types = (
+          spanner_graph_gcp_lib.read_column_spanner_types_gcp(snapshot)
+      )
     super().__init__(
-        metadata=read_metadata(database, graph),
+        metadata=metadata,
+        column_spanner_types=column_spanner_types,
         graph=graph,
         plan=plan,
         schema=schema,
         debug_sampling=debug_sampling,
         query_engine=query_engine,
         sampler_name="Cloud Spanner Graph sampler",
+        # The Cloud client returns the BYTES values in base64.
+        ids_are_base64=True,
     )
     self._database = database
-    if self._root_key_is_string:
-      seed_type = spanner.param_types.STRING
-    else:
-      seed_type = spanner.param_types.BYTES
     self._param_types = {
-        spanner_graph_sampler_lib.SEED_IDS_PARAMETER: spanner.param_types.Array(
-            seed_type
+        name: spanner.param_types.Array(
+            spanner_graph_gcp_lib.PARAM_TYPES[param_type]
         )
+        for name, param_type in self._seed_parameter_types.items()
     }
     if not debug_sampling:
       self._param_types[spanner_graph_sampler_lib.SAMPLING_SEED_PARAMETER] = (
@@ -124,17 +91,15 @@ class SpannerGraphSamplerGcp(spanner_graph_sampler_lib.SpannerGraphSampler):
 
   def _execute(
       self,
-      seed_values: list[bytes] | list[str],
+      seed_parameters: Mapping[str, list[Any]],
       sampling_seed: bytes | None,
   ) -> Iterable[Sequence[Any]]:
     # The Cloud client expects the BYTES parameters in base64.
     params: dict[str, Any] = {}
-    if self._root_key_is_string:
-      params[spanner_graph_sampler_lib.SEED_IDS_PARAMETER] = seed_values
-    else:
-      params[spanner_graph_sampler_lib.SEED_IDS_PARAMETER] = [
-          base64.b64encode(seed_id) for seed_id in seed_values  # pyrefly: ignore[bad-argument-type]
-      ]
+    for name, values in seed_parameters.items():
+      if self._seed_parameter_types[name] == spanner_graph_io_lib.TYPE_BYTES:
+        values = [base64.b64encode(value) for value in values]
+      params[name] = values
     if sampling_seed is not None:
       params[spanner_graph_sampler_lib.SAMPLING_SEED_PARAMETER] = (
           base64.b64encode(sampling_seed)
@@ -143,7 +108,7 @@ class SpannerGraphSamplerGcp(spanner_graph_sampler_lib.SpannerGraphSampler):
       rows = snapshot.execute_sql(
           self.query, params=params, param_types=self._param_types
       )
-      return [_decode_ids(row) for row in rows]
+      return list(rows)
 
 
 def create_spanner_graph_sampler_gcp(
@@ -169,14 +134,16 @@ def create_spanner_graph_sampler_gcp(
 
   Limitations:
 
-  - The key of a node table is a single STRING or BYTES column.
+  - A BYTES primary key feature of a nodeset holds the key of its node table.
+    With a composite key, it is a feature that is not a property (e.g. "#id")
+    holding the key columns joined with "/". The seeds are given by this key.
   - Features are scalar or 1D properties defined by a plain column (not by an
     expression).
   - Parallel edges (same source and target) of an edgeset are merged into a
     single edge.
   - Duplicate seeds in a call to sample get the same subgraph.
   - With query_engine "GQL", a label cannot be shared by several node tables
-    or by several edge tables.
+    or by several edge tables, and an element table has a single label.
 
   Recommendations for fast sampling:
 

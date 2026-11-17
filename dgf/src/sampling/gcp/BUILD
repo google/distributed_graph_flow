@@ -85,7 +85,8 @@ py_library(
     type_checking = True,
     deps = [
         "//dgf/src/data:schema",
-        "//dgf/src/io/gcp:spanner_graph_metadata",
+        "//dgf/src/io:spanner_graph",
+        "//dgf/src/io/gcp:spanner_graph",
         "//dgf/src/sampling:config",
         "//dgf/src/sampling:spanner_graph_sampler",
         "//dgf/src/util:log",

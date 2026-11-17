@@ -32,8 +32,8 @@ from absl import app
 from absl import flags
 import dgf
 from dgf.benchmark import spanner_graph_sampling
+from dgf.src.io.gcp import spanner_graph as spanner_graph_gcp_lib
 from dgf.src.sampling import spanner_graph_sampler as spanner_graph_sampler_lib
-from dgf.src.sampling.gcp import spanner_graph_sampler as spanner_graph_sampler_gcp_lib
 from google.cloud import spanner
 
 
@@ -113,7 +113,7 @@ def main(argv):
       raise app.UsageError("--project and --instance are required on GCP.")
     project: str = _PROJECT.value
     instance: str = _INSTANCE.value
-    metadata = spanner_graph_sampler_gcp_lib.read_metadata(
+    metadata = spanner_graph_gcp_lib.get_metadata(
         spanner.Client(project=project)
         .instance(instance)
         .database(_DATABASE.value),

@@ -12,10 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import base64
+from typing import Any
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
+from dgf.src.io import spanner_graph as spanner_graph_io_lib
 from dgf.src.io.gcp import spanner_graph_metadata as spanner_graph_metadata_lib
 from dgf.src.sampling import config as config_lib
 from dgf.src.sampling import spanner_graph_sampler as spanner_graph_sampler_lib
@@ -177,6 +181,16 @@ def _table_name_schema() -> schema_lib.GraphSchema:
   )
 
 
+def _resolve_graph_tables(
+    metadata: spanner_graph_metadata_lib.SpannerGraphMetadata,
+    schema: schema_lib.GraphSchema,
+    column_spanner_types: dict[tuple[str, str], str] | None = None,
+) -> spanner_graph_io_lib.GraphTables:
+  return spanner_graph_io_lib.resolve_graph_tables(
+      metadata, schema, column_spanner_types, bytes_are_base64=True
+  )
+
+
 def _plan() -> config_lib.SamplingPlan:
   return config_lib.simple_sampling_config_to_sampling_plan(
       config_lib.SimpleSamplingConfig(
@@ -194,9 +208,7 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
       (QueryEngine.GQL, False, "gql"),
   )
   def test_query(self, engine, debug_sampling, golden_suffix):
-    tables = spanner_graph_sampler_lib.resolve_graph_tables(
-        _toy_metadata(), _toy_schema()
-    )
+    tables = _resolve_graph_tables(_toy_metadata(), _toy_schema())
     query = spanner_graph_sampler_lib.generate_query(
         tables=tables,
         plan=_plan(),
@@ -212,7 +224,7 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
     schema = _toy_schema()
     schema.node_sets["book"] = schema.node_sets.pop("paper")
     with self.assertRaisesRegex(ValueError, "'book' is neither a label"):
-      spanner_graph_sampler_lib.resolve_graph_tables(_toy_metadata(), schema)
+      _resolve_graph_tables(_toy_metadata(), schema)
 
   def test_missing_property_raises(self):
     schema = _toy_schema()
@@ -220,7 +232,7 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
         format=FeatureFormat.INTEGER_64
     )
     with self.assertRaisesRegex(ValueError, "'color' of 'paper' is not a"):
-      spanner_graph_sampler_lib.resolve_graph_tables(_toy_metadata(), schema)
+      _resolve_graph_tables(_toy_metadata(), schema)
 
   def test_incompatible_type_raises(self):
     schema = _toy_schema()
@@ -228,13 +240,11 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
         format=FeatureFormat.FLOAT_32
     )
     with self.assertRaisesRegex(ValueError, "not compatible"):
-      spanner_graph_sampler_lib.resolve_graph_tables(_toy_metadata(), schema)
+      _resolve_graph_tables(_toy_metadata(), schema)
 
   def test_rows_to_in_memory_graphs(self):
     schema = _toy_schema()
-    tables = spanner_graph_sampler_lib.resolve_graph_tables(
-        _toy_metadata(), schema
-    )
+    tables = _resolve_graph_tables(_toy_metadata(), schema)
     paper_1 = {"year": 2010, "tag": "AP8=", "embedding": [1.0, 2.0]}
     paper_2 = {"year": None, "tag": None, "embedding": None}
     rows = [
@@ -250,7 +260,7 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
         [b"p1", b"p1", "node", "paper", None, None, paper_1],
     ]
     graphs = spanner_graph_sampler_lib.rows_to_in_memory_graphs(
-        rows, schema, tables, "paper", [b"p2", b"p1"]
+        rows, schema, tables, "paper", [b"p2", b"p1"], ids_are_base64=False
     )
     test_util.assert_are_equal(
         self,
@@ -308,20 +318,16 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
 
   def test_rows_to_in_memory_graphs_missing_seed_raises(self):
     schema = _toy_schema()
-    tables = spanner_graph_sampler_lib.resolve_graph_tables(
-        _toy_metadata(), schema
-    )
+    tables = _resolve_graph_tables(_toy_metadata(), schema)
     with self.assertRaisesRegex(ValueError, "not found"):
       spanner_graph_sampler_lib.rows_to_in_memory_graphs(
-          [], schema, tables, "paper", [b"p0"]
+          [], schema, tables, "paper", [b"p0"], ids_are_base64=False
       )
 
   @parameterized.parameters(QueryEngine.SQL, QueryEngine.GQL)
   def test_hop_width_zero_skips_hop(self, engine):
     schema = _toy_schema()
-    tables = spanner_graph_sampler_lib.resolve_graph_tables(
-        _toy_metadata(), schema
-    )
+    tables = _resolve_graph_tables(_toy_metadata(), schema)
     plan = config_lib.SamplingPlan(
         root=config_lib.PlanNode(
             nodeset="paper",
@@ -345,9 +351,7 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
       (-1, ValueError), (1.5, ValueError), ("1; DROP TABLE Papers", TypeError)
   )
   def test_invalid_hop_width_raises(self, invalid_hop_width, error):
-    tables = spanner_graph_sampler_lib.resolve_graph_tables(
-        _toy_metadata(), _toy_schema()
-    )
+    tables = _resolve_graph_tables(_toy_metadata(), _toy_schema())
     plan = config_lib.SamplingPlan(
         root=config_lib.PlanNode(
             nodeset="paper",
@@ -371,9 +375,7 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
 
   def test_resolve_by_element_table_name(self):
     schema = _table_name_schema()
-    tables = spanner_graph_sampler_lib.resolve_graph_tables(
-        _toy_metadata(), schema
-    )
+    tables = _resolve_graph_tables(_toy_metadata(), schema)
     self.assertEqual(tables.node_tables["Papers"].label, "paper")
     self.assertEqual(tables.node_tables["Authors"].label, "author")
     self.assertEqual(tables.edge_tables["Writes"].label, "writes")
@@ -465,7 +467,7 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
             )
         },
     )
-    tables = spanner_graph_sampler_lib.resolve_graph_tables(metadata, schema)
+    tables = _resolve_graph_tables(metadata, schema)
     plan = config_lib.simple_sampling_config_to_sampling_plan(
         config_lib.SimpleSamplingConfig(
             seed_nodeset="event", num_hops=1, hop_width=2, multi_visit=False
@@ -513,7 +515,7 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
         [b"e0", None, "edge", "links", b"e0", b"e1", {"history": None}],
     ]
     (graph,) = spanner_graph_sampler_lib.rows_to_in_memory_graphs(
-        rows, schema, tables, "event", [b"e0"]
+        rows, schema, tables, "event", [b"e0"], ids_are_base64=False
     )
     event_features = graph.node_sets["event"].features
     np.testing.assert_array_equal(
@@ -534,9 +536,7 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
 
   def test_wrong_static_array_length_raises(self):
     schema = _toy_schema()
-    tables = spanner_graph_sampler_lib.resolve_graph_tables(
-        _toy_metadata(), schema
-    )
+    tables = _resolve_graph_tables(_toy_metadata(), schema)
     rows = [[
         b"p1",
         b"p1",
@@ -550,7 +550,7 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
         ValueError, "Feature 'embedding' of 'paper' has length 1, expected 2"
     ):
       spanner_graph_sampler_lib.rows_to_in_memory_graphs(
-          rows, schema, tables, "paper", [b"p1"]
+          rows, schema, tables, "paper", [b"p1"], ids_are_base64=False
       )
 
   def test_2d_feature_raises(self):
@@ -559,13 +559,203 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
         format=FeatureFormat.FLOAT_32, shape=(2, 2)
     )
     with self.assertRaisesRegex(NotImplementedError, "Only scalar and 1D"):
-      spanner_graph_sampler_lib.resolve_graph_tables(_toy_metadata(), schema)
+      _resolve_graph_tables(_toy_metadata(), schema)
 
-  def test_composite_key_raises(self):
+  def test_composite_key_with_property_as_primary_key_raises(self):
     metadata = _toy_metadata()
     metadata.node_tables[0].key_columns = ["PaperId", "Year"]
-    with self.assertRaisesRegex(NotImplementedError, "composite key"):
-      spanner_graph_sampler_lib.resolve_graph_tables(metadata, _toy_schema())
+    with self.assertRaisesRegex(ValueError, "composite key"):
+      _resolve_graph_tables(metadata, _toy_schema())
+
+  def test_primary_key_feature_not_stored_in_table_key(self):
+    # The primary key feature is then read like the other features, and the
+    # nodes are still identified by the key of their Spanner table.
+    metadata = _toy_metadata()
+    metadata.node_tables[0].property_definitions = [
+        spanner_graph_metadata_lib.PropertyDefinition("id", "Tag"),
+    ]
+    schema = _table_name_schema()
+    del schema.node_sets["Authors"]
+    schema.edge_sets.clear()
+    tables = _resolve_graph_tables(
+        metadata, schema, {("Papers", "PaperId"): "BYTES"}
+    )
+    self.assertIsNone(tables.node_tables["Papers"].primary_key)
+    (graph,) = spanner_graph_sampler_lib.rows_to_in_memory_graphs(
+        [[b"p1", b"p1", "node", "Papers", None, None, {"id": "dGFn"}]],
+        schema,
+        tables,
+        "Papers",
+        [b"p1"],
+        ids_are_base64=False,
+    )
+    np.testing.assert_array_equal(
+        graph.node_sets["Papers"].features["id"], [b"tag"]
+    )
+
+  def test_base64_ids(self):
+    schema = _toy_schema()
+    tables = _resolve_graph_tables(_toy_metadata(), schema)
+
+    def rows(paper_id: bytes, author_id: bytes) -> list[list[Any]]:
+      return [
+          [paper_id, paper_id, "node", "paper", None, None, _PAPER_PROPERTIES],
+          [paper_id, author_id, "node", "author", None, None, None],
+          [
+              paper_id,
+              None,
+              "edge",
+              "writes",
+              author_id,
+              paper_id,
+              {"position": 1},
+          ],
+      ]
+
+    test_util.assert_are_equal(
+        self,
+        spanner_graph_sampler_lib.rows_to_in_memory_graphs(
+            rows(base64.b64encode(b"\x00\xff"), base64.b64encode(b"a0")),
+            schema,
+            tables,
+            "paper",
+            [b"\x00\xff"],
+            ids_are_base64=True,
+        ),
+        spanner_graph_sampler_lib.rows_to_in_memory_graphs(
+            rows(b"\x00\xff", b"a0"),
+            schema,
+            tables,
+            "paper",
+            [b"\x00\xff"],
+            ids_are_base64=False,
+        ),
+    )
+
+  @parameterized.parameters(
+      ("a/b", b"a/b"),
+      (b"\x00\xff", b"\x00\xff"),
+      (np.int64(-5), b"-5"),
+      (7, b"7"),
+  )
+  def test_seed_id_bytes(self, seed_id, expected):
+    self.assertEqual(
+        spanner_graph_sampler_lib._seed_id_bytes(seed_id), expected
+    )
+
+  @parameterized.parameters(1.5, True, None)
+  def test_invalid_seed_id_raises(self, seed_id):
+    with self.assertRaisesRegex(TypeError, "Unsupported seed id"):
+      spanner_graph_sampler_lib._seed_id_bytes(seed_id)
+
+  @parameterized.parameters(QueryEngine.SQL, QueryEngine.GQL)
+  def test_composite_key(self, engine):
+    metadata = spanner_graph_metadata_lib.SpannerGraphMetadata.from_dict({  # pyrefly: ignore[missing-attribute]
+        "catalog": "",
+        "schema": "",
+        "name": "g",
+        "nodeTables": [{
+            "name": "Cells",
+            "kind": "NODE",
+            "baseCatalogName": "",
+            "baseSchemaName": "",
+            "baseTableName": "Cells",
+            "keyColumns": ["cell_id", "snapshot_ts"],
+            "labelNames": ["Cell"],
+            "propertyDefinitions": [
+                _property("cell_id", "cell_id"),
+                _property("snapshot_ts", "snapshot_ts"),
+            ],
+        }],
+        "edgeTables": [{
+            "name": "Links",
+            "kind": "EDGE",
+            "baseCatalogName": "",
+            "baseSchemaName": "",
+            "baseTableName": "Links",
+            "keyColumns": ["src_cell", "dst_cell", "snapshot_ts"],
+            "labelNames": ["LINKS"],
+            "propertyDefinitions": [],
+            "sourceNodeTable": {
+                "nodeTableName": "Cells",
+                "edgeTableColumns": ["src_cell", "snapshot_ts"],
+                "nodeTableColumns": ["cell_id", "snapshot_ts"],
+            },
+            # The columns are not in the order of the key of Cells.
+            "destinationNodeTable": {
+                "nodeTableName": "Cells",
+                "edgeTableColumns": ["snapshot_ts", "dst_cell"],
+                "nodeTableColumns": ["snapshot_ts", "cell_id"],
+            },
+        }],
+        "labels": [],
+        "propertyDeclarations": [
+            {"name": "cell_id", "type": "STRING"},
+            {"name": "snapshot_ts", "type": "TIMESTAMP"},
+        ],
+    })
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "Cell": schema_lib.NodeSchema(
+                features={
+                    "#id": FeatureSchema(
+                        format=FeatureFormat.BYTES,
+                        semantic=FeatureSemantic.PRIMARY_ID,
+                    ),
+                    "snapshot_ts": FeatureSchema(
+                        format=FeatureFormat.INTEGER_64,
+                        semantic=FeatureSemantic.TIMESTAMP,
+                    ),
+                }
+            )
+        },
+        edge_sets={
+            "LINKS": schema_lib.EdgeSchema(source="Cell", target="Cell")
+        },
+    )
+    tables = _resolve_graph_tables(metadata, schema)
+    keys = tables.node_tables["Cell"].keys
+    self.assertEqual(
+        spanner_graph_sampler_lib.seed_parameter_types(keys),
+        {"seed_ids_0": "STRING", "seed_ids_1": "INT64"},
+    )
+    # The "/" of the cell id "bc/1" is escaped in the seed id.
+    self.assertEqual(
+        spanner_graph_sampler_lib.seed_parameter_values(
+            keys, [rb"bc\/1/1794398700000000", b"dz/5"]
+        ),
+        {"seed_ids_0": ["bc/1", "dz"], "seed_ids_1": [1794398700000000, 5]},
+    )
+
+    plan = config_lib.simple_sampling_config_to_sampling_plan(
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="Cell", num_hops=1, hop_width=2, multi_visit=False
+        ),
+        schema,
+    )
+    query = spanner_graph_sampler_lib.generate_query(
+        tables=tables, plan=plan, engine=engine, graph_name="g"
+    )
+    test_util.assert_golden_string(
+        self,
+        query,
+        f"spanner_graph_sampler_test_query_composite_key_{engine.name.lower()}.sql",
+    )
+
+    rows = [
+        [b"bc/1", b"bc/1", "node", "Cell", None, None, {"snapshot_ts": 1}],
+        [b"bc/1", b"dz/1", "node", "Cell", None, None, {"snapshot_ts": 1}],
+        [b"bc/1", None, "edge", "LINKS", b"bc/1", b"dz/1", None],
+    ]
+    (graph,) = spanner_graph_sampler_lib.rows_to_in_memory_graphs(
+        rows, schema, tables, "Cell", [b"bc/1"], ids_are_base64=False
+    )
+    np.testing.assert_array_equal(
+        graph.node_sets["Cell"].features["#id"], [b"bc/1", b"dz/1"]
+    )
+    np.testing.assert_array_equal(
+        graph.edge_sets["LINKS"].adjacency, [[0], [1]]
+    )
 
   @parameterized.named_parameters(
       ("duplicate_node", [_PAPER_ROW, _PAPER_ROW], "Duplicate node"),
@@ -598,12 +788,10 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
   )
   def test_invalid_rows_raise(self, rows, message):
     schema = _toy_schema()
-    tables = spanner_graph_sampler_lib.resolve_graph_tables(
-        _toy_metadata(), schema
-    )
+    tables = _resolve_graph_tables(_toy_metadata(), schema)
     with self.assertRaisesRegex(ValueError, message):
       spanner_graph_sampler_lib.rows_to_in_memory_graphs(
-          rows, schema, tables, "paper", [b"p1"]
+          rows, schema, tables, "paper", [b"p1"], ids_are_base64=False
       )
 
   def test_feature_name_injection_rejected(self):
@@ -612,13 +800,13 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
         FeatureSchema(format=FeatureFormat.INTEGER_64)
     )
     with self.assertRaisesRegex(ValueError, "Invalid identifier"):
-      spanner_graph_sampler_lib.resolve_graph_tables(_toy_metadata(), schema)
+      _resolve_graph_tables(_toy_metadata(), schema)
 
   def test_nodeset_name_injection_rejected(self):
     schema = _toy_schema()
     schema.node_sets["paper' OR '1'='1"] = schema.node_sets.pop("paper")
     with self.assertRaisesRegex(ValueError, "Invalid identifier"):
-      spanner_graph_sampler_lib.resolve_graph_tables(_toy_metadata(), schema)
+      _resolve_graph_tables(_toy_metadata(), schema)
 
   def test_property_defined_by_expression_raises(self):
     metadata = _toy_metadata()
@@ -630,18 +818,16 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
         NotImplementedError,
         "'year' of 'paper' is defined by the expression 'Year \\+ 1'",
     ):
-      spanner_graph_sampler_lib.resolve_graph_tables(metadata, _toy_schema())
+      _resolve_graph_tables(metadata, _toy_schema())
 
   def test_table_name_injection_rejected(self):
     metadata = _toy_metadata()
     metadata.node_tables[0].base_table_name = "Papers`; DROP TABLE x"
     with self.assertRaisesRegex(ValueError, "Invalid identifier"):
-      spanner_graph_sampler_lib.resolve_graph_tables(metadata, _toy_schema())
+      _resolve_graph_tables(metadata, _toy_schema())
 
   def test_graph_name_injection_rejected(self):
-    tables = spanner_graph_sampler_lib.resolve_graph_tables(
-        _toy_metadata(), _toy_schema()
-    )
+    tables = _resolve_graph_tables(_toy_metadata(), _toy_schema())
     with self.assertRaisesRegex(ValueError, "Invalid identifier"):
       spanner_graph_sampler_lib.generate_query(
           tables=tables,
@@ -656,16 +842,31 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
     with self.assertRaisesRegex(
         ValueError, "label 'paper' is defined on 2 element tables"
     ):
-      spanner_graph_sampler_lib.resolve_graph_tables(metadata, _toy_schema())
+      _resolve_graph_tables(metadata, _toy_schema())
 
-  def test_element_table_with_several_labels_raises(self):
+  def test_several_labels_is_only_supported_by_sql_engine(self):
     metadata = _toy_metadata()
     metadata.node_tables[0].label_names = ["paper", "publication"]
+    schema = _table_name_schema()
+    tables = _resolve_graph_tables(metadata, schema)
+    plan = config_lib.simple_sampling_config_to_sampling_plan(
+        config_lib.SimpleSamplingConfig(
+            seed_nodeset="Papers", num_hops=1, hop_width=3, multi_visit=False
+        ),
+        schema,
+    )
+    query = spanner_graph_sampler_lib.generate_query(
+        tables=tables, plan=plan, engine=QueryEngine.SQL, graph_name="toy_graph"
+    )
+    self.assertIn("FROM `Writes` AS e", query)
     with self.assertRaisesRegex(
-        ValueError, "element table 'Papers' has 2 labels"
+        NotImplementedError, "'Papers' has several labels"
     ):
-      spanner_graph_sampler_lib.resolve_graph_tables(
-          metadata, _table_name_schema()
+      spanner_graph_sampler_lib.generate_query(
+          tables=tables,
+          plan=plan,
+          engine=QueryEngine.GQL,
+          graph_name="toy_graph",
       )
 
   def test_shared_label_is_only_supported_by_sql_engine(self):
@@ -675,7 +876,7 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
     metadata.node_tables[0].label_names = ["entity"]
     metadata.node_tables[1].label_names = ["entity"]
     schema = _table_name_schema()
-    tables = spanner_graph_sampler_lib.resolve_graph_tables(metadata, schema)
+    tables = _resolve_graph_tables(metadata, schema)
     self.assertTrue(tables.node_tables["Papers"].label_is_shared)
     self.assertFalse(tables.edge_tables["Writes"].label_is_shared)
     plan = config_lib.simple_sampling_config_to_sampling_plan(
@@ -700,9 +901,7 @@ class SpannerGraphSamplerTest(parameterized.TestCase):
 
   @parameterized.parameters(QueryEngine.SQL, QueryEngine.GQL)
   def test_each_hop_has_a_different_sampling_hash(self, engine):
-    tables = spanner_graph_sampler_lib.resolve_graph_tables(
-        _toy_metadata(), _toy_schema()
-    )
+    tables = _resolve_graph_tables(_toy_metadata(), _toy_schema())
     query = spanner_graph_sampler_lib.generate_query(
         tables=tables, plan=_plan(), engine=engine, graph_name="toy_graph"
     )
