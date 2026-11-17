@@ -283,14 +283,9 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
     # TODO(gbm): Add support for multi-dim features.
 
     value = value.astype(np.float32)
-    # TODO(gbm): Add support for NaNs.
-    if np.isnan(value).any():
-      raise ValueError(
-          f"Feature '{self.input_feature}' contains NaN values. DGF normalizers"
-          " do not support NaNs in features. Please verify your graph"
-          " extraction pipeline and impute missing values (e.g. median"
-          " imputation) before creating the GF graph."
-      )
+    # Non-finite values (NaN, +-inf) pass through unchanged, also in
+    # `normalize_tensorflow`. Serving does not raise by default; training
+    # rejects missing values earlier, at the statistics.
     quantiles = self.quantiles
     num_buckets = len(quantiles) - 1
 
@@ -320,7 +315,9 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
     # Note: This is not really a quantile, so it's fine to adjust it a little:
     #  * Center the output to [-0.5, 0.5] so that the median is 0.
     #  * Clip to [-100, 100] to avoid overflows when squaring downstream.
+    #  * We pass through not only NaNs, but also ±inf (instead of clipping).
     soft_quantile = np.clip(smooth_bucket_idx / num_buckets - 0.5, -100, 100)
+    soft_quantile = np.where(np.isfinite(value), soft_quantile, value)
     return {self.output_feature_name: soft_quantile}
 
   def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
@@ -343,6 +340,7 @@ class SoftQuantileNormalizer(AbstractFeatureNormalizer):
     # See comment in normalize_numpy for details.
     soft_quantile = smooth_bucket_idx / num_buckets - 0.5
     soft_quantile = tf.clip_by_value(soft_quantile, -100, 100)
+    soft_quantile = tf.where(tf.math.is_finite(value), soft_quantile, value)
     return {self.output_feature_name: soft_quantile}
 
 

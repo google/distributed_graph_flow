@@ -309,7 +309,7 @@ class SoftQuantileNormalizerTest(parameterized.TestCase):
           "test_feature", input_schema, input_stats
       )
 
-  def test_nan_input(self):
+  def test_non_finite_input_passes_through(self):
     input_schema = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.FLOAT_32,
         semantic=schema_lib.FeatureSemantic.NUMERICAL,
@@ -324,9 +324,19 @@ class SoftQuantileNormalizerTest(parameterized.TestCase):
     normalizer = normalize_lib.SoftQuantileNormalizer.create(
         "test_feature", input_schema, input_stats
     )
-    input_values = np.array([1.0, np.nan, 3.0], dtype=np.float32)
-    with self.assertRaisesRegex(ValueError, "contains NaN values"):
-      normalizer.normalize_numpy(input_values)
+    input_values = np.array([1.0, np.nan, np.inf, -np.inf], dtype=np.float32)
+    # Non-finite values pass through unchanged.
+    expected = np.array([-0.4, np.nan, np.inf, -np.inf], dtype=np.float32)
+
+    np_output = normalizer.normalize_numpy(input_values)
+    tf_output = normalizer.normalize_tensorflow(tf.constant(input_values))
+
+    np.testing.assert_allclose(
+        np_output["test_feature_SOFT_QUANTILE"], expected, atol=1e-6
+    )
+    np.testing.assert_allclose(
+        tf_output["test_feature_SOFT_QUANTILE"].numpy(), expected, atol=1e-6
+    )
 
   def test_timeseries_feature_2d(self):
     input_schema = schema_lib.FeatureSchema(
