@@ -76,6 +76,35 @@ class MinimalRequirementsTest(absltest.TestCase):
     loaded_model = dgf.learning.load_model(model_path)
     loaded_model.predict(graph, seed_node_idxs=[0, 1, 2])
 
+  def test_train_node_embedding_model(self):
+    graph, schema = gen_test_graph.gen_toy_classification_dataset()
+    work_dir = self.create_tempdir().full_path
+    model = dgf.learning.train_node_embedding_model(
+        graph=graph,
+        schema=schema,
+        target_nodeset="N1",
+        exclude_features=["label"],
+        work_dir=os.path.join(work_dir, "train"),
+        num_train_steps=10,
+        valid_every_n_steps=5,
+        batch_size=5,
+        num_sampling_hops=1,
+        sampling_width=3,
+        node_embedding_dim=8,
+        fast_compile=True,
+    )
+    self.assertIsInstance(model, dgf.learning.NodeEmbeddingModel)
+    model.describe()
+    model.evaluate(graph, seed_node_idxs=[0, 1, 2])
+    embeddings = model.predict(graph, seed_node_idxs=[0, 1, 2])
+    self.assertEqual(embeddings.shape, (3, 8))
+
+    model_path = os.path.join(work_dir, "model")
+    model.save(model_path)
+    loaded_model = dgf.learning.load_model(model_path)
+    self.assertIsInstance(loaded_model, dgf.learning.NodeEmbeddingModel)
+    loaded_model.predict(graph, seed_node_idxs=[0, 1, 2])
+
 
 if __name__ == "__main__":
   absltest.main()

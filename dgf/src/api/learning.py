@@ -21,6 +21,8 @@ from dgf.src.learning.ten_lines.node_prediction_model import NodePredictionModel
 from dgf.src.learning.ten_lines.node_prediction_train import train_node_model
 from dgf.src.learning.ten_lines.link_prediction_train import LinkPredictionModel
 from dgf.src.learning.ten_lines.link_prediction_train import train_link_model
+from dgf.src.learning.ten_lines.node_embedding_model import NodeEmbeddingModel
+from dgf.src.learning.ten_lines.node_embedding_train import train_node_embedding_model
 from dgf.src.learning.ten_lines.common import Model
 from dgf.src.learning.ten_lines.common import load_model
 from dgf.src.learning.ten_lines.common import TFFunctionInputFormat

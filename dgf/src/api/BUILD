@@ -211,6 +211,8 @@ py_library(
     deps = [
         "//dgf/src/learning/ten_lines:common",
         "//dgf/src/learning/ten_lines:link_prediction_train",
+        "//dgf/src/learning/ten_lines:node_embedding_model",
+        "//dgf/src/learning/ten_lines:node_embedding_train",
         "//dgf/src/learning/ten_lines:node_prediction",
     ],
 )

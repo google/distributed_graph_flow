@@ -241,10 +241,12 @@ Top-level learning module.
 
 *   [`dgf.learning.LinkPredictionModel`](api/dgf-learning.md#section-linkpredictionmodel): The user-visible returned model object for edge prediction.
 *   [`dgf.learning.Model`](api/dgf-learning.md#section-model): A generic model from the 10-lines of code API.
+*   [`dgf.learning.NodeEmbeddingModel`](api/dgf-learning.md#section-nodeembeddingmodel): The user-visible returned model object for node embedding.
 *   [`dgf.learning.NodePredictionModel`](api/dgf-learning.md#section-nodepredictionmodel): The user-visible returned model object.
 *   [`dgf.learning.TFFunctionInputFormat`](api/dgf-learning.md#section-tffunctioninputformat): Input format of a model exported with `to_tensorflow_function`.
 *   [`dgf.learning.load_model`](api/dgf-learning.md#section-load-model): Loads a model previously saved with `model.save()`.
 *   [`dgf.learning.train_link_model`](api/dgf-learning.md#section-train-link-model): Trains a supervised Graph Neural Network model for edge prediction.
+*   [`dgf.learning.train_node_embedding_model`](api/dgf-learning.md#section-train-node-embedding-model): Trains an unsupervised Graph Neural Network model for node embedding.
 *   [`dgf.learning.train_node_model`](api/dgf-learning.md#section-train-node-model): Trains a supervised Graph Neural Network model for node-level prediction.
 
 

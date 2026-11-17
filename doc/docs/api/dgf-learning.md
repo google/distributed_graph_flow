@@ -11,6 +11,9 @@ hide:
 ## dgf.learning.Model  # {: #section-model}
 ::: dgf.learning.Model
 
+## dgf.learning.NodeEmbeddingModel  # {: #section-nodeembeddingmodel}
+::: dgf.learning.NodeEmbeddingModel
+
 ## dgf.learning.NodePredictionModel  # {: #section-nodepredictionmodel}
 ::: dgf.learning.NodePredictionModel
 
@@ -22,6 +25,9 @@ hide:
 
 ## dgf.learning.train_link_model  # {: #section-train-link-model}
 ::: dgf.learning.train_link_model
+
+## dgf.learning.train_node_embedding_model  # {: #section-train-node-embedding-model}
+::: dgf.learning.train_node_embedding_model
 
 ## dgf.learning.train_node_model  # {: #section-train-node-model}
 ::: dgf.learning.train_node_model

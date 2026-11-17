@@ -272,9 +272,7 @@ def train_node_embedding_model(
   Usage example:
 
     ```python
-    from dgf.src.learning.ten_lines import node_embedding_train
-
-    model = node_embedding_train.train_node_embedding_model(
+    model = dgf.learning.train_node_embedding_model(
         graph=graph,
         schema=schema,
         target_nodeset="paper",
