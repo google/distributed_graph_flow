@@ -21,6 +21,8 @@ import json
 from typing import Any, NamedTuple
 
 from dgf.src.data import distributed_graph as distributed_graph_lib
+from dgf.src.data import schema as schema_lib
+from dgf.src.io import spanner_graph as spanner_graph_lib
 from dgf.src.io.gcp import common as gcp_common_lib
 from dgf.src.io.gcp import common_beam as gcp_common_beam_lib
 from dgf.src.io.gcp import spanner_graph
@@ -91,6 +93,35 @@ def check_metadata(
     )
 
 
+def _graph_schema(
+    metadata: spanner_graph_metadata_lib.SpannerGraphMetadata,
+    combine_as_json: bool,
+) -> schema_lib.GraphSchema:
+  """Gets the DGF schema of the graph read by distributed_read_beam."""
+  if not combine_as_json:
+    return spanner_graph_lib.graph_schema_from_metadata(metadata)
+  return schema_lib.GraphSchema(
+      node_sets={
+          node_table.name: schema_lib.NodeSchema(
+              features=gcp_common_lib.infer_feature_set_schema(
+                  {}, [], combine_as_json=True
+              )
+          )
+          for node_table in metadata.node_tables
+      },
+      edge_sets={
+          edge_table.name: schema_lib.EdgeSchema(
+              source=edge_table.source_node_table.node_table_name,
+              target=edge_table.destination_node_table.node_table_name,
+              features=gcp_common_lib.infer_feature_set_schema(
+                  {}, [], combine_as_json=True
+              ),
+          )
+          for edge_table in metadata.edge_tables
+      },
+  )
+
+
 def distributed_read_beam(
     project: str,
     instance: str,
@@ -117,9 +148,7 @@ def distributed_read_beam(
   spanner_client = gcp_spanner.Client(project=project)
   db = spanner_client.instance(instance).database(database)
   spanner_graph_metadata = spanner_graph.get_metadata(db, graph)
-  graph_schema = spanner_graph.graph_schema(
-      spanner_graph_metadata, combine_as_json
-  )
+  graph_schema = _graph_schema(spanner_graph_metadata, combine_as_json)
   log.info("Spanner graph metadata: %s", spanner_graph_metadata.to_json())  # pyrefly: ignore[missing-attribute]
   log.info("Graph schema: %s", graph_schema)
 

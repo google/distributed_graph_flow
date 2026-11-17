@@ -71,7 +71,7 @@ class E2EArxivTest(parameterized.TestCase):
     start_time = time.time()
     cls.graph, cls.schema = cache_lib.cache(
         "/tmp/spanner_graph_sampler_integration_test_arxiv_cache_v2.pkl",
-        lambda: spanner_graph_io_lib.read_spanner_graph(
+        lambda: spanner_graph_io_lib.read_spanner_graph_gcp(
             **cls.spanner_graph_config, verbose=2
         ),
     )
@@ -171,8 +171,8 @@ class E2EMagTest(parameterized.TestCase):
       start_time = time.time()
       cls.graph, cls.schema = cache_lib.cache(
           "/tmp/spanner_graph_sampler_integration_test_mag_cache_v2.pkl",
-          lambda: spanner_graph_io_lib.read_spanner_graph(
-              **cls.spanner_graph_config, verbose=2, max_workers=4
+          lambda: spanner_graph_io_lib.read_spanner_graph_gcp(
+              **cls.spanner_graph_config, verbose=2
           ),
       )
       print(f"Graph loaded in {time.time() - start_time:.2f} seconds.")
@@ -189,7 +189,7 @@ class E2EMagTest(parameterized.TestCase):
     )
 
     # CTE Sampler
-    spanner_schema = spanner_graph_io_lib.read_spanner_graph_schema(
+    spanner_schema = spanner_graph_io_lib.read_spanner_graph_schema_gcp(
         **self.spanner_graph_config
     )
     cte_sampler = spanner_graph_sampler_lib.create_spanner_graph_sampler_gcp(

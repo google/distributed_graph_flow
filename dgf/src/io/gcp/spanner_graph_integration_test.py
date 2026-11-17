@@ -32,9 +32,11 @@ def expected_schema() -> schema_lib.GraphSchema:
                       semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
                       is_utf8_string=True,
                   ),
+                  # The column is declared with vector_length=>128.
                   "feat": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.FLOAT_64,
-                      shape=(None,),
+                      semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                      shape=(128,),
                   ),
                   "labels": schema_lib.FeatureSchema(
                       format=schema_lib.FeatureFormat.INTEGER_64,
@@ -57,7 +59,7 @@ def expected_schema() -> schema_lib.GraphSchema:
 class SpannerGraphManualTest(absltest.TestCase):
 
   def test_read_spanner_graph(self):
-    graph, schema = spanner_graph.read_spanner_graph(
+    graph, schema = spanner_graph.read_spanner_graph_gcp(
         project="biggraphs-poc",
         instance="gcp-gnns",
         database="ogbn_arxiv",

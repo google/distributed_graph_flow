@@ -42,8 +42,13 @@ from dgf.src.io.graph_snapshots_metadata import write_metadata as write_snapshot
 from dgf.src.io.graph_snapshots import read_graph_snapshots
 from dgf.src.io.graph_snapshots import read_graph_snapshots_as_temporal_graph
 
-from dgf.src.io.gcp.spanner_graph import read_spanner_graph
-from dgf.src.io.gcp.spanner_graph import read_spanner_graph_schema
+from dgf.src.io.gcp.spanner_graph import read_spanner_graph_gcp
+from dgf.src.io.gcp.spanner_graph import read_spanner_graph_schema_gcp
+
+# Aliases of read_spanner_graph_gcp and read_spanner_graph_schema_gcp.
+read_spanner_graph = read_spanner_graph_gcp
+read_spanner_graph_schema = read_spanner_graph_schema_gcp
+
 from dgf.src.io.gcp.bigquery_graph import read_bigquery_graph_schema
 
 from dgf.src.io.gcp.bigquery_graph import read_bigquery_graph

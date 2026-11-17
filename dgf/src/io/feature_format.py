@@ -162,3 +162,16 @@ class _LazyFeatureFormatToTfgnnTfDtype:
 # Mapping from a FeatureFormat to the TensorFlow dtype used to store its values
 # in a TF GNN Graph Sample.
 FEATURE_FORMAT_TO_TFGNN_TF_DTYPE = _LazyFeatureFormatToTfgnnTfDtype()
+
+
+def default_scalar_value(feature_format: schema_lib.FeatureFormat) -> Any:
+  """Gets the DGF value of a missing scalar of this format."""
+  if feature_format == schema_lib.FeatureFormat.BYTES:
+    return b""
+  if feature_format == schema_lib.FeatureFormat.BOOL:
+    return False
+  if feature_format.is_float():
+    return 0.0
+  if feature_format.is_integer():
+    return 0
+  raise NotImplementedError(f"Unsupported feature format: {feature_format}.")
