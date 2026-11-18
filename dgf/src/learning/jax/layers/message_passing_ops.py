@@ -33,6 +33,9 @@ SORT_MIN_EDGES = 50000
 UINT16_MAX_NODES = 2**16
 # Added to the softmax denominator to avoid divisions by zero.
 SOFTMAX_EPSILON = 1e-9
+# Added to the variance of the set statistics before the square root, so that
+# the gradient is finite when all the sources of a node have the same value.
+SET_STATISTICS_EPSILON = 1e-6
 
 
 @dataclasses.dataclass(frozen=True)
@@ -182,6 +185,88 @@ def node_degrees(
       node_idxs,
       num_nodes,
       indices_are_sorted=indices_are_sorted,
+  )
+
+
+def set_statistics_pool(
+    source_values: jt.Float[jt.Array, "num_src_nodes dims"],
+    source_idxs: jt.Int[jt.Array, " num_edges"],
+    target_idxs: jt.Int[jt.Array, " num_edges"],
+    num_dst_nodes: int,
+    indices_are_sorted: bool = False,
+) -> jt.Float[jt.Array, "num_dst_nodes out_dims"]:
+  """Summarizes the source nodes of each target node as [mean, std, log-count].
+
+  For each target node, the values of the source nodes connected to it are
+  reduced to their mean, their (population) standard deviation and the log of
+  one plus their number. Unlike a mean or a sum, this tells apart a target node
+  with few sources from one with many, and a homogeneous set of sources from a
+  spread one. Target nodes without incoming edges get a zero mean,
+  `sqrt(SET_STATISTICS_EPSILON)` as standard deviation and a zero log-count.
+
+  A source node connected to the same target node by several edges is counted
+  once per edge.
+
+  No padding mask is needed on graphs padded by `GraphMerger`: padding edges
+  only connect padding nodes, so they do not change the output of the real
+  target nodes. The output of the padding target nodes is not meaningful.
+
+  The statistics are computed in `common.DEFAULT_POINTWISE_NORM_PRECISION` and
+  returned in the dtype of `source_values`.
+
+  Usage example:
+
+  ```python
+  # 3 authors with 2 dims, 2 papers. Paper 0 has authors 0 and 1, paper 1 has
+  # author 2.
+  author_values = jnp.array([[1.0, 2.0], [3.0, 2.0], [5.0, 6.0]])
+  paper_values = set_statistics_pool(
+      author_values,
+      source_idxs=jnp.array([0, 1, 2]),
+      target_idxs=jnp.array([0, 0, 1]),
+      num_dst_nodes=2,
+  )
+  # With sqrt(SET_STATISTICS_EPSILON) = 0.001 as the std of identical values:
+  # paper_values[0] ~= [2, 2, 1, 0.001, log(3)]: 2 authors, std [1, 0].
+  # paper_values[1] ~= [5, 6, 0.001, 0.001, log(2)]: 1 author, std [0, 0].
+  ```
+
+  Args:
+    source_values: Value of each source node.
+    source_idxs: Source node of each edge.
+    target_idxs: Target node of each edge.
+    num_dst_nodes: Number of target nodes.
+    indices_are_sorted: Whether `target_idxs` is sorted. The edges of a graph
+      padded by `GraphMerger` are generally not.
+
+  Returns:
+    The concatenated [mean, std, log(1 + count)] of each target node, of shape
+    [num_dst_nodes, 2 * dims + 1].
+  """
+  values = source_values[source_idxs].astype(
+      common.DEFAULT_POINTWISE_NORM_PRECISION
+  )
+
+  def sum_by_target(
+      edge_values: jt.Float[jt.Array, "num_edges dims"],
+  ) -> jt.Float[jt.Array, "num_dst_nodes dims"]:
+    return jax.ops.segment_sum(
+        edge_values,
+        target_idxs,
+        num_dst_nodes,
+        indices_are_sorted=indices_are_sorted,
+    )
+
+  counts = node_degrees(
+      target_idxs, num_dst_nodes, values.dtype, indices_are_sorted
+  )
+  # Nodes without sources have zero sums: Any non-zero divisor gives zero.
+  safe_counts = jnp.maximum(counts, 1.0)
+  mean = sum_by_target(values) / safe_counts
+  variance = sum_by_target(jnp.square(values - mean[target_idxs])) / safe_counts
+  std = jnp.sqrt(variance + SET_STATISTICS_EPSILON)
+  return jnp.concatenate([mean, std, jnp.log1p(counts)], axis=-1).astype(
+      source_values.dtype
   )
 
 
