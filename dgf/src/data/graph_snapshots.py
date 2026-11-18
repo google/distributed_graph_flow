@@ -37,19 +37,28 @@ class GraphSnapshots:
 
   All snapshots share a single `schema`, read from the dataset root.
 
+  The graphs are not necessarily in memory: `graphs` can be a sequence that
+  reads a graph from disk each time it is accessed, e.g. the one returned by
+  `dgf.io.read_graph_snapshots(path, lazy=True)`. Access the graphs one at a
+  time when the snapshots do not fit in memory together.
+
   Attributes:
     timestamps: Array of shape [num_snapshots]. Dtype: int64. The timestamp of
       each snapshot, sorted in increasing order.
     snapshot_ids: The directory name of each snapshot, used for error messages
       and debugging.
     schema: The schema shared by all the snapshots.
-    graphs: The in-memory graph of each snapshot.
+    graphs: The graph of each snapshot, in memory or read from disk when it is
+      accessed.
+    name: Optional name of the graph captured by the snapshots, e.g. to tell
+      apart the snapshots of several graphs.
   """
 
   timestamps: np.ndarray
   snapshot_ids: Sequence[str]
   schema: schema_lib.GraphSchema
   graphs: Sequence[in_memory_graph_lib.InMemoryGraph]
+  name: str | None = None
 
   def __post_init__(self):
     if len(self.timestamps) != len(self.snapshot_ids) or len(
