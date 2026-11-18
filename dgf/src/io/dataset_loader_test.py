@@ -231,12 +231,15 @@ class LoadDatasetTest(parameterized.TestCase):
 
       # 2. Default cache_dir=None
       mock_node_prop.reset_mock()
+      expected_default_dir = os.path.join(
+          os.path.expanduser("~"), ".cache", "dgf", "ogb_cache_dir"
+      )
       with mock.patch.object(dataset_loader.fs, "rmtree") as mock_rmtree:
         dataset_loader.download_ogb_graph("ogbn-arxiv", cache_dir=None)
         mock_node_prop.assert_called_once_with(
-            name="ogbn-arxiv", root="/tmp/ogb_cache_dir"
+            name="ogbn-arxiv", root=expected_default_dir
         )
-        mock_rmtree.assert_called_with("/tmp/ogb_cache_dir")
+        mock_rmtree.assert_called_with(expected_default_dir)
 
   @unittest.skipIf(
       os.environ.get("TEST_STRATEGY") != "local",
@@ -627,6 +630,61 @@ class LoadDatasetTest(parameterized.TestCase):
     self.assertIsNotNone(num_queries)
     assert num_queries is not None
     self.assertGreater(num_queries, 1000)
+
+  def test_fetch_auto_cache_dir_uses_per_user_dir(self):
+    fake_home = self.create_tempdir().full_path
+    with (
+        mock.patch.object(os.path, "expanduser", return_value=fake_home),
+        mock.patch.object(
+            dataset_loader, "load_from_cns", return_value=("graph", "schema")
+        ),
+        mock.patch.object(
+            dataset_loader.cache_lib,
+            "cache",
+            side_effect=lambda path, fn: (path, fn()),
+        ) as mock_cache,
+    ):
+      dataset_loader.fetch_ogb_graph("arxiv", cache_dir="AUTO", repo="CNS")
+      self.assertEqual(
+          mock_cache.call_args.args[0],
+          os.path.join(fake_home, ".cache", "dgf", "gf_fetch", "arxiv.cache"),
+      )
+
+      dataset_loader.fetch_jena_climate_graph(
+          "jena_climate_1h", cache_dir="AUTO", repo="CNS"
+      )
+      self.assertEqual(
+          mock_cache.call_args.args[0],
+          os.path.join(
+              fake_home,
+              ".cache",
+              "dgf",
+              "gf_fetch_jena_climate",
+              "jena_climate_1h_h3600_qs6_ss1.cache",
+          ),
+      )
+
+    with (
+        mock.patch.object(os.path, "expanduser", return_value=fake_home),
+        mock.patch.object(
+            dataset_loader.cache_lib,
+            "cache",
+            return_value=("graph", "schema"),
+        ) as mock_cache,
+    ):
+      dataset_loader.fetch_graphland_graph(
+          "hm-prices", cache_dir="AUTO", mask_name="RL", repo="CNS"
+      )
+      self.assertEqual(
+          mock_cache.call_args.args[0],
+          os.path.join(
+              fake_home,
+              ".cache",
+              "dgf",
+              "gf_fetch_graphland",
+              "hm-prices_RL.cache",
+          ),
+      )
 
 
 if __name__ == "__main__":

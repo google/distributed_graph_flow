@@ -25,7 +25,6 @@ import dataclasses
 import functools
 import io
 import os
-import tempfile
 from typing import Any
 import urllib.request
 
@@ -693,8 +692,9 @@ def fetch_traffic_graph(
       15 minutes ahead). For CNS, must be one of 900 (15m), 1800 (30m), or 3600
       (60m).
     cache_dir: Optional. Directory to cache the graph in order to avoid
-      re-downloading/re-parsing it each time. If "AUTO", uses the OS default
-      temporary directory. If None, does not cache the graph.
+      re-downloading/re-parsing it each time. If "AUTO", uses a per-user cache
+      directory (~/.cache/dgf/gf_fetch_traffic). If None, does not cache the
+      graph.
     verbose: Optional. Whether to print cache and download progress.
     query_step: Stride, in sampling periods, between two query times (default:
       1, i.e. one query per sensor and per recording, as in DCRNN).
@@ -708,7 +708,7 @@ def fetch_traffic_graph(
   spec = traffic_dataset_spec(dataset)
 
   if cache_dir == "AUTO":
-    cache_dir = os.path.join(tempfile.gettempdir(), "gf_fetch_traffic")
+    cache_dir = cache_lib.default_cache_dir("gf_fetch_traffic")
 
   if cache_dir is not None:
     fs.makedirs(cache_dir)

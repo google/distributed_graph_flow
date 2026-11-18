@@ -106,6 +106,14 @@ class CacheTest(absltest.TestCase):
           self, schema, gen_test_graph.generate_schema(variable_length=False)
       )
 
+  def test_default_cache_dir(self):
+    fake_home = self.create_tempdir().full_path
+    with mock.patch.object(os.path, "expanduser", return_value=fake_home):
+      self.assertEqual(
+          cache_lib.default_cache_dir("gf_fetch"),
+          os.path.join(fake_home, ".cache", "dgf", "gf_fetch"),
+      )
+
 
 if __name__ == "__main__":
   absltest.main()

@@ -737,6 +737,33 @@ class DatasetLoaderRelbenchTest(parameterized.TestCase):
         name="relbench_f1_driver_position"
     )
 
+  def test_fetch_relbench_graph_auto_cache_dir_uses_per_user_dir(self):
+    fake_home = self.create_tempdir().full_path
+    with (
+        mock.patch.object(os.path, "expanduser", return_value=fake_home),
+        mock.patch.object(
+            dataset_loader_relbench.cache_lib,
+            "cache",
+            return_value=("graph", "schema"),
+        ) as mock_cache,
+    ):
+      dataset_loader_relbench.fetch_relbench_graph(
+          dataset="rel-f1",
+          task="driver-position",
+          cache_dir="AUTO",
+          repo="CNS",
+      )
+      self.assertEqual(
+          mock_cache.call_args.args[0],
+          os.path.join(
+              fake_home,
+              ".cache",
+              "dgf",
+              "gf_fetch_relbench",
+              "relbench_f1_driver_position.cache",
+          ),
+      )
+
   @parameterized.named_parameters(
       (
           "driver_position",

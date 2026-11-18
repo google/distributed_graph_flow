@@ -23,7 +23,6 @@ import gzip
 import io
 import os
 import tarfile
-import tempfile
 from typing import Any
 import urllib.request
 import zipfile
@@ -98,7 +97,7 @@ def download_ogb_graph(
   # The problem might need to be fixed in the open-source library, and
   # sync back into /third_party.
   if cache_dir is None:
-    cache_dir = "/tmp/ogb_cache_dir"
+    cache_dir = cache_lib.default_cache_dir("ogb_cache_dir")
   if fs.exists(cache_dir):
     logging.info("Clearing OGB dataset cache directory %s", cache_dir)
     fs.rmtree(cache_dir)
@@ -594,8 +593,8 @@ def fetch_ogb_graph(
   Args:
     name: The name of the OGB dataset.
     cache_dir: Optional. The directory to cache the graph in order to avoid to
-      re-download it each time. If equal to "AUTO, use the OS default temporary
-      directory. If None, does not cache the graph.
+      re-download it each time. If equal to "AUTO", uses a per-user cache
+      directory (~/.cache/dgf/gf_fetch). If None, does not cache the graph.
     verbose: Optional. Whether to print cache path information.
     repo: Define the source of the data.
 
@@ -604,7 +603,7 @@ def fetch_ogb_graph(
   """
 
   if cache_dir == "AUTO":
-    cache_dir = os.path.join(tempfile.gettempdir(), "gf_fetch")
+    cache_dir = cache_lib.default_cache_dir("gf_fetch")
 
   if cache_dir is not None:
     fs.makedirs(cache_dir)
@@ -782,8 +781,9 @@ def fetch_graphland_graph(
   Args:
     name: The name of the Graphland dataset.
     cache_dir: Optional. The directory to cache the graph in order to avoid to
-      re-download it each time. If equal to "AUTO, use the OS default temporary
-      directory. If None, does not cache the graph.
+      re-download it each time. If equal to "AUTO", uses a per-user cache
+      directory (~/.cache/dgf/gf_fetch_graphland). If None, does not cache the
+      graph.
     verbose: Optional. Whether to print cache path information.
     mask_name: The name of the mask to use for splitting the data. Can be RL,
       RH, TH, THI. Note that not all datasets have all the options.
@@ -794,7 +794,7 @@ def fetch_graphland_graph(
   """
 
   if cache_dir == "AUTO":
-    cache_dir = os.path.join(tempfile.gettempdir(), "gf_fetch_graphland")
+    cache_dir = cache_lib.default_cache_dir("gf_fetch_graphland")
 
   if cache_dir is not None:
     fs.makedirs(cache_dir)
@@ -1231,8 +1231,9 @@ def fetch_jena_climate_graph(
     name: The name of the dataset under CNS fetch_repo (e.g. 'jena_climate_1h'
       or 'jena_climate_24h').
     cache_dir: Optional. Directory to cache the graph in order to avoid
-      re-downloading/re-parsing it each time. If "AUTO", uses OS default
-      temporary directory. If None, does not cache the graph.
+      re-downloading/re-parsing it each time. If "AUTO", uses a per-user cache
+      directory (~/.cache/dgf/gf_fetch_jena_climate). If None, does not cache
+      the graph.
     verbose: Optional. Whether to print cache and download progress.
     forecast_horizon_seconds: Forecasting horizon in seconds (default: 3600 for
       1 hour ahead).
@@ -1247,7 +1248,7 @@ def fetch_jena_climate_graph(
     An InMemoryGraph instance and its GraphSchema.
   """
   if cache_dir == "AUTO":
-    cache_dir = os.path.join(tempfile.gettempdir(), "gf_fetch_jena_climate")
+    cache_dir = cache_lib.default_cache_dir("gf_fetch_jena_climate")
 
   if cache_dir is not None:
     fs.makedirs(cache_dir)

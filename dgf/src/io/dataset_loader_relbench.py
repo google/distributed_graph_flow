@@ -27,7 +27,6 @@ import dataclasses
 import functools
 import io
 import os
-import tempfile
 import urllib.request
 import zipfile
 
@@ -820,8 +819,8 @@ def fetch_relbench_graph(
     task: Name of the predictive task (e.g. "driver-position", "driver-dnf",
       "driver-top3").
     cache_dir: Optional. Directory to cache the graph to avoid re-loading it
-      each time. If "AUTO", uses the OS default temporary directory. If None,
-      does not cache the graph.
+      each time. If "AUTO", uses a per-user cache directory
+      (~/.cache/dgf/gf_fetch_relbench). If None, does not cache the graph.
     verbose: Optional. Whether to print cache and load progress.
     repo: Define the source of the data (Repo.AUTO, Repo.CNS, Repo.WEB).
     source: Optional root of the raw RelBench dataset, only used with
@@ -836,7 +835,7 @@ def fetch_relbench_graph(
   cns_name = relbench_cns_name(dataset, task)
 
   if cache_dir == "AUTO":
-    cache_dir = os.path.join(tempfile.gettempdir(), "gf_fetch_relbench")
+    cache_dir = cache_lib.default_cache_dir("gf_fetch_relbench")
 
   if cache_dir is not None:
     fs.makedirs(cache_dir)

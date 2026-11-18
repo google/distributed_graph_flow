@@ -34,9 +34,18 @@ graph, schema = dgf.io.cache("/tmp/cache.pkl",
 
 from collections.abc import Callable, Sequence
 import inspect
+import os
 import pickle
 from typing import TypeVar
 from dgf.src.util import filesystem as fs
+
+
+def default_cache_dir(name: str) -> str:
+  """Returns a per-user cache directory path under ~/.cache/dgf."""
+  # Use a per-user cache directory rather than the world-writable system
+  # temporary directory. Loading a pickle from a location another local user
+  # can pre-create would allow arbitrary code execution.
+  return os.path.join(os.path.expanduser("~"), ".cache", "dgf", name)
 
 
 def _load_from_pickle(path: str):
