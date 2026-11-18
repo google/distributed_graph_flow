@@ -187,13 +187,11 @@ def _escape_composite_part(text: str) -> str:
   return text.replace("\\", "\\\\").replace("/", "\\/")
 
 
-def _timestamp_to_micros(value: datetime.datetime | int | np.integer) -> int:
+def timestamp_to_micros(value: datetime.datetime | int | np.integer) -> int:
   """Converts a UTC datetime or integer microsecond value to int64 micros."""
   if isinstance(value, datetime.datetime):
     if value.tzinfo is None:
-      raise ValueError(
-          f"Composite key datetime {value!r} must be timezone-aware."
-      )
+      raise ValueError(f"Datetime {value!r} must be timezone-aware.")
     return (value.astimezone(datetime.timezone.utc) - _UTC_EPOCH) // (
         datetime.timedelta(microseconds=1)
     )
@@ -225,7 +223,7 @@ def encode_composite_key(
         )
       encoded_parts.append(bytes(value).hex())
     elif column_type == TYPE_TIMESTAMP:
-      encoded_parts.append(str(_timestamp_to_micros(value)))
+      encoded_parts.append(str(timestamp_to_micros(value)))
     elif column_type in (TYPE_INT32, TYPE_INT64):
       if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
         raise ValueError(
@@ -800,6 +798,8 @@ class NodeTable:
     for key_property in self.key_properties:
       if key_property is not None:
         gcp_common_lib.validate_identifier(key_property)
+    if self.primary_key is not None:
+      gcp_common_lib.validate_identifier(self.primary_key.removeprefix("#"))
     for feature_name in self.features:
       gcp_common_lib.validate_identifier(feature_name)
 
@@ -1127,6 +1127,28 @@ def _filter_parameter(column_name: str) -> str:
   return f"filter_{column_name}"
 
 
+def filter_column_type(
+    table_name: str,
+    column_name: str,
+    column_spanner_types: Mapping[tuple[str, str], str],
+) -> str:
+  """Gets the Spanner type of a column the rows of a table are filtered on."""
+  gcp_common_lib.validate_identifier(column_name)
+  if (table_name, column_name) not in column_spanner_types:
+    raise ValueError(
+        f"Cannot filter on {column_name!r}: The Spanner table"
+        f" {table_name!r} has no such column."
+    )
+  raw_type = column_spanner_types[(table_name, column_name)]
+  type_kind, is_array, _ = parse_spanner_type(raw_type)
+  if is_array or type_kind not in _SUPPORTED_FILTER_TYPES:
+    raise ValueError(
+        f"Cannot filter on column {column_name!r} of {table_name!r} of type"
+        f" {raw_type!r}. Supported types: {sorted(_SUPPORTED_FILTER_TYPES)}."
+    )
+  return type_kind
+
+
 def _filter_sql(
     table_name: str,
     filters: Mapping[str, Any],
@@ -1136,19 +1158,9 @@ def _filter_sql(
   """Gets the WHERE conditions of a table, and adds their parameter types."""
   conditions = []
   for column_name in filters:
-    gcp_common_lib.validate_identifier(column_name)
-    if (table_name, column_name) not in column_spanner_types:
-      raise ValueError(
-          f"Cannot filter on {column_name!r}: The Spanner table"
-          f" {table_name!r} has no such column."
-      )
-    raw_type = column_spanner_types[(table_name, column_name)]
-    type_kind, is_array, _ = parse_spanner_type(raw_type)
-    if is_array or type_kind not in _SUPPORTED_FILTER_TYPES:
-      raise ValueError(
-          f"Cannot filter on column {column_name!r} of {table_name!r} of type"
-          f" {raw_type!r}. Supported types: {sorted(_SUPPORTED_FILTER_TYPES)}."
-      )
+    type_kind = filter_column_type(
+        table_name, column_name, column_spanner_types
+    )
     parameter = _filter_parameter(column_name)
     if parameter_types.setdefault(parameter, type_kind) != type_kind:
       raise ValueError(

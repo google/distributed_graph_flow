@@ -78,6 +78,19 @@ FEATURE_FORMAT_TO_NP_DTYPE: dict[schema_lib.FeatureFormat, Any] = {
     schema_lib.FeatureFormat.BOOL: np.bool_,
 }
 
+# Format of the values of a feature stored in a tf.Example, which only holds
+# bytes, int64 and float32 values.
+FEATURE_FORMAT_TO_TF_EXAMPLE_FORMAT: dict[
+    schema_lib.FeatureFormat, schema_lib.FeatureFormat
+] = {
+    schema_lib.FeatureFormat.INTEGER_64: schema_lib.FeatureFormat.INTEGER_64,
+    schema_lib.FeatureFormat.INTEGER_32: schema_lib.FeatureFormat.INTEGER_64,
+    schema_lib.FeatureFormat.FLOAT_32: schema_lib.FeatureFormat.FLOAT_32,
+    schema_lib.FeatureFormat.FLOAT_64: schema_lib.FeatureFormat.FLOAT_32,
+    schema_lib.FeatureFormat.BYTES: schema_lib.FeatureFormat.BYTES,
+    schema_lib.FeatureFormat.BOOL: schema_lib.FeatureFormat.INTEGER_64,
+}
+
 
 _SUPPORTED_NP_DTYPES = frozenset(FEATURE_FORMAT_TO_NP_DTYPE.values())
 
