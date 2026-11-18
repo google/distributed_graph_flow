@@ -15,7 +15,8 @@
 """Client-independent core for reading Spanner Property Graphs into memory."""
 
 import base64
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from concurrent import futures
 import dataclasses
 import datetime
 import itertools
@@ -117,6 +118,20 @@ COLUMNS_TYPE_QUERY = (
     "SELECT c.TABLE_NAME, c.COLUMN_NAME, c.SPANNER_TYPE FROM"
     " INFORMATION_SCHEMA.COLUMNS AS c WHERE c.TABLE_SCHEMA = ''"
 )
+# Query reading the key columns of the usable indexes of the database, in order.
+INDEX_COLUMNS_QUERY = (
+    "SELECT i.TABLE_NAME, i.INDEX_NAME, i.INDEX_TYPE = 'PRIMARY_KEY',"
+    " i.SPANNER_IS_MANAGED, c.COLUMN_NAME FROM INFORMATION_SCHEMA.INDEXES AS i"
+    " JOIN INFORMATION_SCHEMA.INDEX_COLUMNS AS c ON c.TABLE_SCHEMA ="
+    " i.TABLE_SCHEMA AND c.TABLE_NAME = i.TABLE_NAME AND c.INDEX_NAME ="
+    " i.INDEX_NAME WHERE i.TABLE_SCHEMA = '' AND i.INDEX_TYPE IN ('GLOBAL',"
+    " 'INDEX', 'LOCAL', 'PRIMARY_KEY') AND NOT i.IS_NULL_FILTERED AND"
+    " i.FILTER IS NULL AND (i.INDEX_TYPE = 'PRIMARY_KEY' OR i.INDEX_STATE ="
+    " 'READ_WRITE') AND c.ORDINAL_POSITION IS NOT NULL ORDER BY i.TABLE_NAME,"
+    " i.INDEX_NAME, c.ORDINAL_POSITION"
+)
+# Query parameter holding the partition of the rows read by a query.
+PARTITION_PARAMETER = "partition"
 
 
 def property_graph_metadata_query(metadata_column: str) -> str:
@@ -146,6 +161,42 @@ def column_types_from_rows(
       (str(table_name), str(column_name)): str(spanner_type)
       for table_name, column_name, spanner_type in rows
   }
+
+
+@dataclasses.dataclass(frozen=True)
+class TableIndex:
+  """Key columns of the primary key or of a secondary index of a table."""
+
+  name: str
+  columns: tuple[str, ...]
+  is_primary_key: bool
+  # Whether the index was created by Spanner e.g. for a foreign key.
+  is_managed: bool
+
+  def __post_init__(self) -> None:
+    gcp_common_lib.validate_identifier(self.name)
+
+
+def table_indexes_from_rows(
+    rows: Iterable[Sequence[Any]],
+) -> dict[str, list[TableIndex]]:
+  """Gets the indexes of each table from the rows of INDEX_COLUMNS_QUERY."""
+  table_indexes: dict[str, list[TableIndex]] = {}
+  for (
+      table_name,
+      index_name,
+      is_primary_key,
+      is_managed,
+  ), index_rows in itertools.groupby(rows, key=lambda row: tuple(row[:4])):
+    table_indexes.setdefault(str(table_name), []).append(
+        TableIndex(
+            name=str(index_name),
+            columns=tuple(str(row[4]) for row in index_rows),
+            is_primary_key=bool(is_primary_key),
+            is_managed=bool(is_managed),
+        )
+    )
+  return table_indexes
 
 
 def _strip_scalar_type_params(raw_scalar: str) -> str:
@@ -1101,6 +1152,8 @@ class NodeReadPlan:
   table: NodeTable
   query: str
   features: Mapping[str, FeatureSpec]
+  # Whether the query reads the rows of the partition @partition.
+  is_partitioned: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1110,6 +1163,8 @@ class EdgeReadPlan:
   edgeset_name: str
   query: str
   features: Mapping[str, FeatureSpec]
+  # Whether the query reads the rows of the partition @partition.
+  is_partitioned: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1118,13 +1173,18 @@ class GraphReadPlan:
 
   node_plans: tuple[NodeReadPlan, ...]
   edge_plans: tuple[EdgeReadPlan, ...]
-  # Spanner type of each query parameter holding a filter value.
+  # Spanner type of each query parameter.
   parameter_types: Mapping[str, str]
+  # Number of partitions of the partitioned queries.
+  num_partitions: int = 1
 
 
-def _filter_parameter(column_name: str) -> str:
-  """Gets the name of the query parameter holding the filter value of a column."""
-  return f"filter_{column_name}"
+def filter_parameters(filters: Mapping[str, Any] | None) -> dict[str, Any]:
+  """Gets the query parameters holding the filter values."""
+  return {
+      f"filter_{column_name}": value
+      for column_name, value in (filters or {}).items()
+  }
 
 
 def filter_column_type(
@@ -1161,7 +1221,7 @@ def _filter_sql(
     type_kind = filter_column_type(
         table_name, column_name, column_spanner_types
     )
-    parameter = _filter_parameter(column_name)
+    parameter = f"filter_{column_name}"
     if parameter_types.setdefault(parameter, type_kind) != type_kind:
       raise ValueError(
           f"Cannot filter on {column_name!r}: This column has the types"
@@ -1169,6 +1229,133 @@ def _filter_sql(
       )
     conditions.append(f"t.`{column_name}` = @{parameter}")
   return conditions
+
+
+def _filter_index(
+    table_name: str,
+    filters: Collection[str],
+    table_indexes: Mapping[str, Sequence[TableIndex]],
+) -> TableIndex | None:
+  """Gets the index of a table seeking the rows matching the filters, if any."""
+  candidates = [
+      index
+      for index in table_indexes.get(table_name, ())
+      if set(index.columns[: len(filters)]) == set(filters)
+  ]
+  if not candidates:
+    return None
+  return min(
+      candidates,
+      key=lambda index: (
+          not index.is_primary_key,
+          index.is_managed,
+          index.name,
+      ),
+  )
+
+
+def _partition_sql(
+    table_name: str,
+    filters: Collection[str],
+    table_indexes: Mapping[str, Sequence[TableIndex]],
+    column_spanner_types: Mapping[tuple[str, str], str],
+    num_partitions: int,
+) -> str | None:
+  """Gets the condition selecting the rows of @partition, if supported."""
+  # The primary key is stored in the secondary indexes: The condition is
+  # checked before reading the rows of the table.
+  primary_keys = [
+      index for index in table_indexes[table_name] if index.is_primary_key
+  ]
+  if len(primary_keys) != 1:
+    return None
+  columns = []
+  for column_name in primary_keys[0].columns:
+    if column_name in filters:
+      continue
+    type_kind, is_array, _ = parse_spanner_type(
+        column_spanner_types[(table_name, column_name)]
+    )
+    if is_array or type_kind not in _SUPPORTED_KEY_TYPES:
+      return None
+    columns.append(Column(name=column_name, type_kind=type_kind))
+  if not columns:
+    return None
+  key_sql = key_bytes_sql(columns, [column.sql("t") for column in columns])
+  return (
+      f"ABS(MOD(FARM_FINGERPRINT({key_sql}), {num_partitions:d})) ="
+      f" @{PARTITION_PARAMETER}"
+  )
+
+
+def _from_where_sql(
+    table_name: str,
+    conditions: Sequence[str],
+    filters: Mapping[str, Any],
+    column_spanner_types: Mapping[tuple[str, str], str],
+    parameter_types: dict[str, str],
+    table_indexes: Mapping[str, Sequence[TableIndex]],
+    num_partitions: int,
+    force_index: bool | None = None,
+) -> tuple[str, bool]:
+  """Gets the FROM and WHERE clauses reading the filtered rows of a table.
+
+  Spanner only uses a secondary index by itself if it stores all the columns
+  read. Without it, a filter that is not a prefix of the primary key scans the
+  whole table. So the query forces the secondary index matching the filters,
+  and is split in partitions read in parallel, as reading the other columns
+  from the table is the slow part.
+
+  Args:
+    table_name: The Spanner table.
+    conditions: Other conditions on the rows.
+    filters: Only the rows whose column equals the value are read.
+    column_spanner_types: Spanner type of each (table_name, column_name).
+    parameter_types: Spanner type of each query parameter. Updated.
+    table_indexes: The indexes of each table.
+    num_partitions: Number of partitions of the queries forcing an index.
+    force_index: If None, forces a secondary index when one starts with filters.
+      If True, raises ValueError if the table has no index starting with
+      filters. If False, forces _base_table to disable secondary indexes.
+
+  Returns:
+    The SQL clauses, and whether they read the rows of @partition only.
+  """
+  conditions = [
+      *conditions,
+      *_filter_sql(table_name, filters, column_spanner_types, parameter_types),
+  ]
+  from_sql = f"FROM `{table_name}`"
+  is_partitioned = False
+  if force_index is not None and not force_index:
+    from_sql += "@{FORCE_INDEX=_base_table}"
+  elif filters:
+    index = _filter_index(table_name, filters, table_indexes)
+    if force_index and index is None:
+      raise ValueError(
+          f"Table {table_name!r} has no index starting with {sorted(filters)}."
+      )
+    if index is not None and not index.is_primary_key:
+      from_sql += f"@{{FORCE_INDEX={index.name}}}"
+      partition_sql = None
+      if num_partitions > 1:
+        partition_sql = _partition_sql(
+            table_name,
+            filters,
+            table_indexes,
+            column_spanner_types,
+            num_partitions,
+        )
+      if partition_sql is not None:
+        conditions.append(partition_sql)
+        parameter_types[PARTITION_PARAMETER] = TYPE_INT64
+        is_partitioned = True
+    elif force_index:
+      from_sql += "@{FORCE_INDEX=_base_table}"
+  from_sql += " AS t"
+  if conditions:
+    from_sql += f" WHERE {' AND '.join(conditions)}"
+  return from_sql, is_partitioned
 
 
 def _select_features_sql(table: NodeTable | EdgeTable) -> list[str]:
@@ -1187,6 +1374,9 @@ def resolve_read_plan(
     *,
     bytes_are_base64: bool = False,
     filters: Mapping[str, Any] | None = None,
+    table_indexes: Mapping[str, Sequence[TableIndex]] | None = None,
+    num_partitions: int = 1,
+    force_index: bool | None = None,
 ) -> GraphReadPlan:
   """Precomputes validated SQL read queries and parsers for schema.
 
@@ -1198,13 +1388,27 @@ def resolve_read_plan(
     bytes_are_base64: Whether the client returns the BYTES values in base64.
     filters: Only the rows whose column equals the value are read, for each
       {column_name: value}. All the tables read must have these columns.
+    table_indexes: The indexes of each table, from table_indexes_from_rows. The
+      queries force the secondary indexes matching the filters.
+    num_partitions: Number of partitions of the queries forcing an index, to
+      read in parallel.
+    force_index: Whether to force an index hint on the SQL queries. If None,
+      forces a secondary index when one starts with filters. If True, requires
+      filters and raises ValueError if a table has no index starting with
+      filters. If False, forces _base_table to disable secondary indexes.
 
   Returns:
     The read plans of the nodesets and edgesets of the schema.
   """
   filters = filters or {}
+  if force_index and not filters:
+    raise ValueError("force_index=True requires filters.")
   if filters and column_spanner_types is None:
     raise ValueError("Filters require the Spanner types of the columns.")
+  if num_partitions < 1:
+    raise ValueError(f"Invalid number of partitions: {num_partitions}.")
+  column_spanner_types = column_spanner_types or {}
+  table_indexes = table_indexes or {}
   parameter_types: dict[str, str] = {}
   tables = resolve_graph_tables(
       metadata, schema, column_spanner_types, bytes_are_base64=bytes_are_base64
@@ -1214,18 +1418,23 @@ def resolve_read_plan(
   for nodeset_name, table in tables.node_tables.items():
     id_sql = key_bytes_sql(table.keys, [col.sql("t") for col in table.keys])
     select_sql = ", ".join([f"{id_sql} AS id", *_select_features_sql(table)])
-    query = f"SELECT {select_sql} FROM `{table.table}` AS t"
-    if filters:
-      conditions = _filter_sql(
-          table.table, filters, column_spanner_types or {}, parameter_types
-      )
-      query += f" WHERE {' AND '.join(conditions)}"
+    from_where_sql, is_partitioned = _from_where_sql(
+        table.table,
+        [],
+        filters,
+        column_spanner_types,
+        parameter_types,
+        table_indexes,
+        num_partitions,
+        force_index=force_index,
+    )
     node_plans.append(
         NodeReadPlan(
             nodeset_name=nodeset_name,
             table=table,
-            query=query,
+            query=f"SELECT {select_sql} {from_where_sql}",
             features=table.features,
+            is_partitioned=is_partitioned,
         )
     )
 
@@ -1241,12 +1450,16 @@ def resolve_read_plan(
     non_null_clauses = [
         f"{col.sql('t')} IS NOT NULL" for col in (*table.source, *table.target)
     ]
-    where_sql = " AND ".join([
-        *dict.fromkeys(non_null_clauses),
-        *_filter_sql(
-            table.table, filters, column_spanner_types or {}, parameter_types
-        ),
-    ])
+    from_where_sql, is_partitioned = _from_where_sql(
+        table.table,
+        list(dict.fromkeys(non_null_clauses)),
+        filters,
+        column_spanner_types,
+        parameter_types,
+        table_indexes,
+        num_partitions,
+        force_index=force_index,
+    )
     select_sql = ", ".join([
         f"{source_id_sql} AS source_id",
         f"{target_id_sql} AS target_id",
@@ -1255,11 +1468,9 @@ def resolve_read_plan(
     edge_plans.append(
         EdgeReadPlan(
             edgeset_name=edgeset_name,
-            query=(
-                f"SELECT {select_sql} FROM `{table.table}` AS t WHERE"
-                f" {where_sql}"
-            ),
+            query=f"SELECT {select_sql} {from_where_sql}",
             features=table.features,
+            is_partitioned=is_partitioned,
         )
     )
 
@@ -1267,6 +1478,7 @@ def resolve_read_plan(
       node_plans=tuple(node_plans),
       edge_plans=tuple(edge_plans),
       parameter_types=parameter_types,
+      num_partitions=num_partitions,
   )
 
 
@@ -1300,6 +1512,42 @@ def in_memory_node_set(
   )
 
 
+def parse_node_rows(
+    plan: NodeReadPlan,
+    rows: Iterable[Sequence[Any]],
+    *,
+    bytes_are_base64: bool,
+) -> tuple[np.ndarray, FeatureColumns]:
+  """Parses the node ids and feature columns from the rows of a node query."""
+  node_ids: list[Any] = []
+  columns = FeatureColumns(plan.features)
+  for row in rows:
+    node_ids.append(row[0])
+    columns.append(itertools.islice(row, 1, None))
+  return _pack_node_ids(plan.nodeset_name, node_ids, bytes_are_base64), columns
+
+
+def parse_edge_rows(
+    plan: EdgeReadPlan,
+    rows: Iterable[Sequence[Any]],
+    *,
+    bytes_are_base64: bool,
+) -> tuple[np.ndarray, np.ndarray, FeatureColumns]:
+  """Parses the endpoint ids and feature columns from the rows of an edge query."""
+  source_ids: list[Any] = []
+  target_ids: list[Any] = []
+  columns = FeatureColumns(plan.features)
+  for row in rows:
+    source_ids.append(row[0])
+    target_ids.append(row[1])
+    columns.append(itertools.islice(row, 2, None))
+  return (
+      _pack_node_ids(plan.edgeset_name, source_ids, bytes_are_base64),
+      _pack_node_ids(plan.edgeset_name, target_ids, bytes_are_base64),
+      columns,
+  )
+
+
 def _read_node_set(
     plan: NodeReadPlan,
     nodeset_schema: schema_lib.NodeSchema,
@@ -1308,15 +1556,11 @@ def _read_node_set(
     verbose: int,
 ) -> tuple[in_memory_graph_lib.InMemoryNodeSet, io_ext.ByteIdToIdxMapper]:
   """Builds an InMemoryNodeSet and ByteIdToIdxMapper from SQL result rows."""
-  node_ids: list[Any] = []
-  columns = FeatureColumns(plan.features)
   if verbose >= 1:
     rows = tqdm.tqdm(rows, desc=f"Loading nodes for {plan.nodeset_name}")
-  for row in rows:
-    node_ids.append(row[0])
-    columns.append(itertools.islice(row, 1, None))
-
-  id_array = _pack_node_ids(plan.nodeset_name, node_ids, bytes_are_base64)
+  id_array, columns = parse_node_rows(
+      plan, rows, bytes_are_base64=bytes_are_base64
+  )
   if verbose >= 1:
     log.info("Loaded %d nodes in nodeset %r", len(id_array), plan.nodeset_name)
   return (
@@ -1334,19 +1578,12 @@ def _read_edge_set(
     verbose: int,
 ) -> in_memory_graph_lib.InMemoryEdgeSet:
   """Builds an InMemoryEdgeSet from SQL result rows."""
-  source_ids: list[Any] = []
-  target_ids: list[Any] = []
-  columns = FeatureColumns(plan.features)
   if verbose >= 1:
     rows = tqdm.tqdm(rows, desc=f"Loading edges for {plan.edgeset_name}")
-  for row in rows:
-    source_ids.append(row[0])
-    target_ids.append(row[1])
-    columns.append(itertools.islice(row, 2, None))
-
-  if source_ids:
-    source_arr = _pack_node_ids(plan.edgeset_name, source_ids, bytes_are_base64)
-    target_arr = _pack_node_ids(plan.edgeset_name, target_ids, bytes_are_base64)
+  source_arr, target_arr, columns = parse_edge_rows(
+      plan, rows, bytes_are_base64=bytes_are_base64
+  )
+  if len(source_arr):  # pylint: disable=g-explicit-length-test
     adjacency, mismatch_src, mismatch_trg = io_ext.PairMapping(
         source_mapper,
         target_mapper,
@@ -1369,11 +1606,19 @@ def _read_edge_set(
 
   if verbose >= 1:
     log.info(
-        "Loaded %d edges in edgeset %r", len(source_ids), plan.edgeset_name
+        "Loaded %d edges in edgeset %r", len(source_arr), plan.edgeset_name
     )
   return in_memory_graph_lib.InMemoryEdgeSet(
       adjacency=adjacency, features=columns.pack()
   )
+
+
+def _chain_results(
+    results: list[futures.Future[list[Sequence[Any]]]],
+) -> Iterable[Sequence[Any]]:
+  """Iterates over the rows of queries, releasing them once read."""
+  while results:
+    yield from results.pop(0).result()
 
 
 def read_graph_with_executor(
@@ -1386,9 +1631,12 @@ def read_graph_with_executor(
     schema: schema_lib.GraphSchema | None = None,
     column_spanner_types: Mapping[tuple[str, str], str] | None = None,
     filters: Mapping[str, Any] | None = None,
+    table_indexes: Mapping[str, Sequence[TableIndex]] | None = None,
+    force_index: bool | None = None,
+    max_workers: int = 1,
     verbose: int = 1,
 ) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
-  """Reads all the nodesets and edgesets in memory, with one query each.
+  """Reads all the nodesets and edgesets in memory with SQL queries.
 
   Args:
     metadata: The definition of the property graph.
@@ -1400,6 +1648,15 @@ def read_graph_with_executor(
     column_spanner_types: Spanner type of each (table_name, column_name).
     filters: Only the rows whose column equals the value are read, for each
       {column_name: value}. All the tables read must have these columns.
+    table_indexes: The indexes of each table, from table_indexes_from_rows. The
+      queries force the secondary indexes matching the filters, and are split in
+      max_workers partitions.
+    force_index: Whether to force an index hint on the SQL queries. If None,
+      forces a secondary index when one starts with filters. If True, requires
+      filters and raises ValueError if a table has no index starting with
+      filters. If False, forces _base_table to disable secondary indexes.
+    max_workers: Maximum number of queries run in parallel. If greater than 1,
+      execute_fn is called from several threads.
     verbose: Verbosity (0 = silent, 1 = progress, 2 = debug).
 
   Returns:
@@ -1425,42 +1682,64 @@ def read_graph_with_executor(
       column_spanner_types=column_spanner_types,
       bytes_are_base64=bytes_are_base64,
       filters=filters,
+      table_indexes=table_indexes,
+      num_partitions=max_workers,
+      force_index=force_index,
   )
-  parameters = {
-      _filter_parameter(column_name): value
-      for column_name, value in (filters or {}).items()
-  }
+  parameters = filter_parameters(filters)
+
+  def execute(query: str, partition: int | None) -> list[Sequence[Any]]:
+    query_parameters = parameters
+    if partition is not None:
+      query_parameters = {**parameters, PARTITION_PARAMETER: partition}
+    return list(execute_fn(query, query_parameters, read_plan.parameter_types))
 
   node_sets: dict[str, in_memory_graph_lib.InMemoryNodeSet] = {}
   node_mappers: dict[str, io_ext.ByteIdToIdxMapper] = {}
-  for node_plan in read_plan.node_plans:
-    if verbose >= 2:
-      log.info("node SQL query:\n%s", node_plan.query)
-    node_sets[node_plan.nodeset_name], node_mappers[node_plan.nodeset_name] = (
-        _read_node_set(
+  edge_sets: dict[str, in_memory_graph_lib.InMemoryEdgeSet] = {}
+  with futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+
+    def submit(
+        plan: NodeReadPlan | EdgeReadPlan,
+    ) -> list[futures.Future[list[Sequence[Any]]]]:
+      if verbose >= 2:
+        log.info("SQL query:\n%s", plan.query)
+      partitions = (
+          range(read_plan.num_partitions) if plan.is_partitioned else (None,)
+      )
+      return [
+          pool.submit(execute, plan.query, partition)
+          for partition in partitions
+      ]
+
+    # All the queries are queued at once, and their rows parsed in order.
+    node_rows = [submit(node_plan) for node_plan in read_plan.node_plans]
+    edge_rows = [submit(edge_plan) for edge_plan in read_plan.edge_plans]
+    try:
+      for node_plan, rows in zip(read_plan.node_plans, node_rows):
+        (
+            node_sets[node_plan.nodeset_name],
+            node_mappers[node_plan.nodeset_name],
+        ) = _read_node_set(
             plan=node_plan,
             nodeset_schema=schema.node_sets[node_plan.nodeset_name],
-            rows=execute_fn(
-                node_plan.query, parameters, read_plan.parameter_types
-            ),
+            rows=_chain_results(rows),
             bytes_are_base64=bytes_are_base64,
             verbose=verbose,
         )
-    )
-
-  edge_sets: dict[str, in_memory_graph_lib.InMemoryEdgeSet] = {}
-  for edge_plan in read_plan.edge_plans:
-    if verbose >= 2:
-      log.info("edge SQL query:\n%s", edge_plan.query)
-    edgeset_schema = schema.edge_sets[edge_plan.edgeset_name]
-    edge_sets[edge_plan.edgeset_name] = _read_edge_set(
-        plan=edge_plan,
-        rows=execute_fn(edge_plan.query, parameters, read_plan.parameter_types),
-        source_mapper=node_mappers[edgeset_schema.source],
-        target_mapper=node_mappers[edgeset_schema.target],
-        bytes_are_base64=bytes_are_base64,
-        verbose=verbose,
-    )
+      for edge_plan, rows in zip(read_plan.edge_plans, edge_rows):
+        edgeset_schema = schema.edge_sets[edge_plan.edgeset_name]
+        edge_sets[edge_plan.edgeset_name] = _read_edge_set(
+            plan=edge_plan,
+            rows=_chain_results(rows),
+            source_mapper=node_mappers[edgeset_schema.source],
+            target_mapper=node_mappers[edgeset_schema.target],
+            bytes_are_base64=bytes_are_base64,
+            verbose=verbose,
+        )
+    except BaseException:
+      pool.shutdown(wait=False, cancel_futures=True)
+      raise
 
   log.info(
       "Graph read in memory in %s",

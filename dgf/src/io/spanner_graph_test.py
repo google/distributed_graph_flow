@@ -422,6 +422,224 @@ class SpannerGraphCoreTest(parameterized.TestCase):
           filters={"cell_id = 'bc' OR t.cell_id": "x"},
       )
 
+  def test_filters_force_index_and_partition(self):
+    metadata = _composite_metadata()
+    column_types = {
+        ("Cells", "cell_id"): "STRING(64)",
+        ("Cells", "snapshot_ts"): "TIMESTAMP",
+        ("Racks", "cell_id"): "STRING(64)",
+        ("Racks", "rack_id"): "STRING(64)",
+        ("Racks", "snapshot_ts"): "TIMESTAMP",
+    }
+    table_indexes = spanner_graph_lib.table_indexes_from_rows([
+        ("Cells", "CellsBySnapshot", False, False, "snapshot_ts"),
+        ("Cells", "CellsBySnapshot", False, False, "cell_id"),
+        ("Cells", "PRIMARY_KEY", True, False, "cell_id"),
+        ("Cells", "PRIMARY_KEY", True, False, "snapshot_ts"),
+        ("Racks", "IDX_Racks_managed", False, True, "cell_id"),
+        ("Racks", "IDX_Racks_managed", False, True, "snapshot_ts"),
+        ("Racks", "PRIMARY_KEY", True, False, "cell_id"),
+        ("Racks", "PRIMARY_KEY", True, False, "rack_id"),
+        ("Racks", "PRIMARY_KEY", True, False, "snapshot_ts"),
+        ("Racks", "RacksByRack", False, False, "cell_id"),
+        ("Racks", "RacksByRack", False, False, "rack_id"),
+        ("Racks", "RacksByRack", False, False, "snapshot_ts"),
+        ("Racks", "RacksBySnapshotCell", False, False, "snapshot_ts"),
+        ("Racks", "RacksBySnapshotCell", False, False, "cell_id"),
+        ("Racks", "RacksBySnapshotCell", False, False, "rack_id"),
+    ])
+    self.assertEqual(
+        table_indexes["Racks"][1],
+        spanner_graph_lib.TableIndex(
+            name="PRIMARY_KEY",
+            columns=("cell_id", "rack_id", "snapshot_ts"),
+            is_primary_key=True,
+            is_managed=False,
+        ),
+    )
+    schema = spanner_graph_lib.graph_schema_from_metadata(metadata)
+    snapshot = datetime.datetime(2026, 11, 11, tzinfo=datetime.timezone.utc)
+    filters = {"cell_id": "bc", "snapshot_ts": snapshot}
+    calls = []
+
+    def fake_execute(query, parameters, parameter_types):
+      del parameter_types
+      calls.append((query, parameters.get("partition")))
+      if "AS source_id" in query:
+        return []
+      if "FROM `Cells`" in query:
+        return [[b"bc/100", "bc", 100, None]]
+      rack_id = f"r{parameters['partition']}"
+      return [[f"bc/{rack_id}/100".encode(), rack_id, "bc", 100, 12]]
+
+    graph, _ = spanner_graph_lib.read_graph_with_executor(
+        metadata=metadata,
+        execute_fn=fake_execute,
+        bytes_are_base64=False,
+        schema=schema,
+        column_spanner_types=column_types,
+        filters=filters,
+        table_indexes=table_indexes,
+        max_workers=3,
+        verbose=0,
+    )
+    # The rows of the partitions are concatenated in order.
+    self.assertEqual(
+        graph.node_sets["Rack"].features["rack_id"].tolist(),
+        [b"r0", b"r1", b"r2"],
+    )
+    # The filters are a prefix of the primary key of Cells: No index is forced.
+    cell_calls = [call for call in calls if "FROM `Cells`" in call[0]]
+    self.assertLen(cell_calls, 1)
+    self.assertIn("FROM `Cells` AS t WHERE", cell_calls[0][0])
+    self.assertIsNone(cell_calls[0][1])
+    # The nodeset and the edgeset of Racks are read in 3 partitions each, with
+    # the index not managed by Spanner.
+    rack_calls = [call for call in calls if "FROM `Racks`" in call[0]]
+    self.assertCountEqual(
+        [partition for _, partition in rack_calls], [0, 1, 2, 0, 1, 2]
+    )
+    for query, _ in rack_calls:
+      self.assertIn(
+          "FROM `Racks`@{FORCE_INDEX=RacksBySnapshotCell} AS t WHERE", query
+      )
+      self.assertEndsWith(
+          query,
+          "t.`cell_id` = @filter_cell_id AND t.`snapshot_ts` ="
+          " @filter_snapshot_ts AND ABS(MOD(FARM_FINGERPRINT(CAST(t.`rack_id`"
+          " AS BYTES)), 3)) = @partition",
+      )
+
+    # Without parallelism, the index is forced but the rows not partitioned.
+    plan = spanner_graph_lib.resolve_read_plan(
+        metadata,
+        schema,
+        column_spanner_types=column_types,
+        filters=filters,
+        table_indexes=table_indexes,
+    )
+    self.assertEndsWith(
+        plan.node_plans[1].query,
+        "FROM `Racks`@{FORCE_INDEX=RacksBySnapshotCell} AS t WHERE t.`cell_id`"
+        " = @filter_cell_id AND t.`snapshot_ts` = @filter_snapshot_ts",
+    )
+    self.assertFalse(plan.node_plans[1].is_partitioned)
+    self.assertNotIn("partition", plan.parameter_types)
+
+    # No index starts with the filtered column: The table is scanned.
+    unindexed_racks = {
+        "Cells": table_indexes["Cells"],
+        "Racks": [
+            index
+            for index in table_indexes["Racks"]
+            if index.name != "RacksBySnapshotCell"
+        ],
+    }
+    plan = spanner_graph_lib.resolve_read_plan(
+        metadata,
+        schema,
+        column_spanner_types=column_types,
+        filters={"snapshot_ts": snapshot},
+        table_indexes=unindexed_racks,
+        num_partitions=3,
+    )
+    self.assertEndsWith(
+        plan.node_plans[1].query,
+        "FROM `Racks` AS t WHERE t.`snapshot_ts` = @filter_snapshot_ts",
+    )
+
+    # force_index=False forces _base_table even when a secondary index matches,
+    # and also without filters.
+    plan = spanner_graph_lib.resolve_read_plan(
+        metadata,
+        schema,
+        column_spanner_types=column_types,
+        filters=filters,
+        table_indexes=table_indexes,
+        num_partitions=3,
+        force_index=False,
+    )
+    self.assertIn(
+        "FROM `Cells`@{FORCE_INDEX=_base_table} AS t", plan.node_plans[0].query
+    )
+    self.assertEndsWith(
+        plan.node_plans[1].query,
+        "FROM `Racks`@{FORCE_INDEX=_base_table} AS t WHERE t.`cell_id` ="
+        " @filter_cell_id AND t.`snapshot_ts` = @filter_snapshot_ts",
+    )
+    self.assertFalse(plan.node_plans[1].is_partitioned)
+    self.assertNotIn("partition", plan.parameter_types)
+
+    plan = spanner_graph_lib.resolve_read_plan(
+        metadata, schema, force_index=False
+    )
+    self.assertEndsWith(
+        plan.node_plans[0].query, "FROM `Cells`@{FORCE_INDEX=_base_table} AS t"
+    )
+
+    # force_index=True forces _base_table on primary-key prefixes and the
+    # matching secondary index otherwise, and raises when no index matches.
+    plan = spanner_graph_lib.resolve_read_plan(
+        metadata,
+        schema,
+        column_spanner_types=column_types,
+        filters=filters,
+        table_indexes=table_indexes,
+        num_partitions=3,
+        force_index=True,
+    )
+    self.assertIn(
+        "FROM `Cells`@{FORCE_INDEX=_base_table} AS t WHERE",
+        plan.node_plans[0].query,
+    )
+    self.assertFalse(plan.node_plans[0].is_partitioned)
+    self.assertIn(
+        "FROM `Racks`@{FORCE_INDEX=RacksBySnapshotCell} AS t WHERE",
+        plan.node_plans[1].query,
+    )
+    self.assertTrue(plan.node_plans[1].is_partitioned)
+
+    with self.assertRaisesRegex(
+        ValueError, "force_index=True requires filters"
+    ):
+      spanner_graph_lib.resolve_read_plan(metadata, schema, force_index=True)
+
+    with self.assertRaisesRegex(
+        ValueError,
+        "Table 'Racks' has no index starting with \\['snapshot_ts'\\]",
+    ):
+      spanner_graph_lib.resolve_read_plan(
+          metadata,
+          schema,
+          column_spanner_types=column_types,
+          filters={"snapshot_ts": snapshot},
+          table_indexes=unindexed_racks,
+          force_index=True,
+      )
+
+    with self.assertRaisesRegex(ValueError, "Invalid identifier"):
+      spanner_graph_lib.table_indexes_from_rows(
+          [("Racks", "Index} AS t --", False, False, "cell_id")]
+      )
+
+  def test_query_error_is_raised(self):
+    metadata = _composite_metadata()
+
+    def fake_execute(query, parameters, parameter_types):
+      del parameters, parameter_types
+      if "FROM `Racks`" in query:
+        raise RuntimeError("Query failed")
+      return []
+
+    with self.assertRaisesRegex(RuntimeError, "Query failed"):
+      spanner_graph_lib.read_graph_with_executor(
+          metadata=metadata,
+          execute_fn=fake_execute,
+          bytes_are_base64=False,
+          max_workers=2,
+          verbose=0,
+      )
+
   def test_null_key_raises(self):
     metadata = _composite_metadata()
     schema = spanner_graph_lib.graph_schema_from_metadata(metadata)

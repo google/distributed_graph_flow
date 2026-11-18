@@ -82,6 +82,17 @@ def read_column_spanner_types_gcp(
   )
 
 
+def read_table_indexes_gcp(
+    database_or_snapshot: Any,
+) -> dict[str, list[spanner_graph_lib.TableIndex]]:
+  """Reads the primary key and the secondary indexes of each table."""
+  return spanner_graph_lib.table_indexes_from_rows(
+      _execute_query(
+          database_or_snapshot, spanner_graph_lib.INDEX_COLUMNS_QUERY
+      )
+  )
+
+
 def graph_data_read_query(
     graph: str,
     graph_element_type: str,
@@ -161,6 +172,7 @@ def read_spanner_graph_gcp(
     *,
     schema: schema_lib.GraphSchema | None = None,
     filters: Mapping[str, Any] | None = None,
+    force_index: bool | None = None,
     verbose: int = 1,
 ) -> tuple[in_memory_graph_lib.InMemoryGraph, schema_lib.GraphSchema]:
   """Reads a Google Cloud Spanner Property Graph into an in-memory graph.
@@ -168,6 +180,9 @@ def read_spanner_graph_gcp(
   The tables of the property graph are read with one SQL query each, all in the
   same snapshot. The whole graph is loaded in memory: To train on a large
   graph, sample it with dgf.sampling.create_spanner_graph_sampler_gcp instead.
+
+  With filters, a table is read fast if the filtered columns are the first
+  columns of its primary key or of one of its secondary indexes.
 
   A node table with a composite key gets a "#id" BYTES primary key feature
   holding its key columns joined with "/". NULL values are read as the DGF
@@ -194,6 +209,10 @@ def read_spanner_graph_gcp(
     filters: Only the rows whose column equals the value are read, for each
       {column_name: value}, e.g. {"snapshot": my_datetime}. All the tables read
       must have these columns, of type BOOL, DATE, INT64, STRING or TIMESTAMP.
+    force_index: Whether to force an index hint on the SQL queries. If None,
+      forces a secondary index when one starts with filters. If True, requires
+      filters and raises ValueError if a read table has no index starting with
+      filters. If False, forces _base_table to disable secondary indexes.
     verbose: Verbosity (0 = silent, 1 = progress, 2 = debug).
 
   Returns:
@@ -217,6 +236,9 @@ def read_spanner_graph_gcp(
           },
       )
 
+    table_indexes = None
+    if filters and (force_index is None or force_index):
+      table_indexes = read_table_indexes_gcp(snapshot)
     return spanner_graph_lib.read_graph_with_executor(
         metadata=get_metadata(snapshot, graph),
         execute_fn=execute_fn,
@@ -225,5 +247,7 @@ def read_spanner_graph_gcp(
         schema=schema,
         column_spanner_types=read_column_spanner_types_gcp(snapshot),
         filters=filters,
+        table_indexes=table_indexes,
+        force_index=force_index,
         verbose=verbose,
     )

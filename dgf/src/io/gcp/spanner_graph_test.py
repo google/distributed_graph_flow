@@ -201,6 +201,12 @@ class SpannerGraphGcpTest(parameterized.TestCase):
         return [[_infoschema_response()]]
       if "INFORMATION_SCHEMA.COLUMNS" in query:
         return [["Nodes", "year", "INT64"], ["Edges", "year", "INT64"]]
+      if "INFORMATION_SCHEMA.INDEXES" in query:
+        return [
+            ["Nodes", "PRIMARY_KEY", True, False, "id"],
+            ["Nodes", "NodesByYear", False, False, "year"],
+            ["Edges", "PRIMARY_KEY", True, False, "id"],
+        ]
       filter_calls.append((query, params, param_types))
       return []
 
@@ -219,6 +225,52 @@ class SpannerGraphGcpTest(parameterized.TestCase):
       self.assertEqual(params, {"filter_year": 2020})
       self.assertEqual(
           param_types, {"filter_year": gcp_spanner.param_types.INT64}
+      )
+    self.assertIn(
+        "FROM `Nodes`@{FORCE_INDEX=NodesByYear} AS t", filter_calls[0][0]
+    )
+    self.assertIn("FROM `Edges` AS t", filter_calls[1][0])
+
+    # force_index=False skips reading INFORMATION_SCHEMA.INDEXES and forces
+    # _base_table on every query.
+    filter_calls.clear()
+
+    def no_index_side_effect(query, params=None, param_types=None):
+      if "INFORMATION_SCHEMA.INDEXES" in query:
+        raise AssertionError("INFORMATION_SCHEMA.INDEXES should not be queried")
+      return execute_sql_side_effect(
+          query, params=params, param_types=param_types
+      )
+
+    mock_snapshot.execute_sql.side_effect = no_index_side_effect
+    spanner_graph.read_spanner_graph_gcp(
+        "project",
+        "instance",
+        "database",
+        "graph",
+        filters={"year": 2020},
+        force_index=False,
+        verbose=0,
+    )
+    self.assertIn(
+        "FROM `Nodes`@{FORCE_INDEX=_base_table} AS t", filter_calls[0][0]
+    )
+    self.assertIn(
+        "FROM `Edges`@{FORCE_INDEX=_base_table} AS t", filter_calls[1][0]
+    )
+
+    mock_snapshot.execute_sql.side_effect = execute_sql_side_effect
+    with self.assertRaisesRegex(
+        ValueError, "Table 'Edges' has no index starting with \\['year'\\]"
+    ):
+      spanner_graph.read_spanner_graph_gcp(
+          "project",
+          "instance",
+          "database",
+          "graph",
+          filters={"year": 2020},
+          force_index=True,
+          verbose=0,
       )
 
 
