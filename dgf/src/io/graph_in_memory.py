@@ -21,6 +21,7 @@ to 0-based indices in the edge set adjacencies.
 """
 
 from collections.abc import Sequence
+from concurrent import futures
 import os
 import time
 from dgf.src.analyse import schema as analyse_schema_lib
@@ -53,6 +54,8 @@ MAX_SUPPORTED_GF_VERSION = graph_constants.MAX_SUPPORTED_GF_VERSION
 
 
 IMPLICIT_EDGE_FEATURES = {KEY_SOURCE, KEY_TARGET}
+# Maximum number of nodesets and edgesets written in parallel by write_graph.
+_MAX_PARALLEL_WRITTEN_SETS = 8
 
 # Highest GF version number supported
 
@@ -546,7 +549,10 @@ def write_graph(
   # Write Node Sets
   node_dir = os.path.join(path, FILENAME_NODE_FEATURE)
   filesystem.makedirs(node_dir)
-  for nodeset_name, nodeset_schema in schema.node_sets.items():
+
+  def write_node_set(
+      nodeset_name: str, nodeset_schema: schema_lib.NodeSchema
+  ) -> None:
     node_set = graph.node_sets[nodeset_name]
 
     # Check the existance of a primary key.
@@ -580,7 +586,10 @@ def write_graph(
   # Write Edge Sets
   edge_dir = os.path.join(path, FILENAME_EDGES_ADJACENCIES)
   filesystem.makedirs(edge_dir)
-  for edgeset_name, edgeset_schema in schema.edge_sets.items():
+
+  def write_edge_set(
+      edgeset_name: str, edgeset_schema: schema_lib.EdgeSchema
+  ) -> None:
     edge_set = graph.edge_sets[edgeset_name]
     if verbose:
       log.info("Writing edgeset %s to %s", edgeset_name, edge_dir)
@@ -631,6 +640,23 @@ def write_graph(
         compression=compression,
         container_type=container,
     )
+
+  # Opening and closing a file takes seconds on a distributed filesystem.
+  with futures.ThreadPoolExecutor(
+      max_workers=_MAX_PARALLEL_WRITTEN_SETS
+  ) as executor:
+    write_tasks = [
+        *(
+            executor.submit(write_node_set, nodeset_name, nodeset_schema)
+            for nodeset_name, nodeset_schema in schema.node_sets.items()
+        ),
+        *(
+            executor.submit(write_edge_set, edgeset_name, edgeset_schema)
+            for edgeset_name, edgeset_schema in schema.edge_sets.items()
+        ),
+    ]
+    for write_task in write_tasks:
+      write_task.result()
 
   end_time = time.monotonic()
   log.info(
