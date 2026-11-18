@@ -34,7 +34,15 @@ class GraphSnapshotsFormat(str, enum.Enum):
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass
 class GraphSnapshotsMetadata:
-  """Root metadata for a DGF Graph Snapshots dataset."""
+  """Root metadata for a DGF Graph Snapshots dataset.
+
+  Attributes:
+    format: The format of the dataset.
+    version: The version of the format.
+    name: Optional name of the graph captured by the snapshots, e.g. to tell
+      apart the datasets of several graphs.
+  """
 
   format: GraphSnapshotsFormat | str
   version: int
+  name: str | None = None
