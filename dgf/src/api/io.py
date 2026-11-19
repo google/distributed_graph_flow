@@ -40,6 +40,7 @@ from dgf.src.io.graph_snapshots_metadata import read_metadata as read_snapshot_m
 from dgf.src.io.graph_snapshots_metadata import write_metadata as write_snapshot_metadata
 
 from dgf.src.io.graph_snapshots import read_graph_snapshots
+from dgf.src.io.graph_snapshots import write_graph_snapshots
 from dgf.src.io.graph_snapshots import read_graph_snapshots_as_temporal_graph
 
 from dgf.src.io.gcp.spanner_graph import read_spanner_graph_gcp

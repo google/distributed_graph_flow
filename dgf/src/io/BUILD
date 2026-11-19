@@ -215,9 +215,11 @@ py_library(
     deps = [
         ":graph_constants",
         ":graph_in_memory",
+        ":graph_snapshots_metadata",
         ":schema",
         "//dgf/src/data:gf_metadata",
         "//dgf/src/data:graph_snapshots",
+        "//dgf/src/data:graph_snapshots_metadata",
         "//dgf/src/data:in_memory_graph",
         "//dgf/src/data:schema",
         "//dgf/src/transform:combine_graph_snapshots",
