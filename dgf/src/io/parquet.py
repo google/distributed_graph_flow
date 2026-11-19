@@ -14,7 +14,7 @@
 
 """Utilities to read parquet files."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from concurrent import futures
 import dataclasses
 import os
@@ -71,7 +71,7 @@ def py_arrow_chunked_binary_to_np_bytes(column: pa.ChunkedArray) -> np.ndarray:
   """
   # TODO(gbm): Implement the full function in c++.
   max_len = pc.max(pa.compute.binary_length(column)).as_py()  # pyrefly: ignore[missing-attribute]
-  if max_len is None:
+  if not max_len:
     max_len = 1
   num_values = len(column)
   out = np.zeros(num_values * max_len, dtype=np.uint8)
@@ -152,7 +152,9 @@ def _table_to_numpy_dict(
       # A numpy array of np.bytes
       return py_arrow_chunked_binary_to_np_bytes(value)
 
-    arrays = [_pa_array_to_numpy(chunk, expected_shape) for chunk in value.chunks]
+    arrays = [
+        _pa_array_to_numpy(chunk, expected_shape) for chunk in value.chunks
+    ]
     if len(arrays) == 0:
       if pa.types.is_string(pq_type) or pa.types.is_large_string(pq_type):
         return py_arrow_chunked_binary_to_np_bytes(value.cast(pa.binary()))
@@ -293,14 +295,31 @@ class WriteParquetSpec:
   is_static_shape: bool
 
 
-def _write_single_shard(
-    data: dict[str, np.ndarray],
+def write_parquet_specs(
+    schema: schema_lib.FeatureSetSchema,
+) -> dict[str, WriteParquetSpec]:
+  """Builds the Parquet write specs for the features of a schema."""
+  return {
+      feature_name: WriteParquetSpec(
+          pa_type=feature_schema_to_py_arrow_full_data_type(feature_schema),
+          schema=feature_schema,
+          is_scalar=feature_schema.shape is None or feature_schema.shape == (),
+          is_static_shape=feature_schema.is_static_shape(),
+      )
+      for feature_name, feature_schema in schema.items()
+  }
+
+
+def write_parquet_shard(
+    data: Mapping[str, np.ndarray],
     shard_path: str,
-    start_row: int,
-    end_row: int,
-    write_specs: dict[str, WriteParquetSpec],
+    write_specs: Mapping[str, WriteParquetSpec],
+    *,
+    start_row: int = 0,
+    end_row: int | None = None,
     compression: str = "snappy",
-):
+) -> None:
+  """Writes a slice of a dictionary of numpy arrays to a single Parquet file."""
 
   def to_pa_array(key, np_values, spec):
     try:
@@ -332,12 +351,20 @@ def _write_single_shard(
       ) from e
 
   shard_data = {
-      key: to_pa_array(key, data[key][start_row:end_row], spec)
+      key: to_pa_array(
+          key,
+          data[key]
+          if start_row == 0 and end_row is None
+          else data[key][start_row:end_row],
+          spec,
+      )
       for key, spec in write_specs.items()
   }
   table = pa.Table.from_pydict(shard_data)
+  buffer_stream = pa.BufferOutputStream()
+  pq.write_table(table, buffer_stream, compression=compression)
   with filesystem.open_write(shard_path, binary=True) as f:
-    pq.write_table(table, f, compression=compression)
+    f.write(memoryview(buffer_stream.getvalue()))
 
 
 def write_numpy_dict_to_parquet(
@@ -369,15 +396,7 @@ def write_numpy_dict_to_parquet(
 
   rows_per_shard = (num_rows + num_shards - 1) // num_shards
 
-  write_specs = {
-      feature_name: WriteParquetSpec(
-          pa_type=feature_schema_to_py_arrow_full_data_type(feature_schema),
-          schema=feature_schema,
-          is_scalar=feature_schema.shape is None or feature_schema.shape == (),
-          is_static_shape=feature_schema.is_static_shape(),
-      )
-      for feature_name, feature_schema in schema.items()
-  }
+  write_specs = write_parquet_specs(schema)
 
   def _write_shard_task(shard_index: int):
     start_row = shard_index * rows_per_shard
@@ -397,12 +416,12 @@ def write_numpy_dict_to_parquet(
     if verbose:
       print(f"Writing shard {shard_index + 1}/{num_shards} to {shard_path}")
 
-    _write_single_shard(
+    write_parquet_shard(
         data,
         shard_path,
-        start_row,
-        end_row,
         write_specs,
+        start_row=start_row,
+        end_row=end_row,
         compression=compression,
     )
 

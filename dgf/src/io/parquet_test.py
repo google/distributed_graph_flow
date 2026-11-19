@@ -468,6 +468,35 @@ class ParquetTest(parameterized.TestCase):
     result = parquet_lib.feature_schema_to_py_arrow_full_data_type(schema)
     self.assertEqual(result, expected_type)
 
+  def test_read_empty_bytes_feature(self):
+    tmpdir = self.tmp_dir()
+    schema = {
+        "text": schema_lib.FeatureSchema(format=schema_lib.FeatureFormat.BYTES),
+        "texts": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.BYTES, shape=(None,)
+        ),
+    }
+    specs = parquet_lib.write_parquet_specs(schema)
+    path_empty = os.path.join(tmpdir, "empty_bytes.parquet")
+    parquet_lib.write_parquet_shard(
+        {
+            "text": np.array([b"", b""], dtype="|S1"),
+            "texts": np.array(
+                [np.array([b""], dtype="|S1"), np.empty(0, dtype="|S1")],
+                dtype=object,
+            ),
+        },
+        path_empty,
+        specs,
+    )
+    data, num_rows = parquet_lib.read_parquet_to_numpy_dict(
+        [path_empty], features_schema=schema
+    )
+    self.assertEqual(num_rows, 2)
+    self.assertEqual(data["text"].tolist(), [b"", b""])
+    self.assertEqual(data["texts"][0].tolist(), [b""])
+    self.assertEmpty(data["texts"][1])
+
   def test_feature_schema_to_py_arrow_full_data_type_invalid_shape(self):
     with self.assertRaisesRegex(ValueError, "Invalid dimension size in shape"):
       parquet_lib.feature_schema_to_py_arrow_full_data_type(
