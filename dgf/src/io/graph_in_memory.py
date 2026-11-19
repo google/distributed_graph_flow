@@ -534,18 +534,6 @@ def write_graph(
   if isinstance(container, str):
     container = gf_metadata_lib.Container(container)
 
-  # Write Metadata
-  metadata = gf_metadata_lib.GFGraphMetadata(
-      version=MAX_SUPPORTED_GF_VERSION,
-      timestamp=graph.timestamp,
-      container=container,
-  )
-  metadata_path = os.path.join(path, FILENAME_METADATA)
-  if verbose:
-    log.info("Writing metadata to %s", metadata_path)
-  with filesystem.open_write(metadata_path) as f:
-    f.write(metadata.to_json(indent=2))  # pyrefly: ignore[missing-attribute]
-
   # Write Node Sets
   node_dir = os.path.join(path, FILENAME_NODE_FEATURE)
   filesystem.makedirs(node_dir)
@@ -657,6 +645,23 @@ def write_graph(
     ]
     for write_task in write_tasks:
       write_task.result()
+
+  # Write Metadata. It is written last, so that a directory with a metadata
+  # file is a graph that was written completely. It is written to a temporary
+  # file that is then renamed, since a file can be partially written (e.g. on
+  # CNS) but renaming is atomic.
+  metadata = gf_metadata_lib.GFGraphMetadata(
+      version=MAX_SUPPORTED_GF_VERSION,
+      timestamp=graph.timestamp,
+      container=container,
+  )
+  metadata_path = os.path.join(path, FILENAME_METADATA)
+  if verbose:
+    log.info("Writing metadata to %s", metadata_path)
+  tmp_metadata_path = f"{metadata_path}.tmp"
+  with filesystem.open_write(tmp_metadata_path) as f:
+    f.write(metadata.to_json(indent=2))  # pyrefly: ignore[missing-attribute]
+  filesystem.replace(tmp_metadata_path, metadata_path)
 
   end_time = time.monotonic()
   log.info(

@@ -334,6 +334,56 @@ class ReadGfGraphTest(parameterized.TestCase):
       self.assertTrue(mock_node_shards.called)
       self.assertTrue(mock_edge_shards.called)
 
+  def test_write_graph_writes_the_metadata_atomically(self):
+    output_path = os.path.join(self.create_tempdir().full_path, "gf_graph")
+    in_memory_graph = gen_test_graph.generate_in_memory_graph(
+        node_ids=True, edge_ids=True
+    )
+    schema = gen_test_graph.generate_schema(
+        node_ids=True, edge_ids=True, semantic=True
+    )
+
+    # The metadata file only appears when the temporary file is renamed.
+    with mock.patch.object(
+        gf_graph_in_memory.filesystem,
+        "replace",
+        autospec=True,
+        side_effect=RuntimeError("interrupted"),
+    ):
+      with self.assertRaisesRegex(RuntimeError, "interrupted"):
+        gf_graph_in_memory.write_graph(in_memory_graph, schema, output_path)
+
+    self.assertFalse(
+        os.path.exists(
+            os.path.join(output_path, gf_graph_in_memory.FILENAME_METADATA)
+        )
+    )
+
+  def test_interrupted_write_graph_writes_no_metadata(self):
+    output_path = os.path.join(self.create_tempdir().full_path, "gf_graph")
+    in_memory_graph = gen_test_graph.generate_in_memory_graph(
+        node_ids=True, edge_ids=True
+    )
+    schema = gen_test_graph.generate_schema(
+        node_ids=True, edge_ids=True, semantic=True
+    )
+
+    with mock.patch.object(
+        gf_graph_in_memory,
+        "_write_container",
+        autospec=True,
+        side_effect=RuntimeError("interrupted"),
+    ):
+      with self.assertRaisesRegex(RuntimeError, "interrupted"):
+        gf_graph_in_memory.write_graph(in_memory_graph, schema, output_path)
+
+    self.assertTrue(os.path.isdir(output_path))
+    self.assertFalse(
+        os.path.exists(
+            os.path.join(output_path, gf_graph_in_memory.FILENAME_METADATA)
+        )
+    )
+
 
 if __name__ == "__main__":
   absltest.main()

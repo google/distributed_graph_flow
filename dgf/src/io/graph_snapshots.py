@@ -282,12 +282,24 @@ def write_graph_snapshots(
     snapshots: graph_snapshots_lib.GraphSnapshots,
     path: str,
     verbose: bool = False,
+    *,
+    resume: bool = False,
 ) -> None:
   """Writes graph snapshots to disk as a DGF Graph Snapshots dataset.
 
   The graphs are read from `snapshots.graphs` and written one at a time, such
   that snapshots that do not fit in memory together can be written from a
   sequence that creates each graph when it is accessed.
+
+  If the dataset exists, the snapshots are added to it: The snapshots of the
+  dataset that are not in `snapshots` are kept. The timestamps of the snapshots
+  of a dataset should be different: `read_graph_snapshots` fails on a dataset
+  with two snapshots of the same timestamp.
+
+  The metadata file of a snapshot is written last. If the writing is
+  interrupted, the dataset has a snapshot directory without metadata file, and
+  `read_graph_snapshots` fails on it. Call this function again with
+  `resume=True` to write the missing snapshots.
 
   Usage example:
 
@@ -300,36 +312,93 @@ def write_graph_snapshots(
   )
   dgf.io.write_graph_snapshots(snapshots, "/path/to/snapshot_dataset")
 
+  # Adds a snapshot to the dataset.
+  new_snapshots = dgf.data.GraphSnapshots(
+      timestamps=np.array([300], dtype=np.int64),
+      snapshot_ids=["third"],
+      schema=schema,
+      graphs=[third_graph],
+  )
+  dgf.io.write_graph_snapshots(new_snapshots, "/path/to/snapshot_dataset")
+
   snapshots = dgf.io.read_graph_snapshots("/path/to/snapshot_dataset")
   ```
 
   Args:
     snapshots: The graph snapshots. The timestamp of a graph, if it has one,
       should be the timestamp of its snapshot.
-    path: Path to the dataset directory to create.
+    path: Path to the dataset directory to create, or to the dataset to add
+      the snapshots to. An existing dataset should have the schema of
+      `snapshots`.
     verbose: If True, print progress information.
+    resume: If True, the snapshots that are already in the dataset are not
+      written again, and their graphs are not read from `snapshots.graphs`. A
+      snapshot whose writing was interrupted is written again. If False, all
+      the snapshots are written, and replace the ones of the dataset with the
+      same id.
 
   Raises:
-    ValueError: If a snapshot id is not a valid directory name, or if the
-      timestamp of a graph is not the timestamp of its snapshot.
+    ValueError: If a snapshot id is not a valid directory name, if the
+      timestamp of a graph is not the timestamp of its snapshot, or if the
+      dataset exists and has another schema. With `resume=True`, also if a
+      snapshot that is already in the dataset has another timestamp.
   """
   # The snapshot ids are directory names: They are checked before anything is
   # written, so that a dataset is never written outside of `path`.
   for snapshot_id in snapshots.snapshot_ids:
     _check_snapshot_id(snapshot_id)
-  filesystem.makedirs(path)
-  io_snapshots_metadata.write_metadata(
-      snapshots_metadata_lib.GraphSnapshotsMetadata(
-          format=snapshots_metadata_lib.GraphSnapshotsFormat.GRAPH_SNAPSHOTS,
-          version=_GRAPH_SNAPSHOTS_VERSION,
-      ),
-      os.path.join(path, graph_constants.FILENAME_METADATA),
-  )
-  io_schema.write_schema(
-      snapshots.schema, os.path.join(path, graph_constants.FILENAME_SCHEMA)
-  )
+  schema_path = os.path.join(path, graph_constants.FILENAME_SCHEMA)
+  if filesystem.exists(schema_path):
+    # The dataset exists: The snapshots are added to it. The schema of the
+    # dataset was converted to JSON and back.
+    schema_json = snapshots.schema.to_json()  # pyrefly: ignore[missing-attribute]
+    if io_schema.read_schema(schema_path) != (
+        schema_lib.GraphSchema.from_json(schema_json)  # pyrefly: ignore[missing-attribute]
+    ):
+      raise ValueError(
+          f"Cannot write the snapshots to the dataset {path}: Its schema is"
+          " not the schema of `snapshots`."
+      )
+  else:
+    # The schema is written last, to a temporary file that is then renamed: A
+    # dataset with a schema file has its metadata, and its schema file is
+    # complete.
+    filesystem.makedirs(path)
+    io_snapshots_metadata.write_metadata(
+        snapshots_metadata_lib.GraphSnapshotsMetadata(
+            format=snapshots_metadata_lib.GraphSnapshotsFormat.GRAPH_SNAPSHOTS,
+            version=_GRAPH_SNAPSHOTS_VERSION,
+        ),
+        os.path.join(path, graph_constants.FILENAME_METADATA),
+    )
+    tmp_schema_path = f"{schema_path}.tmp"
+    io_schema.write_schema(snapshots.schema, tmp_schema_path)
+    filesystem.replace(tmp_schema_path, schema_path)
   for index, snapshot_id in enumerate(snapshots.snapshot_ids):
     timestamp = int(snapshots.timestamps[index])
+    snapshot_path = os.path.join(
+        path, graph_constants.DIRNAME_SNAPSHOTS, snapshot_id
+    )
+    if filesystem.exists(snapshot_path):
+      # A snapshot directory with a metadata file was written completely.
+      if resume and filesystem.exists(
+          os.path.join(snapshot_path, graph_constants.FILENAME_METADATA)
+      ):
+        written_timestamp = _read_snapshot_timestamp(snapshot_path)
+        if written_timestamp != timestamp:
+          raise ValueError(
+              f"Cannot resume the writing of the dataset {path}: Its snapshot"
+              f" {snapshot_id!r} has timestamp {written_timestamp}, but the"
+              f" timestamp of the snapshot is {timestamp}."
+          )
+        if verbose:
+          log.info(
+              "Snapshot %d / %d (%s) is already written",
+              index + 1,
+              len(snapshots),
+              snapshot_id,
+          )
+        continue
     graph = snapshots.graphs[index]
     if graph.timestamp is not None and graph.timestamp != timestamp:
       raise ValueError(
@@ -337,6 +406,11 @@ def write_graph_snapshots(
           f" {graph.timestamp}, but the timestamp of the snapshot is"
           f" {timestamp}."
       )
+    if filesystem.exists(snapshot_path):
+      # The snapshot is replaced, or its writing was interrupted. Removing the
+      # directory ensures that it never mixes the files of two writings. It is
+      # removed after the graph is read, which can be from this directory.
+      filesystem.rmtree(snapshot_path)
     if verbose:
       log.info(
           "Writing snapshot %d / %d (%s)",
@@ -347,7 +421,7 @@ def write_graph_snapshots(
     graph_in_memory.write_graph(
         dataclasses.replace(graph, timestamp=timestamp),
         snapshots.schema,
-        path=os.path.join(path, graph_constants.DIRNAME_SNAPSHOTS, snapshot_id),
+        path=snapshot_path,
         verbose=False,
     )
 

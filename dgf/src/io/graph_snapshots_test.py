@@ -14,6 +14,7 @@
 
 """Unit tests for graph_snapshots."""
 
+from collections.abc import Sequence
 import dataclasses
 import os
 from unittest import mock
@@ -72,6 +73,33 @@ def _create_graph(
       },
       edge_sets={},
   )
+
+
+def _create_two_snapshots(
+    graphs: Sequence[in_memory_graph_lib.InMemoryGraph],
+) -> data_graph_snapshots.GraphSnapshots:
+  """Builds the snapshots "first" and "second" from their two graphs."""
+  return data_graph_snapshots.GraphSnapshots(
+      timestamps=np.array([100, 200], dtype=np.int64),
+      snapshot_ids=["first", "second"],
+      schema=_create_schema(),
+      graphs=graphs,
+  )
+
+
+class _RecordingGraphs(Sequence[in_memory_graph_lib.InMemoryGraph]):
+  """Graphs that record the indices at which they are accessed."""
+
+  def __init__(self, graphs: list[in_memory_graph_lib.InMemoryGraph]):
+    self._graphs = graphs
+    self.accessed_indices: list[int] = []
+
+  def __len__(self) -> int:
+    return len(self._graphs)
+
+  def __getitem__(self, index):
+    self.accessed_indices.append(index)
+    return self._graphs[index]
 
 
 class GraphSnapshotsTest(absltest.TestCase):
@@ -363,10 +391,20 @@ class GraphSnapshotsTest(absltest.TestCase):
         schema=_create_schema(),
         graphs=[_create_graph([b"1"], [1.0], timestamp=150)],
     )
+    dataset_dir = os.path.join(self.create_tempdir().full_path, "dataset")
+    graph_snapshots.write_graph_snapshots(
+        dataclasses.replace(
+            snapshots, graphs=[_create_graph([b"1"], [1.0], timestamp=100)]
+        ),
+        dataset_dir,
+    )
+
     with self.assertRaisesRegex(ValueError, "has timestamp 150"):
-      graph_snapshots.write_graph_snapshots(
-          snapshots, os.path.join(self.create_tempdir().full_path, "dataset")
-      )
+      graph_snapshots.write_graph_snapshots(snapshots, dataset_dir)
+
+    # The snapshot that was not replaced is kept.
+    loaded = graph_snapshots.read_graph_snapshots(dataset_dir)
+    self.assertEqual(list(loaded.snapshot_ids), ["first"])
 
   def test_write_graph_snapshots_with_invalid_snapshot_id_raises(self):
     root = self.create_tempdir().full_path
@@ -383,6 +421,275 @@ class GraphSnapshotsTest(absltest.TestCase):
           graph_snapshots.write_graph_snapshots(snapshots, dataset_dir)
         # Nothing is written.
         self.assertEqual(os.listdir(root), [])
+
+  def test_write_graph_snapshots_replaces_the_written_snapshots(self):
+    dataset_dir = os.path.join(self.create_tempdir().full_path, "dataset")
+    graph_snapshots.write_graph_snapshots(
+        _create_two_snapshots([
+            _create_graph([b"1", b"2"], [1.0, 2.0], timestamp=100),
+            _create_graph([b"1"], [3.0], timestamp=200),
+        ]),
+        dataset_dir,
+    )
+    graphs = _RecordingGraphs([
+        _create_graph([b"1"], [4.0], timestamp=100),
+        _create_graph([b"1"], [5.0], timestamp=200),
+    ])
+
+    graph_snapshots.write_graph_snapshots(
+        _create_two_snapshots(graphs), dataset_dir
+    )
+
+    self.assertEqual(graphs.accessed_indices, [0, 1])
+    loaded = graph_snapshots.read_graph_snapshots(dataset_dir)
+    self.assertEqual(list(loaded.snapshot_ids), ["first", "second"])
+    test_util.assert_are_equal(
+        self,
+        loaded.graphs[0].node_sets["n1"].features["f1"],
+        np.array([4.0], dtype=np.float32),
+    )
+    test_util.assert_are_equal(
+        self,
+        loaded.graphs[1].node_sets["n1"].features["f1"],
+        np.array([5.0], dtype=np.float32),
+    )
+
+  def test_write_graph_snapshots_adds_snapshots_to_a_dataset(self):
+    root_dir = self.create_tempdir().full_path
+    for resume in (False, True):
+      with self.subTest(resume=resume):
+        dataset_dir = os.path.join(root_dir, str(resume))
+        graph_snapshots.write_graph_snapshots(
+            _create_two_snapshots([
+                _create_graph([b"1", b"2"], [1.0, 2.0], timestamp=100),
+                _create_graph([b"1"], [3.0], timestamp=200),
+            ]),
+            dataset_dir,
+        )
+
+        # Only the new snapshot is given. It is not the last one in time.
+        graph_snapshots.write_graph_snapshots(
+            data_graph_snapshots.GraphSnapshots(
+                timestamps=np.array([150], dtype=np.int64),
+                snapshot_ids=["added"],
+                schema=_create_schema(),
+                graphs=[_create_graph([b"7"], [7.0], timestamp=150)],
+            ),
+            dataset_dir,
+            resume=resume,
+        )
+
+        loaded = graph_snapshots.read_graph_snapshots(dataset_dir)
+        self.assertEqual(
+            list(loaded.snapshot_ids), ["first", "added", "second"]
+        )
+        test_util.assert_are_equal(
+            self, loaded.timestamps, np.array([100, 150, 200], dtype=np.int64)
+        )
+        for graph, expected_f1 in zip(
+            loaded.graphs, ([1.0, 2.0], [7.0], [3.0])
+        ):
+          test_util.assert_are_equal(
+              self,
+              graph.node_sets["n1"].features["f1"],
+              np.array(expected_f1, dtype=np.float32),
+          )
+
+  def test_write_graph_snapshots_replaces_the_snapshots_it_reads(self):
+    dataset_dir = os.path.join(self.create_tempdir().full_path, "dataset")
+    graph_snapshots.write_graph_snapshots(
+        _create_two_snapshots([
+            _create_graph([b"1", b"2"], [1.0, 2.0], timestamp=100),
+            _create_graph([b"1"], [3.0], timestamp=200),
+        ]),
+        dataset_dir,
+    )
+    lazy = graph_snapshots.read_graph_snapshots(dataset_dir, lazy=True)
+
+    # Each graph is read from the snapshot directory that it replaces.
+    graph_snapshots.write_graph_snapshots(lazy, dataset_dir)
+
+    loaded = graph_snapshots.read_graph_snapshots(dataset_dir)
+    self.assertEqual(list(loaded.snapshot_ids), ["first", "second"])
+    test_util.assert_are_equal(
+        self,
+        loaded.graphs[0].node_sets["n1"].features["f1"],
+        np.array([1.0, 2.0], dtype=np.float32),
+    )
+
+  def test_write_graph_snapshots_interrupted_before_the_schema(self):
+    dataset_dir = os.path.join(self.create_tempdir().full_path, "dataset")
+    graphs = [
+        _create_graph([b"1", b"2"], [1.0, 2.0], timestamp=100),
+        _create_graph([b"1"], [3.0], timestamp=200),
+    ]
+    with mock.patch.object(
+        graph_snapshots.filesystem,
+        "replace",
+        autospec=True,
+        side_effect=RuntimeError("interrupted"),
+    ):
+      with self.assertRaisesRegex(RuntimeError, "interrupted"):
+        graph_snapshots.write_graph_snapshots(
+            _create_two_snapshots(graphs), dataset_dir
+        )
+    # The schema file only appears when the temporary file is renamed.
+    self.assertFalse(
+        filesystem.exists(
+            os.path.join(dataset_dir, graph_constants.FILENAME_SCHEMA)
+        )
+    )
+
+    graph_snapshots.write_graph_snapshots(
+        _create_two_snapshots(graphs), dataset_dir, resume=True
+    )
+
+    loaded = graph_snapshots.read_graph_snapshots(dataset_dir)
+    self.assertEqual(list(loaded.snapshot_ids), ["first", "second"])
+
+  def test_write_graph_snapshots_resume_writes_a_new_dataset(self):
+    dataset_dir = os.path.join(self.create_tempdir().full_path, "dataset")
+    graphs = _RecordingGraphs([
+        _create_graph([b"1", b"2"], [1.0, 2.0], timestamp=100),
+        _create_graph([b"1"], [3.0], timestamp=200),
+    ])
+
+    graph_snapshots.write_graph_snapshots(
+        _create_two_snapshots(graphs), dataset_dir, resume=True
+    )
+
+    self.assertEqual(graphs.accessed_indices, [0, 1])
+    loaded = graph_snapshots.read_graph_snapshots(dataset_dir)
+    self.assertEqual(list(loaded.snapshot_ids), ["first", "second"])
+
+  def test_write_graph_snapshots_resume_skips_the_written_snapshots(self):
+    dataset_dir = os.path.join(self.create_tempdir().full_path, "dataset")
+    first = _create_graph([b"1", b"2"], [1.0, 2.0], timestamp=100)
+    second = _create_graph([b"1"], [3.0], timestamp=200)
+    graph_snapshots.write_graph_snapshots(
+        data_graph_snapshots.GraphSnapshots(
+            timestamps=np.array([100], dtype=np.int64),
+            snapshot_ids=["first"],
+            schema=_create_schema(),
+            graphs=[first],
+        ),
+        dataset_dir,
+    )
+    graphs = _RecordingGraphs([first, second])
+
+    with mock.patch.object(
+        graph_in_memory, "write_graph", wraps=graph_in_memory.write_graph
+    ) as write_graph:
+      graph_snapshots.write_graph_snapshots(
+          _create_two_snapshots(graphs), dataset_dir, resume=True
+      )
+
+    # The graph of the snapshot that is already written is not accessed.
+    self.assertEqual(graphs.accessed_indices, [1])
+    self.assertEqual(write_graph.call_count, 1)
+    loaded = graph_snapshots.read_graph_snapshots(dataset_dir)
+    self.assertEqual(list(loaded.snapshot_ids), ["first", "second"])
+    test_util.assert_are_equal(
+        self,
+        loaded.graphs[0].node_sets["n1"].features["f1"],
+        np.array([1.0, 2.0], dtype=np.float32),
+    )
+    test_util.assert_are_equal(
+        self,
+        loaded.graphs[1].node_sets["n1"].features["f1"],
+        np.array([3.0], dtype=np.float32),
+    )
+
+  def test_write_graph_snapshots_resume_writes_interrupted_snapshot_again(self):
+    dataset_dir = os.path.join(self.create_tempdir().full_path, "dataset")
+    first = _create_graph([b"1", b"2"], [1.0, 2.0], timestamp=100)
+    second = _create_graph([b"1"], [3.0], timestamp=200)
+    graph_snapshots.write_graph_snapshots(
+        _create_two_snapshots([first, second]), dataset_dir
+    )
+    # An interrupted writing leaves a snapshot directory without metadata file,
+    # that holds a part of the files of the graph.
+    second_dir = os.path.join(
+        dataset_dir, graph_constants.DIRNAME_SNAPSHOTS, "second"
+    )
+    os.remove(os.path.join(second_dir, graph_constants.FILENAME_METADATA))
+    leftover_path = os.path.join(second_dir, "leftover")
+    with filesystem.open_write(leftover_path) as f:
+      f.write("")
+    with self.assertRaisesRegex(ValueError, "errors found"):
+      graph_snapshots.read_graph_snapshots(dataset_dir)
+    graphs = _RecordingGraphs([first, second])
+
+    graph_snapshots.write_graph_snapshots(
+        _create_two_snapshots(graphs), dataset_dir, resume=True
+    )
+
+    self.assertEqual(graphs.accessed_indices, [1])
+    self.assertFalse(filesystem.exists(leftover_path))
+    loaded = graph_snapshots.read_graph_snapshots(dataset_dir)
+    self.assertEqual(list(loaded.snapshot_ids), ["first", "second"])
+    test_util.assert_are_equal(
+        self,
+        loaded.graphs[1].node_sets["n1"].features["f1"],
+        np.array([3.0], dtype=np.float32),
+    )
+
+  def test_write_graph_snapshots_to_a_dataset_of_another_schema_raises(self):
+    dataset_dir = os.path.join(self.create_tempdir().full_path, "dataset")
+    graphs = [
+        _create_graph([b"1", b"2"], [1.0, 2.0], timestamp=100),
+        _create_graph([b"1"], [3.0], timestamp=200),
+    ]
+    graph_snapshots.write_graph_snapshots(
+        _create_two_snapshots(graphs), dataset_dir
+    )
+    other_schema = _create_schema()
+    other_schema.node_sets["n1"].features["f2"] = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+    )
+
+    for resume in (False, True):
+      with self.subTest(resume=resume):
+        with self.assertRaisesRegex(
+            ValueError, "Its schema is not the schema"
+        ):
+          graph_snapshots.write_graph_snapshots(
+              dataclasses.replace(
+                  _create_two_snapshots(graphs), schema=other_schema
+              ),
+              dataset_dir,
+              resume=resume,
+          )
+
+    # The dataset is not modified.
+    test_util.assert_are_equal(
+        self,
+        graph_snapshots.read_graph_snapshots(dataset_dir).schema,
+        _create_schema(),
+    )
+
+  def test_write_graph_snapshots_resume_with_another_timestamp_raises(self):
+    dataset_dir = os.path.join(self.create_tempdir().full_path, "dataset")
+    graphs = [
+        _create_graph([b"1", b"2"], [1.0, 2.0], timestamp=100),
+        _create_graph([b"1"], [3.0], timestamp=200),
+    ]
+    graph_snapshots.write_graph_snapshots(
+        _create_two_snapshots(graphs), dataset_dir
+    )
+
+    with self.assertRaisesRegex(
+        ValueError, "'second' has timestamp 200, but .* is 250"
+    ):
+      graph_snapshots.write_graph_snapshots(
+          dataclasses.replace(
+              _create_two_snapshots(graphs),
+              timestamps=np.array([100, 250], dtype=np.int64),
+          ),
+          dataset_dir,
+          resume=True,
+      )
 
   def test_read_graph_snapshots_as_temporal_graph(self):
     dataset_dir = self.create_tempdir().full_path
