@@ -28,6 +28,8 @@ from dgf.src.transform.normalize import auto_normalize
 from dgf.src.transform.normalize import AutoNormalizeConfig
 from dgf.src.transform.normalize import DictionaryIndexNormalizer
 from dgf.src.transform.normalize import IdentityNormalizer
+from dgf.src.transform.normalize import ImputeNanNormalizer
+from dgf.src.transform.normalize import OneHotNormalizer
 from dgf.src.transform.normalize import SoftQuantileNormalizer
 from dgf.src.transform.normalize import SinusoidTimedeltaNormalizer
 from dgf.src.transform.normalize import TimedeltaNormalizer
@@ -35,6 +37,7 @@ from dgf.src.transform.normalize import SequentialNormalizer
 from dgf.src.transform.normalize import CalendarNormalizer
 from dgf.src.transform.normalize import CalendarFeature
 from dgf.src.transform.normalize import TextEmbeddingNormalizer
+from dgf.src.transform.normalize import ZScoreNormalizer
 
 from dgf.src.transform.extract import filter_graph
 from dgf.src.transform.extract import drop_edge_features

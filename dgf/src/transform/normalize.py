@@ -22,7 +22,7 @@ import dataclasses
 import enum
 import inspect
 import math
-from typing import Any
+from typing import Any, Literal
 
 import dataclasses_json
 from dgf.src.data import in_memory_graph
@@ -976,6 +976,1029 @@ def _day_of_month_from_days_tensorflow(days: tf.Tensor) -> tf.Tensor:
   return day_of_year - tf.math.floordiv(153 * shifted_month + 2, 5) + 1
 
 
+# Default cap on the one-hot width inferred by `OneHotNormalizer.create`. At
+# 1024 categories the dense float32 output is 4 KiB per entity (and per
+# timestep), which is already larger than typical node feature vectors; wider
+# vocabularies (e.g. hashed IDs) are better served by an index plus a learned
+# embedding (`DictionaryIndexNormalizer`). The cap only guards against
+# accidental blow-ups and can be raised or disabled by the caller.
+DEFAULT_MAX_ONE_HOT_CATEGORIES = 1024
+
+
+@normalizer_registry.register
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass(kw_only=True)
+class OneHotNormalizer(AbstractFeatureNormalizer):
+  """One-hot encodes integer or boolean categorical features into float32 vectors.
+
+  Categories in `[0, num_categories)` are mapped to unit basis vectors, while
+  out-of-vocabulary or out-of-range indices encode as all zeros. With
+  `drop_if_binary=True`, a feature with `num_categories == 2` is instead
+  committed to a single indicator column (`value == 1`); a value outside
+  `[0, 2)` then raises instead of silently looking like category `0`.
+
+  Usage example:
+
+  ```python
+  normalizer = dgf.transform.OneHotNormalizer.create(
+      "category_idx",
+      dgf.data.FeatureSchema(
+          format=dgf.data.FeatureFormat.INTEGER_64,
+          semantic=dgf.data.FeatureSemantic.CATEGORICAL,
+          shape=(),
+          num_categorical_values=3,
+      ),
+  )
+  outputs = normalizer.normalize_numpy(np.array([0, 2, 3], dtype=np.int64))
+  ```
+
+  Attributes:
+    num_categories: Number of known categories in `[0, num_categories)`.
+    output_shape: Static output feature shape (excluding the leading entity
+      dimension), ending in `1` for dropped binary features or `num_categories`.
+    output_feature_name: Name of the emitted float32 embedding feature.
+    drop_if_binary: If True, a feature with `num_categories == 2` emits a single
+      `(..., 1)` column (`index == 1`) and values outside `[0, 2)` raise. If
+      False (default), it emits a `(..., 2)` vector and unseen values encode as
+      zeros like any other out-of-range index.
+    is_timeseries: Whether the feature is a timeseries.
+    group: Feature group name emitted on the output schema. When `is_timeseries`
+      is True and `group` is None, defaults to `input_feature` (its implicit
+      sequence group).
+  """
+
+  num_categories: int
+  output_shape: tuple[int | None, ...]
+  output_feature_name: str
+  drop_if_binary: bool = False
+  is_timeseries: bool = False
+  group: str | None = None
+  type: str = dataclasses.field(default="OneHotNormalizer", init=False)
+
+  def __post_init__(self):
+    if self.is_timeseries and self.group is None:
+      self.group = self.input_feature
+    if self.num_categories < 1:
+      raise ValueError(
+          "OneHotNormalizer requires num_categories >= 1, got"
+          f" {self.num_categories}."
+      )
+    expected_dim = (
+        1
+        if (self.drop_if_binary and self.num_categories == 2)
+        else self.num_categories
+    )
+    if not self.output_shape or self.output_shape[-1] != expected_dim:
+      raise ValueError(
+          "OneHotNormalizer expected trailing output_shape dimension"
+          f" {expected_dim}, got {self.output_shape}."
+      )
+
+  @classmethod
+  def create(
+      cls,
+      feature_name: str,
+      input_schema: schema_lib.FeatureSchema,
+      input_stats: statistics_lib.FeatureStatistics | None = None,
+      *,
+      num_categories: int | None = None,
+      drop_if_binary: bool = False,
+      max_one_hot_categories: int | None = DEFAULT_MAX_ONE_HOT_CATEGORIES,
+  ) -> "OneHotNormalizer":
+    """Creates a `OneHotNormalizer` from a feature schema and optional stats.
+
+    Args:
+      feature_name: Name of the categorical input feature.
+      input_schema: Schema of the input feature (must be INTEGER or BOOL with a
+        static shape).
+      input_stats: Optional feature statistics used to infer `num_categories`
+        from `round(input_stats.maximum) + 1` when neither `num_categories` nor
+        `input_schema.num_categorical_values` is set.
+      num_categories: Explicit category count overriding schema/stats inference.
+      drop_if_binary: If True, a feature with `num_categories == 2` emits a
+        single indicator column (`value == 1`) and values outside `[0, 2)`
+        raise. If False (default), it emits a 2-element vector and unseen values
+        encode as zeros.
+      max_one_hot_categories: Maximum allowed category count before raising a
+        `ValueError` to guard against accidentally creating very wide dense
+        arrays (e.g., from hashed integer IDs). Pass `None` to disable.
+
+    Returns:
+      A configured `OneHotNormalizer`.
+
+    Raises:
+      ValueError: If `input_schema` is not static-shape INTEGER or BOOL,
+        `num_categories` cannot be resolved or is `< 1`, `input_stats` is empty
+        or has a non-finite maximum when inferring `num_categories`, the
+        resolved category count exceeds `max_one_hot_categories`, or
+        `drop_if_binary=True` is paired with out-of-range statistics on a
+        binary feature.
+    """
+    if (
+        not input_schema.format.is_integer()
+        and input_schema.format != schema_lib.FeatureFormat.BOOL
+    ):
+      raise ValueError(
+          f"Feature '{feature_name}' has format '{input_schema.format}', but"
+          " OneHotNormalizer only supports INTEGER or BOOL features."
+      )
+    if not input_schema.is_static_shape():
+      raise ValueError(
+          f"Feature '{feature_name}' has dynamic shape {input_schema.shape};"
+          " OneHotNormalizer requires a static shape."
+      )
+    if max_one_hot_categories is not None and max_one_hot_categories < 1:
+      raise ValueError(
+          "OneHotNormalizer requires max_one_hot_categories >= 1 or None, got"
+          f" {max_one_hot_categories}."
+      )
+
+    if num_categories is not None:
+      resolved_categories = num_categories
+      category_source = "explicit"
+    elif input_schema.num_categorical_values is not None:
+      resolved_categories = input_schema.num_categorical_values
+      category_source = "schema"
+    elif input_schema.format == schema_lib.FeatureFormat.BOOL:
+      resolved_categories = 2
+      category_source = "bool"
+    elif input_stats is not None:
+      if input_stats.count == 0 or not math.isfinite(input_stats.maximum):
+        raise ValueError(
+            f"No finite maximum observed for feature '{feature_name}' in"
+            " input_stats (count == 0 or non-finite maximum); cannot infer"
+            " num_categories for OneHotNormalizer. Provide explicit"
+            " `num_categories` or set `input_schema.num_categorical_values`."
+        )
+      resolved_categories = max(1, round(input_stats.maximum) + 1)
+      category_source = "stats"
+    else:
+      raise ValueError(
+          f"Cannot infer num_categories for feature '{feature_name}'; provide"
+          " num_categories, input_schema.num_categorical_values, or"
+          " input_stats."
+      )
+
+    if resolved_categories < 1:
+      raise ValueError(
+          f"Feature '{feature_name}' resolved to invalid num_categories="
+          f"{resolved_categories}; expected >= 1."
+      )
+    if (
+        max_one_hot_categories is not None
+        and resolved_categories > max_one_hot_categories
+    ):
+      if category_source == "stats":
+        hint = (
+            "set `input_schema.num_categorical_values`, map sparse/hashed IDs"
+            " with `DictionaryIndexNormalizer` (or disable"
+            " `categorical_one_hot` to use learned embeddings), or increase"
+            " `max_one_hot_categories`"
+        )
+      else:
+        hint = (
+            "disable `categorical_one_hot` to use learned embeddings over"
+            " integer indices, or increase `max_one_hot_categories` (or pass"
+            " `max_one_hot_categories=None`)"
+        )
+      raise ValueError(
+          f"Feature '{feature_name}' resolved to {resolved_categories}"
+          " categories, which exceeds max_one_hot_categories="
+          f"{max_one_hot_categories}. To avoid allocating a very wide dense"
+          f" array per entity, {hint}."
+      )
+
+    is_binary = drop_if_binary and resolved_categories == 2
+    if is_binary and input_stats is not None and input_stats.count > 0:
+      if math.isfinite(input_stats.minimum) and input_stats.minimum < 0:
+        raise ValueError(
+            f"Feature '{feature_name}' has minimum={input_stats.minimum} < 0"
+            " in input_stats (e.g. negative sentinels), which is incompatible"
+            " with drop_if_binary=True (values must be in [0, 2)). Set"
+            " drop_if_binary=False to encode out-of-range values as zeros."
+        )
+      if math.isfinite(input_stats.maximum) and input_stats.maximum >= 2:
+        raise ValueError(
+            f"Feature '{feature_name}' has maximum={input_stats.maximum} >= 2"
+            " in input_stats, which is incompatible with drop_if_binary=True"
+            " (values must be in [0, 2)). Set drop_if_binary=False to encode"
+            " out-of-range values as zeros."
+        )
+
+    out_dim = 1 if is_binary else resolved_categories
+    output_shape = (*(input_schema.shape or ()), out_dim)
+    return OneHotNormalizer(
+        input_feature=feature_name,
+        num_categories=resolved_categories,
+        output_shape=output_shape,
+        output_feature_name=f"{feature_name}_ONE_HOT",
+        drop_if_binary=drop_if_binary,
+        is_timeseries=input_schema.is_timeseries,
+        group=_output_timeseries_group(feature_name, input_schema),
+    )
+
+  def output_schema(self) -> schema_lib.FeatureSetSchema:
+    return {
+        self.output_feature_name: schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=self.output_shape,
+            is_timeseries=self.is_timeseries,
+            group=self.group,
+        )
+    }
+
+  def _binary_range_message(self) -> str:
+    return (
+        f"Feature '{self.input_feature}' is encoded as a single binary column"
+        " (drop_if_binary=True), so values must be in [0, 2)."
+    )
+
+  def normalize_numpy(self, value: np.ndarray) -> dict[str, np.ndarray]:
+    idx = np.asarray(value, dtype=np.int64)
+    if self.drop_if_binary and self.num_categories == 2:
+      out_of_range = (idx < 0) | (idx >= 2)
+      if out_of_range.any():
+        raise ValueError(
+            f"{self._binary_range_message()} Got"
+            f" {np.unique(idx[out_of_range]).tolist()}."
+        )
+      encoded = (idx[..., None] == 1).astype(np.float32)
+    else:
+      categories = np.arange(self.num_categories, dtype=np.int64)
+      encoded = (idx[..., None] == categories).astype(np.float32)
+    return {self.output_feature_name: encoded}
+
+  def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
+    idx = tf.cast(value, tf.int64)
+    if self.drop_if_binary and self.num_categories == 2:
+      in_range = tf.reduce_all((idx >= 0) & (idx < 2))
+      check = tf.debugging.Assert(
+          in_range, [self._binary_range_message(), idx]
+      )
+      with tf.control_dependencies([check]):
+        encoded = tf.cast(
+            tf.equal(tf.expand_dims(idx, axis=-1), 1), tf.float32
+        )
+    else:
+      encoded = tf.one_hot(idx, depth=self.num_categories, dtype=tf.float32)
+    return {self.output_feature_name: encoded}
+
+
+# Semantics that a float32 output of `ImputeNanNormalizer` or
+# `ZScoreNormalizer` can carry. The other semantics promise something a float
+# output cannot be: an int64 index (CATEGORICAL, PRIMARY_ID), an int64
+# timestamp, a boolean mask, or text bytes. UNKNOWN is the schema default.
+_CONTINUOUS_SEMANTICS = frozenset({
+    schema_lib.FeatureSemantic.UNKNOWN,
+    schema_lib.FeatureSemantic.NUMERICAL,
+    schema_lib.FeatureSemantic.EMBEDDING,
+    schema_lib.FeatureSemantic.TIMEDELTA,
+    schema_lib.FeatureSemantic.TIMESERIES,
+})
+
+
+def _check_continuous_semantic(
+    normalizer_name: str,
+    feature_name: str,
+    semantic: schema_lib.FeatureSemantic,
+) -> None:
+  """Raises if `semantic` cannot describe a continuous float32 output.
+
+  Args:
+    normalizer_name: Normalizer class name, used in the error message.
+    feature_name: Input feature name, used in the error message.
+    semantic: The semantic that would be emitted on the output schema.
+
+  Raises:
+    ValueError: If `semantic` is not in `_CONTINUOUS_SEMANTICS`.
+  """
+  if semantic not in _CONTINUOUS_SEMANTICS:
+    allowed = sorted(s.value for s in _CONTINUOUS_SEMANTICS)
+    raise ValueError(
+        f"{normalizer_name} emits continuous float32 values, which cannot"
+        f" carry semantic {semantic.value} (feature '{feature_name}');"
+        f" expected one of {allowed}."
+    )
+
+
+def _validate_fixed_numeric_schema(
+    feature_name: str,
+    input_schema: schema_lib.FeatureSchema,
+    normalizer_name: str,
+) -> tuple[int, ...] | None:
+  """Validates a static-shape numeric schema and returns narrowed `int` dims."""
+  if (
+      not input_schema.format.is_integer()
+      and not input_schema.format.is_float()
+  ):
+    raise ValueError(
+        f"Feature '{feature_name}' has format '{input_schema.format}', but"
+        f" {normalizer_name} only supports INTEGER or FLOAT features."
+    )
+  _check_continuous_semantic(
+      normalizer_name, feature_name, input_schema.semantic
+  )
+  if not input_schema.is_static_shape():
+    raise ValueError(
+        f"Feature '{feature_name}' has dynamic shape {input_schema.shape};"
+        f" {normalizer_name} requires a static shape."
+    )
+  if input_schema.shape is None:
+    return None
+  return tuple(int(dim) for dim in input_schema.shape if dim is not None)
+
+
+def _validate_fit_values(
+    feature_name: str,
+    schema_shape: tuple[int, ...] | None,
+    values: np.ndarray,
+) -> tuple[np.ndarray, tuple[int, ...]]:
+  """Validates training values and returns them as float64 plus item shape.
+
+  Args:
+    feature_name: Name of the feature, used in error messages.
+    schema_shape: Item shape from the schema, or None to infer it from values.
+    values: Array of shape `(num_entities, *feature_shape)`.
+
+  Returns:
+    A `(vals, output_shape)` tuple where `vals` is a float64 copy of `values`
+    with NaN and ±inf replaced by NaN.
+
+  Raises:
+    ValueError: If `values` is not a dense integer/float array with at least one
+      dimension, or its item shape does not match `schema_shape`.
+  """
+  arr = np.asarray(values)
+  if arr.ndim < 1 or not (
+      np.issubdtype(arr.dtype, np.integer)
+      or np.issubdtype(arr.dtype, np.floating)
+  ):
+    raise ValueError(
+        f"Feature '{feature_name}' must be a dense integer or float array with"
+        f" at least 1 dimension, got dtype={arr.dtype}, shape={arr.shape}."
+    )
+  item_shape = tuple(int(dim) for dim in arr.shape[1:])
+  output_shape = schema_shape if schema_shape is not None else item_shape
+  if item_shape != output_shape:
+    raise ValueError(
+        f"Feature '{feature_name}' values have item shape {item_shape},"
+        f" expected {output_shape}."
+    )
+  vals = arr.astype(np.float64)
+  return np.where(np.isfinite(vals), vals, np.nan), output_shape
+
+
+def _check_param_shape(
+    normalizer_name: str,
+    feature_name: str,
+    param_name: str,
+    param: np.ndarray,
+    output_shape: tuple[int, ...],
+) -> None:
+  """Raises if a per-element parameter does not have shape `output_shape`.
+
+  Without this check a wrongly shaped parameter (e.g. from a hand-edited JSON
+  config) would silently broadcast across entities.
+
+  Args:
+    normalizer_name: Normalizer class name, used in the error message.
+    feature_name: Input feature name, used in the error message.
+    param_name: Parameter name (e.g. `mean`), used in the error message.
+    param: The parameter array to check.
+    output_shape: The expected per-entity shape.
+
+  Raises:
+    ValueError: If `param.shape != output_shape`.
+  """
+  if param.shape != tuple(output_shape):
+    raise ValueError(
+        f"{normalizer_name} for feature '{feature_name}' expects {param_name}"
+        f" of shape {tuple(output_shape)}, got {param.shape}."
+    )
+
+
+@normalizer_registry.register
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass(kw_only=True)
+class ImputeNanNormalizer(AbstractFeatureNormalizer):
+  """Replaces non-finite (NaN and ±inf) entries in numeric features.
+
+  Supports creating scalar fills from `FeatureStatistics` (`create`) or exact
+  per-channel fills (`median`, `mean`, `zero`) from an array of training values
+  (`from_values`).
+
+  The output is float32 and always finite. A finite float64 input beyond the
+  float32 range (`|x| > 3.4e38`) is neither missing nor representable, so
+  normalization raises (`ValueError` in NumPy, `InvalidArgumentError` in
+  TensorFlow) instead of emitting ±inf or substituting the fill value. A
+  fitted fill value beyond the float32 range raises `ValueError` as well.
+  Because the emitted tensor is float32, chaining `ImputeNanNormalizer` before
+  `ZScoreNormalizer` rounds float64/int64 values to float32 first; when inputs
+  carry a large offset (e.g. `1e8 + small signal`), run `ZScoreNormalizer`
+  directly on the raw float64 values first (it ignores NaN/±inf when fitting
+  and preserves non-finite entries for subsequent zero-imputation).
+
+  Usage example:
+
+  ```python
+  normalizer = dgf.transform.ImputeNanNormalizer.from_values(
+      "score",
+      dgf.data.FeatureSchema(
+          format=dgf.data.FeatureFormat.FLOAT_32,
+          semantic=dgf.data.FeatureSemantic.NUMERICAL,
+          shape=(2,),
+      ),
+      train_values,
+      strategy="median",
+  )
+  outputs = normalizer.normalize_numpy(test_values)
+  ```
+
+  Attributes:
+    output_feature_name: Name of the imputed float32 output feature.
+    output_shape: Static shape of each entity's feature value.
+    fill_values: Finite float32 array of shape `output_shape` substituted where
+      inputs are NaN or ±inf.
+    output_semantic: Feature semantic emitted on the output schema (preserved
+      from `input_schema.semantic` in `create` and `from_values`).
+    is_timeseries: Whether the feature is a timeseries.
+    group: Feature group name emitted on the output schema. When `is_timeseries`
+      is True and `group` is None, defaults to `input_feature` (its implicit
+      sequence group).
+  """
+
+  output_feature_name: str
+  output_shape: tuple[int, ...]
+  fill_values: np.ndarray = dataclasses.field(
+      metadata=dataclasses_json.config(
+          encoder=lambda x: np.asarray(x, dtype=np.float32).tolist(),
+          # `__post_init__` casts to float32 and validates the range.
+          decoder=lambda x: np.asarray(x, dtype=np.float64),
+      )
+  )
+  output_semantic: schema_lib.FeatureSemantic = (
+      schema_lib.FeatureSemantic.NUMERICAL
+  )
+  is_timeseries: bool = False
+  group: str | None = None
+  type: str = dataclasses.field(default="ImputeNanNormalizer", init=False)
+
+  def __post_init__(self):
+    if self.is_timeseries and self.group is None:
+      self.group = self.input_feature
+    _check_continuous_semantic(
+        "ImputeNanNormalizer", self.input_feature, self.output_semantic
+    )
+    # A fill beyond the float32 range overflows to ±inf here and is rejected
+    # by the finiteness check below, so numpy's overflow warning is redundant.
+    with np.errstate(over="ignore"):
+      self.fill_values = np.asarray(self.fill_values, dtype=np.float32)
+    _check_param_shape(
+        "ImputeNanNormalizer",
+        self.input_feature,
+        "fill_values",
+        self.fill_values,
+        self.output_shape,
+    )
+    if not np.isfinite(self.fill_values).all():
+      raise ValueError(
+          f"ImputeNanNormalizer for feature '{self.input_feature}' requires"
+          " finite fill_values (no NaN or ±inf, and |fill| <= 3.4e38 so it is"
+          " representable in float32)."
+      )
+
+  @classmethod
+  def create(
+      cls,
+      feature_name: str,
+      input_schema: schema_lib.FeatureSchema,
+      input_stats: statistics_lib.FeatureStatistics,
+      *,
+      strategy: Literal[
+          "median", "mean", "zero", "median_with_fallbacks"
+      ] = "median",
+  ) -> "ImputeNanNormalizer":
+    """Creates an `ImputeNanNormalizer` from `FeatureStatistics`.
+
+    Args:
+      feature_name: Name of the numeric input feature.
+      input_schema: Schema of the input feature (static-shape INTEGER or FLOAT).
+      input_stats: Feature statistics providing median quantiles or mean.
+      strategy: Fill strategy:
+        - `median`: Uses `np.median(input_stats.quantiles)` (mean of the two
+          middle quantiles for even lengths). Raises `ValueError` if quantiles
+          are missing or non-finite.
+        - `mean`: Uses `input_stats.mean`. Raises `ValueError` if no finite
+          mean was observed.
+        - `zero`: Fills with `0.0`.
+        - `median_with_fallbacks`: Uses the quantile median when available and
+          finite, otherwise falls back to a finite `input_stats.mean`, and
+          finally to `0.0` (with a warning) if neither is available.
+
+    Returns:
+      A configured `ImputeNanNormalizer`.
+    """
+    schema_shape = _validate_fixed_numeric_schema(
+        feature_name, input_schema, "ImputeNanNormalizer"
+    )
+    output_shape: tuple[int, ...] = schema_shape or ()
+
+    def _finite_quantile_median() -> float | None:
+      if not input_stats.quantiles:
+        return None
+      quantiles = np.asarray(input_stats.quantiles, dtype=np.float64)
+      # Any non-finite quantile means the statistics are unusable, even if
+      # the middle element happens to be finite (e.g. `[1, 2, inf]`).
+      if not np.isfinite(quantiles).all():
+        return None
+      return float(np.median(quantiles))
+
+    if strategy == "zero":
+      scalar_fill = 0.0
+    elif strategy == "mean":
+      if input_stats.count == 0 or not math.isfinite(input_stats.mean):
+        raise ValueError(
+            f"No finite mean observed for feature '{feature_name}' in"
+            " input_stats; cannot create ImputeNanNormalizer with"
+            " strategy='mean'."
+        )
+      scalar_fill = float(input_stats.mean)
+    elif strategy == "median":
+      med = _finite_quantile_median()
+      if med is None:
+        raise ValueError(
+            f"No finite quantiles observed for feature '{feature_name}' in"
+            " input_stats; cannot create ImputeNanNormalizer with"
+            " strategy='median'. Use strategy='median_with_fallbacks' to fall"
+            " back to mean or 0.0."
+        )
+      scalar_fill = med
+    elif strategy == "median_with_fallbacks":
+      med = _finite_quantile_median()
+      if med is not None:
+        scalar_fill = med
+      elif input_stats.count > 0 and math.isfinite(input_stats.mean):
+        scalar_fill = float(input_stats.mean)
+      else:
+        log.warning(
+            f"No finite statistics observed for feature {feature_name}."
+            " Defaulting ImputeNanNormalizer fill value to 0.0."
+        )
+        scalar_fill = 0.0
+    else:
+      raise ValueError(
+          f"Unsupported ImputeNanNormalizer.create strategy '{strategy}'."
+      )
+
+    # Kept in float64 here: `__post_init__` casts to float32 and rejects a
+    # fill beyond the float32 range.
+    fill_values = np.full(output_shape, scalar_fill, dtype=np.float64)
+    return ImputeNanNormalizer(
+        input_feature=feature_name,
+        output_feature_name=f"{feature_name}_IMPUTED",
+        output_shape=output_shape,
+        fill_values=fill_values,
+        output_semantic=input_schema.semantic,
+        is_timeseries=input_schema.is_timeseries,
+        group=_output_timeseries_group(feature_name, input_schema),
+    )
+
+  @classmethod
+  def from_values(
+      cls,
+      feature_name: str,
+      input_schema: schema_lib.FeatureSchema,
+      values: np.ndarray,
+      *,
+      strategy: Literal["median", "mean", "zero"] = "median",
+  ) -> "ImputeNanNormalizer":
+    """Fits per-column non-finite replacement statistics from training values.
+
+    Args:
+      feature_name: Name of the numeric input feature.
+      input_schema: Schema of the input feature (static-shape INTEGER or FLOAT).
+      values: Array of shape `(num_entities, *feature_shape)` used to fit
+        per-column fill values. NaN and ±inf entries are ignored when fitting.
+        For pre-padded timeseries features, statistics are computed across all
+        finite entries per position (including numeric padding such as `0.0`),
+        so pad missing steps with `NaN` if padding should be excluded.
+      strategy: Imputation strategy (`median`, `mean`, or `zero`; defaults to
+        `median`).
+
+    Returns:
+      A fitted `ImputeNanNormalizer`.
+    """
+    if strategy not in ("median", "mean", "zero"):
+      raise ValueError(
+          f"Unsupported ImputeNanNormalizer strategy '{strategy}'; expected"
+          " 'median', 'mean', or 'zero'."
+      )
+    schema_shape = _validate_fixed_numeric_schema(
+        feature_name, input_schema, "ImputeNanNormalizer"
+    )
+    vals, output_shape = _validate_fit_values(
+        feature_name, schema_shape, values
+    )
+    num_cols = int(np.prod(output_shape, dtype=np.int64))
+    flat_f64 = vals.reshape(vals.shape[0], num_cols)
+
+    if num_cols == 0 or strategy == "zero":
+      flat_fill = np.zeros(num_cols, dtype=np.float64)
+    else:
+      if flat_f64.shape[0] == 0 or np.isnan(flat_f64).all(axis=0).any():
+        raise ValueError(
+            f"Feature '{feature_name}' has a column that is entirely non-finite"
+            f" (NaN/±inf) and cannot be imputed with strategy='{strategy}'."
+        )
+      # A float64 overflow here yields a non-finite fill, which
+      # `__post_init__` rejects.
+      with np.errstate(over="ignore"):
+        if strategy == "median":
+          flat_fill = np.nanmedian(flat_f64, axis=0)
+        else:
+          flat_fill = np.nanmean(flat_f64, axis=0)
+
+    return ImputeNanNormalizer(
+        input_feature=feature_name,
+        output_feature_name=f"{feature_name}_IMPUTED",
+        output_shape=output_shape,
+        fill_values=flat_fill.reshape(output_shape),
+        output_semantic=input_schema.semantic,
+        is_timeseries=input_schema.is_timeseries,
+        group=_output_timeseries_group(feature_name, input_schema),
+    )
+
+  def output_schema(self) -> schema_lib.FeatureSetSchema:
+    return {
+        self.output_feature_name: schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=self.output_semantic,
+            shape=self.output_shape,
+            is_timeseries=self.is_timeseries,
+            group=self.group,
+        )
+    }
+
+  def _float32_range_message(self) -> str:
+    return (
+        f"Feature '{self.input_feature}' has finite values beyond the float32"
+        " range (|x| > 3.4e38). ImputeNanNormalizer emits float32 and neither"
+        " turns them into ±inf nor treats them as missing; rescale the"
+        " feature first."
+    )
+
+  def normalize_numpy(self, value: np.ndarray) -> dict[str, np.ndarray]:
+    # Finiteness is tested on the input before downcasting: a finite float64
+    # value beyond the float32 range is not missing, so it is not imputed, and
+    # it cannot be emitted either without becoming ±inf, so it raises.
+    val = np.asarray(value)
+    finite = np.isfinite(val)
+    with np.errstate(over="ignore"):
+      cast = val.astype(np.float32)
+    if (finite & ~np.isfinite(cast)).any():
+      raise ValueError(self._float32_range_message())
+    fill = np.asarray(self.fill_values, dtype=np.float32)
+    return {self.output_feature_name: np.where(finite, cast, fill)}
+
+  def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
+    val = tf.convert_to_tensor(value)
+    cast = tf.cast(val, tf.float32)
+    if val.dtype == tf.float64:
+      finite = tf.math.is_finite(val)
+      in_range = tf.reduce_all(
+          tf.logical_or(tf.logical_not(finite), tf.math.is_finite(cast))
+      )
+      check = tf.debugging.Assert(in_range, [self._float32_range_message()])
+      with tf.control_dependencies([check]):
+        cast = tf.identity(cast)
+    else:
+      # Narrower floats and integers are always within the float32 range.
+      finite = tf.math.is_finite(cast)
+    fill = tf.broadcast_to(
+        tf.constant(self.fill_values, dtype=tf.float32), tf.shape(cast)
+    )
+    return {self.output_feature_name: tf.where(finite, cast, fill)}
+
+
+# Largest magnitude up to which float64 represents every integer exactly (its
+# mantissa has 53 bits).
+_FLOAT64_EXACT_INT_MAX = 2**53
+
+# Maximum allowed shift `|E[x - mean]| / std` in standardized z-units caused by
+# rounding the true sample mean to a single float64 value. Capping this absolute
+# shift at `1e-5` keeps mean-rounding bias within 5 decimal digits (accepting
+# realistic offsets such as Unix second or millisecond timestamps while
+# rejecting spreads where float64 mean quantization visibly distorts float32
+# outputs, e.g. `2**52 + [0, 1]`, where `2**52 + 0.5` rounds to `2**52`).
+_Z_SCORE_MAX_MEAN_RESIDUAL_RTOL = 1e-5
+
+# Minimum positive fitted `std` accepted for non-constant channels in
+# `ZScoreNormalizer.from_values`. Below IEEE-754 float64 `smallest_normal`
+# (~2.225e-308), subnormal scales lose mantissa bits and quantize onto multiples
+# of `5e-324`, producing inaccurate z-scores even when the mean is exact.
+_Z_SCORE_MIN_NORMAL_STD = float(np.finfo(np.float64).smallest_normal)
+
+
+def _z_score_scale(std: Any, feature_name: str = "") -> np.ndarray:
+  """Validates `std` as finite non-negative float64 and maps `0.0` to `1.0`.
+
+  Negative and non-finite (`NaN`, `±inf`) scales raise `ValueError`. An exact
+  `0.0` scale (from a zero-variance channel) is replaced by `1.0` so the
+  channel is centered (`value - mean`) without dividing by zero. Any positive
+  finite scale is kept as is, however small relative to the mean, because a
+  small spread at a large offset (e.g. `[1e6, 1e6 + 1, 1e6 + 2]`) is real
+  signal.
+
+  Args:
+    std: Per-element standard deviation array.
+    feature_name: Feature name used in validation error messages.
+
+  Returns:
+    A float64 array of positive, finite scales.
+
+  Raises:
+    ValueError: If `std` contains `NaN`, `±inf`, or negative values.
+  """
+  std_arr = np.asarray(std, dtype=np.float64)
+  if (~np.isfinite(std_arr) | (std_arr < 0.0)).any():
+    raise ValueError(
+        f"ZScoreNormalizer for feature '{feature_name}' requires finite,"
+        " non-negative std values (no NaN, ±inf, or negative scales)."
+    )
+  return np.where(std_arr == 0.0, 1.0, std_arr)
+
+
+@normalizer_registry.register
+@dataclasses_json.dataclass_json
+@dataclasses.dataclass(kw_only=True)
+class ZScoreNormalizer(AbstractFeatureNormalizer):
+  """Standardizes numeric or embedding features via `(value - mean) / std`.
+
+  `mean` and `std` are stored in float64, and `value - mean` is computed in
+  float64 before the result is cast to float32, so inputs with a large offset
+  (e.g. `1e8 + small signal`) keep their signal. Channels that are constant in
+  the fitting data, or constructed with `std == 0`, use a scale of `1.0`, so
+  they are centered without dividing by zero. Non-finite (`NaN`, `±inf`)
+  `mean` or `std` values and negative `std` values raise `ValueError` in
+  `__post_init__` (covering direct construction, `from_values`, and JSON
+  deserialization). At normalization time, non-finite input entries (`NaN`,
+  `±inf`) propagate through `(value - mean) / std`; to preserve float64 offset
+  precision on features with missing values, run `ZScoreNormalizer` first and
+  impute non-finite outputs afterward (e.g. with `ImputeNanNormalizer` using
+  `strategy='zero'`).
+
+  Usage example:
+
+  ```python
+  normalizer = dgf.transform.ZScoreNormalizer.from_values(
+      "feat",
+      dgf.data.FeatureSchema(
+          format=dgf.data.FeatureFormat.FLOAT_32,
+          semantic=dgf.data.FeatureSemantic.EMBEDDING,
+          shape=(16,),
+      ),
+      train_embeddings,
+  )
+  outputs = normalizer.normalize_numpy(test_embeddings)
+  ```
+
+  Attributes:
+    output_feature_name: Name of the standardized float32 output feature.
+    output_shape: Static shape of each entity's feature value.
+    mean: Finite float64 per-element mean array of shape `output_shape`.
+    std: Positive, finite float64 per-element scale array of shape
+      `output_shape` (`0.0` passed at construction is mapped to `1.0`).
+    output_semantic: Feature semantic emitted on the output schema (preserved
+      from `input_schema.semantic` in `from_values`).
+    is_timeseries: Whether the feature is a timeseries.
+    group: Feature group name emitted on the output schema. When `is_timeseries`
+      is True and `group` is None, defaults to `input_feature` (its implicit
+      sequence group).
+  """
+
+  output_feature_name: str
+  output_shape: tuple[int, ...]
+  mean: np.ndarray = dataclasses.field(
+      metadata=dataclasses_json.config(
+          encoder=lambda x: np.asarray(x, dtype=np.float64).tolist(),
+          decoder=lambda x: np.asarray(x, dtype=np.float64),
+      )
+  )
+  std: np.ndarray = dataclasses.field(
+      metadata=dataclasses_json.config(
+          encoder=lambda x: np.asarray(x, dtype=np.float64).tolist(),
+          decoder=lambda x: np.asarray(x, dtype=np.float64),
+      )
+  )
+  output_semantic: schema_lib.FeatureSemantic = (
+      schema_lib.FeatureSemantic.NUMERICAL
+  )
+  is_timeseries: bool = False
+  group: str | None = None
+  type: str = dataclasses.field(default="ZScoreNormalizer", init=False)
+
+  def __post_init__(self):
+    if self.is_timeseries and self.group is None:
+      self.group = self.input_feature
+    _check_continuous_semantic(
+        "ZScoreNormalizer", self.input_feature, self.output_semantic
+    )
+    self.mean = np.asarray(self.mean, dtype=np.float64)
+    self.std = np.asarray(self.std, dtype=np.float64)
+    for param_name, param in (("mean", self.mean), ("std", self.std)):
+      _check_param_shape(
+          "ZScoreNormalizer",
+          self.input_feature,
+          param_name,
+          param,
+          self.output_shape,
+      )
+    if not np.isfinite(self.mean).all():
+      raise ValueError(
+          f"ZScoreNormalizer for feature '{self.input_feature}' requires"
+          " finite mean values (no NaN or ±inf)."
+      )
+    self.std = _z_score_scale(self.std, self.input_feature)
+
+  @classmethod
+  def from_values(
+      cls,
+      feature_name: str,
+      input_schema: schema_lib.FeatureSchema,
+      values: np.ndarray,
+  ) -> "ZScoreNormalizer":
+    """Fits per-element mean and standard deviation across the leading axis.
+
+    Statistics are computed and stored in float64 so large offsets do not lose
+    precision when the mean is representable in float64 relative to the spread.
+    Integer values must satisfy `|x| <= 2**53` (beyond that, float64 cannot
+    represent every integer and could merge distinct values), non-constant
+    channels must have a normal float64 standard deviation (`std >=
+    _Z_SCORE_MIN_NORMAL_STD`), and channels whose float64 mean rounding shifts
+    outputs by more than `_Z_SCORE_MAX_MEAN_RESIDUAL_RTOL * std` (e.g.
+    `2**52 + [0, 1]`, or spreads narrower than `~1e-11 * |mean|` with a
+    non-representable mean) raise `ValueError` rather than emitting biased
+    z-scores. Normalization does not repeat the integer bound check: a larger
+    integer input is rounded to the nearest float64 before `(value - mean) /
+    std`.
+
+    Args:
+      feature_name: Name of the numeric or embedding input feature.
+      input_schema: Schema of the input feature (static-shape INTEGER or FLOAT).
+      values: Integer or float array of shape `(num_entities, *feature_shape)`.
+        Non-finite values (NaN and ±inf) are ignored when estimating mean and
+        standard deviation. Channels whose finite values are all equal (`max ==
+        min`) have zero variance and get a scale of `1.0` so they normalize to
+        `0.0`. For pre-padded timeseries features, statistics are computed
+        across all finite entries per position (including numeric padding such
+        as `0.0`), so pad missing steps with `NaN` if padding should be
+        excluded.
+
+    Returns:
+      A fitted `ZScoreNormalizer`.
+
+    Raises:
+      ValueError: If `values` is empty, a channel has no finite value, an
+        integer value exceeds `2**53` in magnitude, `values - mean` overflows
+        float64, a non-constant channel's standard deviation underflows below
+        `_Z_SCORE_MIN_NORMAL_STD`, or a non-constant channel's mean residual
+        exceeds `_Z_SCORE_MAX_MEAN_RESIDUAL_RTOL * std`.
+    """
+    schema_shape = _validate_fixed_numeric_schema(
+        feature_name, input_schema, "ZScoreNormalizer"
+    )
+    vals, output_shape = _validate_fit_values(
+        feature_name, schema_shape, values
+    )
+    arr = np.asarray(values)
+    if (
+        np.issubdtype(arr.dtype, np.integer)
+        and (
+            (arr > _FLOAT64_EXACT_INT_MAX) | (arr < -_FLOAT64_EXACT_INT_MAX)
+        ).any()
+    ):
+      raise ValueError(
+          f"Feature '{feature_name}' has integer values beyond 2**53 in"
+          " magnitude, which float64 cannot represent exactly; fitting"
+          " ZScoreNormalizer on them could merge distinct values. Subtract an"
+          " offset from the feature first (e.g. for nanosecond timestamps)."
+      )
+    num_cols = int(np.prod(output_shape, dtype=np.int64))
+    if num_cols == 0:
+      mean = np.zeros(output_shape, dtype=np.float64)
+      std = np.ones(output_shape, dtype=np.float64)
+    else:
+      if vals.shape[0] == 0 or np.isnan(vals).all(axis=0).any():
+        raise ValueError(
+            f"Feature '{feature_name}' has no values or a channel that is"
+            " entirely non-finite (NaN/±inf); cannot fit ZScoreNormalizer."
+            " Drop the channel, or impute non-finite outputs after"
+            " ZScoreNormalizer (applying ImputeNanNormalizer before"
+            " ZScoreNormalizer casts inputs to float32 first)."
+        )
+      lo = np.nanmin(vals, axis=0)
+      constant = np.nanmax(vals, axis=0) == lo
+      # Overflow/underflow is detected explicitly below, so silence numpy's
+      # floating-point warnings (and errors under `np.seterr(all="raise")`).
+      with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        # Rescale extreme magnitudes before summing so `nanmean` neither
+        # overflows above ~1e308 nor loses precision near float64 subnormals,
+        # then refine with a second-pass residual average. Constant channels
+        # use their common value directly so `vals - mean` is identically 0.
+        vscale = np.nanmax(np.abs(vals), axis=0)
+        need_vscale = (vscale > 1e150) | ((vscale > 0.0) & (vscale < 1e-290))
+        scale = np.where(need_vscale & np.isfinite(vscale), vscale, 1.0)
+        mean1 = scale * np.nanmean(vals / scale, axis=0)
+        mean = np.where(
+            constant,
+            lo,
+            mean1 + scale * np.nanmean((vals - mean1) / scale, axis=0),
+        )
+        # Max-abs-scaled corrected two-pass standard deviation avoids squaring
+        # overflow (> ~1.34e154) and underflow (< ~1e-154), and exposes the
+        # mean-rounding shift `|r_unit| / std_unit == |E[x - mean]| / std`.
+        d = vals - mean
+        diff_overflow = (~np.isnan(vals) & ~np.isfinite(d)).any(axis=0)
+        dmax = np.nanmax(np.abs(d), axis=0)
+        dmax_safe = np.where((dmax > 0.0) & np.isfinite(dmax), dmax, 1.0)
+        d_unit = d / dmax_safe
+        r_unit = np.nanmean(d_unit, axis=0)
+        var_unit = np.maximum(
+            0.0, np.nanmean(np.square(d_unit), axis=0) - np.square(r_unit)
+        )
+        std_unit = np.sqrt(var_unit)
+        raw_std = dmax_safe * std_unit
+      unusable = (
+          ~np.isfinite(mean)
+          | diff_overflow
+          | (
+              ~constant
+              & (
+                  ~np.isfinite(raw_std)
+                  | (raw_std < _Z_SCORE_MIN_NORMAL_STD)
+                  | ~np.isfinite(r_unit)
+                  | ~np.isfinite(std_unit)
+                  | (std_unit <= 0.0)
+                  | (
+                      np.abs(r_unit)
+                      > _Z_SCORE_MAX_MEAN_RESIDUAL_RTOL * std_unit
+                  )
+              )
+          )
+      )
+      if unusable.any():
+        raise ValueError(
+            f"Feature '{feature_name}' values cannot be standardized"
+            " accurately in float64 (either `values - mean` overflowed, `std`"
+            " underflowed into float64 subnormals, or rounding the mean to"
+            " float64 shifts z-scores by more than"
+            f" {_Z_SCORE_MAX_MEAN_RESIDUAL_RTOL:g} std:"
+            f" mean {mean[unusable].tolist()}, std"
+            f" {raw_std[unusable].tolist()}); subtract an offset or rescale"
+            " the feature first."
+        )
+      std = np.where(constant, 1.0, raw_std)
+
+    return ZScoreNormalizer(
+        input_feature=feature_name,
+        output_feature_name=f"{feature_name}_Z_SCORE",
+        output_shape=output_shape,
+        mean=mean,
+        std=std,
+        output_semantic=input_schema.semantic,
+        is_timeseries=input_schema.is_timeseries,
+        group=_output_timeseries_group(feature_name, input_schema),
+    )
+
+  def output_schema(self) -> schema_lib.FeatureSetSchema:
+    return {
+        self.output_feature_name: schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=self.output_semantic,
+            shape=self.output_shape,
+            is_timeseries=self.is_timeseries,
+            group=self.group,
+        )
+    }
+
+  def normalize_numpy(self, value: np.ndarray) -> dict[str, np.ndarray]:
+    # `value - mean` runs in float64: a float32 subtraction would cancel the
+    # signal of inputs with a large offset (float32 ulp at 1e8 is 8).
+    val = np.asarray(value, dtype=np.float64)
+    return {
+        self.output_feature_name: ((val - self.mean) / self.std).astype(
+            np.float32
+        )
+    }
+
+  def normalize_tensorflow(self, value: tf.Tensor) -> dict[str, tf.Tensor]:
+    val = tf.cast(value, tf.float64)
+    mean = tf.constant(self.mean, dtype=tf.float64)
+    std = tf.constant(self.std, dtype=tf.float64)
+    return {self.output_feature_name: tf.cast((val - mean) / std, tf.float32)}
+
+
 @normalizer_registry.register
 @dataclasses_json.dataclass_json
 @dataclasses.dataclass(kw_only=True)
@@ -1130,6 +2153,19 @@ class AutoNormalizeConfig:
   Attributes:
     categorical_bytes_to_index: If True, categorical features with BYTES format
       will be converted to integer indices using `DictionaryIndexNormalizer`.
+    categorical_one_hot: If True, categorical features (BYTES when
+      `categorical_bytes_to_index` is True, INTEGER, or BOOL) are one-hot
+      encoded into float32 embeddings using `OneHotNormalizer`. INTEGER
+      categorical features without `num_categorical_values` require non-empty
+      finite statistics (empty BYTES categorical features emit a 1-column
+      all-zero vector).
+    categorical_one_hot_drop_if_binary: If True and `categorical_one_hot` is
+      True, categorical features with exactly two categories emit a single
+      indicator column and raise on an unseen value. If False (default), they
+      emit a 2-element vector and unseen values encode as zeros.
+    max_one_hot_categories: Maximum category count allowed by `OneHotNormalizer`
+      when `categorical_one_hot` is True (defaults to
+      `DEFAULT_MAX_ONE_HOT_CATEGORIES`). Pass `None` to disable.
     numerical_soft_quantile: If True, numerical features (INTEGER or FLOAT) will
       be normalized using `SoftQuantileNormalizer`.
     keep_raw_features: A set of `(nodeset_name, feature_name)` tuples that
@@ -1170,6 +2206,9 @@ class AutoNormalizeConfig:
   """
 
   categorical_bytes_to_index: bool = True
+  categorical_one_hot: bool = False
+  categorical_one_hot_drop_if_binary: bool = False
+  max_one_hot_categories: int | None = DEFAULT_MAX_ONE_HOT_CATEGORIES
   numerical_soft_quantile: bool = True
   keep_raw_features: set[tuple[str, str]] = dataclasses.field(
       default_factory=set,
@@ -1384,11 +2423,44 @@ def auto_normalize(
           and feature_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL
           and feature_schema.format == schema_lib.FeatureFormat.BYTES
       ):
-        nodeset_normalizers.append(
-            DictionaryIndexNormalizer.create(
-                feature_name, feature_schema, feature_stats
-            )
+        dict_norm = DictionaryIndexNormalizer.create(
+            feature_name, feature_schema, feature_stats
         )
+        if config.categorical_one_hot:
+          # `DictionaryIndexNormalizer` drops the timeseries flag and group
+          # from its index schema; restore them from the original feature so
+          # the one-hot output keeps its (implicit) sequence group.
+          idx_schema = dataclasses.replace(
+              dict_norm.output_schema()[dict_norm.output_feature_name],
+              is_timeseries=feature_schema.is_timeseries,
+              group=_output_timeseries_group(feature_name, feature_schema),
+          )
+          num_categories = len(dict_norm.dictionary_map)
+          # Without any observed value, `DictionaryIndexNormalizer` uses a
+          # placeholder dictionary whose out-of-vocabulary index (0) collides
+          # with the placeholder entry. Move it outside `[0, num_categories)`
+          # (together with the placeholder entry itself) so that every value
+          # one-hot encodes as zeros, as documented for unseen values.
+          if dict_norm.out_of_vocab_value < num_categories:
+            dict_norm = dataclasses.replace(
+                dict_norm,
+                dictionary_map=dict.fromkeys(
+                    dict_norm.dictionary_map, num_categories
+                ),
+                out_of_vocab_value=num_categories,
+            )
+          one_hot_norm = OneHotNormalizer.create(
+              dict_norm.output_feature_name,
+              idx_schema,
+              num_categories=num_categories,
+              drop_if_binary=config.categorical_one_hot_drop_if_binary,
+              max_one_hot_categories=config.max_one_hot_categories,
+          )
+          nodeset_normalizers.append(
+              SequentialNormalizer.create([dict_norm, one_hot_norm])
+          )
+        else:
+          nodeset_normalizers.append(dict_norm)
         feature_has_normalized = True
 
       # Text bytes embedding
@@ -1406,19 +2478,33 @@ def auto_normalize(
         )
         feature_has_normalized = True
 
-      # Categorical integer
-      if (
-          feature_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL
-          and feature_schema.format.is_integer()
-      ):
-        feature_schema = copy.deepcopy(feature_schema)
-        if feature_schema.num_categorical_values is None:
-          feature_schema.num_categorical_values = (
-              round(feature_stats.maximum) + 1
+      # Categorical integer (or boolean when one-hot encoding)
+      if feature_schema.semantic == schema_lib.FeatureSemantic.CATEGORICAL and (
+          feature_schema.format.is_integer()
+          or (
+              config.categorical_one_hot
+              and feature_schema.format == schema_lib.FeatureFormat.BOOL
           )
-        nodeset_normalizers.append(
-            IdentityNormalizer(feature_name, input_schema=feature_schema)
-        )
+      ):
+        if config.categorical_one_hot:
+          nodeset_normalizers.append(
+              OneHotNormalizer.create(
+                  feature_name,
+                  feature_schema,
+                  feature_stats,
+                  drop_if_binary=config.categorical_one_hot_drop_if_binary,
+                  max_one_hot_categories=config.max_one_hot_categories,
+              )
+          )
+        else:
+          feature_schema = copy.deepcopy(feature_schema)
+          if feature_schema.num_categorical_values is None:
+            feature_schema.num_categorical_values = (
+                round(feature_stats.maximum) + 1
+            )
+          nodeset_normalizers.append(
+              IdentityNormalizer(feature_name, input_schema=feature_schema)
+          )
         feature_has_normalized = True
 
       # Numerical

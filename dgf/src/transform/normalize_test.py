@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
+
 from absl.testing import absltest
 from absl.testing import parameterized
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
@@ -2565,6 +2567,2229 @@ class GraphNormalizerKwargsTest(parameterized.TestCase):
         np.asarray(jax_out_graph.edge_sets["e"].features["time_seed_delta"]),
         expected_deltas,
     )
+
+
+class OneHotNormalizerTest(parameterized.TestCase):
+
+  def test_multiclass_and_oov_numpy_tf_and_json(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(),
+        num_categorical_values=3,
+    )
+    normalizer = normalize_lib.OneHotNormalizer.create(
+        "cat", input_schema, drop_if_binary=True
+    )
+    values = np.array([0, 2, 3, -1, 1], dtype=np.int64)
+    expected = np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    np_out = normalizer.normalize_numpy(values)
+    np.testing.assert_array_equal(np_out["cat_ONE_HOT"], expected)
+
+    tf_out = normalizer.normalize_tensorflow(tf.constant(values))
+    np.testing.assert_array_equal(tf_out["cat_ONE_HOT"].numpy(), expected)
+
+    self.assertEqual(
+        normalizer.output_schema(),
+        {
+            "cat_ONE_HOT": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.FLOAT_32,
+                semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                shape=(3,),
+            )
+        },
+    )
+
+    cfg = normalize_lib.GraphNormalizerConfig(
+        nodesets={
+            "n": normalize_lib.NodeSetNormalizerConfig(normalizers=[normalizer])
+        },
+        edgesets={},
+    )
+    restored = normalize_lib.GraphNormalizerConfig.from_json(  # pyrefly: ignore[missing-attribute]
+        cfg.to_json()  # pyrefly: ignore[missing-attribute]
+    )
+    test_util.assert_are_equal(self, restored, cfg)
+
+  @parameterized.named_parameters(
+      (
+          "int_drop",
+          schema_lib.FeatureFormat.INTEGER_64,
+          True,
+          [0, 1, 0, 1],
+          [[0.0], [1.0], [0.0], [1.0]],
+      ),
+      (
+          "int_keep",
+          schema_lib.FeatureFormat.INTEGER_64,
+          False,
+          [0, 1, 2, -1],
+          [[1.0, 0.0], [0.0, 1.0], [0.0, 0.0], [0.0, 0.0]],
+      ),
+      (
+          "bool_drop",
+          schema_lib.FeatureFormat.BOOL,
+          True,
+          [False, True, False, True],
+          [[0.0], [1.0], [0.0], [1.0]],
+      ),
+      (
+          "bool_keep",
+          schema_lib.FeatureFormat.BOOL,
+          False,
+          [False, True, False, True],
+          [[1.0, 0.0], [0.0, 1.0], [1.0, 0.0], [0.0, 1.0]],
+      ),
+  )
+  def test_binary_drop_and_bool(self, fmt, drop_if_binary, values, expected):
+    input_schema = schema_lib.FeatureSchema(
+        format=fmt,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(),
+    )
+    stats = statistics_lib.FeatureStatistics(
+        count=4, minimum=0.0, maximum=1.0, dictionary={}, quantiles=[]
+    )
+    normalizer = normalize_lib.OneHotNormalizer.create(
+        "flag",
+        input_schema,
+        stats if fmt != schema_lib.FeatureFormat.BOOL else None,
+        drop_if_binary=drop_if_binary,
+    )
+    values = np.array(
+        values,
+        dtype=np.bool_ if fmt == schema_lib.FeatureFormat.BOOL else np.int64,
+    )
+    expected = np.array(expected, dtype=np.float32)
+
+    np_out = normalizer.normalize_numpy(values)["flag_ONE_HOT"]
+    tf_out = (
+        normalizer.normalize_tensorflow(tf.constant(values))["flag_ONE_HOT"]
+        .numpy()
+    )
+    np.testing.assert_array_equal(np_out, expected)
+    np.testing.assert_array_equal(tf_out, expected)
+    self.assertEqual(np_out.dtype, np.float32)
+    self.assertEqual(tf_out.dtype, np.float32)
+
+  def test_binary_drop_enforces_binary_numpy_tf_and_graph_mode(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(),
+        num_categorical_values=2,
+    )
+    normalizer = normalize_lib.OneHotNormalizer.create(
+        "flag", input_schema, drop_if_binary=True
+    )
+
+    @tf.function
+    def _tf_fn(tensor):
+      return normalizer.normalize_tensorflow(tensor)["flag_ONE_HOT"]
+
+    for bad_values in (
+        np.array([0, 1, 2], dtype=np.int64),
+        np.array([0, -1], dtype=np.int64),
+    ):
+      with self.assertRaisesRegex(ValueError, r"must be in \[0, 2\)"):
+        normalizer.normalize_numpy(bad_values)
+      with self.assertRaises(tf.errors.InvalidArgumentError):
+        normalizer.normalize_tensorflow(tf.constant(bad_values))
+      with self.assertRaises(tf.errors.InvalidArgumentError):
+        _tf_fn(tf.constant(bad_values))
+
+  def test_invalid_output_shape_rejected(self):
+    with self.assertRaisesRegex(ValueError, "trailing output_shape"):
+      normalize_lib.OneHotNormalizer(
+          input_feature="flag",
+          num_categories=2,
+          output_shape=(2,),
+          output_feature_name="flag_ONE_HOT",
+          drop_if_binary=True,
+      )
+    with self.assertRaisesRegex(ValueError, "trailing output_shape"):
+      normalize_lib.OneHotNormalizer(
+          input_feature="flag",
+          num_categories=2,
+          output_shape=(),
+          output_feature_name="flag_ONE_HOT",
+      )
+    with self.assertRaisesRegex(ValueError, "num_categories >= 1"):
+      normalize_lib.OneHotNormalizer(
+          input_feature="flag",
+          num_categories=0,
+          output_shape=(0,),
+          output_feature_name="flag_ONE_HOT",
+      )
+
+  def test_multidim_feature_and_invalid_inputs(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_32,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(2,),
+        num_categorical_values=3,
+    )
+    normalizer = normalize_lib.OneHotNormalizer.create("pair", input_schema)
+    values = np.array([[0, 2], [1, 0]], dtype=np.int32)
+    expected = np.array(
+        [
+            [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]],
+        ],
+        dtype=np.float32,
+    )
+    np_out = normalizer.normalize_numpy(values)["pair_ONE_HOT"]
+    tf_out = (
+        normalizer.normalize_tensorflow(tf.constant(values))["pair_ONE_HOT"]
+        .numpy()
+    )
+    self.assertEqual(np_out.dtype, np.float32)
+    self.assertEqual(tf_out.dtype, np.float32)
+    np.testing.assert_array_equal(np_out, expected)
+    np.testing.assert_array_equal(tf_out, expected)
+
+    with self.assertRaisesRegex(ValueError, "INTEGER or BOOL"):
+      normalize_lib.OneHotNormalizer.create(
+          "bad",
+          schema_lib.FeatureSchema(
+              format=schema_lib.FeatureFormat.FLOAT_32,
+              semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+          ),
+          num_categories=3,
+      )
+    with self.assertRaisesRegex(ValueError, "static shape"):
+      normalize_lib.OneHotNormalizer.create(
+          "dyn",
+          schema_lib.FeatureSchema(
+              format=schema_lib.FeatureFormat.INTEGER_64,
+              semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+              shape=(None,),
+          ),
+          num_categories=3,
+      )
+    with self.assertRaisesRegex(ValueError, "Cannot infer num_categories"):
+      normalize_lib.OneHotNormalizer.create(
+          "missing",
+          schema_lib.FeatureSchema(
+              format=schema_lib.FeatureFormat.INTEGER_64,
+              semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+              shape=(),
+          ),
+      )
+    with self.assertRaisesRegex(ValueError, "invalid num_categories=0"):
+      normalize_lib.OneHotNormalizer.create(
+          "zero_cats", input_schema, num_categories=0
+      )
+
+  def test_empty_or_non_finite_stats_rejected(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(),
+    )
+    for bad_stats in (
+        statistics_lib.FeatureStatistics(
+            count=0,
+            minimum=float("nan"),
+            maximum=float("nan"),
+            dictionary={},
+            quantiles=[],
+        ),
+        statistics_lib.FeatureStatistics(
+            count=3,
+            minimum=0.0,
+            maximum=float("nan"),
+            dictionary={},
+            quantiles=[],
+        ),
+        statistics_lib.FeatureStatistics(
+            count=3,
+            minimum=0.0,
+            maximum=float("inf"),
+            dictionary={},
+            quantiles=[],
+        ),
+    ):
+      with self.assertRaisesRegex(ValueError, "No finite maximum observed"):
+        normalize_lib.OneHotNormalizer.create("cat", input_schema, bad_stats)
+
+    # Providing an explicit category count or schema num_categorical_values
+    # succeeds even when stats are empty.
+    empty_stats = statistics_lib.FeatureStatistics(
+        count=0,
+        minimum=float("nan"),
+        maximum=float("nan"),
+        dictionary={},
+        quantiles=[],
+    )
+    explicit = normalize_lib.OneHotNormalizer.create(
+        "cat", input_schema, empty_stats, num_categories=3
+    )
+    self.assertEqual(explicit.num_categories, 3)
+
+  def test_max_one_hot_categories_rejects_large_id(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(),
+    )
+    large_id_stats = statistics_lib.FeatureStatistics(
+        count=10,
+        minimum=0.0,
+        maximum=1e9,
+        dictionary={},
+        quantiles=[],
+    )
+    with self.assertRaisesRegex(
+        ValueError, "exceeds max_one_hot_categories=1024.*DictionaryIndex"
+    ):
+      normalize_lib.OneHotNormalizer.create(
+          "hashed_id", input_schema, large_id_stats
+      )
+
+    # Explicit / schema category counts that exceed the cap report a message
+    # tailored to explicit widths (not suggesting num_categorical_values or
+    # DictionaryIndexNormalizer).
+    for schema, explicit_num_cats in (
+        (input_schema, 10),
+        (
+            schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.INTEGER_64,
+                semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                shape=(),
+                num_categorical_values=10,
+            ),
+            None,
+        ),
+    ):
+      with self.assertRaises(ValueError) as cm:
+        normalize_lib.OneHotNormalizer.create(
+            "cat",
+            schema,
+            num_categories=explicit_num_cats,
+            max_one_hot_categories=4,
+        )
+      msg = str(cm.exception)
+      self.assertIn("exceeds max_one_hot_categories=4", msg)
+      self.assertIn("disable `categorical_one_hot`", msg)
+      self.assertNotIn("DictionaryIndexNormalizer", msg)
+      self.assertNotIn("num_categorical_values", msg)
+
+    # Explicit smaller cap is also enforced, while passing an explicit
+    # num_categorical_values within the cap succeeds.
+    small_stats = statistics_lib.FeatureStatistics(
+        count=4, minimum=0.0, maximum=10.0, dictionary={}, quantiles=[]
+    )
+    with self.assertRaisesRegex(ValueError, "exceeds max_one_hot_categories=4"):
+      normalize_lib.OneHotNormalizer.create(
+          "cat", input_schema, small_stats, max_one_hot_categories=4
+      )
+    capped_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(),
+        num_categorical_values=4,
+    )
+    ok_norm = normalize_lib.OneHotNormalizer.create(
+        "cat", capped_schema, large_id_stats, max_one_hot_categories=4
+    )
+    self.assertEqual(ok_norm.num_categories, 4)
+
+    # `None` disables the cap (2001 categories from maximum=2000), and a cap
+    # below 1 is rejected.
+    wide_stats = statistics_lib.FeatureStatistics(
+        count=4, minimum=0.0, maximum=2000.0, dictionary={}, quantiles=[]
+    )
+    uncapped = normalize_lib.OneHotNormalizer.create(
+        "cat", input_schema, wide_stats, max_one_hot_categories=None
+    )
+    self.assertEqual(uncapped.num_categories, 2001)
+    with self.assertRaisesRegex(ValueError, ">= 1 or None, got 0"):
+      normalize_lib.OneHotNormalizer.create(
+          "cat", input_schema, wide_stats, max_one_hot_categories=0
+      )
+
+  def test_drop_if_binary_rejects_negative_sentinels_in_stats(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(),
+    )
+    sentinel_stats = statistics_lib.FeatureStatistics(
+        count=5, minimum=-1.0, maximum=1.0, dictionary={}, quantiles=[]
+    )
+    with self.assertRaisesRegex(ValueError, "minimum=-1.0 < 0"):
+      normalize_lib.OneHotNormalizer.create(
+          "flag", input_schema, sentinel_stats, drop_if_binary=True
+      )
+    # A third category observed in the stats contradicts a feature declared
+    # binary (num_categorical_values=2) and committed to [0, 2).
+    binary_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(),
+        num_categorical_values=2,
+    )
+    third_class_stats = statistics_lib.FeatureStatistics(
+        count=5, minimum=0.0, maximum=2.0, dictionary={}, quantiles=[]
+    )
+    with self.assertRaisesRegex(ValueError, "maximum=2.0 >= 2"):
+      normalize_lib.OneHotNormalizer.create(
+          "flag", binary_schema, third_class_stats, drop_if_binary=True
+      )
+
+    # With drop_if_binary=False, -1 sentinels are allowed and encode as zeros.
+    safe_norm = normalize_lib.OneHotNormalizer.create(
+        "flag", input_schema, sentinel_stats, drop_if_binary=False
+    )
+    np.testing.assert_array_equal(
+        safe_norm.normalize_numpy(np.array([-1, 0, 1], dtype=np.int64))[
+            "flag_ONE_HOT"
+        ],
+        np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+    )
+
+  def test_timeseries_implicit_group_preserved(self):
+    ts_implicit = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(4,),
+        num_categorical_values=3,
+        is_timeseries=True,
+        group=None,
+    )
+    expected_implicit = {
+        "events_ONE_HOT": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+            shape=(4, 3),
+            is_timeseries=True,
+            group="events",
+        )
+    }
+    norm_implicit = normalize_lib.OneHotNormalizer.create("events", ts_implicit)
+    self.assertEqual(norm_implicit.output_schema(), expected_implicit)
+
+    # Direct construction and JSON with `group=None` also populate the implicit
+    # group via `__post_init__`.
+    direct = normalize_lib.OneHotNormalizer(
+        input_feature="events",
+        num_categories=3,
+        output_shape=(4, 3),
+        output_feature_name="events_ONE_HOT",
+        is_timeseries=True,
+        group=None,
+    )
+    self.assertEqual(direct.output_schema(), expected_implicit)
+    cfg = normalize_lib.GraphNormalizerConfig(
+        nodesets={"n": normalize_lib.NodeSetNormalizerConfig([direct])},
+        edgesets={},
+    )
+    null_group_json = cfg.to_json().replace('"group": "events"', '"group": null')  # pyrefly: ignore[missing-attribute]
+    self.assertIn('"group": null', null_group_json)
+    restored = (
+        normalize_lib.GraphNormalizerConfig.from_json(null_group_json)  # pyrefly: ignore[missing-attribute]
+        .nodesets["n"]
+        .normalizers[0]
+    )
+    self.assertEqual(restored.output_schema(), expected_implicit)
+
+    ts_explicit = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        shape=(4,),
+        num_categorical_values=3,
+        is_timeseries=True,
+        group="seq_a",
+    )
+    norm_explicit = normalize_lib.OneHotNormalizer.create("events", ts_explicit)
+    self.assertEqual(
+        norm_explicit.output_schema(),
+        {
+            "events_ONE_HOT": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.FLOAT_32,
+                semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                shape=(4, 3),
+                is_timeseries=True,
+                group="seq_a",
+            )
+        },
+    )
+
+
+class ImputeNanNormalizerTest(parameterized.TestCase):
+
+  @parameterized.named_parameters(
+      ("median", "median", [2.0, 1.0]),
+      ("mean", "mean", [2.25, 1.0]),
+      ("zero", "zero", [0.0, 0.0]),
+  )
+  def test_from_values_strategies_and_tf_parity(self, strategy, expected_fills):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(2,),
+    )
+    train_values = np.array(
+        [
+            [2.0, -3.0],
+            [2.0, 5.0],
+            [1.0, -3.0],
+            [4.0, 5.0],
+            [np.nan, np.nan],
+        ],
+        dtype=np.float32,
+    )
+    normalizer = normalize_lib.ImputeNanNormalizer.from_values(
+        "num", input_schema, train_values, strategy=strategy
+    )
+    np.testing.assert_allclose(
+        normalizer.fill_values, np.array(expected_fills, dtype=np.float32)
+    )
+
+    test_values = np.array([[np.nan, 10.0], [7.0, np.nan]], dtype=np.float32)
+    np_out = normalizer.normalize_numpy(test_values)["num_IMPUTED"]
+    tf_out = (
+        normalizer.normalize_tensorflow(tf.constant(test_values))["num_IMPUTED"]
+        .numpy()
+    )
+    expected = np.array(
+        [[expected_fills[0], 10.0], [7.0, expected_fills[1]]], dtype=np.float32
+    )
+    np.testing.assert_allclose(np_out, expected)
+    np.testing.assert_allclose(tf_out, expected)
+    self.assertEqual(np_out.dtype, np.float32)
+    self.assertEqual(tf_out.dtype, np.float32)
+
+    cfg = normalize_lib.GraphNormalizerConfig(
+        nodesets={
+            "n": normalize_lib.NodeSetNormalizerConfig(normalizers=[normalizer])
+        },
+        edgesets={},
+    )
+    restored = normalize_lib.GraphNormalizerConfig.from_json(  # pyrefly: ignore[missing-attribute]
+        cfg.to_json()  # pyrefly: ignore[missing-attribute]
+    )
+    test_util.assert_are_equal(self, restored, cfg)
+
+  def test_create_from_stats_and_all_nan_rejected(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    stats = statistics_lib.FeatureStatistics(
+        count=3,
+        minimum=1.0,
+        maximum=9.0,
+        dictionary={},
+        quantiles=[1.0, 4.0, 9.0],
+        mean=4.5,
+    )
+    med_norm = normalize_lib.ImputeNanNormalizer.create(
+        "x", input_schema, stats, strategy="median"
+    )
+    np.testing.assert_allclose(
+        med_norm.normalize_numpy(np.array([np.nan, 2.0], dtype=np.float32))[
+            "x_IMPUTED"
+        ],
+        np.array([4.0, 2.0], dtype=np.float32),
+    )
+
+    with self.assertRaisesRegex(ValueError, "entirely non-finite"):
+      normalize_lib.ImputeNanNormalizer.from_values(
+          "x", input_schema, np.array([np.nan, np.nan], dtype=np.float32)
+      )
+
+  def test_create_median_even_length_matches_numpy_median(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    even_stats = statistics_lib.FeatureStatistics(
+        count=4,
+        minimum=1.0,
+        maximum=10.0,
+        dictionary={},
+        quantiles=[1.0, 2.0, 6.0, 10.0],
+        mean=4.75,
+    )
+    norm = normalize_lib.ImputeNanNormalizer.create(
+        "x", input_schema, even_stats, strategy="median"
+    )
+    np.testing.assert_allclose(
+        norm.fill_values, np.array(4.0, dtype=np.float32)
+    )
+
+  def test_create_fails_loudly_and_median_with_fallbacks(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    no_quantiles_stats = statistics_lib.FeatureStatistics(
+        count=3,
+        minimum=1.0,
+        maximum=5.0,
+        dictionary={},
+        quantiles=[],
+        mean=3.0,
+    )
+    empty_stats = statistics_lib.FeatureStatistics(
+        count=0,
+        minimum=float("nan"),
+        maximum=float("nan"),
+        dictionary={},
+        quantiles=[],
+        mean=float("nan"),
+    )
+
+    with self.assertRaisesRegex(ValueError, "No finite quantiles"):
+      normalize_lib.ImputeNanNormalizer.create(
+          "x", input_schema, no_quantiles_stats, strategy="median"
+      )
+    with self.assertRaisesRegex(ValueError, "No finite mean"):
+      normalize_lib.ImputeNanNormalizer.create(
+          "x", input_schema, empty_stats, strategy="mean"
+      )
+
+    # Explicit fallback strategy: quantiles -> mean -> 0.0.
+    mean_fb = normalize_lib.ImputeNanNormalizer.create(
+        "x", input_schema, no_quantiles_stats, strategy="median_with_fallbacks"
+    )
+    np.testing.assert_allclose(
+        mean_fb.fill_values, np.array(3.0, dtype=np.float32)
+    )
+    zero_fb = normalize_lib.ImputeNanNormalizer.create(
+        "x", input_schema, empty_stats, strategy="median_with_fallbacks"
+    )
+    np.testing.assert_allclose(
+        zero_fb.fill_values, np.array(0.0, dtype=np.float32)
+    )
+    # With finite quantiles the fallback strategy uses their median (4.0),
+    # not the mean (9.0).
+    skewed_stats = statistics_lib.FeatureStatistics(
+        count=3,
+        minimum=1.0,
+        maximum=22.0,
+        dictionary={},
+        quantiles=[1.0, 4.0, 22.0],
+        mean=9.0,
+    )
+    quantile_fb = normalize_lib.ImputeNanNormalizer.create(
+        "x", input_schema, skewed_stats, strategy="median_with_fallbacks"
+    )
+    self.assertEqual(float(quantile_fb.fill_values), 4.0)
+    # `mean` and `zero` use exactly the mean and 0.0.
+    self.assertEqual(
+        float(
+            normalize_lib.ImputeNanNormalizer.create(
+                "x", input_schema, skewed_stats, strategy="mean"
+            ).fill_values
+        ),
+        9.0,
+    )
+    self.assertEqual(
+        float(
+            normalize_lib.ImputeNanNormalizer.create(
+                "x", input_schema, skewed_stats, strategy="zero"
+            ).fill_values
+        ),
+        0.0,
+    )
+    # A non-finite quantile makes the quantiles unusable even when the middle
+    # one is finite: `median` raises and the fallback uses the mean.
+    inf_quantile_stats = statistics_lib.FeatureStatistics(
+        count=3,
+        minimum=1.0,
+        maximum=float("inf"),
+        dictionary={},
+        quantiles=[1.0, 2.0, float("inf")],
+        mean=5.0,
+    )
+    with self.assertRaisesRegex(ValueError, "No finite quantiles"):
+      normalize_lib.ImputeNanNormalizer.create(
+          "x", input_schema, inf_quantile_stats, strategy="median"
+      )
+    self.assertEqual(
+        float(
+            normalize_lib.ImputeNanNormalizer.create(
+                "x",
+                input_schema,
+                inf_quantile_stats,
+                strategy="median_with_fallbacks",
+            ).fill_values
+        ),
+        5.0,
+    )
+
+  def test_imputes_posinf_and_neginf_across_paths(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(2,),
+    )
+    train_values = np.array(
+        [
+            [2.0, 10.0],
+            [4.0, 20.0],
+            [np.inf, -np.inf],
+            [-np.inf, np.nan],
+        ],
+        dtype=np.float32,
+    )
+    normalizer = normalize_lib.ImputeNanNormalizer.from_values(
+        "x", input_schema, train_values, strategy="median"
+    )
+    np.testing.assert_allclose(
+        normalizer.fill_values, np.array([3.0, 15.0], dtype=np.float32)
+    )
+
+    test_values = np.array(
+        [[np.nan, np.inf], [-np.inf, 7.0]], dtype=np.float32
+    )
+    expected = np.array([[3.0, 15.0], [3.0, 7.0]], dtype=np.float32)
+    np.testing.assert_allclose(
+        normalizer.normalize_numpy(test_values)["x_IMPUTED"], expected
+    )
+    np.testing.assert_allclose(
+        normalizer.normalize_tensorflow(tf.constant(test_values))["x_IMPUTED"]
+        .numpy(),
+        expected,
+    )
+
+    with self.assertRaisesRegex(ValueError, "entirely non-finite"):
+      normalize_lib.ImputeNanNormalizer.from_values(
+          "x",
+          input_schema,
+          np.array([[np.inf, 1.0], [-np.inf, 2.0]], dtype=np.float32),
+      )
+    for bad_fill in (np.nan, np.inf, -np.inf):
+      with self.assertRaisesRegex(ValueError, "finite fill_values"):
+        normalize_lib.ImputeNanNormalizer(
+            input_feature="x",
+            output_feature_name="x_IMPUTED",
+            output_shape=(2,),
+            fill_values=np.array([1.0, bad_fill], dtype=np.float32),
+        )
+
+  def test_finite_float64_beyond_float32_range_raises(self):
+    normalizer = normalize_lib.ImputeNanNormalizer(
+        input_feature="x",
+        output_feature_name="x_IMPUTED",
+        output_shape=(),
+        fill_values=np.array(2.0, dtype=np.float32),
+    )
+
+    @tf.function
+    def _tf_fn(tensor):
+      return normalizer.normalize_tensorflow(tensor)["x_IMPUTED"]
+
+    # 1e40 is finite in float64 but beyond the float32 range (3.4e38): it is
+    # not missing, so it must not get the fill value, and it cannot be emitted
+    # as float32 without becoming inf, so every path raises.
+    too_large = np.array([1e40, 3.0, np.nan], dtype=np.float64)
+    with self.assertRaisesRegex(ValueError, "beyond the float32 range"):
+      normalizer.normalize_numpy(too_large)
+    with self.assertRaises(tf.errors.InvalidArgumentError):
+      normalizer.normalize_tensorflow(tf.constant(too_large))
+    with self.assertRaises(tf.errors.InvalidArgumentError):
+      _tf_fn(tf.constant(too_large))
+
+    # float64 values within the float32 range pass through; NaN and ±inf get
+    # the fill value 2.0. 2**127 (~1.7e38) and 0.5 are exact in float32.
+    in_range = np.array(
+        [2.0**127, 0.5, np.nan, np.inf, -np.inf], dtype=np.float64
+    )
+    expected = np.array([2.0**127, 0.5, 2.0, 2.0, 2.0], dtype=np.float32)
+    for out in (
+        normalizer.normalize_numpy(in_range)["x_IMPUTED"],
+        normalizer.normalize_tensorflow(tf.constant(in_range))[
+            "x_IMPUTED"
+        ].numpy(),
+        _tf_fn(tf.constant(in_range)).numpy(),
+    ):
+      self.assertEqual(out.dtype, np.float32)
+      np.testing.assert_array_equal(out, expected)
+
+    # Integer inputs are always within the float32 range.
+    int_values = np.array([2**62, -3], dtype=np.int64)
+    int_expected = np.array([2.0**62, -3.0], dtype=np.float32)
+    np.testing.assert_array_equal(
+        normalizer.normalize_numpy(int_values)["x_IMPUTED"], int_expected
+    )
+    np.testing.assert_array_equal(
+        normalizer.normalize_tensorflow(tf.constant(int_values))[
+            "x_IMPUTED"
+        ].numpy(),
+        int_expected,
+    )
+
+  def test_fill_beyond_float32_range_rejected(self):
+    # A fitted fill of 2e40 is finite in float64 but not representable in
+    # float32. It raises (also under `median_with_fallbacks`: the quantiles
+    # exist, so falling back to the mean would hide that the feature is out of
+    # range), and it raises a ValueError even when numpy overflow is an error.
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_64,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    stats = statistics_lib.FeatureStatistics(
+        count=3,
+        minimum=1e40,
+        maximum=3e40,
+        dictionary={},
+        quantiles=[1e40, 2e40, 3e40],
+        mean=2.0,
+    )
+    with np.errstate(over="raise"):
+      for strategy in ("median", "median_with_fallbacks"):
+        with self.assertRaisesRegex(ValueError, "finite fill_values"):
+          normalize_lib.ImputeNanNormalizer.create(
+              "x", input_schema, stats, strategy=strategy
+          )
+      for strategy in ("median", "mean"):
+        with self.assertRaisesRegex(ValueError, "finite fill_values"):
+          normalize_lib.ImputeNanNormalizer.from_values(
+              "x",
+              input_schema,
+              np.array([1e40, 2e40, 3e40]),
+              strategy=strategy,
+          )
+
+  def test_non_continuous_semantic_rejected(self):
+    stats = statistics_lib.FeatureStatistics(
+        count=2,
+        minimum=1.0,
+        maximum=3.0,
+        dictionary={},
+        quantiles=[1.0, 3.0],
+        mean=2.0,
+    )
+    allowed = {
+        schema_lib.FeatureSemantic.UNKNOWN,
+        schema_lib.FeatureSemantic.NUMERICAL,
+        schema_lib.FeatureSemantic.EMBEDDING,
+        schema_lib.FeatureSemantic.TIMEDELTA,
+        schema_lib.FeatureSemantic.TIMESERIES,
+    }
+    for semantic in schema_lib.FeatureSemantic:
+      schema = schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.INTEGER_64,
+          semantic=semantic,
+          shape=(),
+      )
+      if semantic in allowed:
+        for norm in (
+            normalize_lib.ImputeNanNormalizer.create("x", schema, stats),
+            normalize_lib.ImputeNanNormalizer.from_values(
+                "x", schema, np.array([1, 3], dtype=np.int64)
+            ),
+            normalize_lib.ImputeNanNormalizer(
+                input_feature="x",
+                output_feature_name="x_IMPUTED",
+                output_shape=(),
+                fill_values=np.array(2.0, dtype=np.float32),
+                output_semantic=semantic,
+            ),
+        ):
+          self.assertEqual(norm.output_schema()["x_IMPUTED"].semantic, semantic)
+      else:
+        expected_error = f"cannot carry semantic {semantic.value}"
+        with self.assertRaisesRegex(ValueError, expected_error):
+          normalize_lib.ImputeNanNormalizer.create("x", schema, stats)
+        with self.assertRaisesRegex(ValueError, expected_error):
+          normalize_lib.ImputeNanNormalizer.from_values(
+              "x", schema, np.array([1, 3], dtype=np.int64)
+          )
+        with self.assertRaisesRegex(ValueError, expected_error):
+          normalize_lib.ImputeNanNormalizer(
+              input_feature="x",
+              output_feature_name="x_IMPUTED",
+              output_shape=(),
+              fill_values=np.array(2.0, dtype=np.float32),
+              output_semantic=semantic,
+          )
+
+  def test_parameter_and_schema_validation_raises(self):
+    with self.assertRaisesRegex(ValueError, r"fill_values of shape \(\)"):
+      normalize_lib.ImputeNanNormalizer(
+          input_feature="x",
+          output_feature_name="x_IMPUTED",
+          output_shape=(),
+          fill_values=np.array([[1.0], [2.0]], dtype=np.float32),
+      )
+    stats = statistics_lib.FeatureStatistics(
+        count=2,
+        minimum=1.0,
+        maximum=3.0,
+        dictionary={},
+        quantiles=[1.0, 3.0],
+        mean=2.0,
+    )
+    with self.assertRaisesRegex(ValueError, "INTEGER or FLOAT"):
+      normalize_lib.ImputeNanNormalizer.create(
+          "x",
+          schema_lib.FeatureSchema(
+              format=schema_lib.FeatureFormat.BYTES,
+              semantic=schema_lib.FeatureSemantic.NUMERICAL,
+              shape=(),
+          ),
+          stats,
+      )
+    with self.assertRaisesRegex(ValueError, "static shape"):
+      normalize_lib.ImputeNanNormalizer.create(
+          "x",
+          schema_lib.FeatureSchema(
+              format=schema_lib.FeatureFormat.FLOAT_32,
+              semantic=schema_lib.FeatureSemantic.NUMERICAL,
+              shape=(None,),
+          ),
+          stats,
+      )
+    fixed_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(2,),
+    )
+    with self.assertRaisesRegex(ValueError, "at least 1 dimension"):
+      normalize_lib.ImputeNanNormalizer.from_values(
+          "x", fixed_schema, np.array(1.0, dtype=np.float32)
+      )
+    with self.assertRaisesRegex(
+        ValueError, r"item shape \(3,\), expected \(2,\)"
+    ):
+      normalize_lib.ImputeNanNormalizer.from_values(
+          "x", fixed_schema, np.zeros((4, 3), dtype=np.float32)
+      )
+
+  def test_timeseries_implicit_group_preserved(self):
+    ts_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(3,),
+        is_timeseries=True,
+        group=None,
+    )
+    expected_implicit = {
+        "seq_IMPUTED": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.NUMERICAL,
+            shape=(3,),
+            is_timeseries=True,
+            group="seq",
+        )
+    }
+    stats = statistics_lib.FeatureStatistics(
+        count=3,
+        minimum=1.0,
+        maximum=3.0,
+        dictionary={},
+        quantiles=[1.0, 2.0, 3.0],
+        mean=2.0,
+    )
+    from_stats = normalize_lib.ImputeNanNormalizer.create(
+        "seq", ts_schema, stats
+    )
+    self.assertEqual(from_stats.output_schema(), expected_implicit)
+    from_vals = normalize_lib.ImputeNanNormalizer.from_values(
+        "seq", ts_schema, np.array([[1.0, 2.0, 3.0]], dtype=np.float32)
+    )
+    self.assertEqual(from_vals.output_schema(), expected_implicit)
+    direct = normalize_lib.ImputeNanNormalizer(
+        input_feature="seq",
+        output_feature_name="seq_IMPUTED",
+        output_shape=(3,),
+        fill_values=np.array([1.0, 2.0, 3.0], dtype=np.float32),
+        is_timeseries=True,
+        group=None,
+    )
+    self.assertEqual(direct.output_schema(), expected_implicit)
+    cfg = normalize_lib.GraphNormalizerConfig(
+        nodesets={"n": normalize_lib.NodeSetNormalizerConfig([direct])},
+        edgesets={},
+    )
+    null_group_json = cfg.to_json().replace('"group": "seq"', '"group": null')  # pyrefly: ignore[missing-attribute]
+    self.assertIn('"group": null', null_group_json)
+    restored = (
+        normalize_lib.GraphNormalizerConfig.from_json(null_group_json)  # pyrefly: ignore[missing-attribute]
+        .nodesets["n"]
+        .normalizers[0]
+    )
+    self.assertEqual(restored.output_schema(), expected_implicit)
+
+    explicit_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(3,),
+        is_timeseries=True,
+        group="seq_a",
+    )
+    explicit_norm = normalize_lib.ImputeNanNormalizer.create(
+        "seq", explicit_schema, stats
+    )
+    self.assertEqual(
+        explicit_norm.output_schema(),
+        {
+            "seq_IMPUTED": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.FLOAT_32,
+                semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                shape=(3,),
+                is_timeseries=True,
+                group="seq_a",
+            )
+        },
+    )
+
+  def test_output_schema_preserves_input_semantic(self):
+    stats = statistics_lib.FeatureStatistics(
+        count=2,
+        minimum=1.0,
+        maximum=3.0,
+        dictionary={},
+        quantiles=[1.0, 3.0],
+        mean=2.0,
+    )
+    vals = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+    normalizers = []
+    for semantic in (
+        schema_lib.FeatureSemantic.NUMERICAL,
+        schema_lib.FeatureSemantic.EMBEDDING,
+    ):
+      schema = schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.FLOAT_32,
+          semantic=semantic,
+          shape=(2,),
+      )
+      for name, norm in (
+          (
+              f"stats_{semantic.name}",
+              normalize_lib.ImputeNanNormalizer.create(
+                  f"stats_{semantic.name}", schema, stats
+              ),
+          ),
+          (
+              f"vals_{semantic.name}",
+              normalize_lib.ImputeNanNormalizer.from_values(
+                  f"vals_{semantic.name}", schema, vals
+              ),
+          ),
+      ):
+        self.assertEqual(
+            norm.output_schema(),
+            {
+                f"{name}_IMPUTED": schema_lib.FeatureSchema(
+                    format=schema_lib.FeatureFormat.FLOAT_32,
+                    semantic=semantic,
+                    shape=(2,),
+                )
+            },
+        )
+        normalizers.append(norm)
+
+    cfg = normalize_lib.GraphNormalizerConfig(
+        nodesets={
+            "n": normalize_lib.NodeSetNormalizerConfig(normalizers=normalizers)
+        },
+        edgesets={},
+    )
+    restored = normalize_lib.GraphNormalizerConfig.from_json(  # pyrefly: ignore[missing-attribute]
+        cfg.to_json()  # pyrefly: ignore[missing-attribute]
+    )
+    test_util.assert_are_equal(self, restored, cfg)
+
+  def test_from_values_defaults_to_median(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    train_values = np.array([1.0, 2.0, 9.0, np.nan], dtype=np.float32)
+    normalizer = normalize_lib.ImputeNanNormalizer.from_values(
+        "x", input_schema, train_values
+    )
+    np.testing.assert_allclose(
+        normalizer.fill_values, np.array(2.0, dtype=np.float32)
+    )
+
+  def test_unsupported_strategy_rejected(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    with self.assertRaisesRegex(ValueError, "Unsupported ImputeNanNormalizer"):
+      normalize_lib.ImputeNanNormalizer.from_values(
+          "x",
+          input_schema,
+          np.array([1.0, 2.0, 2.0], dtype=np.float32),
+          strategy="most_frequent",  # pyrefly: ignore[bad-argument-type]
+      )
+    stats = statistics_lib.FeatureStatistics(
+        count=3,
+        minimum=1.0,
+        maximum=2.0,
+        dictionary={},
+        quantiles=[1.0, 2.0, 2.0],
+        mean=5.0 / 3.0,
+    )
+    for bad_strategy in ("most_frequent", "bogus"):
+      with self.assertRaisesRegex(
+          ValueError, "Unsupported ImputeNanNormalizer.create strategy"
+      ):
+        normalize_lib.ImputeNanNormalizer.create(
+            "x",
+            input_schema,
+            stats,
+            strategy=bad_strategy,  # pyrefly: ignore[bad-argument-type]
+        )
+    # The strategy is validated before looking at the data, so even an empty
+    # feature or an all-NaN column reports the unsupported strategy.
+    for schema, values in (
+        (
+            schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.FLOAT_32,
+                semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                shape=(0,),
+            ),
+            np.zeros((3, 0), dtype=np.float32),
+        ),
+        (input_schema, np.array([np.nan], dtype=np.float32)),
+    ):
+      with self.assertRaisesRegex(
+          ValueError, "Unsupported ImputeNanNormalizer"
+      ):
+        normalize_lib.ImputeNanNormalizer.from_values(
+            "x",
+            schema,
+            values,
+            strategy="bogus",  # pyrefly: ignore[bad-argument-type]
+        )
+
+
+class ZScoreNormalizerTest(absltest.TestCase):
+
+  def test_z_score_with_zero_variance_clamping_and_json(self):
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.EMBEDDING,
+        shape=(3,),
+    )
+    # Col 0: [1, 5, nan] -> mean 3, std 2 (distinct from 1.0).
+    # Col 1: [5, 5, 5]   -> mean 5, constant -> std 1.0.
+    # Col 2: [2, 6, 4]   -> mean 4, std sqrt(8/3).
+    train_values = np.array(
+        [
+            [1.0, 5.0, 2.0],
+            [5.0, 5.0, 6.0],
+            [np.nan, 5.0, 4.0],
+        ],
+        dtype=np.float32,
+    )
+    normalizer = normalize_lib.ZScoreNormalizer.from_values(
+        "emb", input_schema, train_values
+    )
+    np.testing.assert_allclose(
+        normalizer.mean, np.array([3.0, 5.0, 4.0], dtype=np.float64), rtol=1e-12
+    )
+    np.testing.assert_allclose(
+        normalizer.std,
+        np.array([2.0, 1.0, math.sqrt(8.0 / 3.0)], dtype=np.float64),
+        rtol=1e-12,
+    )
+
+    test_values = np.array(
+        [[7.0, 5.0, 6.0], [-1.0, 7.0, 2.0]], dtype=np.float32
+    )
+    np_out = normalizer.normalize_numpy(test_values)["emb_Z_SCORE"]
+    tf_out = (
+        normalizer.normalize_tensorflow(tf.constant(test_values))["emb_Z_SCORE"]
+        .numpy()
+    )
+    s = math.sqrt(1.5)  # 2 / sqrt(8/3)
+    expected = np.array([[2.0, 0.0, s], [-2.0, 2.0, -s]], dtype=np.float32)
+    for out in (np_out, tf_out):
+      self.assertEqual(out.dtype, np.float32)
+      np.testing.assert_allclose(out, expected, rtol=0, atol=1e-6)
+
+    cfg = normalize_lib.GraphNormalizerConfig(
+        nodesets={
+            "n": normalize_lib.NodeSetNormalizerConfig(normalizers=[normalizer])
+        },
+        edgesets={},
+    )
+    restored = normalize_lib.GraphNormalizerConfig.from_json(  # pyrefly: ignore[missing-attribute]
+        cfg.to_json()  # pyrefly: ignore[missing-attribute]
+    )
+    test_util.assert_are_equal(self, restored, cfg)
+
+  def test_constant_std_uses_unit_scale_on_all_paths(self):
+    # 1. Construction: exact zero std becomes 1.0, while any positive finite
+    # std is kept, including at a large mean.
+    constructed = normalize_lib.ZScoreNormalizer(
+        input_feature="x",
+        output_feature_name="x_Z_SCORE",
+        output_shape=(3,),
+        mean=np.array([1.0, 1e6, 0.0], dtype=np.float64),
+        std=np.array([0.0, 1e-3, 1e-3], dtype=np.float64),
+    )
+    np.testing.assert_array_equal(
+        constructed.std,
+        np.array([1.0, 1e-3, 1e-3], dtype=np.float64),
+    )
+
+    # 2. Fitting: column 0 is constant (`max == min`), so it gets scale 1.0 and
+    # normalizes to 0.0. Columns 1-3 have spread `sqrt(2/3) * step` at offsets
+    # 0, 1e6, and 1e6 with a float32-ulp step (0.0625); all keep their std.
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_64,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(4,),
+    )
+    train_values = np.array(
+        [
+            [0.1, 0.0, 1e6, 1e6],
+            [0.1, 1.0, 1e6 + 1.0, 1e6 + 0.0625],
+            [0.1, 2.0, 1e6 + 2.0, 1e6 - 0.0625],
+        ],
+        dtype=np.float64,
+    )
+    fitted = normalize_lib.ZScoreNormalizer.from_values(
+        "x", input_schema, train_values
+    )
+    np.testing.assert_allclose(
+        fitted.std,
+        [1.0, math.sqrt(2 / 3), math.sqrt(2 / 3), 0.0625 * math.sqrt(2 / 3)],
+        rtol=1e-12,
+    )
+    np.testing.assert_allclose(
+        fitted.mean, [0.1, 1.0, 1e6 + 1.0, 1e6], rtol=1e-15
+    )
+
+    s = math.sqrt(1.5)  # (+-1) / sqrt(2/3)
+    expected_train = np.array(
+        [[0.0, -s, -s, 0.0], [0.0, 0.0, 0.0, s], [0.0, s, s, -s]],
+        dtype=np.float32,
+    )
+    # Unseen values: the constant column is shifted by 0.5 (scale 1.0), and the
+    # others move two steps above their mean, i.e. 2 / sqrt(2/3) = sqrt(6).
+    test_values = np.array([[0.6, 3.0, 1e6 + 3.0, 1e6 + 0.125]])
+    expected_test = np.array(
+        [[0.5, math.sqrt(6), math.sqrt(6), math.sqrt(6)]], dtype=np.float32
+    )
+    for values, expected in (
+        (train_values, expected_train),
+        (test_values, expected_test),
+    ):
+      np_out = fitted.normalize_numpy(values)["x_Z_SCORE"]
+      tf_out = fitted.normalize_tensorflow(tf.constant(values))[
+          "x_Z_SCORE"
+      ].numpy()
+      for out in (np_out, tf_out):
+        self.assertEqual(out.dtype, np.float32)
+        np.testing.assert_allclose(out, expected, rtol=0, atol=1e-6)
+
+    # 3. JSON deserialization maps 0.0 std to 1.0 and rejects negative std.
+    cfg = normalize_lib.GraphNormalizerConfig(
+        nodesets={
+            "n": normalize_lib.NodeSetNormalizerConfig(
+                normalizers=[
+                    normalize_lib.ZScoreNormalizer(
+                        input_feature="x",
+                        output_feature_name="x_Z_SCORE",
+                        output_shape=(3,),
+                        mean=np.array([1.0, 2.0, 3.0], dtype=np.float64),
+                        std=np.array([2.0, 4.0, 5.0], dtype=np.float64),
+                    )
+                ]
+            )
+        },
+        edgesets={},
+    )
+    zero_json = cfg.to_json().replace("[2.0, 4.0, 5.0]", "[0.0, 4.0, 5.0]")  # pyrefly: ignore[missing-attribute]
+    restored = normalize_lib.GraphNormalizerConfig.from_json(zero_json)  # pyrefly: ignore[missing-attribute]
+    restored_norm = restored.nodesets["n"].normalizers[0]
+    self.assertIsInstance(restored_norm, normalize_lib.ZScoreNormalizer)
+    np.testing.assert_array_equal(
+        restored_norm.std, np.array([1.0, 4.0, 5.0], dtype=np.float64)
+    )
+    self.assertEqual(restored_norm.std.dtype, np.float64)
+
+    neg_json = cfg.to_json().replace("[2.0, 4.0, 5.0]", "[-1.0, 4.0, 5.0]")  # pyrefly: ignore[missing-attribute]
+    with self.assertRaisesRegex(ValueError, "non-negative std"):
+      normalize_lib.GraphNormalizerConfig.from_json(neg_json)  # pyrefly: ignore[missing-attribute]
+
+    # 4. Normalization (NumPy, TF eager, TF graph, JAX) relies on the
+    # `__post_init__` zero-variance invariant across every backend.
+    constructed = normalize_lib.ZScoreNormalizer(
+        input_feature="x",
+        output_feature_name="x_Z_SCORE",
+        output_shape=(2,),
+        mean=np.array([1.0, 3.0], dtype=np.float64),
+        std=np.array([0.0, 2.0], dtype=np.float64),
+    )
+    values = np.array([[4.0, 7.0]], dtype=np.float32)
+    expected = np.array([[3.0, 2.0]], dtype=np.float32)
+    np_out = constructed.normalize_numpy(values)["x_Z_SCORE"]
+    tf_out = constructed.normalize_tensorflow(tf.constant(values))[
+        "x_Z_SCORE"
+    ].numpy()
+
+    @tf.function
+    def _tf_fn(tensor):
+      return constructed.normalize_tensorflow(tensor)["x_Z_SCORE"]
+
+    tf_graph_out = _tf_fn(tf.constant(values)).numpy()
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "n": in_memory_graph_lib.InMemoryNodeSet(
+                num_nodes=1, features={"x": values}
+            )
+        },
+        edge_sets={},
+    )
+    jax_out = (
+        normalize_lib.GraphNormalizer(
+            config=normalize_lib.GraphNormalizerConfig(
+                nodesets={
+                    "n": normalize_lib.NodeSetNormalizerConfig(
+                        normalizers=[constructed]
+                    )
+                },
+                edgesets={},
+            )
+        )
+        .normalize_numpy_to_jax(graph)
+        .node_sets["n"]
+        .features["x_Z_SCORE"]
+    )
+    for out in (np_out, tf_out, tf_graph_out, np.asarray(jax_out)):
+      self.assertEqual(out.dtype, np.float32)
+      np.testing.assert_allclose(out, expected, rtol=0, atol=1e-6)
+
+  def test_invalid_mean_or_std_rejected(self):
+    for bad_mean in (np.nan, np.inf, -np.inf):
+      with self.assertRaisesRegex(ValueError, "finite mean"):
+        normalize_lib.ZScoreNormalizer(
+            input_feature="x",
+            output_feature_name="x_Z_SCORE",
+            output_shape=(2,),
+            mean=np.array([1.0, bad_mean], dtype=np.float64),
+            std=np.array([1.0, 1.0], dtype=np.float64),
+        )
+    for bad_std in (np.nan, np.inf, -np.inf, -1e-6, -2.0):
+      with self.assertRaisesRegex(ValueError, "non-negative std"):
+        normalize_lib.ZScoreNormalizer(
+            input_feature="x",
+            output_feature_name="x_Z_SCORE",
+            output_shape=(2,),
+            mean=np.array([1.0, 2.0], dtype=np.float64),
+            std=np.array([1.0, bad_std], dtype=np.float64),
+        )
+
+  def test_parameter_shapes_must_match_output_shape(self):
+    with self.assertRaisesRegex(ValueError, r"mean of shape \(3,\)"):
+      normalize_lib.ZScoreNormalizer(
+          input_feature="x",
+          output_feature_name="x_Z_SCORE",
+          output_shape=(3,),
+          mean=np.array([[10.0, 20.0, 30.0], [100.0, 200.0, 300.0]]),
+          std=np.array([1.0, 1.0, 1.0]),
+      )
+    with self.assertRaisesRegex(ValueError, r"std of shape \(3,\)"):
+      normalize_lib.ZScoreNormalizer(
+          input_feature="x",
+          output_feature_name="x_Z_SCORE",
+          output_shape=(3,),
+          mean=np.array([10.0, 20.0, 30.0]),
+          std=np.array(1.0),
+      )
+
+  def test_from_values_fails_loudly_on_unusable_data(self):
+    schema_2d = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_64,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(2,),
+    )
+    schema_1d = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_64,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    # No rows, or one channel without any finite value.
+    for schema, values in (
+        (schema_2d, np.zeros((0, 2), dtype=np.float64)),
+        (schema_2d, np.array([[np.nan, 1.0], [np.inf, 3.0]])),
+    ):
+      with self.assertRaisesRegex(ValueError, "entirely non-finite"):
+        normalize_lib.ZScoreNormalizer.from_values("x", schema, values)
+    # Non-numeric values.
+    for values in (np.array([b"1.0", b"3.0"]), np.array([True, False])):
+      with self.assertRaisesRegex(ValueError, "dense integer or float array"):
+        normalize_lib.ZScoreNormalizer.from_values("x", schema_1d, values)
+    # Extreme overflow (`[-1.5e308, 1.5e308, 1.5e308]`, where `vals - mean`
+    # exceeds float64 range) and subnormal spreads (`[0, 5e-324]` and
+    # `[0, 5e-324, 1e-323]`, where `std < smallest_normal` loses mantissa bits)
+    # fail loudly.
+    subnormal_step = np.nextafter(0.0, 1.0)
+    for values in (
+        np.array([-1.5e308, 1.5e308, 1.5e308]),
+        np.array([0.0, subnormal_step]),
+        np.array([0.0, subnormal_step, 2.0 * subnormal_step]),
+    ):
+      with self.assertRaisesRegex(ValueError, "cannot be standardized"):
+        normalize_lib.ZScoreNormalizer.from_values("x", schema_1d, values)
+
+  def test_extreme_magnitudes_and_non_representable_mean(self):
+    float_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_64,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    int_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    # Max-abs-scaled variance handles huge (> ~1.34e154) and tiny (< ~1e-154)
+    # spreads without squaring overflow/underflow.
+    for pair in (
+        np.array([1e160, 2e160]),
+        np.array([1e308, 1.7e308]),
+        np.array([-1.5e308, 1.5e308]),
+        np.array([0.0, 1e-162]),
+        np.array([0.0, 5e-162]),
+        np.array([0.0, 1e-300]),
+    ):
+      fitted = normalize_lib.ZScoreNormalizer.from_values(
+          "x", float_schema, pair
+      )
+      for out in (
+          fitted.normalize_numpy(pair)["x_Z_SCORE"],
+          fitted.normalize_tensorflow(tf.constant(pair))["x_Z_SCORE"].numpy(),
+      ):
+        self.assertEqual(out.dtype, np.float32)
+        np.testing.assert_allclose(
+            out, np.array([-1.0, 1.0], dtype=np.float32), rtol=0, atol=1e-6
+        )
+
+    # Just above float64 `smallest_normal` (~2.225e-308), `std` retains full
+    # 53-bit precision: `3e-308 * [0, 1, 2]` has `std = 3e-308 * sqrt(2/3)
+    # ≈ 2.45e-308` and normalizes to `[-sqrt(1.5), 0, sqrt(1.5)]`.
+    tiny_normal = np.array([0.0, 3e-308, 6e-308], dtype=np.float64)
+    tiny_fitted = normalize_lib.ZScoreNormalizer.from_values(
+        "x", float_schema, tiny_normal
+    )
+    np.testing.assert_allclose(
+        tiny_fitted.normalize_numpy(tiny_normal)["x_Z_SCORE"],
+        np.array([-np.sqrt(1.5), 0.0, np.sqrt(1.5)], dtype=np.float32),
+        rtol=0,
+        atol=1e-6,
+    )
+
+    const_huge = np.array([1e308, 1e308])
+    const_norm = normalize_lib.ZScoreNormalizer.from_values(
+        "x", float_schema, const_huge
+    )
+    np.testing.assert_array_equal(
+        const_norm.normalize_numpy(const_huge)["x_Z_SCORE"],
+        np.array([0.0, 0.0], dtype=np.float32),
+    )
+
+    # Realistic large-offset integer timestamps whose mean is not dyadic
+    # (`1.7e9 + 2/3`, bias ~1.7e-7 std << 1e-5) succeed and match hand-derived
+    # z-scores `[-sqrt(2), 1/sqrt(2), 1/sqrt(2)]`.
+    unix_secs = np.array(
+        [1_700_000_000, 1_700_000_001, 1_700_000_001], dtype=np.int64
+    )
+    unix_fitted = normalize_lib.ZScoreNormalizer.from_values(
+        "x", int_schema, unix_secs
+    )
+    np.testing.assert_allclose(
+        unix_fitted.mean, 1_700_000_000.0 + 2.0 / 3.0, rtol=1e-15, atol=0
+    )
+    expected_unix = np.array(
+        [-np.sqrt(2.0), 1.0 / np.sqrt(2.0), 1.0 / np.sqrt(2.0)],
+        dtype=np.float32,
+    )
+    for out in (
+        unix_fitted.normalize_numpy(unix_secs)["x_Z_SCORE"],
+        unix_fitted.normalize_tensorflow(tf.constant(unix_secs))[
+            "x_Z_SCORE"
+        ].numpy(),
+    ):
+      np.testing.assert_allclose(out, expected_unix, rtol=0, atol=1e-6)
+
+    # Pin the `_Z_SCORE_MAX_MEAN_RESIDUAL_RTOL == 1e-5` boundary on `2**52 +
+    # [0, K]` (odd `K` -> mean rounds by 0.5, `std = K / 2`, `|r| / std = 1/K`):
+    # `K = 99_999` (`1.00001e-5 > 1e-5`) raises, while `K = 100_001`
+    # (`0.99999e-5 < 1e-5`) succeeds.
+    boundary_pass = np.array([2**52, 2**52 + 100_001], dtype=np.int64)
+    boundary_fitted = normalize_lib.ZScoreNormalizer.from_values(
+        "x", int_schema, boundary_pass
+    )
+    np.testing.assert_allclose(
+        boundary_fitted.normalize_numpy(boundary_pass)["x_Z_SCORE"],
+        np.array([-1.0, 1.0], dtype=np.float32),
+        rtol=0,
+        atol=1.5e-5,
+    )
+
+    # When rounding the true mean to float64 shifts outputs by more than `1e-5`
+    # std (including `K = 99_999` right above the threshold and 1-ulp spreads
+    # like `2**52 + [0, 1]`), `from_values` raises instead of emitting biased
+    # z-scores.
+    for schema, bad_values in (
+        (int_schema, np.array([2**52, 2**52 + 99_999], dtype=np.int64)),
+        (int_schema, np.array([0, 1], dtype=np.int64) + 2**52),
+        (int_schema, 2**53 - np.array([0, 1], dtype=np.int64)),
+        (int_schema, np.array([0, 0, 1], dtype=np.int64) + 2**51),
+        (float_schema, np.array([1e15, 1e15 + 0.125])),
+        (float_schema, np.array([2.0**53, 2.0**53 + 2.0])),
+    ):
+      with self.assertRaisesRegex(ValueError, "cannot be standardized"):
+        normalize_lib.ZScoreNormalizer.from_values("x", schema, bad_values)
+
+  def test_z_score_then_impute_zero_preserves_large_offset_precision(self):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_64,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    values = np.array(
+        [1e8, 1e8 + 20.5, 1e8 + 41.0, 1e8 + 61.5, np.nan, np.inf],
+        dtype=np.float64,
+    )
+    z_norm = normalize_lib.ZScoreNormalizer.from_values("x", schema, values)
+    z_out_schema = z_norm.output_schema()["x_Z_SCORE"]
+    imp_norm = normalize_lib.ImputeNanNormalizer.from_values(
+        "x_Z_SCORE",
+        z_out_schema,
+        z_norm.normalize_numpy(values)["x_Z_SCORE"],
+        strategy="zero",
+    )
+    seq = normalize_lib.SequentialNormalizer.create([z_norm, imp_norm])
+    expected = np.array(
+        [
+            -3.0 / np.sqrt(5.0),
+            -1.0 / np.sqrt(5.0),
+            1.0 / np.sqrt(5.0),
+            3.0 / np.sqrt(5.0),
+            0.0,
+            0.0,
+        ],
+        dtype=np.float32,
+    )
+    for out in (
+        seq.normalize_numpy(values)["x_Z_SCORE_IMPUTED"],
+        seq.normalize_tensorflow(tf.constant(values))[
+            "x_Z_SCORE_IMPUTED"
+        ].numpy(),
+    ):
+      self.assertEqual(out.dtype, np.float32)
+      np.testing.assert_allclose(out, expected, rtol=1e-6, atol=1e-6)
+
+  def test_from_values_rejects_integers_beyond_float64_exact_range(self):
+    int_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    # Above 2**53 float64 has an ulp of 2, so 2**53 + 1 is not representable.
+    # Nanosecond timestamps (~1.7e18, ulp 256) would even collapse into one
+    # value and look like a constant channel.
+    for values in (
+        np.array([2**53, 2**53 + 1, 2**53 + 2], dtype=np.int64),
+        np.array([-(2**53) - 1, 0, 1], dtype=np.int64),
+        np.array([0, 50, 100], dtype=np.int64) + 1_700_000_000_000_000_000,
+    ):
+      with self.assertRaisesRegex(ValueError, r"beyond 2\*\*53"):
+        normalize_lib.ZScoreNormalizer.from_values("x", int_schema, values)
+
+    # Up to 2**53 inclusive every integer is exact: (2**53 - 2, 2**53 - 1,
+    # 2**53) has mean 2**53 - 1 and std sqrt(2/3), so the outputs are
+    # (-1, 0, 1) * sqrt(1.5).
+    boundary = np.array([-2, -1, 0], dtype=np.int64) + 2**53
+    fitted = normalize_lib.ZScoreNormalizer.from_values(
+        "x", int_schema, boundary
+    )
+    self.assertEqual(float(fitted.mean), float(2**53 - 1))
+    np.testing.assert_allclose(float(fitted.std), math.sqrt(2 / 3), rtol=1e-12)
+    out = fitted.normalize_numpy(boundary)["x_Z_SCORE"]
+    self.assertEqual(out.dtype, np.float32)
+    np.testing.assert_allclose(
+        out,
+        np.array([-1.0, 0.0, 1.0], dtype=np.float32) * np.sqrt(np.float32(1.5)),
+        rtol=0,
+        atol=1e-6,
+    )
+
+  def test_non_continuous_semantic_rejected(self):
+    allowed = {
+        schema_lib.FeatureSemantic.UNKNOWN,
+        schema_lib.FeatureSemantic.NUMERICAL,
+        schema_lib.FeatureSemantic.EMBEDDING,
+        schema_lib.FeatureSemantic.TIMEDELTA,
+        schema_lib.FeatureSemantic.TIMESERIES,
+    }
+    for semantic in schema_lib.FeatureSemantic:
+      schema = schema_lib.FeatureSchema(
+          format=schema_lib.FeatureFormat.INTEGER_64,
+          semantic=semantic,
+          shape=(),
+      )
+      if semantic in allowed:
+        for norm in (
+            normalize_lib.ZScoreNormalizer.from_values(
+                "x", schema, np.array([0, 1, 2], dtype=np.int64)
+            ),
+            normalize_lib.ZScoreNormalizer(
+                input_feature="x",
+                output_feature_name="x_Z_SCORE",
+                output_shape=(),
+                mean=np.array(0.0),
+                std=np.array(1.0),
+                output_semantic=semantic,
+            ),
+        ):
+          self.assertEqual(norm.output_schema()["x_Z_SCORE"].semantic, semantic)
+      else:
+        expected_error = f"cannot carry semantic {semantic.value}"
+        with self.assertRaisesRegex(ValueError, expected_error):
+          normalize_lib.ZScoreNormalizer.from_values(
+              "x", schema, np.array([0, 1, 2], dtype=np.int64)
+          )
+        with self.assertRaisesRegex(ValueError, expected_error):
+          normalize_lib.ZScoreNormalizer(
+              input_feature="x",
+              output_feature_name="x_Z_SCORE",
+              output_shape=(),
+              mean=np.array(0.0),
+              std=np.array(1.0),
+              output_semantic=semantic,
+          )
+
+  def test_large_offset_keeps_precision_on_all_paths(self):
+    # The signal [0, 20.5, 41, 61.5] has mean 30.75, deviations (+-30.75,
+    # +-10.25) = 10.25 * (+-3, +-1), and std 10.25 * sqrt(5); so the expected
+    # outputs are (-3, -1, 1, 3) / sqrt(5) at any offset. In float32 the ulp
+    # is 1 at 1e7 and 8 at 1e8, so a float32 fit or a float32 `x - mean`
+    # visibly distorts them (e.g. +-32 instead of +-1.34 at 1e8).
+    input_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_64,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    signal = np.array([0.0, 20.5, 41.0, 61.5], dtype=np.float64)
+    expected = np.array([-3.0, -1.0, 1.0, 3.0], dtype=np.float32) / np.sqrt(
+        np.float32(5.0)
+    )
+    for base in (1e7, 1e8):
+      train_values = np.concatenate([
+          base + signal,
+          np.array([np.inf, -np.inf, np.nan], dtype=np.float64),
+      ])
+      fitted = normalize_lib.ZScoreNormalizer.from_values(
+          "big", input_schema, train_values
+      )
+      self.assertEqual(float(fitted.mean), base + 30.75)
+      np.testing.assert_allclose(
+          float(fitted.std), 10.25 * math.sqrt(5), rtol=1e-12
+      )
+
+      # JSON keeps the float64 statistics bit-exact.
+      cfg = normalize_lib.GraphNormalizerConfig(
+          nodesets={
+              "n": normalize_lib.NodeSetNormalizerConfig(normalizers=[fitted])
+          },
+          edgesets={},
+      )
+      restored = (
+          normalize_lib.GraphNormalizerConfig.from_json(  # pyrefly: ignore[missing-attribute]
+              cfg.to_json()  # pyrefly: ignore[missing-attribute]
+          )
+          .nodesets["n"]
+          .normalizers[0]
+      )
+      self.assertEqual(float(restored.mean), float(fitted.mean))
+      self.assertEqual(float(restored.std), float(fitted.std))
+      self.assertEqual(restored.mean.dtype, np.float64)
+      self.assertEqual(restored.std.dtype, np.float64)
+
+      # Both the fitted and the deserialized normalizer keep the signal.
+      values = base + signal
+      for norm in (fitted, restored):
+        np_out = norm.normalize_numpy(values)["big_Z_SCORE"]
+        tf_out = norm.normalize_tensorflow(tf.constant(values))[
+            "big_Z_SCORE"
+        ].numpy()
+        for out in (np_out, tf_out):
+          self.assertEqual(out.dtype, np.float32)
+          np.testing.assert_allclose(out, expected, rtol=0, atol=1e-6)
+
+    # int64 inputs beyond float32 precision: 2**52 + (0, 1, 2) repeated 5 times
+    # has mean 2**52 + 1 and std sqrt(2/3), so the outputs are
+    # (-1, 0, 1) * sqrt(1.5). With 15 values the float64 sum (~6.8e16)
+    # exceeds 2**53 and is rounded, so a single-pass mean would be off.
+    int_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
+    )
+    int_values = np.tile(np.array([0, 1, 2], dtype=np.int64), 5) + 2**52
+    int_fitted = normalize_lib.ZScoreNormalizer.from_values(
+        "id_like", int_schema, int_values
+    )
+    self.assertEqual(float(int_fitted.mean), float(2**52 + 1))
+    int_expected = np.tile(
+        np.array([-1.0, 0.0, 1.0], dtype=np.float32), 5
+    ) * np.sqrt(np.float32(1.5))
+    for out in (
+        int_fitted.normalize_numpy(int_values)["id_like_Z_SCORE"],
+        int_fitted.normalize_tensorflow(tf.constant(int_values))[
+            "id_like_Z_SCORE"
+        ].numpy(),
+    ):
+      np.testing.assert_allclose(out, int_expected, rtol=0, atol=1e-6)
+
+    # A constant channel at a huge offset takes its value exactly as the mean,
+    # so it normalizes to exactly 0 (a mean 1 ulp off at 1e60 would be ~1e44).
+    const_fitted = normalize_lib.ZScoreNormalizer.from_values(
+        "c", input_schema, np.full((10,), 1e60)
+    )
+    self.assertEqual(float(const_fitted.mean), 1e60)
+    np.testing.assert_array_equal(
+        const_fitted.normalize_numpy(np.full((10,), 1e60))["c_Z_SCORE"],
+        np.zeros((10,), dtype=np.float32),
+    )
+
+  def test_output_schema_matches_input_semantic_and_timeseries_group(self):
+    num_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(2,),
+        is_timeseries=True,
+        group=None,
+    )
+    explicit_ts_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(2,),
+        is_timeseries=True,
+        group="seq_a",
+    )
+    emb_schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_32,
+        semantic=schema_lib.FeatureSemantic.EMBEDDING,
+        shape=(2,),
+    )
+    vals = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+    num_norm = normalize_lib.ZScoreNormalizer.from_values(
+        "num_ts", num_schema, vals
+    )
+    explicit_ts_norm = normalize_lib.ZScoreNormalizer.from_values(
+        "num_ts", explicit_ts_schema, vals
+    )
+    emb_norm = normalize_lib.ZScoreNormalizer.from_values(
+        "emb", emb_schema, vals
+    )
+    expected_implicit = {
+        "num_ts_Z_SCORE": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.NUMERICAL,
+            shape=(2,),
+            is_timeseries=True,
+            group="num_ts",
+        )
+    }
+    self.assertEqual(num_norm.output_schema(), expected_implicit)
+    self.assertEqual(
+        explicit_ts_norm.output_schema(),
+        {
+            "num_ts_Z_SCORE": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.FLOAT_32,
+                semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                shape=(2,),
+                is_timeseries=True,
+                group="seq_a",
+            )
+        },
+    )
+    self.assertEqual(
+        emb_norm.output_schema(),
+        {
+            "emb_Z_SCORE": schema_lib.FeatureSchema(
+                format=schema_lib.FeatureFormat.FLOAT_32,
+                semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                shape=(2,),
+                is_timeseries=False,
+                group=None,
+            )
+        },
+    )
+
+    # Direct construction and JSON with `group=None` also populate the implicit
+    # timeseries group.
+    direct = normalize_lib.ZScoreNormalizer(
+        input_feature="num_ts",
+        output_feature_name="num_ts_Z_SCORE",
+        output_shape=(2,),
+        mean=np.zeros((2,), dtype=np.float64),
+        std=np.ones((2,), dtype=np.float64),
+        is_timeseries=True,
+        group=None,
+    )
+    self.assertEqual(direct.output_schema(), expected_implicit)
+
+    cfg = normalize_lib.GraphNormalizerConfig(
+        nodesets={
+            "n": normalize_lib.NodeSetNormalizerConfig(
+                normalizers=[num_norm, emb_norm]
+            )
+        },
+        edgesets={},
+    )
+    restored = normalize_lib.GraphNormalizerConfig.from_json(  # pyrefly: ignore[missing-attribute]
+        cfg.to_json()  # pyrefly: ignore[missing-attribute]
+    )
+    test_util.assert_are_equal(self, restored, cfg)
+    null_group_json = cfg.to_json().replace('"group": "num_ts"', '"group": null')  # pyrefly: ignore[missing-attribute]
+    self.assertIn('"group": null', null_group_json)
+    restored_null = (
+        normalize_lib.GraphNormalizerConfig.from_json(null_group_json)  # pyrefly: ignore[missing-attribute]
+        .nodesets["n"]
+        .normalizers[0]
+    )
+    self.assertEqual(restored_null.output_schema(), expected_implicit)
+
+
+class AutoNormalizeOneHotTest(absltest.TestCase):
+
+  def test_auto_normalize_categorical_one_hot_bytes_int_bool(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "nodes": schema_lib.NodeSchema(
+                features={
+                    "color": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                        shape=(),
+                    ),
+                    "shape": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                        shape=(),
+                    ),
+                    "flag": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                        shape=(),
+                    ),
+                    "active": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BOOL,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                        shape=(),
+                    ),
+                }
+            )
+        },
+        edge_sets={},
+    )
+    stats = statistics_lib.GraphFeatureStatistics(
+        node_sets={
+            "nodes": statistics_lib.FeatureSetStatistics(
+                features={
+                    "color": statistics_lib.FeatureStatistics(
+                        count=4,
+                        minimum=0.0,
+                        maximum=0.0,
+                        dictionary={
+                            "red": statistics_lib.DictionaryItem(0, 2),
+                            "green": statistics_lib.DictionaryItem(1, 1),
+                            "blue": statistics_lib.DictionaryItem(2, 1),
+                        },
+                        quantiles=[],
+                    ),
+                    "shape": statistics_lib.FeatureStatistics(
+                        count=4,
+                        minimum=0.0,
+                        maximum=0.0,
+                        dictionary={
+                            "circle": statistics_lib.DictionaryItem(0, 2),
+                            "square": statistics_lib.DictionaryItem(1, 2),
+                        },
+                        quantiles=[],
+                    ),
+                    "flag": statistics_lib.FeatureStatistics(
+                        count=4,
+                        minimum=0.0,
+                        maximum=1.0,
+                        dictionary={},
+                        quantiles=[],
+                    ),
+                    "active": statistics_lib.FeatureStatistics(
+                        count=4,
+                        minimum=float("nan"),
+                        maximum=float("nan"),
+                        dictionary={},
+                        quantiles=[],
+                    ),
+                }
+            )
+        }
+    )
+    normalizer = normalize_lib.auto_normalize(
+        schema,
+        stats,
+        config=normalize_lib.AutoNormalizeConfig(
+            categorical_bytes_to_index=True,
+            categorical_one_hot=True,
+            categorical_one_hot_drop_if_binary=True,
+        ),
+    )
+    self.assertEqual(
+        normalizer.output_schema(),
+        schema_lib.GraphSchema(
+            node_sets={
+                "nodes": schema_lib.NodeSchema(
+                    features={
+                        "color_INDEX_ONE_HOT": schema_lib.FeatureSchema(
+                            format=schema_lib.FeatureFormat.FLOAT_32,
+                            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                            shape=(3,),
+                        ),
+                        "shape_INDEX_ONE_HOT": schema_lib.FeatureSchema(
+                            format=schema_lib.FeatureFormat.FLOAT_32,
+                            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                            shape=(1,),
+                        ),
+                        "flag_ONE_HOT": schema_lib.FeatureSchema(
+                            format=schema_lib.FeatureFormat.FLOAT_32,
+                            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                            shape=(1,),
+                        ),
+                        "active_ONE_HOT": schema_lib.FeatureSchema(
+                            format=schema_lib.FeatureFormat.FLOAT_32,
+                            semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                            shape=(1,),
+                        ),
+                    }
+                )
+            },
+            edge_sets={},
+        ),
+    )
+    restored_cfg = normalize_lib.GraphNormalizerConfig.from_json(  # pyrefly: ignore[missing-attribute]
+        normalizer.config.to_json()  # pyrefly: ignore[missing-attribute]
+    )
+    test_util.assert_are_equal(self, restored_cfg, normalizer.config)
+
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "nodes": in_memory_graph_lib.InMemoryNodeSet(
+                num_nodes=3,
+                features={
+                    "color": np.array([b"red", b"purple", b"blue"]),
+                    "shape": np.array([b"circle", b"square", b"circle"]),
+                    "flag": np.array([0, 1, 0], dtype=np.int64),
+                    "active": np.array([True, False, True], dtype=np.bool_),
+                },
+            )
+        },
+        edge_sets={},
+    )
+    out_np = normalizer.normalize_numpy(graph).node_sets["nodes"].features
+    out_tf = (
+        normalizer.normalize_tensorflow(tf_io.graph_to_tf_graph(graph))
+        .node_sets["nodes"]
+        .features
+    )
+    out_jax = (
+        normalizer.normalize_numpy_to_jax(graph).node_sets["nodes"].features
+    )
+    self.assertEqual(
+        set(out_np.keys()),
+        {
+            "color_INDEX_ONE_HOT",
+            "shape_INDEX_ONE_HOT",
+            "flag_ONE_HOT",
+            "active_ONE_HOT",
+        },
+    )
+
+    # 3-way color: OOV b"purple" -> [0, 0, 0].
+    np.testing.assert_array_equal(
+        out_np["color_INDEX_ONE_HOT"],
+        np.array(
+            [[1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            dtype=np.float32,
+        ),
+    )
+    np.testing.assert_array_equal(
+        out_np["shape_INDEX_ONE_HOT"],
+        np.array([[0.0], [1.0], [0.0]], dtype=np.float32),
+    )
+    np.testing.assert_array_equal(
+        out_np["flag_ONE_HOT"],
+        np.array([[0.0], [1.0], [0.0]], dtype=np.float32),
+    )
+    np.testing.assert_array_equal(
+        out_np["active_ONE_HOT"],
+        np.array([[1.0], [0.0], [1.0]], dtype=np.float32),
+    )
+    for key, expected in out_np.items():
+      self.assertEqual(expected.dtype, np.float32)
+      np.testing.assert_array_equal(out_tf[key].numpy(), expected)
+      np.testing.assert_array_equal(np.asarray(out_jax[key]), expected)
+
+    # Committed binary features fail fast if a third class / OOV appears.
+    oov_graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "nodes": in_memory_graph_lib.InMemoryNodeSet(
+                num_nodes=1,
+                features={
+                    "color": np.array([b"red"]),
+                    "shape": np.array([b"triangle"]),
+                    "flag": np.array([0], dtype=np.int64),
+                    "active": np.array([True], dtype=np.bool_),
+                },
+            )
+        },
+        edge_sets={},
+    )
+    with self.assertRaisesRegex(ValueError, r"must be in \[0, 2\)"):
+      normalizer.normalize_numpy(oov_graph)
+    with self.assertRaises(tf.errors.InvalidArgumentError):
+      normalizer.normalize_tensorflow(tf_io.graph_to_tf_graph(oov_graph))
+
+    # Default drop_if_binary=False encodes 2-class features as vectors so
+    # OOV/third-class inputs encode cleanly as all zeros.
+    vec_normalizer = normalize_lib.auto_normalize(
+        schema,
+        stats,
+        config=normalize_lib.AutoNormalizeConfig(
+            categorical_bytes_to_index=True,
+            categorical_one_hot=True,
+        ),
+    )
+    vec_out_np = (
+        vec_normalizer.normalize_numpy(oov_graph).node_sets["nodes"].features
+    )
+    vec_out_tf = (
+        vec_normalizer.normalize_tensorflow(tf_io.graph_to_tf_graph(oov_graph))
+        .node_sets["nodes"]
+        .features
+    )
+    expected_vec = {
+        "color_INDEX_ONE_HOT": np.array([[1.0, 0.0, 0.0]], dtype=np.float32),
+        "shape_INDEX_ONE_HOT": np.array([[0.0, 0.0]], dtype=np.float32),
+        "flag_ONE_HOT": np.array([[1.0, 0.0]], dtype=np.float32),
+        "active_ONE_HOT": np.array([[0.0, 1.0]], dtype=np.float32),
+    }
+    self.assertEqual(set(vec_out_np.keys()), set(expected_vec.keys()))
+    for key, expected in expected_vec.items():
+      np.testing.assert_array_equal(vec_out_np[key], expected)
+      np.testing.assert_array_equal(vec_out_tf[key].numpy(), expected)
+
+    # `max_one_hot_categories` is forwarded on both the BYTES path (3-way
+    # "color" > 2) and the INTEGER/BOOL path.
+    with self.assertRaises(ValueError) as cm_bytes:
+      normalize_lib.auto_normalize(
+          schema,
+          stats,
+          config=normalize_lib.AutoNormalizeConfig(
+              categorical_bytes_to_index=True,
+              categorical_one_hot=True,
+              max_one_hot_categories=2,
+          ),
+      )
+    self.assertIn("exceeds max_one_hot_categories=2", str(cm_bytes.exception))
+    self.assertIn("disable `categorical_one_hot`", str(cm_bytes.exception))
+    self.assertNotIn("DictionaryIndexNormalizer", str(cm_bytes.exception))
+    int_only_schema = schema_lib.GraphSchema(
+        node_sets={
+            "nodes": schema_lib.NodeSchema(
+                features={
+                    "cat_int": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.INTEGER_64,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                        shape=(),
+                    )
+                }
+            )
+        },
+        edge_sets={},
+    )
+    int_only_stats = statistics_lib.GraphFeatureStatistics(
+        node_sets={
+            "nodes": statistics_lib.FeatureSetStatistics(
+                features={
+                    "cat_int": statistics_lib.FeatureStatistics(
+                        count=5,
+                        minimum=0.0,
+                        maximum=5.0,
+                        dictionary={},
+                        quantiles=[],
+                    )
+                }
+            )
+        }
+    )
+    with self.assertRaisesRegex(ValueError, "exceeds max_one_hot_categories=4"):
+      normalize_lib.auto_normalize(
+          int_only_schema,
+          int_only_stats,
+          config=normalize_lib.AutoNormalizeConfig(
+              categorical_one_hot=True,
+              max_one_hot_categories=4,
+          ),
+      )
+
+    # Empty INTEGER stats without explicit `num_categorical_values` fail loudly.
+    empty_int_stats = statistics_lib.GraphFeatureStatistics(
+        node_sets={
+            "nodes": statistics_lib.FeatureSetStatistics(
+                features={
+                    "cat_int": statistics_lib.FeatureStatistics(
+                        count=0,
+                        minimum=float("nan"),
+                        maximum=float("nan"),
+                        dictionary={},
+                        quantiles=[],
+                    )
+                }
+            )
+        }
+    )
+    with self.assertRaisesRegex(ValueError, "No finite maximum observed"):
+      normalize_lib.auto_normalize(
+          int_only_schema,
+          empty_int_stats,
+          config=normalize_lib.AutoNormalizeConfig(categorical_one_hot=True),
+      )
+
+  def test_auto_normalize_one_hot_bytes_without_observed_values(self):
+    # With no observed value the dictionary is a 1-entry placeholder. Unseen
+    # strings must still one-hot encode as zeros, not as that entry.
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "nodes": schema_lib.NodeSchema(
+                features={
+                    "c": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                        shape=(),
+                    ),
+                }
+            )
+        },
+        edge_sets={},
+    )
+    stats = statistics_lib.GraphFeatureStatistics(
+        node_sets={
+            "nodes": statistics_lib.FeatureSetStatistics(
+                features={
+                    "c": statistics_lib.FeatureStatistics(
+                        count=0, dictionary={}
+                    ),
+                }
+            )
+        }
+    )
+    normalizer = normalize_lib.auto_normalize(
+        schema,
+        stats,
+        config=normalize_lib.AutoNormalizeConfig(
+            categorical_bytes_to_index=True, categorical_one_hot=True
+        ),
+    )
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "nodes": in_memory_graph_lib.InMemoryNodeSet(
+                num_nodes=3,
+                features={"c": np.array([b"red", b"blue", b"SENTINEL"])},
+            )
+        },
+        edge_sets={},
+    )
+    # Not even the placeholder key of the empty dictionary gets a column.
+    expected = np.array([[0.0], [0.0], [0.0]], dtype=np.float32)
+    np.testing.assert_array_equal(
+        normalizer.normalize_numpy(graph)
+        .node_sets["nodes"]
+        .features["c_INDEX_ONE_HOT"],
+        expected,
+    )
+    np.testing.assert_array_equal(
+        normalizer.normalize_tensorflow(tf_io.graph_to_tf_graph(graph))
+        .node_sets["nodes"]
+        .features["c_INDEX_ONE_HOT"]
+        .numpy(),
+        expected,
+    )
+
+  def test_auto_normalize_one_hot_bytes_timeseries_keeps_group(self):
+    # The BYTES path goes through `DictionaryIndexNormalizer`, whose index
+    # schema drops the timeseries flag; the one-hot output must still be a
+    # timeseries in the input's (implicit or explicit) group.
+    for group, expected_group in ((None, "events"), ("seq_a", "seq_a")):
+      schema = schema_lib.GraphSchema(
+          node_sets={
+              "nodes": schema_lib.NodeSchema(
+                  features={
+                      "events": schema_lib.FeatureSchema(
+                          format=schema_lib.FeatureFormat.BYTES,
+                          semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+                          shape=(4,),
+                          is_timeseries=True,
+                          group=group,
+                      ),
+                  }
+              )
+          },
+          edge_sets={},
+      )
+      stats = statistics_lib.GraphFeatureStatistics(
+          node_sets={
+              "nodes": statistics_lib.FeatureSetStatistics(
+                  features={
+                      "events": statistics_lib.FeatureStatistics(
+                          count=2,
+                          dictionary={
+                              "click": statistics_lib.DictionaryItem(0, 5),
+                              "view": statistics_lib.DictionaryItem(1, 3),
+                          },
+                      ),
+                  }
+              )
+          }
+      )
+      normalizer = normalize_lib.auto_normalize(
+          schema,
+          stats,
+          config=normalize_lib.AutoNormalizeConfig(
+              categorical_bytes_to_index=True, categorical_one_hot=True
+          ),
+      )
+      out = (
+          normalizer.output_schema()
+          .node_sets["nodes"]
+          .features["events_INDEX_ONE_HOT"]
+      )
+      self.assertTrue(out.is_timeseries)
+      self.assertEqual(out.group, expected_group)
+      self.assertEqual(out.shape, (4, 2))
 
 
 if __name__ == "__main__":
