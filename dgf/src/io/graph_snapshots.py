@@ -12,19 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""IO functions to read a DGF Graph Snapshots dataset into memory."""
+"""IO functions to read and write a DGF Graph Snapshots dataset."""
 
 from collections.abc import Callable, Sequence
 import concurrent.futures
+import dataclasses
 import os
-from typing import TypeVar
+from typing import TypeVar, overload
 
 from dgf.src.data import gf_metadata as gf_metadata_lib
 from dgf.src.data import graph_snapshots as graph_snapshots_lib
+from dgf.src.data import graph_snapshots_metadata as snapshots_metadata_lib
 from dgf.src.data import in_memory_graph as in_memory_graph_lib
 from dgf.src.data import schema as schema_lib
 from dgf.src.io import graph_constants
 from dgf.src.io import graph_in_memory
+from dgf.src.io import graph_snapshots_metadata as io_snapshots_metadata
 from dgf.src.io import schema as io_schema
 from dgf.src.transform import combine_graph_snapshots as combine_lib
 from dgf.src.util import filesystem
@@ -33,6 +36,9 @@ from dgf.src.validate import graph_snapshots as snapshots_validate_lib
 import numpy as np
 
 _DEFAULT_NUM_WORKERS = 32
+
+# Version of the Graph Snapshots format written by `write_graph_snapshots`.
+_GRAPH_SNAPSHOTS_VERSION = 0
 
 _T = TypeVar("_T")
 _R = TypeVar("_R")
@@ -97,6 +103,20 @@ def _discover_and_sort_snapshots(
   return snapshot_info
 
 
+def _read_snapshot_graph(
+    dataset_path: str, snapshot_id: str, schema: schema_lib.GraphSchema
+) -> in_memory_graph_lib.InMemoryGraph:
+  """Reads the in-memory graph of a single snapshot."""
+  snapshot_dir = os.path.join(
+      dataset_path, graph_constants.DIRNAME_SNAPSHOTS, snapshot_id
+  )
+  return graph_in_memory.read_graph(
+      snapshot_dir,
+      override_schema=schema,
+      verbose=False,
+  )[0]
+
+
 def _load_snapshot_graphs(
     dataset_path: str,
     snapshot_ids: Sequence[str],
@@ -106,32 +126,69 @@ def _load_snapshot_graphs(
   """Loads the in-memory graph of each snapshot in parallel."""
 
   def _load_single(snapshot_id: str) -> in_memory_graph_lib.InMemoryGraph:
-    snapshot_dir = os.path.join(
-        dataset_path, graph_constants.DIRNAME_SNAPSHOTS, snapshot_id
-    )
-    return graph_in_memory.read_graph(
-        snapshot_dir,
-        override_schema=schema,
-        verbose=False,
-    )[0]
+    return _read_snapshot_graph(dataset_path, snapshot_id, schema)
 
   return _parallel_map(_load_single, snapshot_ids, num_workers)
+
+
+class _SnapshotGraphsOnDisk(Sequence[in_memory_graph_lib.InMemoryGraph]):
+  """The graphs of the snapshots of a dataset, read from disk when accessed.
+
+  A graph is read each time it is accessed and it is not kept: Only the graphs
+  held by the caller are in memory.
+  """
+
+  def __init__(
+      self,
+      dataset_path: str,
+      snapshot_ids: Sequence[str],
+      schema: schema_lib.GraphSchema,
+  ):
+    self._dataset_path = dataset_path
+    self._snapshot_ids = list(snapshot_ids)
+    self._schema = schema
+
+  def __len__(self) -> int:
+    return len(self._snapshot_ids)
+
+  @overload
+  def __getitem__(self, index: int) -> in_memory_graph_lib.InMemoryGraph: ...
+
+  @overload
+  def __getitem__(
+      self, index: slice
+  ) -> list[in_memory_graph_lib.InMemoryGraph]: ...
+
+  def __getitem__(self, index):
+    if isinstance(index, slice):
+      return [
+          _read_snapshot_graph(self._dataset_path, snapshot_id, self._schema)
+          for snapshot_id in self._snapshot_ids[index]
+      ]
+    return _read_snapshot_graph(
+        self._dataset_path, self._snapshot_ids[index], self._schema
+    )
 
 
 def read_graph_snapshots(
     path: str,
     verbose: bool = False,
     num_workers: int = _DEFAULT_NUM_WORKERS,
+    lazy: bool = False,
 ) -> graph_snapshots_lib.GraphSnapshots:
-  """Reads a DGF Graph Snapshots dataset from disk into memory.
+  """Reads a DGF Graph Snapshots dataset from disk.
 
   A Graph Snapshots dataset is a directory of independent graphs, each one
   capturing the state of the same graph at a different point in time. The
   snapshots are returned sorted by increasing timestamp.
 
-  All the snapshot graphs are loaded into memory. Use
-  `dgf.transform.combine_graph_snapshots` to convert them into a single
-  Temporal Graph.
+  By default, all the snapshot graphs are loaded into memory. With `lazy=True`,
+  only the schema and the timestamps are read: each graph is read from disk
+  when it is accessed, e.g. with `snapshots.graphs[i]`, and it is not kept. Use
+  it for snapshots that do not fit in memory together.
+
+  Use `dgf.transform.combine_graph_snapshots` to convert the snapshots into a
+  single Temporal Graph.
 
   This function validates the dataset layout, but not the contents of the
   snapshot graphs. Call `dgf.validate.validate_snapshots` to also check the
@@ -144,6 +201,13 @@ def read_graph_snapshots(
 
   snapshots = dgf.io.read_graph_snapshots("/path/to/snapshot_dataset")
   graph, schema = dgf.transform.combine_graph_snapshots(snapshots)
+
+  # One snapshot in memory at a time.
+  snapshots = dgf.io.read_graph_snapshots(
+      "/path/to/snapshot_dataset", lazy=True
+  )
+  for timestamp, graph in zip(snapshots.timestamps, snapshots.graphs):
+    ...
   ```
 
   Args:
@@ -151,6 +215,8 @@ def read_graph_snapshots(
       'snapshots/' sub-directory.
     verbose: If True, print progress information.
     num_workers: Number of threads used to read the snapshots.
+    lazy: If True, the graphs are not loaded: each one is read from disk each
+      time it is accessed.
 
   Returns:
     The graph snapshots, sorted by increasing timestamp.
@@ -178,13 +244,16 @@ def read_graph_snapshots(
         timestamps,
     )
 
-  if verbose:
-    log.info("Loading %d snapshot graphs...", len(snapshot_ids))
-  graphs = _load_snapshot_graphs(
-      path, snapshot_ids, schema=schema, num_workers=num_workers
-  )
-  if verbose:
-    log.info("Loaded %d snapshot graphs.", len(graphs))
+  if lazy:
+    graphs = _SnapshotGraphsOnDisk(path, snapshot_ids, schema)
+  else:
+    if verbose:
+      log.info("Loading %d snapshot graphs...", len(snapshot_ids))
+    graphs = _load_snapshot_graphs(
+        path, snapshot_ids, schema=schema, num_workers=num_workers
+    )
+    if verbose:
+      log.info("Loaded %d snapshot graphs.", len(graphs))
 
   return graph_snapshots_lib.GraphSnapshots(
       timestamps=timestamps,
@@ -192,6 +261,95 @@ def read_graph_snapshots(
       schema=schema,
       graphs=graphs,
   )
+
+
+def _check_snapshot_id(snapshot_id: str) -> None:
+  """Raises a ValueError if `snapshot_id` is not a single directory name."""
+  if (
+      not snapshot_id
+      or snapshot_id in (".", "..")
+      or "/" in snapshot_id
+      or "\\" in snapshot_id
+      or os.path.basename(snapshot_id) != snapshot_id
+  ):
+    raise ValueError(
+        "A snapshot id should be the name of a directory, without path"
+        f" separators. Got {snapshot_id!r}."
+    )
+
+
+def write_graph_snapshots(
+    snapshots: graph_snapshots_lib.GraphSnapshots,
+    path: str,
+    verbose: bool = False,
+) -> None:
+  """Writes graph snapshots to disk as a DGF Graph Snapshots dataset.
+
+  The graphs are read from `snapshots.graphs` and written one at a time, such
+  that snapshots that do not fit in memory together can be written from a
+  sequence that creates each graph when it is accessed.
+
+  Usage example:
+
+  ```python
+  snapshots = dgf.data.GraphSnapshots(
+      timestamps=np.array([100, 200], dtype=np.int64),
+      snapshot_ids=["first", "second"],
+      schema=schema,
+      graphs=[first_graph, second_graph],
+  )
+  dgf.io.write_graph_snapshots(snapshots, "/path/to/snapshot_dataset")
+
+  snapshots = dgf.io.read_graph_snapshots("/path/to/snapshot_dataset")
+  ```
+
+  Args:
+    snapshots: The graph snapshots. The timestamp of a graph, if it has one,
+      should be the timestamp of its snapshot.
+    path: Path to the dataset directory to create.
+    verbose: If True, print progress information.
+
+  Raises:
+    ValueError: If a snapshot id is not a valid directory name, or if the
+      timestamp of a graph is not the timestamp of its snapshot.
+  """
+  # The snapshot ids are directory names: They are checked before anything is
+  # written, so that a dataset is never written outside of `path`.
+  for snapshot_id in snapshots.snapshot_ids:
+    _check_snapshot_id(snapshot_id)
+  filesystem.makedirs(path)
+  io_snapshots_metadata.write_metadata(
+      snapshots_metadata_lib.GraphSnapshotsMetadata(
+          format=snapshots_metadata_lib.GraphSnapshotsFormat.GRAPH_SNAPSHOTS,
+          version=_GRAPH_SNAPSHOTS_VERSION,
+      ),
+      os.path.join(path, graph_constants.FILENAME_METADATA),
+  )
+  io_schema.write_schema(
+      snapshots.schema, os.path.join(path, graph_constants.FILENAME_SCHEMA)
+  )
+  for index, snapshot_id in enumerate(snapshots.snapshot_ids):
+    timestamp = int(snapshots.timestamps[index])
+    graph = snapshots.graphs[index]
+    if graph.timestamp is not None and graph.timestamp != timestamp:
+      raise ValueError(
+          f"The graph of snapshot {snapshot_id!r} has timestamp"
+          f" {graph.timestamp}, but the timestamp of the snapshot is"
+          f" {timestamp}."
+      )
+    if verbose:
+      log.info(
+          "Writing snapshot %d / %d (%s)",
+          index + 1,
+          len(snapshots),
+          snapshot_id,
+      )
+    graph_in_memory.write_graph(
+        dataclasses.replace(graph, timestamp=timestamp),
+        snapshots.schema,
+        path=os.path.join(path, graph_constants.DIRNAME_SNAPSHOTS, snapshot_id),
+        verbose=False,
+    )
 
 
 def read_graph_snapshots_as_temporal_graph(

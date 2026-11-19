@@ -14,7 +14,9 @@
 
 """Unit tests for graph_snapshots."""
 
+import dataclasses
 import os
+from unittest import mock
 
 from absl.testing import absltest
 from dgf.src.data import graph_snapshots as data_graph_snapshots
@@ -276,6 +278,111 @@ class GraphSnapshotsTest(absltest.TestCase):
           schema=schema,
           graphs=[g1, g1],
       )
+
+  def test_read_graph_snapshots_lazy_reads_the_graphs_when_accessed(self):
+    dataset_dir = self.create_tempdir().full_path
+    self._create_sample_dataset(dataset_dir)
+    expected = graph_snapshots.read_graph_snapshots(dataset_dir)
+
+    with mock.patch.object(
+        graph_in_memory, "read_graph", wraps=graph_in_memory.read_graph
+    ) as read_graph:
+      snapshots = graph_snapshots.read_graph_snapshots(dataset_dir, lazy=True)
+      self.assertEqual(read_graph.call_count, 0)
+      self.assertLen(snapshots, 3)
+      self.assertLen(snapshots.graphs, 3)
+      test_util.assert_are_equal(
+          self, snapshots.timestamps, expected.timestamps
+      )
+      self.assertEqual(
+          list(snapshots.snapshot_ids), list(expected.snapshot_ids)
+      )
+      test_util.assert_are_equal(self, snapshots.schema, expected.schema)
+
+      test_util.assert_are_equal(self, snapshots.graphs[1], expected.graphs[1])
+      self.assertEqual(read_graph.call_count, 1)
+      # The graphs are not kept: Each access reads the graph again.
+      test_util.assert_are_equal(self, snapshots.graphs[1], expected.graphs[1])
+      self.assertEqual(read_graph.call_count, 2)
+
+    for graph, expected_graph in zip(snapshots.graphs, expected.graphs):
+      test_util.assert_are_equal(self, graph, expected_graph)
+    self.assertLen(snapshots.graphs[1:], 2)
+
+  def test_lazy_snapshots_combine_into_the_same_temporal_graph(self):
+    dataset_dir = self.create_tempdir().full_path
+    self._create_sample_dataset(dataset_dir)
+
+    graph, schema = combine_lib.combine_graph_snapshots(
+        graph_snapshots.read_graph_snapshots(dataset_dir, lazy=True)
+    )
+
+    expected_graph, expected_schema = combine_lib.combine_graph_snapshots(
+        graph_snapshots.read_graph_snapshots(dataset_dir)
+    )
+    test_util.assert_are_equal(self, graph, expected_graph)
+    test_util.assert_are_equal(self, schema, expected_schema)
+
+  def test_write_and_read_graph_snapshots(self):
+    schema = _create_schema()
+    snapshots = data_graph_snapshots.GraphSnapshots(
+        timestamps=np.array([100, 200], dtype=np.int64),
+        snapshot_ids=["first", "second"],
+        schema=schema,
+        graphs=[
+            # The timestamp of a graph is optional.
+            _create_graph([b"1", b"2"], [1.0, 2.0], timestamp=100),
+            dataclasses.replace(
+                _create_graph([b"1"], [3.0], timestamp=200), timestamp=None
+            ),
+        ],
+    )
+    dataset_dir = os.path.join(self.create_tempdir().full_path, "dataset")
+
+    graph_snapshots.write_graph_snapshots(snapshots, dataset_dir)
+
+    for lazy in (False, True):
+      with self.subTest(lazy=lazy):
+        loaded = graph_snapshots.read_graph_snapshots(dataset_dir, lazy=lazy)
+        self.assertEqual(list(loaded.snapshot_ids), ["first", "second"])
+        test_util.assert_are_equal(
+            self, loaded.timestamps, np.array([100, 200], dtype=np.int64)
+        )
+        test_util.assert_are_equal(self, loaded.schema, schema)
+        self.assertEqual(loaded.graphs[1].timestamp, 200)
+        test_util.assert_are_equal(
+            self,
+            loaded.graphs[1].node_sets["n1"].features["f1"],
+            np.array([3.0], dtype=np.float32),
+        )
+
+  def test_write_graph_snapshots_with_inconsistent_timestamp_raises(self):
+    snapshots = data_graph_snapshots.GraphSnapshots(
+        timestamps=np.array([100], dtype=np.int64),
+        snapshot_ids=["first"],
+        schema=_create_schema(),
+        graphs=[_create_graph([b"1"], [1.0], timestamp=150)],
+    )
+    with self.assertRaisesRegex(ValueError, "has timestamp 150"):
+      graph_snapshots.write_graph_snapshots(
+          snapshots, os.path.join(self.create_tempdir().full_path, "dataset")
+      )
+
+  def test_write_graph_snapshots_with_invalid_snapshot_id_raises(self):
+    root = self.create_tempdir().full_path
+    dataset_dir = os.path.join(root, "dataset")
+    for snapshot_id in ("", ".", "..", "../outside", "a/b", "a\\b", "/abs"):
+      with self.subTest(snapshot_id=snapshot_id):
+        snapshots = data_graph_snapshots.GraphSnapshots(
+            timestamps=np.array([100], dtype=np.int64),
+            snapshot_ids=[snapshot_id],
+            schema=_create_schema(),
+            graphs=[_create_graph([b"1"], [1.0], timestamp=100)],
+        )
+        with self.assertRaisesRegex(ValueError, "name of a directory"):
+          graph_snapshots.write_graph_snapshots(snapshots, dataset_dir)
+        # Nothing is written.
+        self.assertEqual(os.listdir(root), [])
 
   def test_read_graph_snapshots_as_temporal_graph(self):
     dataset_dir = self.create_tempdir().full_path
