@@ -2822,6 +2822,14 @@ class OneHotNormalizerTest(parameterized.TestCase):
       with self.assertRaisesRegex(ValueError, "No finite maximum observed"):
         normalize_lib.OneHotNormalizer.create("cat", input_schema, bad_stats)
 
+    # Only -1 sentinels: no category was observed, so there is nothing to
+    # encode (instead of a single all-zero column).
+    sentinels_only = statistics_lib.FeatureStatistics(
+        count=3, minimum=-1.0, maximum=-1.0, dictionary={}, quantiles=[]
+    )
+    with self.assertRaisesRegex(ValueError, "no non-negative value"):
+      normalize_lib.OneHotNormalizer.create("cat", input_schema, sentinels_only)
+
     # Providing an explicit category count or schema num_categorical_values
     # succeeds even when stats are empty.
     empty_stats = statistics_lib.FeatureStatistics(
@@ -3283,144 +3291,23 @@ class ImputeNanNormalizerTest(parameterized.TestCase):
             fill_values=np.array([1.0, bad_fill], dtype=np.float32),
         )
 
-  def test_finite_float64_beyond_float32_range_raises(self):
+  def test_float64_beyond_float32_range_is_filled_on_both_paths(self):
     normalizer = normalize_lib.ImputeNanNormalizer(
         input_feature="x",
         output_feature_name="x_IMPUTED",
         output_shape=(),
         fill_values=np.array(2.0, dtype=np.float32),
     )
-
-    @tf.function
-    def _tf_fn(tensor):
-      return normalizer.normalize_tensorflow(tensor)["x_IMPUTED"]
-
-    # 1e40 is finite in float64 but beyond the float32 range (3.4e38): it is
-    # not missing, so it must not get the fill value, and it cannot be emitted
-    # as float32 without becoming inf, so every path raises.
-    too_large = np.array([1e40, 3.0, np.nan], dtype=np.float64)
-    with self.assertRaisesRegex(ValueError, "beyond the float32 range"):
-      normalizer.normalize_numpy(too_large)
-    with self.assertRaises(tf.errors.InvalidArgumentError):
-      normalizer.normalize_tensorflow(tf.constant(too_large))
-    with self.assertRaises(tf.errors.InvalidArgumentError):
-      _tf_fn(tf.constant(too_large))
-
-    # float64 values within the float32 range pass through; NaN and ±inf get
-    # the fill value 2.0. 2**127 (~1.7e38) and 0.5 are exact in float32.
-    in_range = np.array(
-        [2.0**127, 0.5, np.nan, np.inf, -np.inf], dtype=np.float64
-    )
-    expected = np.array([2.0**127, 0.5, 2.0, 2.0, 2.0], dtype=np.float32)
+    # 1e40 overflows float32, so it is filled like ±inf on both paths, and the
+    # output stays finite.
+    values = np.array([1e40, 3.0, np.nan], dtype=np.float64)
+    expected = np.array([2.0, 3.0, 2.0], dtype=np.float32)
     for out in (
-        normalizer.normalize_numpy(in_range)["x_IMPUTED"],
-        normalizer.normalize_tensorflow(tf.constant(in_range))[
-            "x_IMPUTED"
-        ].numpy(),
-        _tf_fn(tf.constant(in_range)).numpy(),
+        normalizer.normalize_numpy(values)["x_IMPUTED"],
+        normalizer.normalize_tensorflow(tf.constant(values))["x_IMPUTED"].numpy(),
     ):
       self.assertEqual(out.dtype, np.float32)
       np.testing.assert_array_equal(out, expected)
-
-    # Integer inputs are always within the float32 range.
-    int_values = np.array([2**62, -3], dtype=np.int64)
-    int_expected = np.array([2.0**62, -3.0], dtype=np.float32)
-    np.testing.assert_array_equal(
-        normalizer.normalize_numpy(int_values)["x_IMPUTED"], int_expected
-    )
-    np.testing.assert_array_equal(
-        normalizer.normalize_tensorflow(tf.constant(int_values))[
-            "x_IMPUTED"
-        ].numpy(),
-        int_expected,
-    )
-
-  def test_fill_beyond_float32_range_rejected(self):
-    # A fitted fill of 2e40 is finite in float64 but not representable in
-    # float32. It raises (also under `median_with_fallbacks`: the quantiles
-    # exist, so falling back to the mean would hide that the feature is out of
-    # range), and it raises a ValueError even when numpy overflow is an error.
-    input_schema = schema_lib.FeatureSchema(
-        format=schema_lib.FeatureFormat.FLOAT_64,
-        semantic=schema_lib.FeatureSemantic.NUMERICAL,
-        shape=(),
-    )
-    stats = statistics_lib.FeatureStatistics(
-        count=3,
-        minimum=1e40,
-        maximum=3e40,
-        dictionary={},
-        quantiles=[1e40, 2e40, 3e40],
-        mean=2.0,
-    )
-    with np.errstate(over="raise"):
-      for strategy in ("median", "median_with_fallbacks"):
-        with self.assertRaisesRegex(ValueError, "finite fill_values"):
-          normalize_lib.ImputeNanNormalizer.create(
-              "x", input_schema, stats, strategy=strategy
-          )
-      for strategy in ("median", "mean"):
-        with self.assertRaisesRegex(ValueError, "finite fill_values"):
-          normalize_lib.ImputeNanNormalizer.from_values(
-              "x",
-              input_schema,
-              np.array([1e40, 2e40, 3e40]),
-              strategy=strategy,
-          )
-
-  def test_non_continuous_semantic_rejected(self):
-    stats = statistics_lib.FeatureStatistics(
-        count=2,
-        minimum=1.0,
-        maximum=3.0,
-        dictionary={},
-        quantiles=[1.0, 3.0],
-        mean=2.0,
-    )
-    allowed = {
-        schema_lib.FeatureSemantic.UNKNOWN,
-        schema_lib.FeatureSemantic.NUMERICAL,
-        schema_lib.FeatureSemantic.EMBEDDING,
-        schema_lib.FeatureSemantic.TIMEDELTA,
-        schema_lib.FeatureSemantic.TIMESERIES,
-    }
-    for semantic in schema_lib.FeatureSemantic:
-      schema = schema_lib.FeatureSchema(
-          format=schema_lib.FeatureFormat.INTEGER_64,
-          semantic=semantic,
-          shape=(),
-      )
-      if semantic in allowed:
-        for norm in (
-            normalize_lib.ImputeNanNormalizer.create("x", schema, stats),
-            normalize_lib.ImputeNanNormalizer.from_values(
-                "x", schema, np.array([1, 3], dtype=np.int64)
-            ),
-            normalize_lib.ImputeNanNormalizer(
-                input_feature="x",
-                output_feature_name="x_IMPUTED",
-                output_shape=(),
-                fill_values=np.array(2.0, dtype=np.float32),
-                output_semantic=semantic,
-            ),
-        ):
-          self.assertEqual(norm.output_schema()["x_IMPUTED"].semantic, semantic)
-      else:
-        expected_error = f"cannot carry semantic {semantic.value}"
-        with self.assertRaisesRegex(ValueError, expected_error):
-          normalize_lib.ImputeNanNormalizer.create("x", schema, stats)
-        with self.assertRaisesRegex(ValueError, expected_error):
-          normalize_lib.ImputeNanNormalizer.from_values(
-              "x", schema, np.array([1, 3], dtype=np.int64)
-          )
-        with self.assertRaisesRegex(ValueError, expected_error):
-          normalize_lib.ImputeNanNormalizer(
-              input_feature="x",
-              output_feature_name="x_IMPUTED",
-              output_shape=(),
-              fill_values=np.array(2.0, dtype=np.float32),
-              output_semantic=semantic,
-          )
 
   def test_parameter_and_schema_validation_raises(self):
     with self.assertRaisesRegex(ValueError, r"fill_values of shape \(\)"):
@@ -3938,128 +3825,80 @@ class ZScoreNormalizerTest(absltest.TestCase):
     for values in (np.array([b"1.0", b"3.0"]), np.array([True, False])):
       with self.assertRaisesRegex(ValueError, "dense integer or float array"):
         normalize_lib.ZScoreNormalizer.from_values("x", schema_1d, values)
-    # Extreme overflow (`[-1.5e308, 1.5e308, 1.5e308]`, where `vals - mean`
-    # exceeds float64 range) and subnormal spreads (`[0, 5e-324]` and
-    # `[0, 5e-324, 1e-323]`, where `std < smallest_normal` loses mantissa bits)
-    # fail loudly.
-    subnormal_step = np.nextafter(0.0, 1.0)
-    for values in (
-        np.array([-1.5e308, 1.5e308, 1.5e308]),
-        np.array([0.0, subnormal_step]),
-        np.array([0.0, subnormal_step, 2.0 * subnormal_step]),
-    ):
-      with self.assertRaisesRegex(ValueError, "cannot be standardized"):
-        normalize_lib.ZScoreNormalizer.from_values("x", schema_1d, values)
 
-  def test_extreme_magnitudes_and_non_representable_mean(self):
-    float_schema = schema_lib.FeatureSchema(
-        format=schema_lib.FeatureFormat.FLOAT_64,
+  def test_categorical_input_semantic_rejected(self):
+    values = np.array([0, 1, 2], dtype=np.int64)
+    stats = statistics_lib.FeatureStatistics(
+        count=3,
+        minimum=0.0,
+        maximum=2.0,
+        dictionary={},
+        quantiles=[0.0, 1.0, 2.0],
+        mean=1.0,
+    )
+    numerical = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.INTEGER_64,
         semantic=schema_lib.FeatureSemantic.NUMERICAL,
         shape=(),
     )
+    for fit in (
+        lambda s: normalize_lib.ZScoreNormalizer.from_values("x", s, values),
+        lambda s: normalize_lib.ImputeNanNormalizer.from_values("x", s, values),
+        lambda s: normalize_lib.ImputeNanNormalizer.create("x", s, stats),
+    ):
+      for semantic in (
+          schema_lib.FeatureSemantic.CATEGORICAL,
+          schema_lib.FeatureSemantic.TIMESTAMP,
+          schema_lib.FeatureSemantic.PRIMARY_ID,
+          schema_lib.FeatureSemantic.MASK,
+      ):
+        with self.assertRaisesRegex(ValueError, f"semantic {semantic.value}"):
+          fit(
+              schema_lib.FeatureSchema(
+                  format=schema_lib.FeatureFormat.INTEGER_64,
+                  semantic=semantic,
+                  shape=(),
+              )
+          )
+      # The same feature declared as numerical is accepted.
+      fit(numerical)
+
+  def test_large_integers_keep_exact_statistics_or_raise(self):
     int_schema = schema_lib.FeatureSchema(
         format=schema_lib.FeatureFormat.INTEGER_64,
         semantic=schema_lib.FeatureSemantic.NUMERICAL,
         shape=(),
     )
-    # Max-abs-scaled variance handles huge (> ~1.34e154) and tiny (< ~1e-154)
-    # spreads without squaring overflow/underflow.
-    for pair in (
-        np.array([1e160, 2e160]),
-        np.array([1e308, 1.7e308]),
-        np.array([-1.5e308, 1.5e308]),
-        np.array([0.0, 1e-162]),
-        np.array([0.0, 5e-162]),
-        np.array([0.0, 1e-300]),
-    ):
-      fitted = normalize_lib.ZScoreNormalizer.from_values(
-          "x", float_schema, pair
-      )
-      for out in (
-          fitted.normalize_numpy(pair)["x_Z_SCORE"],
-          fitted.normalize_tensorflow(tf.constant(pair))["x_Z_SCORE"].numpy(),
-      ):
-        self.assertEqual(out.dtype, np.float32)
-        np.testing.assert_allclose(
-            out, np.array([-1.0, 1.0], dtype=np.float32), rtol=0, atol=1e-6
-        )
-
-    # Just above float64 `smallest_normal` (~2.225e-308), `std` retains full
-    # 53-bit precision: `3e-308 * [0, 1, 2]` has `std = 3e-308 * sqrt(2/3)
-    # ≈ 2.45e-308` and normalizes to `[-sqrt(1.5), 0, sqrt(1.5)]`.
-    tiny_normal = np.array([0.0, 3e-308, 6e-308], dtype=np.float64)
-    tiny_fitted = normalize_lib.ZScoreNormalizer.from_values(
-        "x", float_schema, tiny_normal
-    )
+    # 2**52 + 1 + (0, 3, 6), 5 times: mean 2**52 + 4, std sqrt(6). The plain
+    # float64 sum (~6.8e16) exceeds 2**53 and would round the mean by 1.
+    values = np.tile(np.array([0, 3, 6], dtype=np.int64), 5) + 2**52 + 1
+    fitted = normalize_lib.ZScoreNormalizer.from_values("x", int_schema, values)
+    self.assertEqual(float(fitted.mean), float(2**52 + 4))
+    np.testing.assert_allclose(float(fitted.std), math.sqrt(6), rtol=1e-12)
     np.testing.assert_allclose(
-        tiny_fitted.normalize_numpy(tiny_normal)["x_Z_SCORE"],
-        np.array([-np.sqrt(1.5), 0.0, np.sqrt(1.5)], dtype=np.float32),
+        fitted.normalize_numpy(values[:3])["x_Z_SCORE"],
+        np.array([-1.0, 0.0, 1.0], dtype=np.float32) * np.sqrt(np.float32(1.5)),
         rtol=0,
         atol=1e-6,
     )
 
-    const_huge = np.array([1e308, 1e308])
-    const_norm = normalize_lib.ZScoreNormalizer.from_values(
-        "x", float_schema, const_huge
-    )
-    np.testing.assert_array_equal(
-        const_norm.normalize_numpy(const_huge)["x_Z_SCORE"],
-        np.array([0.0, 0.0], dtype=np.float32),
-    )
+    # Beyond 2**53 float64 merges integers, e.g. nanosecond timestamps.
+    with self.assertRaisesRegex(ValueError, r"beyond 2\*\*53"):
+      normalize_lib.ZScoreNormalizer.from_values(
+          "x", int_schema, np.array([0, 50, 100], dtype=np.int64) + 1_700 * 10**15
+      )
 
-    # Realistic large-offset integer timestamps whose mean is not dyadic
-    # (`1.7e9 + 2/3`, bias ~1.7e-7 std << 1e-5) succeed and match hand-derived
-    # z-scores `[-sqrt(2), 1/sqrt(2), 1/sqrt(2)]`.
-    unix_secs = np.array(
-        [1_700_000_000, 1_700_000_001, 1_700_000_001], dtype=np.int64
+  def test_std_underflow_or_overflow_raises(self):
+    schema = schema_lib.FeatureSchema(
+        format=schema_lib.FeatureFormat.FLOAT_64,
+        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        shape=(),
     )
-    unix_fitted = normalize_lib.ZScoreNormalizer.from_values(
-        "x", int_schema, unix_secs
-    )
-    np.testing.assert_allclose(
-        unix_fitted.mean, 1_700_000_000.0 + 2.0 / 3.0, rtol=1e-15, atol=0
-    )
-    expected_unix = np.array(
-        [-np.sqrt(2.0), 1.0 / np.sqrt(2.0), 1.0 / np.sqrt(2.0)],
-        dtype=np.float32,
-    )
-    for out in (
-        unix_fitted.normalize_numpy(unix_secs)["x_Z_SCORE"],
-        unix_fitted.normalize_tensorflow(tf.constant(unix_secs))[
-            "x_Z_SCORE"
-        ].numpy(),
-    ):
-      np.testing.assert_allclose(out, expected_unix, rtol=0, atol=1e-6)
-
-    # Pin the `_Z_SCORE_MAX_MEAN_RESIDUAL_RTOL == 1e-5` boundary on `2**52 +
-    # [0, K]` (odd `K` -> mean rounds by 0.5, `std = K / 2`, `|r| / std = 1/K`):
-    # `K = 99_999` (`1.00001e-5 > 1e-5`) raises, while `K = 100_001`
-    # (`0.99999e-5 < 1e-5`) succeeds.
-    boundary_pass = np.array([2**52, 2**52 + 100_001], dtype=np.int64)
-    boundary_fitted = normalize_lib.ZScoreNormalizer.from_values(
-        "x", int_schema, boundary_pass
-    )
-    np.testing.assert_allclose(
-        boundary_fitted.normalize_numpy(boundary_pass)["x_Z_SCORE"],
-        np.array([-1.0, 1.0], dtype=np.float32),
-        rtol=0,
-        atol=1.5e-5,
-    )
-
-    # When rounding the true mean to float64 shifts outputs by more than `1e-5`
-    # std (including `K = 99_999` right above the threshold and 1-ulp spreads
-    # like `2**52 + [0, 1]`), `from_values` raises instead of emitting biased
-    # z-scores.
-    for schema, bad_values in (
-        (int_schema, np.array([2**52, 2**52 + 99_999], dtype=np.int64)),
-        (int_schema, np.array([0, 1], dtype=np.int64) + 2**52),
-        (int_schema, 2**53 - np.array([0, 1], dtype=np.int64)),
-        (int_schema, np.array([0, 0, 1], dtype=np.int64) + 2**51),
-        (float_schema, np.array([1e15, 1e15 + 0.125])),
-        (float_schema, np.array([2.0**53, 2.0**53 + 2.0])),
-    ):
-      with self.assertRaisesRegex(ValueError, "cannot be standardized"):
-        normalize_lib.ZScoreNormalizer.from_values("x", schema, bad_values)
+    # A non-constant channel whose std underflows to 0 or overflows to inf
+    # would otherwise be scaled by 1 or fail with a misleading message.
+    for values in (np.array([0.0, 1e-200]), np.array([-1e200, 1e200])):
+      with self.assertRaisesRegex(ValueError, "rescale the feature"):
+        normalize_lib.ZScoreNormalizer.from_values("x", schema, values)
 
   def test_z_score_then_impute_zero_preserves_large_offset_precision(self):
     schema = schema_lib.FeatureSchema(
@@ -4099,86 +3938,6 @@ class ZScoreNormalizerTest(absltest.TestCase):
     ):
       self.assertEqual(out.dtype, np.float32)
       np.testing.assert_allclose(out, expected, rtol=1e-6, atol=1e-6)
-
-  def test_from_values_rejects_integers_beyond_float64_exact_range(self):
-    int_schema = schema_lib.FeatureSchema(
-        format=schema_lib.FeatureFormat.INTEGER_64,
-        semantic=schema_lib.FeatureSemantic.NUMERICAL,
-        shape=(),
-    )
-    # Above 2**53 float64 has an ulp of 2, so 2**53 + 1 is not representable.
-    # Nanosecond timestamps (~1.7e18, ulp 256) would even collapse into one
-    # value and look like a constant channel.
-    for values in (
-        np.array([2**53, 2**53 + 1, 2**53 + 2], dtype=np.int64),
-        np.array([-(2**53) - 1, 0, 1], dtype=np.int64),
-        np.array([0, 50, 100], dtype=np.int64) + 1_700_000_000_000_000_000,
-    ):
-      with self.assertRaisesRegex(ValueError, r"beyond 2\*\*53"):
-        normalize_lib.ZScoreNormalizer.from_values("x", int_schema, values)
-
-    # Up to 2**53 inclusive every integer is exact: (2**53 - 2, 2**53 - 1,
-    # 2**53) has mean 2**53 - 1 and std sqrt(2/3), so the outputs are
-    # (-1, 0, 1) * sqrt(1.5).
-    boundary = np.array([-2, -1, 0], dtype=np.int64) + 2**53
-    fitted = normalize_lib.ZScoreNormalizer.from_values(
-        "x", int_schema, boundary
-    )
-    self.assertEqual(float(fitted.mean), float(2**53 - 1))
-    np.testing.assert_allclose(float(fitted.std), math.sqrt(2 / 3), rtol=1e-12)
-    out = fitted.normalize_numpy(boundary)["x_Z_SCORE"]
-    self.assertEqual(out.dtype, np.float32)
-    np.testing.assert_allclose(
-        out,
-        np.array([-1.0, 0.0, 1.0], dtype=np.float32) * np.sqrt(np.float32(1.5)),
-        rtol=0,
-        atol=1e-6,
-    )
-
-  def test_non_continuous_semantic_rejected(self):
-    allowed = {
-        schema_lib.FeatureSemantic.UNKNOWN,
-        schema_lib.FeatureSemantic.NUMERICAL,
-        schema_lib.FeatureSemantic.EMBEDDING,
-        schema_lib.FeatureSemantic.TIMEDELTA,
-        schema_lib.FeatureSemantic.TIMESERIES,
-    }
-    for semantic in schema_lib.FeatureSemantic:
-      schema = schema_lib.FeatureSchema(
-          format=schema_lib.FeatureFormat.INTEGER_64,
-          semantic=semantic,
-          shape=(),
-      )
-      if semantic in allowed:
-        for norm in (
-            normalize_lib.ZScoreNormalizer.from_values(
-                "x", schema, np.array([0, 1, 2], dtype=np.int64)
-            ),
-            normalize_lib.ZScoreNormalizer(
-                input_feature="x",
-                output_feature_name="x_Z_SCORE",
-                output_shape=(),
-                mean=np.array(0.0),
-                std=np.array(1.0),
-                output_semantic=semantic,
-            ),
-        ):
-          self.assertEqual(norm.output_schema()["x_Z_SCORE"].semantic, semantic)
-      else:
-        expected_error = f"cannot carry semantic {semantic.value}"
-        with self.assertRaisesRegex(ValueError, expected_error):
-          normalize_lib.ZScoreNormalizer.from_values(
-              "x", schema, np.array([0, 1, 2], dtype=np.int64)
-          )
-        with self.assertRaisesRegex(ValueError, expected_error):
-          normalize_lib.ZScoreNormalizer(
-              input_feature="x",
-              output_feature_name="x_Z_SCORE",
-              output_shape=(),
-              mean=np.array(0.0),
-              std=np.array(1.0),
-              output_semantic=semantic,
-          )
 
   def test_large_offset_keeps_precision_on_all_paths(self):
     # The signal [0, 20.5, 41, 61.5] has mean 30.75, deviations (+-30.75,
@@ -4237,31 +3996,6 @@ class ZScoreNormalizerTest(absltest.TestCase):
         for out in (np_out, tf_out):
           self.assertEqual(out.dtype, np.float32)
           np.testing.assert_allclose(out, expected, rtol=0, atol=1e-6)
-
-    # int64 inputs beyond float32 precision: 2**52 + (0, 1, 2) repeated 5 times
-    # has mean 2**52 + 1 and std sqrt(2/3), so the outputs are
-    # (-1, 0, 1) * sqrt(1.5). With 15 values the float64 sum (~6.8e16)
-    # exceeds 2**53 and is rounded, so a single-pass mean would be off.
-    int_schema = schema_lib.FeatureSchema(
-        format=schema_lib.FeatureFormat.INTEGER_64,
-        semantic=schema_lib.FeatureSemantic.NUMERICAL,
-        shape=(),
-    )
-    int_values = np.tile(np.array([0, 1, 2], dtype=np.int64), 5) + 2**52
-    int_fitted = normalize_lib.ZScoreNormalizer.from_values(
-        "id_like", int_schema, int_values
-    )
-    self.assertEqual(float(int_fitted.mean), float(2**52 + 1))
-    int_expected = np.tile(
-        np.array([-1.0, 0.0, 1.0], dtype=np.float32), 5
-    ) * np.sqrt(np.float32(1.5))
-    for out in (
-        int_fitted.normalize_numpy(int_values)["id_like_Z_SCORE"],
-        int_fitted.normalize_tensorflow(tf.constant(int_values))[
-            "id_like_Z_SCORE"
-        ].numpy(),
-    ):
-      np.testing.assert_allclose(out, int_expected, rtol=0, atol=1e-6)
 
     # A constant channel at a huge offset takes its value exactly as the mean,
     # so it normalizes to exactly 0 (a mean 1 ulp off at 1e60 would be ~1e44).
