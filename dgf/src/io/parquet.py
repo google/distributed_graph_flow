@@ -384,7 +384,6 @@ def write_numpy_dict_to_parquet(
     base_path: The base path for the sharded Parquet files.
     schema: The schema defining the features to write.
     num_shards: The number of shards to write.
-    verbose: If True, print progress information.
     compression: The parquet compression codec to use.
   """
   if not data:
@@ -394,6 +393,7 @@ def write_numpy_dict_to_parquet(
   first_key = next(iter(data))
   num_rows = data[first_key].shape[0]
 
+  num_shards = max(num_shards, 1)
   rows_per_shard = (num_rows + num_shards - 1) // num_shards
 
   write_specs = write_parquet_specs(schema)
@@ -402,7 +402,8 @@ def write_numpy_dict_to_parquet(
     start_row = shard_index * rows_per_shard
     end_row = min((shard_index + 1) * rows_per_shard, num_rows)
 
-    if start_row >= end_row:
+    # The first shard is written even without rows.
+    if start_row >= end_row and (num_rows > 0 or shard_index > 0):
       return
 
     shard_filename = shard_lib.sharded_filename(

@@ -36,7 +36,6 @@ _CONTAINERS = [
 ]
 
 
-
 class ReadGfGraphTest(parameterized.TestCase):
 
   def test_gf_graph_in_memory(self):
@@ -114,9 +113,7 @@ class ReadGfGraphTest(parameterized.TestCase):
     in_memory_graph_validate_lib.validate_graph(graph, schema)
     self.assertEqual(graph.edge_sets["e2"].num_edges(), 1)
 
-  @parameterized.product(
-      edge_ids=[True, False], container=_CONTAINERS
-  )
+  @parameterized.product(edge_ids=[True, False], container=_CONTAINERS)
   def test_write_graph(self, edge_ids: bool, container: str):
     tmpdir = self.create_tempdir().full_path
 
@@ -333,6 +330,89 @@ class ReadGfGraphTest(parameterized.TestCase):
       )
       self.assertTrue(mock_node_shards.called)
       self.assertTrue(mock_edge_shards.called)
+
+  def test_write_and_read_graph_with_empty_node_and_edge_sets(self):
+    schema = schema_lib.GraphSchema(
+        node_sets={
+            "n1": schema_lib.NodeSchema(
+                features={
+                    "#id": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+                    ),
+                    "f1": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.NUMERICAL,
+                    ),
+                }
+            ),
+            "empty": schema_lib.NodeSchema(
+                features={
+                    "#id": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.BYTES,
+                        semantic=schema_lib.FeatureSemantic.PRIMARY_ID,
+                    ),
+                    "embedding": schema_lib.FeatureSchema(
+                        format=schema_lib.FeatureFormat.FLOAT_32,
+                        semantic=schema_lib.FeatureSemantic.EMBEDDING,
+                        shape=(3,),
+                    ),
+                }
+            ),
+        },
+        edge_sets={
+            "empty_to_n1": schema_lib.EdgeSchema(
+                source="empty", target="n1", features={}
+            ),
+        },
+    )
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={
+            "n1": in_memory_graph_lib.InMemoryNodeSet(
+                num_nodes=2,
+                features={
+                    "#id": np.array([b"a", b"b"], dtype=np.bytes_),
+                    "f1": np.array([1.0, 2.0], dtype=np.float32),
+                },
+            ),
+            "empty": in_memory_graph_lib.InMemoryNodeSet(
+                num_nodes=0,
+                features={
+                    "#id": np.zeros((0,), dtype="S1"),
+                    "embedding": np.zeros((0, 3), dtype=np.float32),
+                },
+            ),
+        },
+        edge_sets={
+            "empty_to_n1": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.zeros((2, 0), dtype=np.int64), features={}
+            ),
+        },
+    )
+    output_path = os.path.join(self.create_tempdir().full_path, "gf_graph")
+
+    gf_graph_in_memory.write_graph(graph, schema, output_path)
+
+    # A set without rows is written as one shard without rows.
+    self.assertEqual(
+        os.listdir(os.path.join(output_path, "nodesets")).count(
+            "empty-00000-of-00001.parquet"
+        ),
+        1,
+    )
+    loaded_graph, _ = gf_graph_in_memory.read_graph(output_path)
+    self.assertEqual(loaded_graph.node_sets["empty"].num_nodes, 0)
+    self.assertEqual(
+        loaded_graph.node_sets["empty"].features["embedding"].shape, (0, 3)
+    )
+    self.assertEqual(
+        loaded_graph.edge_sets["empty_to_n1"].adjacency.shape, (2, 0)
+    )
+    test_util.assert_are_equal(
+        self,
+        loaded_graph.node_sets["n1"].features["f1"],
+        np.array([1.0, 2.0], dtype=np.float32),
+    )
 
   def test_write_graph_writes_the_metadata_atomically(self):
     output_path = os.path.join(self.create_tempdir().full_path, "gf_graph")
