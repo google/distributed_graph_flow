@@ -15,10 +15,14 @@
 """Validation utilities for DGF Snapshots Datasets."""
 
 from collections.abc import Sequence
+import concurrent.futures
+import dataclasses
 import json
 import os
+from typing import Any
 
 from dgf.src.data import graph_snapshots_metadata as data_snapshot_metadata
+from dgf.src.data import schema as schema_lib
 from dgf.src.io import graph_in_memory
 from dgf.src.io import graph_snapshots_metadata as io_snapshot_metadata
 from dgf.src.io import schema as io_schema
@@ -28,32 +32,40 @@ from dgf.src.validate import validate as validate_lib
 
 Issue = validate_lib.Issue
 
+# Number of threads used to read the metadata of the snapshots.
+_NUM_WORKERS = 32
+
 
 def _get_snapshots_dir(dataset_path: str) -> str:
   return os.path.join(dataset_path, "snapshots")
 
 
-def _list_snapshot_ids(dataset_path: str) -> list[str]:
-  snaps_dir = _get_snapshots_dir(dataset_path)
-  if not filesystem.exists(snaps_dir):
-    return []
-  paths = filesystem.glob(os.path.join(snaps_dir, "*"))
-  return sorted([os.path.basename(p) for p in paths if filesystem.is_dir(p)])
+def _read_snapshot_metadata(snapshot_path: str) -> dict[str, Any] | None:
+  """Reads the metadata.json of a snapshot. None if the file is missing."""
+  metadata_path = os.path.join(snapshot_path, "metadata.json")
+  if not filesystem.exists(metadata_path):
+    return None
+  with filesystem.open_read(metadata_path) as f:
+    return json.loads(f.read())
 
 
-def snapshots_issues(
-    dataset_path: str, validate_contents: bool = True
-) -> Sequence[validate_lib.Issue]:
-  """Lists potential storage and content issues in DGF Graph Snapshots.
+@dataclasses.dataclass(frozen=True)
+class _SnapshotsLayout:
+  """Result of the inspection of the layout of a snapshots dataset.
 
-  Args:
-    dataset_path: Path to the DGF Graph Snapshots directory.
-    validate_contents: If True, loads each graph snapshot into memory and
-      validates node/edge features, shapes, dtypes, and adjacency ranges.
-
-  Returns:
-    Sequence of Issue objects describing errors or warnings.
+  Attributes:
+    issues: Issues found in the layout.
+    schema: Root schema. None if it is missing.
+    snapshots: (timestamp, snapshot_id) of each snapshot with valid metadata.
   """
+
+  issues: list[validate_lib.Issue]
+  schema: schema_lib.GraphSchema | None
+  snapshots: list[tuple[int, str]]
+
+
+def _inspect_snapshots_layout(dataset_path: str) -> _SnapshotsLayout:
+  """Inspects dataset layout and snapshot metadata in a single parallel pass."""
   issues: list[validate_lib.Issue] = []
 
   # 1. Root Metadata Check
@@ -74,8 +86,8 @@ def snapshots_issues(
       )
 
   # 2. Root Schema Check
-  global_schema_path = os.path.join(dataset_path, "schema.json")
   global_schema = None
+  global_schema_path = os.path.join(dataset_path, "schema.json")
   if not filesystem.exists(global_schema_path):
     issues.append(
         Issue.error(f"Missing root schema.json at {global_schema_path}")
@@ -87,59 +99,86 @@ def snapshots_issues(
   snaps_dir = _get_snapshots_dir(dataset_path)
   if not filesystem.exists(snaps_dir):
     issues.append(Issue.error(f"Snapshots directory missing at {snaps_dir}"))
-    return issues
+    return _SnapshotsLayout(issues=issues, schema=global_schema, snapshots=[])
 
-  snapshot_ids = _list_snapshot_ids(dataset_path)
-  if not snapshot_ids:
+  # Each entry of the snapshots directory is a snapshot.
+  snapshot_paths = sorted(filesystem.glob(os.path.join(snaps_dir, "*")))
+  if snapshot_paths:
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(_NUM_WORKERS, len(snapshot_paths))
+    ) as executor:
+      metadata_dicts = list(
+          executor.map(_read_snapshot_metadata, snapshot_paths)
+      )
+  else:
+    metadata_dicts = []
     issues.append(
         Issue.warning(f"No snapshot directories found in {snaps_dir}")
     )
 
-  seen_timestamps = {}
-  for snap_id in snapshot_ids:
-    snap_dir = os.path.join(snaps_dir, snap_id)
-
-    # Validate per-snapshot metadata.json
-    snap_meta_path = os.path.join(snap_dir, "metadata.json")
-    snap_meta_valid = True
-    if not filesystem.exists(snap_meta_path):
-      snap_meta_valid = False
+  seen_timestamps: dict[int, str] = {}
+  valid_snapshots: list[tuple[int, str]] = []
+  for snapshot_path, snap_meta_dict in zip(snapshot_paths, metadata_dicts):
+    snapshot_id = os.path.basename(snapshot_path)
+    snap_meta_path = os.path.join(snapshot_path, "metadata.json")
+    if snap_meta_dict is None:
       issues.append(
           Issue.error(
-              f"Snapshot {snap_id!r} missing metadata.json at {snap_meta_path}"
+              f"Snapshot {snapshot_id!r} missing metadata.json at"
+              f" {snap_meta_path}"
+          )
+      )
+      continue
+    timestamp = snap_meta_dict.get("timestamp")
+    if timestamp is None:
+      issues.append(
+          Issue.error(
+              f"Snapshot {snapshot_id!r} metadata.json missing 'timestamp'"
+          )
+      )
+    elif timestamp in seen_timestamps:
+      issues.append(
+          Issue.error(
+              f"Duplicate timestamp {timestamp} found in snapshot"
+              f" {snapshot_id!r} (already defined in"
+              f" {seen_timestamps[timestamp]!r})"
           )
       )
     else:
-      with filesystem.open_read(snap_meta_path) as f:
-        snap_meta_dict = json.loads(f.read())
-      timestamp = snap_meta_dict.get("timestamp")
-      if timestamp is None:
-        snap_meta_valid = False
-        issues.append(
-            Issue.error(
-                f"Snapshot {snap_id!r} metadata.json missing 'timestamp'"
-            )
-        )
-      elif timestamp in seen_timestamps:
-        issues.append(
-            Issue.error(
-                f"Duplicate timestamp {timestamp} found in snapshot"
-                f" {snap_id!r} (already defined in"
-                f" {seen_timestamps[timestamp]!r})"
-            )
-        )
-      else:
-        seen_timestamps[timestamp] = snap_id
+      seen_timestamps[timestamp] = snapshot_id
+      valid_snapshots.append((int(timestamp), snapshot_id))
 
-    # Read and validate in-memory graph content if requested
-    if validate_contents and global_schema is not None and snap_meta_valid:
+  return _SnapshotsLayout(
+      issues=issues, schema=global_schema, snapshots=valid_snapshots
+  )
+
+
+def snapshots_issues(
+    dataset_path: str, validate_contents: bool = True
+) -> Sequence[validate_lib.Issue]:
+  """Lists potential storage and content issues in DGF Graph Snapshots.
+
+  Args:
+    dataset_path: Path to the DGF Graph Snapshots directory.
+    validate_contents: If True, loads each graph snapshot into memory and
+      validates node/edge features, shapes, dtypes, and adjacency ranges.
+
+  Returns:
+    Sequence of Issue objects describing errors or warnings.
+  """
+  layout = _inspect_snapshots_layout(dataset_path)
+  issues = list(layout.issues)
+  if validate_contents and layout.schema is not None:
+    snaps_dir = _get_snapshots_dir(dataset_path)
+    for _, snapshot_id in layout.snapshots:
+      snap_dir = os.path.join(snaps_dir, snapshot_id)
       graph, _ = graph_in_memory.read_graph(
-          snap_dir, override_schema=global_schema
+          snap_dir, override_schema=layout.schema
       )
-      content_issues = in_memory_graph_validate_lib.issues(graph, global_schema)
+      content_issues = in_memory_graph_validate_lib.issues(graph, layout.schema)
       for issue in content_issues:
         issues.append(
-            Issue(issue.severity, f"Snapshot {snap_id!r}: {issue.text}")
+            Issue(issue.severity, f"Snapshot {snapshot_id!r}: {issue.text}")
         )
 
   return issues

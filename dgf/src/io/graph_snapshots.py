@@ -67,38 +67,36 @@ def _read_snapshot_timestamp(snapshot_path: str) -> int:
   return meta.timestamp
 
 
+def _discover_snapshot(snapshot_path: str) -> tuple[int, str]:
+  """Reads the (timestamp, snapshot_id) of a snapshot."""
+  snapshot_id = os.path.basename(snapshot_path)
+  meta_path = os.path.join(snapshot_path, graph_constants.FILENAME_METADATA)
+  missing_metadata_error = ValueError(
+      f"Snapshot {snapshot_id!r} missing metadata.json at {meta_path}"
+  )
+  # On GCS, reading a missing file is retried several times: Check it first.
+  if filesystem.is_gcs_path(snapshot_path) and not filesystem.exists(meta_path):
+    raise missing_metadata_error
+  try:
+    return _read_snapshot_timestamp(snapshot_path), snapshot_id
+  except OSError:
+    if not filesystem.exists(meta_path):
+      raise missing_metadata_error from None
+    raise
+
+
 def _discover_and_sort_snapshots(
     dataset_path: str, num_workers: int
 ) -> list[tuple[int, str]]:
-  """Lists the snapshots of a dataset, sorted by increasing timestamp.
-
-  Only the snapshot metadata is read; the snapshot graphs are left on disk.
-
-  Args:
-    dataset_path: Path to the DGF Graph Snapshots directory.
-    num_workers: Number of threads used to read the snapshot metadata.
-
-  Returns:
-    A list of (timestamp, snapshot_id) pairs sorted by increasing timestamp.
-  """
-  snapshots_dir = os.path.join(
-      dataset_path, graph_constants.DIRNAME_SNAPSHOTS
-  )
-  snapshot_paths = sorted(
-      path
-      for path in filesystem.glob(os.path.join(snapshots_dir, "*"))
-      if filesystem.is_dir(path)
-  )
-  if not snapshot_paths:
+  """Lists the snapshots of a dataset, sorted by increasing timestamp."""
+  snapshots_dir = os.path.join(dataset_path, graph_constants.DIRNAME_SNAPSHOTS)
+  if not filesystem.exists(snapshots_dir):
+    raise ValueError(f"Snapshots directory missing at {snapshots_dir}")
+  # Each entry of the snapshots directory is a snapshot.
+  snapshot_paths = sorted(filesystem.glob(os.path.join(snapshots_dir, "*")))
+  snapshot_info = _parallel_map(_discover_snapshot, snapshot_paths, num_workers)
+  if not snapshot_info:
     raise ValueError(f"No snapshot directories found in {snapshots_dir}")
-
-  timestamps = _parallel_map(
-      _read_snapshot_timestamp, snapshot_paths, num_workers
-  )
-  snapshot_info = [
-      (timestamp, os.path.basename(path))
-      for timestamp, path in zip(timestamps, snapshot_paths)
-  ]
   snapshot_info.sort()
   return snapshot_info
 
@@ -152,12 +150,14 @@ class _SnapshotGraphsOnDisk(Sequence[in_memory_graph_lib.InMemoryGraph]):
     return len(self._snapshot_ids)
 
   @overload
-  def __getitem__(self, index: int) -> in_memory_graph_lib.InMemoryGraph: ...
+  def __getitem__(self, index: int) -> in_memory_graph_lib.InMemoryGraph:
+    ...
 
   @overload
   def __getitem__(
       self, index: slice
-  ) -> list[in_memory_graph_lib.InMemoryGraph]: ...
+  ) -> list[in_memory_graph_lib.InMemoryGraph]:
+    ...
 
   def __getitem__(self, index):
     if isinstance(index, slice):
@@ -175,6 +175,7 @@ def read_graph_snapshots(
     verbose: bool = False,
     num_workers: int = _DEFAULT_NUM_WORKERS,
     lazy: bool = False,
+    validate: bool = False,
 ) -> graph_snapshots_lib.GraphSnapshots:
   """Reads a DGF Graph Snapshots dataset from disk.
 
@@ -182,17 +183,13 @@ def read_graph_snapshots(
   capturing the state of the same graph at a different point in time. The
   snapshots are returned sorted by increasing timestamp.
 
-  By default, all the snapshot graphs are loaded into memory. With `lazy=True`,
+  By default, all the snapshot graphs are loaded into memory. With lazy=True,
   only the schema and the timestamps are read: each graph is read from disk
-  when it is accessed, e.g. with `snapshots.graphs[i]`, and it is not kept. Use
+  when it is accessed, e.g. with snapshots.graphs[i], and it is not kept. Use
   it for snapshots that do not fit in memory together.
 
-  Use `dgf.transform.combine_graph_snapshots` to convert the snapshots into a
+  Use dgf.transform.combine_graph_snapshots to convert the snapshots into a
   single Temporal Graph.
-
-  This function validates the dataset layout, but not the contents of the
-  snapshot graphs. Call `dgf.validate.validate_snapshots` to also check the
-  graphs against the schema.
 
   Usage example:
 
@@ -217,6 +214,8 @@ def read_graph_snapshots(
     num_workers: Number of threads used to read the snapshots.
     lazy: If True, the graphs are not loaded: each one is read from disk each
       time it is accessed.
+    validate: If True, validates the dataset layout before returning. Set to
+      False for a faster loading.
 
   Returns:
     The graph snapshots, sorted by increasing timestamp.
@@ -228,10 +227,10 @@ def read_graph_snapshots(
     log.info("Reading global schema from %s", schema_path)
   schema = io_schema.read_schema(schema_path)
 
-  if verbose:
-    log.info("Validating snapshot dataset at %s", path)
-  snapshots_validate_lib.validate_snapshots(path, validate_contents=False)
-
+  if validate:
+    if verbose:
+      log.info("Validating the layout of %s", path)
+    snapshots_validate_lib.validate_snapshots(path, validate_contents=False)
   if verbose:
     log.info("Discovering snapshots in %s", path)
   snapshot_info = _discover_and_sort_snapshots(path, num_workers=num_workers)
@@ -327,15 +326,14 @@ def write_graph_snapshots(
   Args:
     snapshots: The graph snapshots. The timestamp of a graph, if it has one,
       should be the timestamp of its snapshot.
-    path: Path to the dataset directory to create, or to the dataset to add
-      the snapshots to. An existing dataset should have the schema of
-      `snapshots`.
+    path: Path to the dataset directory to create, or to the dataset to add the
+      snapshots to. An existing dataset should have the schema of `snapshots`.
     verbose: If True, print progress information.
     resume: If True, the snapshots that are already in the dataset are not
       written again, and their graphs are not read from `snapshots.graphs`. A
-      snapshot whose writing was interrupted is written again. If False, all
-      the snapshots are written, and replace the ones of the dataset with the
-      same id.
+      snapshot whose writing was interrupted is written again. If False, all the
+      snapshots are written, and replace the ones of the dataset with the same
+      id.
 
   Raises:
     ValueError: If a snapshot id is not a valid directory name, if the

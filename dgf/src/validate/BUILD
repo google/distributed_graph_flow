@@ -41,6 +41,7 @@ py_library(
         ":in_memory_graph",
         ":validate",
         "//dgf/src/data:graph_snapshots_metadata",
+        "//dgf/src/data:schema",
         "//dgf/src/io:graph_in_memory",
         "//dgf/src/io:graph_snapshots_metadata",
         "//dgf/src/io:schema",

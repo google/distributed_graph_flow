@@ -203,9 +203,7 @@ class GraphSnapshotsTest(absltest.TestCase):
     dataset_dir = self.create_tempdir().full_path
     self._create_sample_dataset(dataset_dir)
 
-    snapshots = graph_snapshots.read_graph_snapshots(
-        dataset_dir, num_workers=1
-    )
+    snapshots = graph_snapshots.read_graph_snapshots(dataset_dir, num_workers=1)
 
     test_util.assert_are_equal(
         self, snapshots.timestamps, np.array([100, 200, 300], dtype=np.int64)
@@ -223,17 +221,21 @@ class GraphSnapshotsTest(absltest.TestCase):
     )
     filesystem.makedirs(bad_snapshot_dir)
 
-    # `validate_snapshots` runs before the snapshots are discovered, so it is
-    # the one reporting the incomplete snapshot.
-    with self.assertRaisesRegex(ValueError, "errors found"):
+    with self.assertRaisesRegex(ValueError, "missing metadata.json"):
       graph_snapshots.read_graph_snapshots(dataset_dir)
+    with self.assertRaisesRegex(ValueError, "errors found"):
+      graph_snapshots.read_graph_snapshots(dataset_dir, validate=True)
 
   def test_read_graph_snapshots_duplicate_timestamps_raises_error(self):
     dataset_dir = self.create_tempdir().full_path
     self._create_sample_dataset(dataset_dir, include_duplicate=True)
 
-    with self.assertRaisesRegex(ValueError, "errors found"):
+    with self.assertRaisesRegex(
+        ValueError, "timestamps must be strictly increasing"
+    ):
       graph_snapshots.read_graph_snapshots(dataset_dir)
+    with self.assertRaisesRegex(ValueError, "errors found"):
+      graph_snapshots.read_graph_snapshots(dataset_dir, validate=True)
 
   def test_read_graph_snapshots_missing_root_schema_raises_error(self):
     dataset_dir = self.create_tempdir().full_path
@@ -256,8 +258,10 @@ class GraphSnapshotsTest(absltest.TestCase):
         os.path.join(dataset_dir, graph_constants.DIRNAME_SNAPSHOTS)
     )
 
-    with self.assertRaisesRegex(ValueError, "errors found"):
+    with self.assertRaisesRegex(ValueError, "Snapshots directory missing"):
       graph_snapshots.read_graph_snapshots(dataset_dir)
+    with self.assertRaisesRegex(ValueError, "errors found"):
+      graph_snapshots.read_graph_snapshots(dataset_dir, validate=True)
 
   def test_read_graph_snapshots_empty_snapshots_dir_raises_error(self):
     dataset_dir = self.create_tempdir().full_path
@@ -616,8 +620,10 @@ class GraphSnapshotsTest(absltest.TestCase):
     leftover_path = os.path.join(second_dir, "leftover")
     with filesystem.open_write(leftover_path) as f:
       f.write("")
-    with self.assertRaisesRegex(ValueError, "errors found"):
+    with self.assertRaisesRegex(ValueError, "missing metadata.json"):
       graph_snapshots.read_graph_snapshots(dataset_dir)
+    with self.assertRaisesRegex(ValueError, "errors found"):
+      graph_snapshots.read_graph_snapshots(dataset_dir, validate=True)
     graphs = _RecordingGraphs([first, second])
 
     graph_snapshots.write_graph_snapshots(
@@ -651,9 +657,7 @@ class GraphSnapshotsTest(absltest.TestCase):
 
     for resume in (False, True):
       with self.subTest(resume=resume):
-        with self.assertRaisesRegex(
-            ValueError, "Its schema is not the schema"
-        ):
+        with self.assertRaisesRegex(ValueError, "Its schema is not the schema"):
           graph_snapshots.write_graph_snapshots(
               dataclasses.replace(
                   _create_two_snapshots(graphs), schema=other_schema
@@ -691,6 +695,48 @@ class GraphSnapshotsTest(absltest.TestCase):
           resume=True,
       )
 
+  def test_read_graph_snapshots_single_pass_metadata_read(self):
+    dataset_dir = self.create_tempdir().full_path
+    self._create_sample_dataset(dataset_dir)
+
+    with (
+        mock.patch.object(
+            graph_snapshots.snapshots_validate_lib,
+            "validate_snapshots",
+            wraps=graph_snapshots.snapshots_validate_lib.validate_snapshots,
+        ) as validate_mock,
+        mock.patch.object(
+            filesystem, "open_read", wraps=filesystem.open_read
+        ) as open_read,
+    ):
+      snapshots = graph_snapshots.read_graph_snapshots(dataset_dir, lazy=True)
+
+    self.assertEqual(validate_mock.call_count, 0)
+    self.assertLen(snapshots, 3)
+    snapshot_meta_reads = [
+        call.args[0]
+        for call in open_read.call_args_list
+        if call.args[0].endswith(graph_constants.FILENAME_METADATA)
+        and graph_constants.DIRNAME_SNAPSHOTS in call.args[0]
+    ]
+    # Each snapshot metadata.json is read once, not twice.
+    self.assertLen(snapshot_meta_reads, 3)
+
+  def test_read_graph_snapshots_regular_file_in_snapshots_dir_raises(self):
+    dataset_dir = self.create_tempdir().full_path
+    self._create_sample_dataset(dataset_dir)
+    with filesystem.open_write(
+        os.path.join(dataset_dir, graph_constants.DIRNAME_SNAPSHOTS, "README")
+    ) as f:
+      f.write("")
+
+    with self.assertRaisesRegex(
+        ValueError, "Snapshot 'README' missing metadata.json"
+    ):
+      graph_snapshots.read_graph_snapshots(dataset_dir)
+    with self.assertRaisesRegex(ValueError, "errors found"):
+      graph_snapshots.read_graph_snapshots(dataset_dir, validate=True)
+
   def test_read_graph_snapshots_as_temporal_graph(self):
     dataset_dir = self.create_tempdir().full_path
     self._create_sample_dataset(dataset_dir)
@@ -701,8 +747,8 @@ class GraphSnapshotsTest(absltest.TestCase):
 
     # The wrapper must be exactly equivalent to the explicit two-step.
     snapshots = graph_snapshots.read_graph_snapshots(dataset_dir)
-    expected_graph, expected_schema = (
-        combine_lib.combine_graph_snapshots(snapshots)
+    expected_graph, expected_schema = combine_lib.combine_graph_snapshots(
+        snapshots
     )
     test_util.assert_are_equal(self, graph, expected_graph)
     test_util.assert_are_equal(self, schema, expected_schema)

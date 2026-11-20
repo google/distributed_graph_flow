@@ -249,6 +249,30 @@ class GraphSnapshotsTest(absltest.TestCase):
           ],
       )
 
+  def test_regular_file_in_snapshots_dir_is_an_error(self):
+    with tempfile.TemporaryDirectory() as tmpdir:
+      dataset_path = os.path.join(tmpdir, "dataset")
+      schema = gen_test_graph.generate_schema(node_ids=True, semantic=True)
+      graph = gen_test_graph.generate_in_memory_graph(node_ids=True)
+      _add_test_snapshot(dataset_path, "snap_001", 1000, graph, schema)
+      with filesystem.open_write(
+          os.path.join(dataset_path, "snapshots", "README")
+      ) as f:
+        f.write("not a snapshot")
+
+      issues = snapshots_validate_lib.snapshots_issues(
+          dataset_path, validate_contents=False
+      )
+      self.assertEqual(
+          issues,
+          [
+              Issue.error(
+                  "Snapshot 'README' missing metadata.json at"
+                  f" {os.path.join(dataset_path, 'snapshots', 'README', 'metadata.json')}"
+              )
+          ],
+      )
+
   def test_empty_snapshots_dir(self):
     with tempfile.TemporaryDirectory() as tmpdir:
       dataset_path = os.path.join(tmpdir, "dataset")
