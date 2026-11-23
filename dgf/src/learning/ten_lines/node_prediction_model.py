@@ -242,7 +242,12 @@ class NodePredictionModel(common.Model):
     )
     task_type = self.data().task.task_type
     if task_type == TaskType.NODE_REGRESSION:
-      prediction_schema = {"type": "number"}
+      head = self.data().core_model_config.head
+      assert isinstance(head, regression_lib.RegressionHeadConfig)
+      if head.num_outputs == 1:
+        prediction_schema = {"type": "number"}
+      else:
+        prediction_schema = {"type": "array", "items": {"type": "number"}}
     elif task_type == TaskType.NODE_CLASSIFICATION:
       prediction_schema = {"type": "array", "items": {"type": "number"}}
     else:

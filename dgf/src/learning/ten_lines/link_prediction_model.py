@@ -345,7 +345,7 @@ class LinkPredictionModel(common.Model):
         source_sampling_plan=self.data().source_sampling_plan,
         target_sampling_plan=self.data().target_sampling_plan,
     )
-    prediction_schema = {"type": "array", "items": {"type": "number"}}
+    prediction_schema = {"type": "number"}
     return instance_schema, prediction_schema
 
   def describe(self) -> util.RichDisplay:
