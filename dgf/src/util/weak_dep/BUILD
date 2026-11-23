@@ -15,6 +15,20 @@ py_library(
 )
 
 py_library(
+    name = "weak_dep_ydf",
+    srcs = ["weak_dep_ydf.py"],
+    type_checking = True,
+    visibility = [
+        "//:internal_users",
+        "//dgf/src:__subpackages__",
+    ],
+    deps = [
+        ":weak_dep_base",
+        "//third_party/py/ydf",  # build_cleaner: keep
+    ],
+)
+
+py_library(
     name = "weak_dep_tensorflow",
     srcs = ["weak_dep_tensorflow.py"],
     type_checking = True,
