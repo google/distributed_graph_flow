@@ -1132,9 +1132,7 @@ class LinkPredictionPredictibleModelTest(absltest.TestCase):
 
   def test_extract_serving_schemata(self):
     signature, pred_schema = self.model._extract_serving_schemata()
-    self.assertEqual(
-        pred_schema, {"type": "array", "items": {"type": "number"}}
-    )
+    self.assertEqual(pred_schema, {"type": "number"})
     expected_dict = {
         "x-google-gnn-input-graphs": [
             {
@@ -1210,6 +1208,9 @@ class LinkPredictionPredictibleModelTest(absltest.TestCase):
     self.assertContainsSubset(
         expected_dict["properties"],
         tf_predict_fn.__call__.structured_input_signature[1],
+    )
+    self.assertEqual(
+        tf_predict_fn.__call__.structured_outputs.shape.as_list(), [None]
     )
 
   def test_predict(self):

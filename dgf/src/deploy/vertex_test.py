@@ -19,6 +19,7 @@ import types
 from typing import Any, Optional
 from unittest import mock
 from absl.testing import absltest
+from absl.testing import parameterized
 from dgf.src.deploy import vertex
 from dgf.src.learning.ten_lines import common
 from dgf.src.util.weak_dep.weak_dep_tensorflow import tf  # pylint: disable=g-importing-member
@@ -458,7 +459,6 @@ class VertexDeployTest(absltest.TestCase):
     self.mock_endpoint_create.assert_called_once_with(
         display_name="gnn-model-v1",
         sync=True,
-        dedicated_endpoint_enabled=True,
     )
     self.assertLen(self.gcp.deploy_calls, 1)
 
@@ -765,6 +765,20 @@ class VertexDeployTest(absltest.TestCase):
     self.mock_model_upload.assert_called_once()
     self.assertLen(self.gcp.deploy_calls, 1)
 
+  def test_use_dedicated_endpoint_enabled(self):
+    vertex.to_vertex_ai(
+        model=FakeGNNModel("uuid-dedicated"),
+        model_dir_on_gcs="gs://test-bucket/dir1",
+        display_name="gnn-model-dedicated",
+        location="us-central1",
+        use_dedicated_endpoint=True,
+    )
+    self.mock_endpoint_create.assert_called_once_with(
+        display_name="gnn-model-dedicated",
+        sync=True,
+        dedicated_endpoint_enabled=True,
+    )
+
   def test_create_batched_serving_model(self):
     """Verifies _create_batched_serving_model predicts on each instance."""
 
@@ -776,14 +790,14 @@ class VertexDeployTest(absltest.TestCase):
 
     raw_model = DummyRawModel()
     raw_model.__call__ = raw_model.__call__.get_concrete_function(
-        X=tf.TensorSpec(shape=[3], dtype=tf.float32)
+        X=tf.TensorSpec(shape=[None, 3], dtype=tf.float32)
     )
 
     batched_model = self._real_create_batched_serving_model(raw_model, {"X"})
     # The signature input names are the (case sensitive) instance schema keys.
     self.assertIn("X:0", [t.name for t in batched_model.__call__.inputs])
     out = batched_model.__call__(
-        X=tf.constant([[1.0, 2.0, 3.0]], dtype=tf.float32)
+        X=tf.constant([[[1.0, 2.0, 3.0]]], dtype=tf.float32)
     )
     self.assertIn("predictions", out)
     self.assertEqual(out["predictions"].shape.as_list(), [1, 3])
@@ -792,7 +806,7 @@ class VertexDeployTest(absltest.TestCase):
     )
 
     out = batched_model.__call__(
-        X=tf.constant([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], dtype=tf.float32)
+        X=tf.constant([[[1.0, 2.0, 3.0]], [[4.0, 5.0, 6.0]]], dtype=tf.float32)
     )
     self.assertEqual(out["predictions"].shape.as_list(), [2, 3])
     self.assertSequenceAlmostEqual(
@@ -834,9 +848,293 @@ class VertexDeployTest(absltest.TestCase):
         nodes_a_reserved_size=tf.constant([2], dtype=tf.int32),
         nodes_a_f=tf.constant([[3.0, 7.0]], dtype=tf.float32),
     )
-    self.assertSequenceAlmostEqual(
-        out["predictions"].numpy().tolist()[0], [7.0]
+    self.assertEqual(out["predictions"].shape.as_list(), [1])
+    self.assertSequenceAlmostEqual(out["predictions"].numpy().tolist(), [7.0])
+
+
+def _make_node_raw_model(feature_shape: list[int | None]) -> tf.Module:
+  """Builds a raw TF graph dict model returning gathered seed features."""
+
+  class RawNodeModel(tf.Module):
+
+    @tf.function(autograph=False)
+    def __call__(self, **kwargs):
+      return tf.gather(kwargs["nodes_a_f"], kwargs["seed_node_idxs"])
+
+  raw_model = RawNodeModel()
+  raw_model.__call__ = raw_model.__call__.get_concrete_function(
+      seed_node_idxs=tf.TensorSpec([None], tf.int32),
+      nodes_a_f=tf.TensorSpec(feature_shape, tf.float32),
+  )
+  return raw_model
+
+
+def _make_link_raw_model() -> tf.Module:
+  """Builds a raw TF link model returning 1D edge probabilities."""
+
+  class RawLinkModel(tf.Module):
+
+    @tf.function(autograph=False)
+    def __call__(self, **kwargs):
+      src = tf.gather(
+          kwargs["source_nodes_a_f"], kwargs["source_seed_node_idxs"]
+      )
+      dst = tf.gather(
+          kwargs["target_nodes_b_f"], kwargs["target_seed_node_idxs"]
+      )
+      return tf.math.sigmoid(tf.reduce_sum(src * dst, axis=-1))
+
+  raw_model = RawLinkModel()
+  raw_model.__call__ = raw_model.__call__.get_concrete_function(
+      source_seed_node_idxs=tf.TensorSpec([None], tf.int32),
+      target_seed_node_idxs=tf.TensorSpec([None], tf.int32),
+      source_nodes_a_f=tf.TensorSpec([None, 2], tf.float32),
+      target_nodes_b_f=tf.TensorSpec([None, 2], tf.float32),
+  )
+  return raw_model
+
+
+class BatchedServingModelTest(parameterized.TestCase):
+
+  def _save_and_load_serving_fn(self, batched_model: tf.Module) -> Any:
+    saved_model_dir = self.create_tempdir().full_path
+    tf.saved_model.save(batched_model, saved_model_dir)
+    loaded = tf.saved_model.load(saved_model_dir)
+    return loaded.signatures["serving_default"]
+
+  def test_vector_output_saved_model_roundtrip(self):
+    raw_model = _make_node_raw_model([None, 3])
+    batched_model = vertex._create_batched_serving_model(  # pylint: disable=protected-access
+        raw_model, {"seed_node_idxs", "nodes_a_f"}
     )
+    serving_fn = self._save_and_load_serving_fn(batched_model)
+    self.assertEqual(
+        serving_fn.structured_outputs["predictions"].shape.as_list(), [None, 3]
+    )
+
+    out = serving_fn(
+        seed_node_idxs=tf.constant([[1], [0]], dtype=tf.int32),
+        nodes_a_f=tf.constant(
+            [
+                [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]],
+                [[7.0, 8.0, 9.0], [0.0, 0.0, 0.0]],
+            ],
+            dtype=tf.float32,
+        ),
+    )
+    predictions = out["predictions"]
+    self.assertEqual(predictions.shape.as_list(), [2, 3])
+    self.assertSequenceAlmostEqual(
+        predictions.numpy()[0].tolist(), [4.0, 5.0, 6.0]
+    )
+    self.assertSequenceAlmostEqual(
+        predictions.numpy()[1].tolist(), [7.0, 8.0, 9.0]
+    )
+
+  def test_scalar_output_saved_model_roundtrip(self):
+    raw_model = _make_node_raw_model([None])
+    batched_model = vertex._create_batched_serving_model(  # pylint: disable=protected-access
+        raw_model, {"seed_node_idxs", "nodes_a_f"}
+    )
+    serving_fn = self._save_and_load_serving_fn(batched_model)
+    self.assertEqual(
+        serving_fn.structured_outputs["predictions"].shape.as_list(), [None]
+    )
+
+    out = serving_fn(
+        seed_node_idxs=tf.constant([[1], [0]], dtype=tf.int32),
+        nodes_a_f=tf.constant([[3.0, 7.0], [9.5, 1.0]], dtype=tf.float32),
+    )
+    predictions = out["predictions"]
+    self.assertEqual(predictions.shape.as_list(), [2])
+    self.assertIsInstance(predictions.numpy().tolist()[0], float)
+    self.assertSequenceAlmostEqual(predictions.numpy().tolist(), [7.0, 9.5])
+
+  def test_link_prediction_saved_model_roundtrip(self):
+    raw_model = _make_link_raw_model()
+    batched_model = vertex._create_batched_serving_model(  # pylint: disable=protected-access
+        raw_model,
+        {
+            "source_seed_node_idxs",
+            "target_seed_node_idxs",
+            "source_nodes_a_f",
+            "target_nodes_b_f",
+        },
+    )
+    serving_fn = self._save_and_load_serving_fn(batched_model)
+    self.assertEqual(
+        serving_fn.structured_outputs["predictions"].shape.as_list(), [None]
+    )
+
+    out = serving_fn(
+        source_seed_node_idxs=tf.constant([[0], [1]], dtype=tf.int32),
+        target_seed_node_idxs=tf.constant([[1], [0]], dtype=tf.int32),
+        source_nodes_a_f=tf.constant(
+            [[[0.0, 0.0], [1.0, 1.0]], [[2.0, 0.0], [0.0, 1.0]]],
+            dtype=tf.float32,
+        ),
+        target_nodes_b_f=tf.constant(
+            [[[5.0, 5.0], [3.0, 4.0]], [[0.0, 2.0], [9.0, 9.0]]],
+            dtype=tf.float32,
+        ),
+    )
+    predictions = out["predictions"]
+    self.assertEqual(predictions.shape.as_list(), [2])
+    self.assertIsInstance(predictions.numpy().tolist()[0], float)
+    # Instance 0: dot([0, 0], [3, 4]) = 0 -> sigmoid(0) = 0.5
+    # Instance 1: dot([0, 1], [0, 2]) = 2 -> sigmoid(2) ~= 0.880797
+    self.assertSequenceAlmostEqual(
+        predictions.numpy().tolist(), [0.5, 0.880797], places=5
+    )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="scalar_empty_seeds",
+          feature_shape=[None],
+          features=[[3.0, 7.0]],
+          seed_node_idxs=[[]],
+      ),
+      dict(
+          testcase_name="scalar_multiple_seeds",
+          feature_shape=[None],
+          features=[[3.0, 7.0]],
+          seed_node_idxs=[[0, 1]],
+      ),
+      dict(
+          testcase_name="vector_empty_seeds",
+          feature_shape=[None, 3],
+          features=[[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]],
+          seed_node_idxs=[[]],
+      ),
+      dict(
+          testcase_name="vector_multiple_seeds",
+          feature_shape=[None, 3],
+          features=[[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]],
+          seed_node_idxs=[[0, 1]],
+      ),
+  )
+  def test_invalid_seed_count_raises_error(
+      self,
+      feature_shape: list[int | None],
+      features: list[Any],
+      seed_node_idxs: list[list[int]],
+  ):
+    raw_model = _make_node_raw_model(feature_shape)
+    batched_model = vertex._create_batched_serving_model(  # pylint: disable=protected-access
+        raw_model, {"seed_node_idxs", "nodes_a_f"}
+    )
+    serving_fn = self._save_and_load_serving_fn(batched_model)
+    with self.assertRaisesRegex(
+        tf.errors.InvalidArgumentError, "single seed in seed_node_idxs"
+    ):
+      serving_fn(
+          seed_node_idxs=tf.constant(seed_node_idxs, dtype=tf.int32),
+          nodes_a_f=tf.constant(features, dtype=tf.float32),
+      )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="empty_target_seeds",
+          source_seeds=[[0]],
+          target_seeds=[[]],
+          expected_key="target_seed_node_idxs",
+      ),
+      dict(
+          testcase_name="multiple_target_seeds",
+          source_seeds=[[0]],
+          target_seeds=[[0, 1]],
+          expected_key="target_seed_node_idxs",
+      ),
+      dict(
+          testcase_name="multiple_source_seeds",
+          source_seeds=[[0, 1]],
+          target_seeds=[[0]],
+          expected_key="source_seed_node_idxs",
+      ),
+  )
+  def test_link_prediction_invalid_seed_count_raises_error(
+      self,
+      source_seeds: list[list[int]],
+      target_seeds: list[list[int]],
+      expected_key: str,
+  ):
+    raw_model = _make_link_raw_model()
+    batched_model = vertex._create_batched_serving_model(  # pylint: disable=protected-access
+        raw_model,
+        {
+            "source_seed_node_idxs",
+            "target_seed_node_idxs",
+            "source_nodes_a_f",
+            "target_nodes_b_f",
+        },
+    )
+    serving_fn = self._save_and_load_serving_fn(batched_model)
+    with self.assertRaisesRegex(
+        tf.errors.InvalidArgumentError, f"single seed in {expected_key}"
+    ):
+      serving_fn(
+          source_seed_node_idxs=tf.constant(source_seeds, dtype=tf.int32),
+          target_seed_node_idxs=tf.constant(target_seeds, dtype=tf.int32),
+          source_nodes_a_f=tf.constant(
+              [[[1.0, 2.0], [3.0, 4.0]]], dtype=tf.float32
+          ),
+          target_nodes_b_f=tf.constant(
+              [[[5.0, 6.0], [7.0, 8.0]]], dtype=tf.float32
+          ),
+      )
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="1d_empty_output",
+          input_spec=[None],
+          batch_input=[[]],
+      ),
+      dict(
+          testcase_name="1d_non_unit_output",
+          input_spec=[None],
+          batch_input=[[1.0, 2.0]],
+      ),
+      dict(
+          testcase_name="2d_non_unit_output",
+          input_spec=[None, 3],
+          batch_input=[[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]],
+      ),
+  )
+  def test_raw_model_non_unit_output_axis_raises_error(
+      self, input_spec: list[int | None], batch_input: list[Any]
+  ):
+    class RawIdentityModel(tf.Module):
+
+      @tf.function(autograph=False)
+      def __call__(self, **kwargs):
+        return kwargs["X"]
+
+    raw_model = RawIdentityModel()
+    raw_model.__call__ = raw_model.__call__.get_concrete_function(
+        X=tf.TensorSpec(input_spec, tf.float32)
+    )
+    batched_model = vertex._create_batched_serving_model(  # pylint: disable=protected-access
+        raw_model, {"X"}
+    )
+    serving_fn = self._save_and_load_serving_fn(batched_model)
+    with self.assertRaisesRegex(
+        tf.errors.InvalidArgumentError, "single prediction"
+    ):
+      serving_fn(X=tf.constant(batch_input, dtype=tf.float32))
+
+  def test_scalar_raw_model_output_raises_value_error(self):
+    class ScalarRawModel(tf.Module):
+
+      @tf.function(autograph=False)
+      def __call__(self, **kwargs):
+        return tf.reduce_sum(kwargs["X"])
+
+    raw_model = ScalarRawModel()
+    raw_model.__call__ = raw_model.__call__.get_concrete_function(
+        X=tf.TensorSpec([None], tf.float32)
+    )
+    with self.assertRaisesRegex(ValueError, "leading seed dimension"):
+      vertex._create_batched_serving_model(raw_model, {"X"})  # pylint: disable=protected-access
 
 
 if __name__ == "__main__":
