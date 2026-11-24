@@ -1768,5 +1768,60 @@ class LinkPredictionTextFeaturesTest(absltest.TestCase):
     self.assertLen(tf_fn._normalizer_tf_resources, 1)  # pylint: disable=protected-access
 
 
+class ComputeTrainAndValidEdgeIdxsTest(parameterized.TestCase):
+
+  @parameterized.named_parameters(
+      dict(
+          testcase_name="numpy_array_len_gt_1",
+          valid_seed_edges=np.array([0, 1]),
+          expected_valid=np.array([0, 1]),
+      ),
+      dict(
+          testcase_name="numpy_array_single_zero",
+          valid_seed_edges=np.array([0]),
+          expected_valid=np.array([0]),
+      ),
+      dict(
+          testcase_name="python_list",
+          valid_seed_edges=[0, 1],
+          expected_valid=np.array([0, 1]),
+      ),
+      dict(
+          testcase_name="none",
+          valid_seed_edges=None,
+          expected_valid=None,
+      ),
+  )
+  def test_explicit_train_and_valid_seed_edges(
+      self, valid_seed_edges, expected_valid
+  ):
+    graph = in_memory_graph_lib.InMemoryGraph(
+        node_sets={"nodes": in_memory_graph_lib.InMemoryNodeSet(num_nodes=4)},
+        edge_sets={
+            "edges": in_memory_graph_lib.InMemoryEdgeSet(
+                adjacency=np.array([[0, 1, 2, 3], [1, 2, 3, 0]])
+            )
+        },
+    )
+    task = link_prediction_model.LinkPredictionTask(target_edgeset="edges")
+    train_idxs, valid_idxs = (
+        link_prediction_train.compute_train_and_valid_edge_idxs(
+            graph=graph,
+            valid_graph=None,
+            hparams=link_prediction_model.HParam(),
+            task=task,
+            validation_ratio=0.1,
+            train_seed_edges=np.array([2, 3]),
+            valid_seed_edges=valid_seed_edges,
+            max_num_valid_examples=None,
+        )
+    )
+    test_util.assert_are_equal(self, train_idxs, np.array([2, 3]))
+    if expected_valid is None:
+      self.assertIsNone(valid_idxs)
+    else:
+      test_util.assert_are_equal(self, valid_idxs, expected_valid)
+
+
 if __name__ == "__main__":
   absltest.main()

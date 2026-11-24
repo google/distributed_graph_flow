@@ -139,7 +139,7 @@ def compute_train_and_valid_edge_idxs(
   if train_seed_edges is not None:
     # The user provided the seed edges. We directly return them.
     return np.array(train_seed_edges), (
-        np.array(valid_seed_edges) if valid_seed_edges else None
+        np.array(valid_seed_edges) if valid_seed_edges is not None else None
     )
 
   if valid_seed_edges is not None:
