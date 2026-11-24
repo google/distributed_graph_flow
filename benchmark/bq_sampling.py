@@ -93,7 +93,7 @@ class BigQueryGraphSamplingBenchmark(benchmark_utils.Benchmark):
     samples = self._sampler.sample(batch_seeds)
     for sample in samples:
       for nodeset in sample.node_sets.values():
-        self._sum_sampled_nodes += nodeset.num_nodes or 0
+        self._sum_sampled_nodes += nodeset.num_nodes
     self._num_samples += len(samples)
 
   def num_units(self) -> int:

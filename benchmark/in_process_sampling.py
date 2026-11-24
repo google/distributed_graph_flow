@@ -124,11 +124,9 @@ class GenGraphSamples(benchmark_utils.Benchmark):
         batch_size=self.batch_size,
         edgeset_to_mask=self.edgeset_to_mask,
     )
-    num_nodes = self.graph.node_sets[
+    self.num_nodes = self.graph.node_sets[
         self.sampling_config.seed_nodeset
     ].num_nodes
-    assert num_nodes is not None
-    self.num_nodes = num_nodes
 
     if self.output_format == OutputFormat.NUMPY:
 
@@ -213,7 +211,7 @@ class GenGraphSamples(benchmark_utils.Benchmark):
 
     for sample in samples:
       for ns in sample.node_sets.values():
-        self.sum_sampled_nodes += ns.num_nodes  # pyrefly: ignore[unsupported-operation]
+        self.sum_sampled_nodes += ns.num_nodes
     _ = self.output_fn(samples)
     self.num_samples += 1
 
@@ -278,11 +276,9 @@ class GenGraphSubsets(benchmark_utils.Benchmark):
         return_node_idxs=not self.extract_features,
         batch_size=self.batch_size,
     )
-    num_nodes = self.graph.node_sets[
+    self.num_nodes = self.graph.node_sets[
         self.sampling_config.seed_nodeset
     ].num_nodes
-    assert num_nodes is not None
-    self.num_nodes = num_nodes
 
   def run_unit(self):
     # Note: `subgraph` does not support repeated seed nodes.
@@ -291,7 +287,7 @@ class GenGraphSubsets(benchmark_utils.Benchmark):
     )
     subgraph = self.sampler.subgraph(seed_node_idxs)
     for ns in subgraph.node_sets.values():
-      self.sum_sampled_nodes += ns.num_nodes  # pyrefly: ignore[unsupported-operation]
+      self.sum_sampled_nodes += ns.num_nodes
     self.num_samples += 1
 
   def details(self) -> str:

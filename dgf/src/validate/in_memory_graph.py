@@ -428,26 +428,19 @@ def issues(
           )
       )
 
-    if nodeset_data.num_nodes is None:
-      items.append(
-          Issue.warning(
-              f"The nodeset {nodeset_name!r} has `num_nodes` set to None."
-          )
-      )
-    else:
-      for feature_name, feature_value in nodeset_data.features.items():
-        if (
-            isinstance(feature_value, np.ndarray)
-            and feature_value.shape[0] != nodeset_data.num_nodes
-        ):
-          items.append(
-              Issue.error(
-                  f"The nodeset {nodeset_name!r} has feature"
-                  f" {feature_name!r} with shape {feature_value.shape}, but"
-                  " expected the first dimension to be equal to `num_nodes`"
-                  f" ({nodeset_data.num_nodes})."
-              )
-          )
+    for feature_name, feature_value in nodeset_data.features.items():
+      if (
+          isinstance(feature_value, np.ndarray)
+          and feature_value.shape[0] != nodeset_data.num_nodes
+      ):
+        items.append(
+            Issue.error(
+                f"The nodeset {nodeset_name!r} has feature"
+                f" {feature_name!r} with shape {feature_value.shape}, but"
+                " expected the first dimension to be equal to `num_nodes`"
+                f" ({nodeset_data.num_nodes})."
+            )
+        )
 
   for edgeset_name, edgeset_schema in schema.edge_sets.items():
     if edgeset_name not in graph.edge_sets:

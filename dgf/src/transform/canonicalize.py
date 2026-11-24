@@ -50,7 +50,7 @@ def canonicalize_graph(
 
   for nodeset_name, nodeset_schema in schema.node_sets.items():
     nodeset = graph.node_sets[nodeset_name]
-    num_nodes = nodeset.num_nodes or 0
+    num_nodes = nodeset.num_nodes
     if num_nodes == 0:
       node_permutations[nodeset_name] = np.empty(0, dtype=np.int64)
       new_node_sets[nodeset_name] = in_memory_graph_lib.InMemoryNodeSet(

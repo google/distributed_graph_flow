@@ -254,7 +254,7 @@ def _single_sample_padding(
 
   node_sets = {}
   for name in schema.node_sets:
-    max_num_nodes = max((s.node_sets[name].num_nodes or 0) for s in samples)
+    max_num_nodes = max(s.node_sets[name].num_nodes for s in samples)
     node_sets[name] = padding_lib.NodeSetPadding(num_nodes=max_num_nodes + 1)
 
   edge_sets = {}

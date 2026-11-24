@@ -47,7 +47,7 @@ def sparse_deferred_struct_to_graph(
     if sd_node_features:
       num_nodes = next(iter(sd_node_features.values())).shape[0]
     else:
-      num_nodes = None
+      num_nodes = 0
     in_memory_node_sets[node_name] = in_memory_graph_lib.InMemoryNodeSet(
         features=_features_to_numpy(sd_node_features),
         num_nodes=num_nodes,
@@ -84,7 +84,7 @@ def sparse_deferred_struct_to_jax_graph(
     if sd_node_features:
       num_nodes = next(iter(sd_node_features.values())).shape[0]
     else:
-      num_nodes = None
+      num_nodes = 0
     in_memory_node_sets[node_name] = jax_in_memory_graph_lib.JaxInMemoryNodeSet(
         features=_features_to_jax(sd_node_features),
         num_nodes=num_nodes,

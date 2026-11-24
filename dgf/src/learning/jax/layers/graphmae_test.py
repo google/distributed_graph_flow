@@ -415,16 +415,6 @@ class GraphMAEErrorTest(absltest.TestCase):
     with self.assertRaisesRegex(ValueError, "embedding_feature"):
       config.make(self.schema)
 
-  def test_none_num_nodes_raises(self):
-    graph, schema = _make_embedded_hetero_graph(num_nodes=4, dims=8)
-    bad_n1 = dataclasses.replace(graph.node_sets["n1"], num_nodes=None)
-    bad_graph = dataclasses.replace(
-        graph, node_sets={**graph.node_sets, "n1": bad_n1}
-    )
-    model = _make_graphmae_config().make(schema)
-    with self.assertRaisesRegex(ValueError, "num_nodes for n1 cannot be None"):
-      _init_and_apply(model, bad_graph)
-
   def test_batch_tuple_with_explicit_seed_idxs_raises(self):
     graph, schema = _make_embedded_hetero_graph(num_nodes=4, dims=8)
     model = _make_graphmae_config().make(schema)

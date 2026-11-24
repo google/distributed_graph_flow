@@ -166,7 +166,6 @@ def apply_feature(
       processor = process_nodesets.get(nodeset_name)
       if processor is None:
         continue
-      assert src_nodeset.num_nodes is not None
       new_values, new_schemas = processor(
           src_nodeset.features,
           src_nodeset_schema.features,
@@ -359,7 +358,6 @@ class Homogenizer:
     for nodeset_name, nodeset_schema in self._schema.node_sets.items():
       nodeset_value = graph.node_sets[nodeset_name]
       nodeset_offsets[nodeset_name] = dst_num_nodes
-      assert nodeset_value.num_nodes is not None
       dst_num_nodes += nodeset_value.num_nodes
 
       for feature_name, feature_schema in nodeset_schema.features.items():

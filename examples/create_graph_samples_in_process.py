@@ -96,7 +96,6 @@ def main(argv):
 
   num_nodes = graph.node_sets[_SEED_NODESET.value].num_nodes
   print(f"Found {num_nodes} in the seed nodeset")
-  assert num_nodes is not None
 
   if _OUTPUT_SCHEMA.value:
     print("Save schema")

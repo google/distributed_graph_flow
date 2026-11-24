@@ -767,7 +767,6 @@ Node(nodeset_idx=0, children=[
   def _assert_no_orphan_nodes(self, graph: in_memory_graph_lib.InMemoryGraph):
     """Checks that each node of `graph` is connected to at least one edge."""
     for node_set_name, node_set in graph.node_sets.items():
-      assert node_set.num_nodes is not None
       connected = np.zeros(node_set.num_nodes, dtype=bool)
       for edge_set_name, edge_set_schema in self.schema.edge_sets.items():
         adjacency = graph.edge_sets[edge_set_name].adjacency
@@ -2168,7 +2167,6 @@ Node(nodeset_idx=0, children=[
         batch_size=2,
     )
     num_nodes = self.graph.node_sets["n1"].num_nodes
-    assert num_nodes is not None
     with self.assertRaisesRegex(ValueError, "out of bounds"):
       sampler.subgraph([num_nodes])
     with self.assertRaisesRegex(ValueError, "out of bounds"):

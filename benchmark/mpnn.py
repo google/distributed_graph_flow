@@ -463,7 +463,7 @@ class RunMPNN(benchmark_utils.Benchmark):
 
     self._step_fn: Callable[[Any, dgf.data.JaxInMemoryGraph], Any] | None = None
     self._total_nodes = sum(
-        ns.num_nodes or 0 for ns in self.jax_graph.node_sets.values()
+        ns.num_nodes for ns in self.jax_graph.node_sets.values()
     )
     self._total_edges = sum(
         int(es.adjacency.shape[1]) for es in self.jax_graph.edge_sets.values()

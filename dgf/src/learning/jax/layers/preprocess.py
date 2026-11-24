@@ -904,7 +904,6 @@ class EmbedAndHomogenizeGraph(nn.Module):
     ):
       nodeset_schema = self.schema.node_sets[nodeset_name]
       nodeset_value = graph.node_sets[nodeset_name]
-      assert nodeset_value.num_nodes is not None
 
       # Remove ignored features
       featureset_schema = nodeset_schema.features

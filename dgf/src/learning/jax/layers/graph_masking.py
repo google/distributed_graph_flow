@@ -191,7 +191,6 @@ class MaskNodeFeatures(nn.Module):
     nodeset = graph.node_sets[nodeset_name]
     x = nodeset.features[self.config.feature]
     num_nodes = nodeset.num_nodes
-    assert num_nodes is not None
 
     mask_token = self.param(
         "mask_token", nn.initializers.zeros, (1, x.shape[-1])

@@ -109,7 +109,6 @@ class NodeEmbeddingModelStandaloneTest(absltest.TestCase):
 
   def test_predict_defaults_to_all_target_nodes(self):
     num_nodes = self.graph.node_sets["N1"].num_nodes
-    assert num_nodes is not None
     with unittest.mock.patch.object(
         self.model,
         "predict_batch",
@@ -391,7 +390,7 @@ def _single_sample_padding(
 
   node_sets = {
       name: padding_lib.NodeSetPadding(
-          num_nodes=max((s.node_sets[name].num_nodes or 0) for s in samples) + 1
+          num_nodes=max(s.node_sets[name].num_nodes for s in samples) + 1
       )
       for name in data.schema.node_sets
   }
@@ -946,7 +945,6 @@ class NodeEmbeddingTrainTest(parameterized.TestCase):
 
   def test_single_nodeset_infers_target_nodeset(self):
     num_nodes = self.graph.node_sets["N1"].num_nodes
-    assert num_nodes is not None
     schema = schema_lib.GraphSchema(
         node_sets={"only": copy.deepcopy(self.schema.node_sets["N1"])},
         edge_sets={

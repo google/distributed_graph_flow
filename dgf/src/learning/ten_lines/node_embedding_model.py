@@ -282,7 +282,6 @@ class NodeEmbeddingModel(common.Model):
     """
     if seed_node_idxs is None:
       num_nodes = graph.node_sets[self.target_nodeset].num_nodes
-      assert num_nodes is not None
       effective_idxs = np.arange(num_nodes, dtype=np.int32)
     else:
       effective_idxs = np.asarray(seed_node_idxs, dtype=np.int32)
@@ -321,7 +320,6 @@ class NodeEmbeddingModel(common.Model):
 
     if seed_node_idxs is None:
       num_nodes = graph.node_sets[self.target_nodeset].num_nodes
-      assert num_nodes is not None
       seed_node_idxs = np.arange(num_nodes, dtype=np.int32)
 
     live = self._get_live()
@@ -362,7 +360,7 @@ class NodeEmbeddingModel(common.Model):
         or any(not nodeset.num_nodes for nodeset in graph.node_sets.values())
     ):
       return False
-    num_graph_nodes = sum(n.num_nodes or 0 for n in graph.node_sets.values())
+    num_graph_nodes = sum(n.num_nodes for n in graph.node_sets.values())
     # The padding is an upper bound of the number of nodes in a batch.
     num_padded_nodes = sum(
         n.num_nodes or 0 for n in self._data.padding.node_sets.values()
@@ -558,7 +556,6 @@ class NodeEmbeddingModel(common.Model):
     self._require_sampling_plan()
 
     num_nodes = graph.node_sets[self.target_nodeset].num_nodes
-    assert num_nodes is not None
 
     if seed_node_idxs is None:
       seed_node_idxs = np.arange(num_nodes, dtype=np.int32)

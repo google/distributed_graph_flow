@@ -470,7 +470,6 @@ class Sampler:
     # Features not gathered in c++ (e.g. object arrays).
     for node_set_name, feature_name, src in self._python_gathered_features:
       node_set = merged.node_sets[node_set_name]
-      assert node_set.num_nodes is not None
       num_real_nodes = int(offsets[node_set_name][-1])
       dst = np.empty((node_set.num_nodes,) + src.shape[1:], dtype=src.dtype)
       merge_lib.gather_rows_numpy(

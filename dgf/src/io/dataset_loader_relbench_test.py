@@ -817,8 +817,6 @@ class DatasetLoaderRelbenchTest(parameterized.TestCase):
         ("queries", 1000),
     ):
       num_nodes = graph.node_sets[node_set_name].num_nodes
-      self.assertIsNotNone(num_nodes)
-      assert num_nodes is not None
       self.assertGreater(num_nodes, min_nodes)
 
 

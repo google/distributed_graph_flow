@@ -553,7 +553,7 @@ def write_graph(
       effective_num_shards = num_shards
     else:
       effective_num_shards, _ = shard_lib.estimate_num_node_shards(
-          node_set.num_nodes or 0
+          node_set.num_nodes
       )
 
     features_to_write = node_set.features

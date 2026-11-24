@@ -31,7 +31,7 @@ class InMemoryNodeSet:
       ArrayOrAnys of shape [num_nodes, <feature shape>].
   """
 
-  num_nodes: int | None
+  num_nodes: int
   features: Features = dataclasses.field(default_factory=dict)
 
 

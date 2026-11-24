@@ -68,7 +68,6 @@ def main(argv) -> None:
 
   # Split the dataset between training and validation
   num_nodes = graph.node_sets["nodes"].num_nodes
-  assert num_nodes is not None
   all_seed_node_idxs = np.arange(num_nodes)
   np.random.seed(42)
   np.random.shuffle(all_seed_node_idxs)

@@ -685,8 +685,6 @@ class GraphMAE(nn.Module):
 
     target_ns = self.config.target_nodeset
     num_target_nodes = graph.node_sets[target_ns].num_nodes
-    if num_target_nodes is None:
-      raise ValueError(f"num_nodes for {target_ns} cannot be None")
 
     if seed_idxs is None:
       # All nodes except the last (sentinel padding) node are seed nodes.

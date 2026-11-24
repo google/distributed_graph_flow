@@ -605,11 +605,6 @@ def _validate_in_memory_graph_to_hgraph_request(
     )
 
   for nodeset_name, nodeset in graph.node_sets.items():
-    if nodeset.num_nodes is None:
-      raise ValueError(
-          f"Node set {nodeset_name} has no number of nodes. Please provide the"
-          " number of nodes in the node set."
-      )
     if nodeset.features is None:
       raise ValueError(
           f"Node set {nodeset_name} has no features. Please provide the"
@@ -633,7 +628,7 @@ def _write_tfrecord_node_sets(
   """Writes node sets to TFRecord files."""
   for nodeset_name, nodeset in graph.node_sets.items():
     num_shards, num_nodes_per_shard = shard_lib.estimate_num_node_shards(
-        nodeset.num_nodes or 0
+        nodeset.num_nodes
     )
     for shard_index in range(num_shards):
       examples = []
@@ -649,7 +644,7 @@ def _write_tfrecord_node_sets(
           shard_index * num_nodes_per_shard,
           min(
               (shard_index + 1) * num_nodes_per_shard,
-              nodeset.num_nodes or 0,
+              nodeset.num_nodes,
           ),
       ):
         examples.append(

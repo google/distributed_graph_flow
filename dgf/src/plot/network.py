@@ -139,9 +139,6 @@ def plot_graph(
       print(f"Warning: Node set '{node_set_name}' not found in the graph.")
       continue
     node_set_data = graph.node_sets[node_set_name]
-    if node_set_data.num_nodes is None:
-      print(f"Warning: Node set '{node_set_name}' has no num_nodes. Skipping.")
-      continue
 
     node_color = _get_color(node_set_name)
     for node_idx in range(node_set_data.num_nodes):

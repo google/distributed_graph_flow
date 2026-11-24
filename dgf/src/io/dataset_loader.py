@@ -505,7 +505,6 @@ def load_ogbn_arxiv_text(
   )
 
   num_nodes = base_graph.node_sets["nodes"].num_nodes
-  assert num_nodes is not None
   if len(paper_ids) != num_nodes:
     raise ValueError(
         f"Expected {num_nodes} paper IDs in mapping, got {len(paper_ids)}."

@@ -496,7 +496,7 @@ def Stage8AddFeatureValueToSample(
     ].features.items():
       if feature_name == KEY_ID:
         continue
-      values = [None] * num_nodes  # pyrefly: ignore[unsupported-operation]
+      values = [None] * num_nodes
       num_values = 0
       for node_idx, row_features in src_features:  # pyrefly: ignore[not-iterable]
         values[node_idx] = row_features[feature_name]  # pyrefly: ignore[unsupported-operation]

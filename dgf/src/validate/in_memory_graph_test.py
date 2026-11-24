@@ -295,12 +295,12 @@ class InMemoryGraphTest(absltest.TestCase):
     )
     graph.node_sets["n1"].features["time"] = np.array(
         [np.array([10, 20], dtype=np.int64)]
-        + [np.array([10], dtype=np.int64)] * (num_nodes - 1),  # pyrefly: ignore[unsupported-operation]
+        + [np.array([10], dtype=np.int64)] * (num_nodes - 1),
         dtype=object,
     )
     graph.node_sets["n1"].features["val"] = np.fromiter(
         [np.array([1.5], dtype=np.float32)]
-        + [np.array([2.5], dtype=np.float32)] * (num_nodes - 1),  # pyrefly: ignore[unsupported-operation]
+        + [np.array([2.5], dtype=np.float32)] * (num_nodes - 1),
         dtype=object,
     )
     issues = in_memory_graph_validate_lib.issues(graph, schema)
@@ -335,12 +335,12 @@ class InMemoryGraphTest(absltest.TestCase):
     )
     graph.node_sets["n1"].features["time"] = np.array(
         [np.array([10, 20], dtype=np.int64)]
-        + [np.array([30], dtype=np.int64)] * (num_nodes - 1),  # pyrefly: ignore[unsupported-operation]
+        + [np.array([30], dtype=np.int64)] * (num_nodes - 1),
         dtype=object,
     )
     graph.node_sets["n1"].features["val"] = np.array(
         [np.array([1.5, 2.5], dtype=np.float32)]
-        + [np.array([3.5], dtype=np.float32)] * (num_nodes - 1),  # pyrefly: ignore[unsupported-operation]
+        + [np.array([3.5], dtype=np.float32)] * (num_nodes - 1),
         dtype=object,
     )
     issues = in_memory_graph_validate_lib.issues(graph, schema)
@@ -355,7 +355,7 @@ class InMemoryGraphTest(absltest.TestCase):
         is_timeseries=False,
         is_creation_time=True,
     )
-    graph.node_sets["n1"].features["time"] = np.zeros(  # pyrefly: ignore[no-matching-overload]
+    graph.node_sets["n1"].features["time"] = np.zeros(
         num_nodes, dtype=np.int64
     )
     schema.node_sets["n1"].features["f1"].is_timeseries = True
@@ -375,7 +375,7 @@ class InMemoryGraphTest(absltest.TestCase):
         group="time",
     )
     graph.node_sets["n1"].features["time"] = np.array(
-        [[10]] * num_nodes, dtype=object  # pyrefly: ignore[unsupported-operation]
+        [[10]] * num_nodes, dtype=object
     )
     schema.node_sets["n1"].features["f1"].is_timeseries = True
     schema.node_sets["n1"].features["f1"].group = "time"
@@ -562,7 +562,7 @@ class InMemoryGraphTest(absltest.TestCase):
     )
 
     # Test identical masks yield warning
-    mask_data = np.zeros((num_nodes, 5), dtype=np.bool_)  # pyrefly: ignore[no-matching-overload]
+    mask_data = np.zeros((num_nodes, 5), dtype=np.bool_)
     graph.node_sets["n1"].features["mask1"] = mask_data
     graph.node_sets["n1"].features["mask2"] = mask_data
     issues = in_memory_graph_validate_lib.issues(graph, schema)

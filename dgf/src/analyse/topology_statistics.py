@@ -35,14 +35,6 @@ class _EdgeSetAccumulator:
   out_degrees: list[np.ndarray]
 
 
-def _get_num_nodes(nodeset: in_memory_graph_lib.InMemoryNodeSet) -> int:
-  if nodeset.num_nodes is not None:
-    return nodeset.num_nodes
-  if nodeset.features:
-    return next(iter(nodeset.features.values())).shape[0]
-  return 0
-
-
 def topology_statistics(
     graph: in_memory_graph_lib.InMemoryGraph,
     schema: schema_lib.GraphSchema,
@@ -122,7 +114,7 @@ def topology_statistics_from_graphs(
     # Collect node counts
     for name in schema.node_sets:
       nodeset = graph.node_sets[name]
-      node_accumulators[name].node_counts.append(_get_num_nodes(nodeset))
+      node_accumulators[name].node_counts.append(nodeset.num_nodes)
 
     # Collect edge counts and degrees
     for name in schema.edge_sets:
@@ -133,8 +125,8 @@ def topology_statistics_from_graphs(
       source_nodeset = graph.node_sets[edge_schema.source]
       target_nodeset = graph.node_sets[edge_schema.target]
 
-      num_sources = _get_num_nodes(source_nodeset)
-      num_targets = _get_num_nodes(target_nodeset)
+      num_sources = source_nodeset.num_nodes
+      num_targets = target_nodeset.num_nodes
 
       # Compute in-degrees for this graph
       target_indices = edgeset.adjacency[1]

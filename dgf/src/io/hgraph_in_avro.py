@@ -151,7 +151,7 @@ def write_avro_node_sets(
     parsed_schema = fastavro.parse_schema(avro_schema_dict)
     feature_items = list(nodeset.features.items())
     num_shards, num_nodes_per_shard = shard_lib.estimate_num_node_shards(
-        nodeset.num_nodes  # pyrefly: ignore[bad-argument-type]
+        nodeset.num_nodes
     )
     for shard_index in range(num_shards):
       filename = shard_lib.sharded_filename(
@@ -162,7 +162,7 @@ def write_avro_node_sets(
       )
       filepath = os.path.join(directory, filename)
       start_index = shard_index * num_nodes_per_shard
-      end_index = min(  # pyrefly: ignore[bad-specialization]
+      end_index = min(
           (shard_index + 1) * num_nodes_per_shard, nodeset.num_nodes
       )
       with filesystem.open_write(filepath, binary=True) as f_out:

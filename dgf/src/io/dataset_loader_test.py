@@ -627,8 +627,6 @@ class LoadDatasetTest(parameterized.TestCase):
     in_memory_graph_validate_lib.validate_graph(graph, schema)
     self.assertEqual(graph.node_sets["station"].num_nodes, 1)
     num_queries = graph.node_sets["queries"].num_nodes
-    self.assertIsNotNone(num_queries)
-    assert num_queries is not None
     self.assertGreater(num_queries, 1000)
 
   def test_fetch_auto_cache_dir_uses_per_user_dir(self):

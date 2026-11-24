@@ -956,7 +956,7 @@ def estimate_num_train_seed_nodes(
   if not isinstance(graph, in_memory_graph.InMemoryGraph):
     return None
   num_nodes = graph.node_sets[target_nodeset].num_nodes
-  if num_nodes is None or valid_graph is not None:
+  if valid_graph is not None:
     return num_nodes
   return int(num_nodes * (1 - validation_ratio))
 
@@ -1046,12 +1046,7 @@ def extract_graph_metrics(
     num_nodes = 0
     for nodeset_name in schema.node_sets:
       if nodeset_name in graph.node_sets:
-        nodeset = graph.node_sets[nodeset_name]
-        if nodeset.num_nodes is not None:
-          num_nodes += nodeset.num_nodes
-        elif nodeset.features:
-          first_arr = next(iter(nodeset.features.values()))
-          num_nodes += len(first_arr)
+        num_nodes += graph.node_sets[nodeset_name].num_nodes
     metrics["num_nodes"] = num_nodes
 
     num_edges = 0

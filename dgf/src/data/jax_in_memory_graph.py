@@ -43,7 +43,7 @@ class JaxInMemoryNodeSet:
   """
 
   features: Features
-  num_nodes: int | None = dataclasses.field(metadata=dict(static=True))
+  num_nodes: int = dataclasses.field(metadata=dict(static=True))
 
 
 @jax_tree_util.register_dataclass

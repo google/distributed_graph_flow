@@ -472,7 +472,7 @@ class NodePredictionModel(common.Model):
         or any(not nodeset.num_nodes for nodeset in graph.node_sets.values())
     ):
       return False
-    num_graph_nodes = sum(n.num_nodes or 0 for n in graph.node_sets.values())
+    num_graph_nodes = sum(n.num_nodes for n in graph.node_sets.values())
     # The padding is an upper bound of the number of nodes in a batch.
     num_padded_nodes = sum(
         n.num_nodes or 0 for n in self._data.padding.node_sets.values()
@@ -584,7 +584,6 @@ class NodePredictionModel(common.Model):
 
     target_nodeset = self._data.task.target_nodeset
     num_nodes = graph.node_sets[target_nodeset].num_nodes
-    assert num_nodes is not None
 
     if seed_node_idxs is None:
       # Consider all the seed nodes

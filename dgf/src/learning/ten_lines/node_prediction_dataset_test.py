@@ -252,7 +252,6 @@ class GNNDatasetPreparatorTest(parameterized.TestCase):
         semantic=schema_lib.FeatureSemantic.TIMESTAMP,
     )
     num_nodes = graph.node_sets["n2"].num_nodes
-    assert num_nodes is not None
     graph.node_sets["n2"].features["ts"] = np.zeros(num_nodes, dtype=np.int64)
     sampling_plan = sampling_config_lib.simple_sampling_config_to_sampling_plan(
         sampling_config_lib.SimpleSamplingConfig(

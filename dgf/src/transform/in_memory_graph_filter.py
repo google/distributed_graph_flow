@@ -90,11 +90,11 @@ class NumNodesPredicate:
     if self.nodeset_name is None:
       nn = 0
       for _, ns in graph.node_sets.items():
-        nn += ns.num_nodes  # pyrefly: ignore[unsupported-operation]
+        nn += ns.num_nodes
     else:
       nn = graph.node_sets[self.nodeset_name].num_nodes
 
-    if self.lower <= nn < self.upper:  # pyrefly: ignore[unsupported-operation]
+    if self.lower <= nn < self.upper:
       return True
 
     return False

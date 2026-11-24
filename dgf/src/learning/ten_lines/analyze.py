@@ -1088,7 +1088,6 @@ def _select_seed_nodes(
   batch evaluation and of a sampler creation are measured on the model.
   """
   num_nodes = graph.node_sets[evaluator.target_nodeset].num_nodes
-  assert num_nodes is not None
   if options.seed_node_idxs is None:
     candidates = np.arange(num_nodes, dtype=np.int32)
   else:

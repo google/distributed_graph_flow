@@ -65,7 +65,7 @@ def homogeneous_graph_piece_to_nx(
   if id_feature_name is not None:
     ids = nodeset.features[id_feature_name].tolist()
   else:
-    ids = np.arange(nodeset.num_nodes)  # pyrefly: ignore[no-matching-overload]
+    ids = np.arange(nodeset.num_nodes)
 
   for i, id in tqdm.tqdm(
       enumerate(ids),

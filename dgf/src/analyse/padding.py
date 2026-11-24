@@ -115,10 +115,9 @@ def padding_from_graph_generator(
   for graph in graphs:
     for node_set_name in schema.node_sets:
       node_set = graph.node_sets[node_set_name]
-      if node_set.num_nodes is not None:
-        max_nodes[node_set_name] = max(
-            max_nodes[node_set_name], node_set.num_nodes
-        )
+      max_nodes[node_set_name] = max(
+          max_nodes[node_set_name], node_set.num_nodes
+      )
 
     for edge_set_name in schema.edge_sets:
       edge_set = graph.edge_sets[edge_set_name]

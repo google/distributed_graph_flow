@@ -72,7 +72,6 @@ def graph_to_networkx(
 
   for node_set_name, node_set in in_memory_graph.node_sets.items():
     num_nodes = node_set.num_nodes
-    assert num_nodes is not None
 
     node_features_items = list(node_set.features.items())
     for i in range(num_nodes):
