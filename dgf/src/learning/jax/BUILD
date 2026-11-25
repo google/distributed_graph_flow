@@ -1,4 +1,3 @@
-load("@rules_python//python:py_library.bzl", "py_library")
 load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 
@@ -25,6 +24,7 @@ py_library(
 py_library(
     name = "common",
     srcs = ["common.py"],
+    type_checking = True,
     deps = [
         # absl/logging dep,
         "//dgf/src/learning:config",
@@ -37,6 +37,7 @@ py_library(
 py_library(
     name = "flax_gnn",
     srcs = ["flax_gnn.py"],
+    type_checking = True,
     deps = [
         ":common",
         # flax:core dep,
@@ -47,6 +48,7 @@ py_library(
 py_library(
     name = "test_utils",
     srcs = ["test_utils.py"],
+    type_checking = True,
     deps = [
         # sparse_deferred/structs:graph_struct",
         "//dgf/src/learning/jax/layers:homo_gnn_sparse_deferred",
@@ -57,6 +59,7 @@ py_library(
 py_library(
     name = "flax_train",
     srcs = ["flax_train.py"],
+    type_checking = True,
     deps = [
         ":common",
         ":metric_writer",
@@ -75,6 +78,7 @@ py_library(
 py_library(
     name = "metric_writer",
     srcs = ["metric_writer.py"],
+    type_checking = True,
     deps = [
         # absl/logging dep,
         "//dgf/src/util/weak_dep:weak_dep_clu",
@@ -84,6 +88,7 @@ py_library(
 py_library(
     name = "message_passing",
     srcs = ["message_passing.py"],
+    type_checking = True,
     deps = [
         # sparse_deferred",
         # sparse_deferred/jax",

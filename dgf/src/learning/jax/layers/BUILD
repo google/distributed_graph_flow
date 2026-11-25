@@ -1,4 +1,3 @@
-load("@rules_python//python:py_library.bzl", "py_library")
 load("//third_party/bazel_rules/rules_python/python:py_library.bzl", "py_library")
 load("@rules_python//python:py_test.bzl", "py_test")
 
@@ -36,6 +35,7 @@ py_library(
 py_library(
     name = "mlp",
     srcs = ["mlp.py"],
+    type_checking = True,
     deps = [
         # absl/logging dep,
         # chex dep,
@@ -49,6 +49,7 @@ py_library(
 py_library(
     name = "timeseries_cnn",
     srcs = ["timeseries_cnn.py"],
+    type_checking = True,
     deps = [
         ":registry",
         ":standard",
@@ -64,6 +65,7 @@ py_library(
 py_library(
     name = "timeseries_transformer",
     srcs = ["timeseries_transformer.py"],
+    type_checking = True,
     deps = [
         ":registry",
         ":standard",
@@ -79,6 +81,7 @@ py_library(
 py_library(
     name = "preprocess",
     srcs = ["preprocess.py"],
+    type_checking = True,
     deps = [
         ":registry",
         ":standard",
@@ -97,6 +100,7 @@ py_library(
 py_library(
     name = "residual_mlp",
     srcs = ["residual_mlp.py"],
+    type_checking = True,
     deps = [
         ":registry",
         # dataclasses_json dep,
@@ -110,6 +114,7 @@ py_library(
 py_library(
     name = "classification",
     srcs = ["classification.py"],
+    type_checking = True,
     deps = [
         ":registry",
         # dataclasses_json dep,
@@ -122,12 +127,14 @@ py_library(
 py_library(
     name = "registry",
     srcs = ["registry.py"],
+    type_checking = True,
     deps = ["//dgf/src/util:dataclass_registry"],
 )
 
 py_library(
     name = "graph_masking",
     srcs = ["graph_masking.py"],
+    type_checking = True,
     deps = [
         # dataclasses_json dep,
         "//dgf/src/data:jax_in_memory_graph",
@@ -141,6 +148,7 @@ py_library(
 py_library(
     name = "message_passing_ops",
     srcs = ["message_passing_ops.py"],
+    type_checking = True,
     deps = [
         "//dgf/src/learning/jax:common",
         # jax dep,
@@ -151,6 +159,7 @@ py_library(
 py_library(
     name = "graph_attention",
     srcs = ["graph_attention.py"],
+    type_checking = True,
     deps = [
         ":message_passing_ops",
         ":registry",
@@ -165,6 +174,7 @@ py_library(
 py_library(
     name = "graphmae",
     srcs = ["graphmae.py"],
+    type_checking = True,
     deps = [
         ":graph_masking",
         ":hetero_gnn",
@@ -182,6 +192,7 @@ py_library(
 py_library(
     name = "hetero_gnn",
     srcs = ["hetero_gnn.py"],
+    type_checking = True,
     deps = [
         ":graph_attention",
         ":message_passing_ops",
@@ -200,6 +211,7 @@ py_library(
 py_library(
     name = "hetero_graph_attention_network",
     srcs = ["hetero_graph_attention_network.py"],
+    type_checking = True,
     deps = [
         ":graph_attention",
         ":hetero_gnn",
@@ -215,6 +227,7 @@ py_library(
 py_library(
     name = "homo_gnn_sparse_deferred",
     srcs = ["homo_gnn_sparse_deferred.py"],
+    type_checking = True,
     deps = [
         ":mlp",
         # sparse_deferred",
@@ -231,6 +244,7 @@ py_library(
 py_library(
     name = "regression",
     srcs = ["regression.py"],
+    type_checking = True,
     deps = [
         ":registry",
         # dataclasses_json dep,
@@ -243,6 +257,7 @@ py_library(
 py_library(
     name = "standard",
     srcs = ["standard.py"],
+    type_checking = True,
     deps = [
         ":registry",
         # dataclasses_json dep,
