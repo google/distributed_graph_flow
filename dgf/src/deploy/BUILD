@@ -29,6 +29,7 @@ py_test(
     deps = [
         ":vertex",
         # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
         "//dgf/src/learning/ten_lines:common",
         "//dgf/src/util/weak_dep:weak_dep_tensorflow",
         # google/cloud/aiplatform dep,
