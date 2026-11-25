@@ -55,6 +55,15 @@ def _create_batched_serving_model(tf_model: Any, input_names: set[str]) -> Any:
     A TF module consuming a batch of instances.
   """
   unbatched_spec = tf_model.__call__.structured_input_signature[1]
+  output_spec = tf_model.__call__.structured_outputs
+  if output_spec.shape.rank == 0:
+    raise ValueError(
+        "Expected tf_model output to have a leading seed dimension, got scalar"
+        " output."
+    )
+  instance_output_shape = (
+      None if output_spec.shape.rank is None else output_spec.shape[1:]
+  )
 
   class BatchedServingWrapper(tf.Module):
     """Module wrapper running the model on each instance of the batch."""
@@ -70,12 +79,41 @@ def _create_batched_serving_model(tf_model: Any, input_names: set[str]) -> Any:
         for k, spec in unbatched_spec.items():
           if k not in instance:
             instance[k] = tf.zeros([d or 0 for d in spec.shape], spec.dtype)
-        return self.raw_model(**instance)
+        with tf.control_dependencies([
+            tf.debugging.assert_equal(
+                tf.shape(instance[k])[0],
+                1,
+                message=(
+                    "Each Vertex AI prediction instance must contain a single"
+                    f" seed in {k}."
+                ),
+            )
+            for k in (
+                "seed_node_idxs",
+                "source_seed_node_idxs",
+                "target_seed_node_idxs",
+            )
+            if k in kwargs
+        ]):
+          out = self.raw_model(**instance)
+        with tf.control_dependencies([
+            tf.debugging.assert_equal(
+                tf.shape(out)[0],
+                1,
+                message=(
+                    "Each Vertex AI prediction instance must produce a single"
+                    " prediction."
+                ),
+            )
+        ]):
+          return out[0]
 
       predictions = tf.map_fn(
           predict_instance,
           tf.range(tf.shape(next(iter(kwargs.values())))[0]),
-          fn_output_signature=tf.TensorSpec(shape=None, dtype=tf.float32),
+          fn_output_signature=tf.TensorSpec(
+              shape=instance_output_shape, dtype=output_spec.dtype
+          ),
       )
       return {"predictions": predictions}
 

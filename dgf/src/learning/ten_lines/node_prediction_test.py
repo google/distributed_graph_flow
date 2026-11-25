@@ -1658,8 +1658,23 @@ class NodePredictionRegressionToy(parameterized.TestCase):
       assert restored_rmse is not None and evaluation.rmse is not None
       self.assertAlmostEqual(restored_rmse, evaluation.rmse, delta=0.1 * scale)
 
-  @parameterized.parameters(("float32", 1), ("int64", 1), ("float32", 3))
-  def test_evaluate(self, label_dtype, label_dim):
+  @parameterized.parameters(
+      ("float32", 1, {"type": "number"}, [None]),
+      ("int64", 1, {"type": "number"}, [None]),
+      (
+          "float32",
+          3,
+          {"type": "array", "items": {"type": "number"}},
+          [None, 3],
+      ),
+  )
+  def test_evaluate(
+      self,
+      label_dtype,
+      label_dim,
+      expected_pred_schema,
+      expected_tf_output_shape,
+  ):
 
     # Generate data
     graph_kwargs = {
@@ -1699,6 +1714,14 @@ class NodePredictionRegressionToy(parameterized.TestCase):
       model.label_classes()
     self.assertIn(
         "only supported for NODE_CLASSIFICATION tasks", str(ctx.exception)
+    )
+
+    _, pred_schema = model._extract_serving_schemata()  # pylint: disable=protected-access
+    self.assertEqual(pred_schema, expected_pred_schema)
+    tf_predict_fn = model.to_tensorflow_function(input_format="TF_GRAPH_DICT")
+    self.assertEqual(
+        tf_predict_fn.__call__.structured_outputs.shape.as_list(),
+        expected_tf_output_shape,
     )
 
     # Save and restore the model
