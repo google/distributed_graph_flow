@@ -17,6 +17,7 @@
 from collections.abc import Callable, Iterator, Sequence
 import dataclasses
 import enum
+import itertools
 from typing import TypeAlias
 from dgf.src.data import in_memory_graph
 from dgf.src.data import padding as padding_lib
@@ -29,8 +30,23 @@ from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 import numpy as np
 
+# Generator of batched graph samples.
+BatchSampleGeneratorIteratorFn = Callable[
+    [], Iterator[tuple[in_memory_graph.InMemoryGraph, dict[str, np.ndarray]]]
+]
+
+# Generator of individual graph samples.
+SingleSampleGeneratorIteratorFn = Callable[
+    [], Iterator[in_memory_graph.InMemoryGraph]
+]
+
 # The types of graphs supported.
-Graph: TypeAlias = in_memory_graph.InMemoryGraph | str | Sequence[str]
+Graph: TypeAlias = (
+    in_memory_graph.InMemoryGraph
+    | str
+    | Sequence[str]
+    | SingleSampleGeneratorIteratorFn
+)
 
 
 class GraphFormat(enum.Enum):
@@ -42,7 +58,7 @@ class GraphFormat(enum.Enum):
       dgf.io.read_graph.
     GRAPH_SAMPLE_GENERATOR: The input graph is a function that yields graph
       samples, e.g. the result of dgf.io.read_tfgnn_graphs.
-    PATH_TFGNN_SAMPLE_BAGZ:The input is a path to a bagz file (or sharded set of
+    PATH_TF_SAMPLE_BAGZ: The input is a path to a bagz file (or sharded set of
       files) containing graph samples in the tfgnn format.
     PATH_TF_SAMPLE_TF_RECORD: The input is a path to a tfrecord file (or sharded
       set of files) containing graph samples in the tfgnn format.
@@ -50,6 +66,7 @@ class GraphFormat(enum.Enum):
 
   AUTO = "AUTO"
   IN_MEMORY_GRAPH = "IN_MEMORY_GRAPH"
+  GRAPH_SAMPLE_GENERATOR = "GRAPH_SAMPLE_GENERATOR"
   PATH_TF_SAMPLE_BAGZ = "PATH_TF_SAMPLE_BAGZ"
   PATH_TF_SAMPLE_TF_RECORD = "PATH_TF_SAMPLE_TF_RECORD"
   PATH_TF_SAMPLE_RECORDIO = "PATH_TF_SAMPLE_RECORDIO"
@@ -92,6 +109,8 @@ def resolve_graph_format(
     return resolve_graph_format(graph[0], format=format)
   if isinstance(graph, in_memory_graph.InMemoryGraph):
     return GraphFormat.IN_MEMORY_GRAPH
+  if callable(graph):
+    return GraphFormat.GRAPH_SAMPLE_GENERATOR
   if isinstance(graph, str):
     if ".bagz" in graph:
       return GraphFormat.PATH_TF_SAMPLE_BAGZ
@@ -111,17 +130,6 @@ def resolve_graph_format(
       "Could not infer format from graph. Specify it manually with 'format' ="
       f" one of: {options}"
   )
-
-
-# Generator of batched graph samples.
-BatchSampleGeneratorIteratorFn = Callable[
-    [], Iterator[tuple[in_memory_graph.InMemoryGraph, dict[str, np.ndarray]]]
-]
-
-# Generator of individual graph samples.
-SingleSampleGeneratorIteratorFn = Callable[
-    [], Iterator[in_memory_graph.InMemoryGraph]
-]
 
 
 @dataclasses.dataclass
@@ -381,53 +389,55 @@ class SampleGeneratorFromAnything:
 
     return batch_generator, single_generator
 
-  def _generator_from_path_tf_sample(
-      self, container_type
+  def _merge_batch(
+      self,
+      graph_merger: merge_lib.GraphMerger,
+      batch: list[in_memory_graph.InMemoryGraph],
+  ) -> Iterator[tuple[in_memory_graph.InMemoryGraph, dict[str, np.ndarray]]]:
+    """Merges one batch of graph samples with configured overflow handling."""
+    for merged_graph, merge_offsets, _ in graph_merger.merge_sub_batches(
+        batch,
+        skip_overflow_padding_error=self.skip_overflow_padding_error,
+        split_overflow_padding_error=self.split_overflow_padding_error,
+        on_skip_samples=self._record_skipped_samples,
+    ):
+      yield merged_graph, merge_offsets
+
+  def _generator_from_single_sample_iterator_fn(
+      self, single_generator: SingleSampleGeneratorIteratorFn
   ) -> tuple[BatchSampleGeneratorIteratorFn, SingleSampleGeneratorIteratorFn]:
-    """Creates a SampleGenerator from a path to a bagz file."""
-    assert isinstance(self.graph, (str, list, tuple))
+    """Wraps a single-sample iterator factory with batch merging and padding."""
 
     def batch_generator():
-      # TODO(gbm): Use pygrain and add shuffling?
-      it = tf_graph_sample.read_tfgnn_graphs(
-          self.graph, self.schema, container_type=container_type
-      )
+      it = single_generator()
       graph_merger = merge_lib.GraphMerger(
           schema=self.schema, padding=self.padding
       )
-      while True:
-        batch = []
-        try:
-          for _ in range(self.batch_size):
-            batch.append(next(it))
-        except StopIteration:
-          if batch and not self.drop_remainder:
-            for (
-                merged_graph,
-                merge_offsets,
-                _,
-            ) in graph_merger.merge_sub_batches(
-                batch,
-                skip_overflow_padding_error=self.skip_overflow_padding_error,
-                split_overflow_padding_error=self.split_overflow_padding_error,
-                on_skip_samples=self._record_skipped_samples,
-            ):
-              yield merged_graph, merge_offsets
-          return
-        for merged_graph, merge_offsets, _ in graph_merger.merge_sub_batches(
-            batch,
-            skip_overflow_padding_error=self.skip_overflow_padding_error,
-            split_overflow_padding_error=self.split_overflow_padding_error,
-            on_skip_samples=self._record_skipped_samples,
-        ):
-          yield merged_graph, merge_offsets
+      try:
+        while batch := list(itertools.islice(it, self.batch_size)):
+          if len(batch) < self.batch_size and self.drop_remainder:
+            return
+          yield from self._merge_batch(graph_merger, batch)
+      finally:
+        close_fn = getattr(it, "close", None)
+        if callable(close_fn):
+          close_fn()
+
+    return batch_generator, single_generator
+
+  def _generator_from_path_tf_sample(
+      self, container_type
+  ) -> tuple[BatchSampleGeneratorIteratorFn, SingleSampleGeneratorIteratorFn]:
+    """Creates a SampleGenerator from a path to a bagz/tfrecord/sstable file."""
+    assert isinstance(self.graph, (str, list, tuple))
 
     def single_generator():
+      # TODO(gbm): Use pygrain and add shuffling?
       return tf_graph_sample.read_tfgnn_graphs(
           self.graph, self.schema, container_type=container_type
       )
 
-    return batch_generator, single_generator
+    return self._generator_from_single_sample_iterator_fn(single_generator)
 
   def iterator_builder(
       self,
@@ -440,6 +450,15 @@ class SampleGeneratorFromAnything:
 
     if self.format == GraphFormat.IN_MEMORY_GRAPH:
       return self._generator_from_in_memory_graph()
+
+    elif self.format == GraphFormat.GRAPH_SAMPLE_GENERATOR:
+      if not callable(self.graph):
+        raise TypeError(
+            "GraphFormat.GRAPH_SAMPLE_GENERATOR requires a callable returning"
+            " an iterator of InMemoryGraph samples, got"
+            f" {type(self.graph).__name__}."
+        )
+      return self._generator_from_single_sample_iterator_fn(self.graph)
 
     elif self.format == GraphFormat.PATH_TF_SAMPLE_BAGZ:
       return self._generator_from_path_tf_sample("BAGZ")

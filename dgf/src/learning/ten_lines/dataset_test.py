@@ -218,6 +218,63 @@ class EvaluationTest(parameterized.TestCase):
     self.assertEqual(num_batches, 11)
     self.assertEqual(num_graphs, 21)
 
+  def test_graph_sample_generator(self):
+    schema = gen_test_graph.generate_schema()
+    samples = [gen_test_graph.generate_in_memory_graph() for _ in range(5)]
+    closed = False
+
+    def _sample_iter():
+      nonlocal closed
+      try:
+        yield from samples
+      finally:
+        closed = True
+
+    self.assertEqual(
+        dataset.resolve_graph_format(_sample_iter),
+        dataset.GraphFormat.GRAPH_SAMPLE_GENERATOR,
+    )
+    generator = dataset.SampleGeneratorFromAnything(
+        graph=_sample_iter,
+        schema=schema,
+        batch_size=2,
+        seed_node_idxs=None,
+        sampling_config=sampling_config_lib.SimpleSamplingConfig(
+            seed_nodeset="n1"
+        ),
+        format=dataset.GraphFormat.AUTO,
+        drop_remainder=False,
+        shuffle=False,
+    )
+    self.assertEqual(
+        generator.format, dataset.GraphFormat.GRAPH_SAMPLE_GENERATOR
+    )
+    batches = list(generator.batch_iterator())
+    self.assertLen(batches, 3)
+    self.assertEqual(sum(len(offsets["n1"]) - 1 for _, offsets in batches), 5)
+    self.assertLen(list(generator.single_iterator()), 5)
+
+    # Verify early close of batch_iterator closes the underlying iterator.
+    closed = False
+    batch_it = generator.batch_iterator()
+    next(batch_it)
+    batch_it.close()  # pyrefly: ignore[missing-attribute]
+    self.assertTrue(closed)
+
+    with self.assertRaises(TypeError):
+      dataset.SampleGeneratorFromAnything(
+          graph="/not/a/callable",
+          schema=schema,
+          batch_size=2,
+          seed_node_idxs=None,
+          sampling_config=sampling_config_lib.SimpleSamplingConfig(
+              seed_nodeset="n1"
+          ),
+          format=dataset.GraphFormat.GRAPH_SAMPLE_GENERATOR,
+          drop_remainder=False,
+          shuffle=False,
+      )
+
   def test_not_supported(self):
     schema = gen_test_graph.generate_schema()
     with self.assertRaises(ValueError):
