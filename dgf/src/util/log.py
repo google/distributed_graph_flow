@@ -19,6 +19,7 @@ To use instead of "logging" or "print" for user code.
 """
 
 import contextlib
+import contextvars
 import dataclasses
 import enum
 import io
@@ -66,6 +67,11 @@ class _Capturer:
 
 _ACTIVE_LOGGERS: list[_Capturer] = []
 
+# Whether the info messages are silenced in the current thread / task.
+_SILENCE_INFO: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "dgf_silence_info", default=False
+)
+
 
 @contextlib.contextmanager
 def capture_logs(log_info: bool = False, log_warning: bool = True):
@@ -90,6 +96,31 @@ def capture_logs(log_info: bool = False, log_warning: bool = True):
     _ACTIVE_LOGGERS.remove(capturer)
 
 
+@contextlib.contextmanager
+def silence_info(enabled: bool = True):
+  """Silences the info messages in a context block.
+
+  The silenced messages are not printed, but they are still recorded by
+  capture_logs. Warnings and errors are not silenced. Only the messages of the
+  current thread (or asyncio task) are silenced.
+
+  Usage example:
+    with log.silence_info(verbose == 0):
+      log.info("Not printed if verbose is 0")
+
+  Args:
+    enabled: If false, this context manager does nothing.
+  """
+  if not enabled:
+    yield
+    return
+  token = _SILENCE_INFO.set(True)
+  try:
+    yield
+  finally:
+    _SILENCE_INFO.reset(token)
+
+
 def _record_log(message: Message):
   for capturer in _ACTIVE_LOGGERS:
     if message.severity == Severity.INFO and not capturer.log_info:
@@ -111,8 +142,9 @@ def info(msg: str, *args: Any) -> None:
   """
 
   text = msg % args if args else msg
-  print(text, flush=True)
-  logging.info(msg, *args)
+  if not _SILENCE_INFO.get():
+    print(text, flush=True)
+    logging.info(msg, *args)
   _record_log(Message.info(text))
 
 

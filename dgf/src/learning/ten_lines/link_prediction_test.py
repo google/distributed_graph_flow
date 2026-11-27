@@ -1303,6 +1303,26 @@ class LinkPredictionBatchNormTest(absltest.TestCase):
     self.assertTrue(any(np.any(mean != 0.0) for mean in running_means))
 
 
+class LinkPredictionSilentInferenceTest(parameterized.TestCase):
+
+  @parameterized.parameters(0, False)
+  def test_predict_and_evaluate_are_silent(self, verbose):
+    graph, schema = gen_toy_graph()
+    model = link_prediction_train.train_link_model(
+        graph=graph,
+        schema=schema,
+        target_edgeset="A_to_B",
+        verbose=0,
+        **RAPID_TRAINING_KWARGS,
+    )
+    with test_util.assert_no_output(self):
+      model.predict(graph, [0], [1], verbose=verbose)
+      model.predict_embedding(
+          graph, node_idxs=[0, 1], encoder="source", verbose=verbose
+      )
+      model.evaluate(graph, num_eval_steps=4, verbose=verbose)
+
+
 class LinkPredictionRealLookingTemporal(parameterized.TestCase):
 
   @classmethod

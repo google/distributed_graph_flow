@@ -41,6 +41,7 @@ from dgf.src.sampling import in_memory_sampler as in_memory_sampler_lib
 from dgf.src.transform import merge as merge_lib
 from dgf.src.transform import normalize as normalize_lib
 from dgf.src.transform import schema as schema_transform_lib
+from dgf.src.util import log
 from dgf.src.util import temporal as temporal_util
 from dgf.src.util import util
 from dgf.src.util import util_ext
@@ -772,7 +773,9 @@ class LinkPredictionModel(common.Model):
           target_offset=jnp.asarray(target_offsets[target_nodeset][:-1]),
       )
 
-      logits = live.apply_core_model(batch)
+      # The model prints info messages when it is traced.
+      with log.silence_info(verbose == 0):
+        logits = live.apply_core_model(batch)
       predictions = jax.nn.sigmoid(logits)
       if to_host:
         predictions = np.asarray(predictions)

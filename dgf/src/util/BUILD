@@ -415,6 +415,7 @@ py_test(
     type_checking = True,
     deps = [
         ":log",
+        ":test_util",
         # absl/testing:absltest dep,
     ],
 )

@@ -1494,6 +1494,24 @@ class NodePredictionBatchNormTest(absltest.TestCase):
       self.assertTrue(np.any(running_mean != 0.0))
 
 
+class NodePredictionSilentInferenceTest(parameterized.TestCase):
+
+  @parameterized.parameters(0, False)
+  def test_predict_and_evaluate_are_silent(self, verbose):
+    graph, schema = gen_test_graph.gen_toy_classification_dataset()
+    model = node_prediction_lib.train_node_model(
+        graph=graph,
+        schema=schema,
+        target_nodeset="N1",
+        target_column="label",
+        verbose=0,
+        **RAPID_TRAINING_KWARGS,
+    )
+    with test_util.assert_no_output(self):
+      model.predict(graph, [0, 1, 2], verbose=verbose)
+      model.evaluate(graph, num_eval_steps=4, verbose=verbose)
+
+
 class NodePredictionNegativeLabelTest(absltest.TestCase):
   """Integer classification labels must be non-negative.
 

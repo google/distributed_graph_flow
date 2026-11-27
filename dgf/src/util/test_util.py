@@ -14,7 +14,9 @@
 
 """Utilities for unit tests."""
 
+import contextlib
 import dataclasses
+import io
 import logging
 import math
 import os
@@ -319,6 +321,21 @@ def unique_subset_of_length(values: list, allowed: list, length: int) -> bool:
       # Contains a value not in allowed.
       return False
   return True
+
+
+@contextlib.contextmanager
+def assert_no_output(test: absltest.TestCase):
+  """Asserts that nothing is printed or logged in a context block."""
+  stdout = io.StringIO()
+  stderr = io.StringIO()
+  with (
+      contextlib.redirect_stdout(stdout),
+      contextlib.redirect_stderr(stderr),
+      test.assertNoLogs("absl", level="INFO"),
+  ):
+    yield
+  test.assertEqual(stdout.getvalue(), "")
+  test.assertEqual(stderr.getvalue(), "")
 
 
 def assert_unique_subset_of_length(

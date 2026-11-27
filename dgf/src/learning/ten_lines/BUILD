@@ -287,6 +287,7 @@ py_library(
         "//dgf/src/transform:merge",
         "//dgf/src/transform:normalize",
         "//dgf/src/transform:schema",
+        "//dgf/src/util:log",
         "//dgf/src/util:temporal",
         "//dgf/src/util:util_ext",
         "//dgf/src/util:util_py",

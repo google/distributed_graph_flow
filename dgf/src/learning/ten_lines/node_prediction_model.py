@@ -456,7 +456,7 @@ class NodePredictionModel(common.Model):
         normalized_batches, prefetch_size=_PREDICT_PREFETCH_SIZE
     ):
       yield self._predict_normalized_batch(
-          live, normalized_batch, to_host=to_host
+          live, normalized_batch, to_host=to_host, verbose=verbose
       )
 
   def _should_cache_normalized_features(
@@ -488,6 +488,7 @@ class NodePredictionModel(common.Model):
       normalized_batch: inference.NormalizedBatch,
       *,
       to_host: bool = True,
+      verbose: int = 2,
   ) -> BatchPrediction:
     """Predicts on an already merged and normalized (sub-)batch.
 
@@ -497,11 +498,14 @@ class NodePredictionModel(common.Model):
       to_host: If true, the predictions are transferred to the host as
         `np.ndarray` (which blocks until the device computation is done). If
         false, the predictions stay on device as `jax.Array`.
+      verbose: The verbosity level.
 
     Returns:
       The batch prediction.
     """
-    predictions = live.apply_core_model(normalized_batch.jax_batch)
+    # The model prints info messages when it is traced.
+    with log.silence_info(verbose == 0):
+      predictions = live.apply_core_model(normalized_batch.jax_batch)
     if to_host:
       predictions = np.asarray(predictions)
     return BatchPrediction(
@@ -696,7 +700,7 @@ class NodePredictionModel(common.Model):
       )
       for normalized_batch in normalized_batches:
         yield self._predict_normalized_batch(
-            live, normalized_batch, to_host=False
+            live, normalized_batch, to_host=False, verbose=verbose
         )
 
     if verbose >= 1:

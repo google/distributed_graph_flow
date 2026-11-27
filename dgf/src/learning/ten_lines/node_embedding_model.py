@@ -328,7 +328,7 @@ class NodeEmbeddingModel(common.Model):
         graph, seed_node_idxs, verbose=verbose
     ):
       yield self._embed_normalized_batch(
-          live, normalized_batch, to_host=to_host
+          live, normalized_batch, to_host=to_host, verbose=verbose
       )
 
   def _require_sampling_plan(self) -> sampling_config_lib.SamplingPlan:
@@ -420,6 +420,7 @@ class NodeEmbeddingModel(common.Model):
       normalized_batch: inference.NormalizedBatch,
       *,
       to_host: bool = True,
+      verbose: int = 2,
   ) -> BatchEmbedding:
     """Computes embeddings on an already merged and normalized (sub-)batch.
 
@@ -429,11 +430,14 @@ class NodeEmbeddingModel(common.Model):
       to_host: If true, the embeddings are transferred to the host as
         `np.ndarray` (which blocks until the device computation is done). If
         false, the embeddings stay on device as `jax.Array`.
+      verbose: The verbosity level.
 
     Returns:
       The batch embedding.
     """
-    emb = live.apply_embed(normalized_batch.jax_batch)
+    # The model prints info messages when it is traced.
+    with log.silence_info(verbose == 0):
+      emb = live.apply_embed(normalized_batch.jax_batch)
     if to_host:
       emb = np.asarray(jax.device_get(emb), dtype=np.float32)
     return BatchEmbedding(
@@ -578,7 +582,9 @@ class NodeEmbeddingModel(common.Model):
         verbose=verbose,
         progress_bar_desc="Evaluation",
     )
-    return self._evaluate_normalized_batches(live, normalized_batches)
+    return self._evaluate_normalized_batches(
+        live, normalized_batches, verbose=verbose
+    )
 
   def evaluate_generator(
       self,
@@ -638,12 +644,16 @@ class NodeEmbeddingModel(common.Model):
         verbose=verbose,
         progress_bar_desc="Evaluation",
     )
-    return self._evaluate_normalized_batches(live, normalized_batches)
+    return self._evaluate_normalized_batches(
+        live, normalized_batches, verbose=verbose
+    )
 
   def _evaluate_normalized_batches(
       self,
       live: ModelLiveResource,
       normalized_batches: Iterator[inference.NormalizedBatch],
+      *,
+      verbose: int,
   ) -> evaluation.Evaluation:
     """Aggregates validation step losses over an iterator of `NormalizedBatch`.
 
@@ -654,6 +664,7 @@ class NodeEmbeddingModel(common.Model):
     Args:
       live: The live model resources.
       normalized_batches: The batches to evaluate.
+      verbose: The verbosity level.
 
     Returns:
       The example-weighted average of the validation losses.
@@ -670,9 +681,11 @@ class NodeEmbeddingModel(common.Model):
 
     for normalized_batch in normalized_batches:
       batch_count = len(normalized_batch.merged_seed_node_idxs)
-      metrics = live.valid_step(
-          self._data.model_params, None, normalized_batch.jax_batch
-      )
+      # The model prints info messages when it is traced.
+      with log.silence_info(verbose == 0):
+        metrics = live.valid_step(
+            self._data.model_params, None, normalized_batch.jax_batch
+        )
       weighted_metrics = {k: metrics[k] * batch_count for k in metric_keys}
       if weighted_sums is None:
         weighted_sums = weighted_metrics

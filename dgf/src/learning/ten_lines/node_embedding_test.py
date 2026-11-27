@@ -1025,6 +1025,19 @@ class NodeEmbeddingTrainTest(parameterized.TestCase):
         atol=1e-6,
     )
 
+  @parameterized.parameters(0, False)
+  def test_predict_and_evaluate_are_silent(self, verbose):
+    model = node_embedding_train.train_node_embedding_model(
+        self.graph,
+        self.schema,
+        target_nodeset="N1",
+        exclude_features=["label"],
+        **RAPID_TRAINING_KWARGS,
+    )
+    with test_util.assert_no_output(self):
+      model.predict(self.graph, [0, 1, 2], verbose=verbose)
+      model.evaluate(self.graph, seed_node_idxs=[0, 1, 2, 3], verbose=verbose)
+
   def test_single_nodeset_infers_target_nodeset(self):
     num_nodes = self.graph.node_sets["N1"].num_nodes
     schema = schema_lib.GraphSchema(

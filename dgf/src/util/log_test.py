@@ -14,8 +14,13 @@
 
 """Tests for log."""
 
+import contextlib
+import io
+import threading
+
 from absl.testing import absltest
 from dgf.src.util import log
+from dgf.src.util import test_util
 
 
 class LogTest(absltest.TestCase):
@@ -72,6 +77,55 @@ class LogTest(absltest.TestCase):
         [m.text for m in logs2],
         ["F"],
     )
+
+  def test_silence_info(self):
+    with log.capture_logs(log_info=True) as logs:
+      with test_util.assert_no_output(self):
+        with log.silence_info():
+          log.info("A")
+    # The silenced messages are still recorded.
+    self.assertListEqual(logs, [log.Message.info("A")])
+
+  def test_silence_info_does_not_silence_warnings_and_errors(self):
+    stderr = io.StringIO()
+    with contextlib.redirect_stderr(stderr), log.silence_info():
+      log.warning("A")
+      log.error("B")
+    self.assertEqual(stderr.getvalue(), "[Warning] A\n[Error] B\n")
+
+  def test_silence_info_disabled(self):
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout), log.silence_info(enabled=False):
+      log.info("A")
+    self.assertEqual(stdout.getvalue(), "A\n")
+
+  def test_silence_info_nested(self):
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+      with log.silence_info():
+        with log.silence_info():
+          log.info("A")
+        log.info("B")
+      log.info("C")
+    self.assertEqual(stdout.getvalue(), "C\n")
+
+  def test_silence_info_does_not_silence_other_threads(self):
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout), log.silence_info():
+      thread = threading.Thread(target=log.info, args=("A",))
+      thread.start()
+      thread.join()
+      log.info("B")
+    self.assertEqual(stdout.getvalue(), "A\n")
+
+  def test_silence_info_is_restored(self):
+    stdout = io.StringIO()
+    with contextlib.redirect_stdout(stdout):
+      with self.assertRaises(ValueError):
+        with log.silence_info():
+          raise ValueError()
+      log.info("A")
+    self.assertEqual(stdout.getvalue(), "A\n")
 
 
 if __name__ == "__main__":
