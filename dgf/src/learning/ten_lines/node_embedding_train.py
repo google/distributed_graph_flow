@@ -137,15 +137,49 @@ def create_core_model_config(
   )
 
 
+def _is_input_feature(feature_schema: schema_lib.FeatureSchema) -> bool:
+  """Tests if a feature is a model input feature."""
+  return feature_schema.semantic not in (
+      schema_lib.FeatureSemantic.PRIMARY_ID,
+      schema_lib.FeatureSemantic.UNKNOWN,
+  )
+
+
 def _nodeset_has_input_features(nodeset_schema: schema_lib.NodeSchema) -> bool:
   """Returns True if `nodeset_schema` has at least one model input feature."""
   return any(
-      feature_schema.semantic not in (
-          schema_lib.FeatureSemantic.PRIMARY_ID,
-          schema_lib.FeatureSemantic.UNKNOWN,
-      )
+      _is_input_feature(feature_schema)
       for feature_schema in nodeset_schema.features.values()
   )
+
+
+def _warn_on_suspicious_features(schema: schema_lib.GraphSchema) -> None:
+  """Prints warnings about label-like input features and edgeset features."""
+  label_features = []
+  edgeset_features = []
+  for nodeset_name, nodeset_schema in schema.node_sets.items():
+    for feature_name, feature_schema in nodeset_schema.features.items():
+      if _is_input_feature(feature_schema) and "label" in feature_name.lower():
+        label_features.append(f"{nodeset_name}.{feature_name}")
+  for edgeset_name, edgeset_schema in schema.edge_sets.items():
+    for feature_name, feature_schema in edgeset_schema.features.items():
+      edgeset_features.append(f"{edgeset_name}.{feature_name}")
+      if _is_input_feature(feature_schema) and "label" in feature_name.lower():
+        label_features.append(f"{edgeset_name}.{feature_name}")
+  if label_features:
+    log.warning(
+        'The model uses input features with a name containing "label": %s. If'
+        " those features are labels of a downstream task, the embeddings leak"
+        " them. Exclude them with the exclude_features argument (nodeset"
+        " features), or remove them from the schema.",
+        ", ".join(label_features),
+    )
+  if edgeset_features:
+    log.warning(
+        "The schema contains edgeset features: %s. Edgeset features are not"
+        " yet used as input by the node embedding model.",
+        ", ".join(edgeset_features),
+    )
 
 
 def _normalize_exclude_features(
@@ -466,6 +500,7 @@ def train_node_embedding_model(
         exclude_features, schema, target_nodeset
     )
     schema = _apply_exclude_features(schema, excluded_features)
+    _warn_on_suspicious_features(schema)
     if not _nodeset_has_input_features(schema.node_sets[target_nodeset]):
       raise ValueError(
           f"The target nodeset {target_nodeset!r} has no input features (after"

@@ -852,6 +852,60 @@ def _strip_all_raw_features(
   )
 
 
+class WarnOnSuspiciousFeaturesTest(parameterized.TestCase):
+  """Tests of `_warn_on_suspicious_features`."""
+
+  def setUp(self):
+    super().setUp()
+    _, self.schema = gen_test_graph.gen_toy_classification_dataset(
+        num_n1_nodes=60, num_n2_nodes=40
+    )
+
+  @parameterized.parameters("labels", "ad_labels", "LABELS")
+  def test_warns_on_label_like_nodeset_feature(self, feature_name):
+    features = self.schema.node_sets["N1"].features
+    features[feature_name] = features.pop("label")
+    with log.capture_logs() as logs:
+      node_embedding_train._warn_on_suspicious_features(self.schema)
+    self.assertLen(logs, 1)
+    self.assertEqual(logs[0].severity, log.Severity.WARNING)
+    self.assertIn(f"N1.{feature_name}", logs[0].text)
+
+  def test_does_not_warn_without_label_like_feature(self):
+    del self.schema.node_sets["N1"].features["label"]
+    with log.capture_logs() as logs:
+      node_embedding_train._warn_on_suspicious_features(self.schema)
+    self.assertEmpty(logs)
+
+  def test_does_not_warn_on_non_input_feature(self):
+    self.schema.node_sets["N1"].features["label"].semantic = (
+        schema_lib.FeatureSemantic.UNKNOWN
+    )
+    with log.capture_logs() as logs:
+      node_embedding_train._warn_on_suspicious_features(self.schema)
+    self.assertEmpty(logs)
+
+  def test_warns_on_edgeset_features(self):
+    del self.schema.node_sets["N1"].features["label"]
+    self.schema.edge_sets["N1_to_N2"].features = {
+        "weight": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.FLOAT_32,
+            semantic=schema_lib.FeatureSemantic.NUMERICAL,
+        ),
+        "edge_label": schema_lib.FeatureSchema(
+            format=schema_lib.FeatureFormat.INTEGER_64,
+            semantic=schema_lib.FeatureSemantic.CATEGORICAL,
+        ),
+    }
+    with log.capture_logs() as logs:
+      node_embedding_train._warn_on_suspicious_features(self.schema)
+    self.assertLen(logs, 2)
+    self.assertIn("N1_to_N2.edge_label", logs[0].text)
+    self.assertNotIn("N1_to_N2.weight", logs[0].text)
+    self.assertIn("edgeset features: N1_to_N2.weight", logs[1].text)
+    self.assertIn("N1_to_N2.edge_label", logs[1].text)
+
+
 class NodeEmbeddingTrainTest(parameterized.TestCase):
   """Tests of `train_node_embedding_model`."""
 
@@ -922,6 +976,34 @@ class NodeEmbeddingTrainTest(parameterized.TestCase):
         loaded.predict(self.graph, [0, 1, 2], verbose=0),
         embeddings,
         atol=1e-6,
+    )
+
+  def test_warns_on_label_feature(self):
+    model = node_embedding_train.train_node_embedding_model(
+        self.graph, self.schema, target_nodeset="N1", **RAPID_TRAINING_KWARGS
+    )
+    self.assertTrue(
+        any(
+            msg.severity == log.Severity.WARNING and "N1.label" in msg.text
+            for msg in (model.metadata.captured_logs or [])
+        )
+    )
+    # The warning is shown in the "Logs" tab.
+    self.assertIn("N1.label", model.describe()._repr_html_())
+
+  def test_does_not_warn_on_excluded_label_feature(self):
+    model = node_embedding_train.train_node_embedding_model(
+        self.graph,
+        self.schema,
+        target_nodeset="N1",
+        exclude_features=["label"],
+        **RAPID_TRAINING_KWARGS,
+    )
+    self.assertFalse(
+        any(
+            "N1.label" in msg.text
+            for msg in (model.metadata.captured_logs or [])
+        )
     )
 
   def test_exclude_features_prevents_label_leakage(self):
