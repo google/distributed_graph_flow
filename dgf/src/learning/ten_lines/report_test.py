@@ -50,6 +50,21 @@ class ReportTest(absltest.TestCase):
     self.assertIn("train", html)
     self.assertIn("valid", html)
 
+  def test_plot_html_training_logs_single_validation(self):
+    logs = common.TrainingLogs(
+        train=[
+            common.LogItem(step=100, metrics={"loss": 0.5}),
+            common.LogItem(step=200, metrics={"loss": 0.4}),
+        ],
+        valid=[common.LogItem(step=200, metrics={"loss": 0.625})],
+        num_train_step=200,
+    )
+    html = report.plot_html_training_logs(logs)
+
+    # A line with a single value is only visible if the points are drawn.
+    self.assertRegex(html, r'"mark": \{[^}]*"point": true')
+    self.assertIn("0.625", html)
+
   def test_html_log_messages(self):
     self.assertEqual(
         report.html_log_messages([]), "<i>No logs were captured.</i>"

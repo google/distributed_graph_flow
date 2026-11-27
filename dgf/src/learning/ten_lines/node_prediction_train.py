@@ -697,6 +697,7 @@ def train_node_model(
 
     train_kwargs = {}
     if valid_dataset is not None:
+      common.warn_if_no_validation(num_train_steps, valid_every_n_steps)
 
       def valid_dataset_iterator_fn():
         valid_generator = valid_dataset.generate_jax()

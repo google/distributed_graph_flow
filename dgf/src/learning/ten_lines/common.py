@@ -397,6 +397,22 @@ def warn_if_not_converged(
   )
 
 
+def warn_if_no_validation(
+    num_train_steps: int | None, valid_every_n_steps: int
+) -> None:
+  """Prints a warning if training is shorter than the validation interval."""
+  if num_train_steps is not None and num_train_steps < valid_every_n_steps:
+    log.warning(
+        "The number of training steps (num_train_steps=%d) is smaller than"
+        " the number of steps between validations (valid_every_n_steps=%d):"
+        " The model is only validated once, at the end of the training, and"
+        " there is no validation curve. Consider decreasing"
+        " valid_every_n_steps.",
+        num_train_steps,
+        valid_every_n_steps,
+    )
+
+
 class Model(abc.ABC):
   """A generic model from the 10-lines of code API.
 

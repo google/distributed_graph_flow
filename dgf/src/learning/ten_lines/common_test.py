@@ -828,6 +828,24 @@ class ConvergenceTest(parameterized.TestCase):
       )
     self.assertEmpty(logs)
 
+  def test_warn_if_no_validation(self):
+    with log.capture_logs() as logs:
+      common.warn_if_no_validation(
+          num_train_steps=500, valid_every_n_steps=1000
+      )
+    self.assertLen(logs, 1)
+    self.assertEqual(logs[0].severity, log.Severity.WARNING)
+    self.assertIn("num_train_steps=500", logs[0].text)
+    self.assertIn("valid_every_n_steps=1000", logs[0].text)
+
+  @parameterized.parameters(1000, 2000, None)
+  def test_warn_if_no_validation_no_warning(self, num_train_steps):
+    with log.capture_logs() as logs:
+      common.warn_if_no_validation(
+          num_train_steps=num_train_steps, valid_every_n_steps=1000
+      )
+    self.assertEmpty(logs)
+
   def test_metadata_json_with_stop_reason(self):
     metadata = common.Metadata(
         name="test",

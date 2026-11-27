@@ -73,7 +73,7 @@ def plot_html_training_logs(training_logs: common.TrainingLogs) -> str:
 
   chart = (
       alt.Chart(df)
-      .mark_line()
+      .mark_line(point=True)
       .encode(
           x="step:Q",
           y=alt.Y("value:Q", scale=alt.Scale(zero=False)),

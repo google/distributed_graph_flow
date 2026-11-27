@@ -771,6 +771,7 @@ def train_link_model(
 
     train_kwargs = {}
     if valid_dataset is not None:
+      common.warn_if_no_validation(num_train_steps, valid_every_n_steps)
 
       def valid_dataset_iterator_fn() -> Iterator[Batch]:
 
