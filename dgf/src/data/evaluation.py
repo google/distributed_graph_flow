@@ -26,6 +26,13 @@ import pandas as pd
 _DEFAULT_MAX_PLOT_POINTS = 1000
 
 
+def _format_metric(value: float) -> str:
+  """Formats a metric value for display."""
+  if isinstance(value, int):
+    return str(value)
+  return f"{value:.4g}"
+
+
 def _downsample_curve(
     x: np.ndarray, y: np.ndarray, num_points: int
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -189,7 +196,9 @@ class Evaluation:
 
     def _add_metric(name, value):
       if value is not None:
-        html_parts.append(f"<tr><td><b>{name}</b></td><td>{value}</td></tr>")
+        html_parts.append(
+            f"<tr><td><b>{name}</b></td><td>{_format_metric(value)}</td></tr>"
+        )
 
     _add_metric("Loss", self.loss)
     _add_metric("Accuracy", self.accuracy)
@@ -234,7 +243,7 @@ class Evaluation:
           '<tr><td style="vertical-align: top;"><b>Hit@N:</b></td><td><ul>'
       )
       for key, value in self.hit_at.items():
-        html_parts.append(f"<li><em>@{key}</em>: {value}</li>")
+        html_parts.append(f"<li><em>@{key}</em>: {_format_metric(value)}</li>")
       html_parts.append("</ul></td></tr>")
 
     if self.user_metrics:
@@ -243,7 +252,7 @@ class Evaluation:
           " Metrics:</b></td><td><ul>"
       )
       for key, value in self.user_metrics.items():
-        html_parts.append(f"<li><em>{key}</em>: {value}</li>")
+        html_parts.append(f"<li><em>{key}</em>: {_format_metric(value)}</li>")
       html_parts.append("</ul></td></tr>")
 
     html_parts.append("</tbody></table>")
